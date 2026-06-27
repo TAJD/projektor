@@ -7,7 +7,7 @@ async function hashToken(token: string): Promise<string> {
 		.join("");
 }
 
-export async function seedWorkspace(slug = "test-ws") {
+export async function seedWorkspace(slug = `test-ws-${crypto.randomUUID().slice(0, 8)}`) {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
 	await env.DB.prepare("INSERT INTO workspaces (id, name, slug, created_at) VALUES (?, ?, ?, ?)")

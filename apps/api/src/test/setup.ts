@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { beforeAll } from "vitest";
+import { beforeAll, beforeEach } from "vitest";
 import { MIGRATIONS } from "./migrations";
 
 // Strip line comments before splitting on ; — Drizzle breakpoints and any
@@ -20,4 +20,13 @@ beforeAll(async () => {
 			await env.DB.prepare(stmt).run();
 		}
 	}
+});
+
+// @cloudflare/vitest-pool-workers ≥0.13 isolates storage per *file*, not per
+// *test* (the old `isolatedStorage` per-test rollback was removed). The transient
+// rate-limit counter therefore accumulates across tests in a file and trips the
+// low test limits (AUTH_LIMIT=3). Reset it before each test so every test starts
+// from a clean window — restoring the per-test freshness the old isolation gave.
+beforeEach(async () => {
+	await env.DB.prepare("DELETE FROM rate_limit").run();
 });
