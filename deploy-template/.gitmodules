@@ -1,4 +1,0 @@
-[submodule "projektor"]
-	path = projektor
-	url = https://github.com/REPLACE_WITH_YOUR_GITHUB_USERNAME/projektor.git
-	branch = main

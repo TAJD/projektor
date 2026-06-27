@@ -54,12 +54,20 @@ and the frontend that calls it are always in lockstep.
 
 ## Deploy your own instance
 
-### 1. Start from the template
+### 1. Fork the deploy example
+
+The recommended path is to **fork
+[`projektor-deploy-example`](https://github.com/TAJD/projektor-deploy-example)** —
+your fork becomes the deploy repo.
 
 ```bash
-gh repo create my-projektor-deploy --private --template TAJD/projektor-deploy-example
-git clone https://github.com/YOU/my-projektor-deploy && cd my-projektor-deploy
+gh repo fork TAJD/projektor-deploy-example --clone
+cd projektor-deploy-example
 ```
+
+> A fork is public. If you want your config (resource IDs) kept private, create
+> from the template instead:
+> `gh repo create my-projektor-deploy --private --template TAJD/projektor-deploy-example`.
 
 ### 2. Provision Cloudflare resources
 

@@ -93,10 +93,6 @@ function rewriteLinks(md) {
 		if (/^(https?:|mailto:|#)/.test(target)) return whole;
 		const [path, anchor] = target.split("#");
 		const clean = path.replace(/^\.\//, "").replace(/(\.\.\/)+/g, "");
-		// deploy-template lives in the repo, not the docs site
-		if (clean.startsWith("deploy-template")) {
-			return `](${GH}/tree/main/deploy-template${anchor ? `#${anchor}` : ""})`;
-		}
 		const base = clean.split("/").pop();
 		const route = fileRoutes[clean] || fileRoutes[base];
 		if (route) return `](${route}${anchor ? `#${anchor}` : ""})`;

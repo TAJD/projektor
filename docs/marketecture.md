@@ -37,7 +37,7 @@ flowchart TB
     AI -->|"Bearer token + X-Workspace-Slug"| MCP
     Browser -->|"CF_Authorization cookie"| Access --> REST
     Browser --> Pages
-    CI -->|"submodule bump"| Worker
+    CI -->|"release artifact"| Worker
 
     MW --> REST
     MW --> MCP
@@ -66,7 +66,7 @@ flowchart TB
 | Data model | Drizzle ORM → D1 | `packages/db` | 11 tables, 1 migration. Raw `c.env.DB.prepare` used everywhere — Drizzle is schema-only. |
 | Shared types | TS | `packages/types` | `HonoEnv`, `Plugin`, `MCPTool`, `PluginContext`. |
 | Auth | CF Access JWT (RS256) + API tokens (SHA-256) | `middleware/auth.ts` | Plus dev bypass via `DEV_USER_EMAIL`. |
-| Deploy | wrangler + GitHub Actions | `deploy-template`, `projektor-workspace` | App is a submodule of a private deploy repo; CI auto-bumps it. |
+| Deploy | wrangler + GitHub Actions | `projektor-deploy-example`, `projektor-workspace` | projektor publishes a release artifact; a config-only deploy repo downloads + ships it (no submodule). |
 
 ## Request flow
 

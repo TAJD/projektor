@@ -39,93 +39,82 @@ AI agents are a first-class client: the primary surface is a JSON-RPC 2.0 MCP en
 
 ## Self-hosting in 5 minutes
 
-You need a Cloudflare account and `wrangler` installed (`npm i -g wrangler`).
+projektor deploys from a **config-only repo** that downloads a pre-built release
+artifact — no source checkout, no submodule, no build step. The fastest path is to
+**fork the deploy example** and deploy from there.
 
-### 1. Fork the deploy template
+You need a Cloudflare account and `wrangler` (`npm i -g wrangler`).
 
-The [`deploy-template/`](./deploy-template/) directory is a ready-made deploy repo.
-Fork or copy it to your own GitHub repository — that repo becomes your private deploy config.
+### 1. Fork the deploy example
 
-### 2. Clone with the submodule
-
-```bash
-git clone --recurse-submodules https://github.com/YOU/your-deploy-repo
-cd your-deploy-repo
-```
-
-The `projektor/` directory inside is this repo checked out as a git submodule.
-
-### 3. Provision Cloudflare resources
+Fork **[`projektor-deploy-example`](https://github.com/TAJD/projektor-deploy-example)** —
+your fork becomes the deploy repo (config only: a `wrangler.toml`, a pinned
+`projektor.version`, and a deploy workflow).
 
 ```bash
-bash setup.sh
+gh repo fork TAJD/projektor-deploy-example --clone
+cd projektor-deploy-example
 ```
 
-`setup.sh` runs three `wrangler` commands and prints the IDs you need:
+> A fork is public. If you'd rather keep your config (Cloudflare resource IDs)
+> private, create from the template instead:
+> `gh repo create my-projektor-deploy --private --template TAJD/projektor-deploy-example`.
 
-| Command | What it creates |
-|---------|-----------------|
-| `wrangler d1 create projektor` | SQLite database — relational data |
-| `wrangler kv namespace create projektor` | KV namespace — sessions and cache |
-| `wrangler r2 bucket create projektor-files` | R2 bucket — file attachments |
-
-### 4. Fill in wrangler.toml
-
-Open `wrangler.toml` and replace every `REPLACE_WITH_…` placeholder with the values printed by `setup.sh`:
-
-```toml
-[[d1_databases]]
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"   # from step 3
-
-[[kv_namespaces]]
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"            # from step 3
-
-[vars]
-CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com"
-CF_ACCESS_AUDIENCE    = "REPLACE_WITH_YOUR_CF_ACCESS_AUDIENCE_TAG"
-ADMIN_EMAILS          = "you@example.com"
-```
-
-> **Cloudflare Access is required.** projektor uses it for browser auth (SSO / Zero Trust).
-> Set up an Access application pointing at your Worker URL before deploying.
-
-### 5. Set secrets
+### 2. Provision Cloudflare resources
 
 ```bash
-wrangler secret put JWT_SECRET   # any random string — used for API token signing
+wrangler d1 create projektor
+wrangler kv namespace create projektor
+wrangler r2 bucket create projektor-files
 ```
 
-Optional (if you prefer secrets over toml vars):
+### 3. Configure wrangler.toml
+
+Pin a version and run the deploy script once — it downloads the release and
+scaffolds `wrangler.toml` from the template:
 
 ```bash
-wrangler secret put CF_ACCESS_TEAM_DOMAIN
-wrangler secret put CF_ACCESS_AUDIENCE
+echo "v1.0.0" > projektor.version    # a published release tag
+./deploy.sh                          # creates wrangler.toml, then asks you to fill it in
 ```
 
-### 6. Apply migrations and deploy
+Fill the `REPLACE_` values — D1 `database_id`, KV `id`, your Cloudflare Access team
+domain + audience, and `ADMIN_EMAILS`. The `./vendor/...` paths are artifact-owned;
+leave them.
+
+> **Cloudflare Access is required** for browser auth (SSO / Zero Trust). Set up an
+> Access application pointing at your Worker URL before deploying.
+
+### 4. Set secrets
+
+On the Worker (set once; persists across deploys):
 
 ```bash
-# Apply the D1 schema migrations
-wrangler d1 migrations apply projektor --remote --config ../wrangler.toml
-
-# Deploy the Worker + static frontend
-wrangler deploy --config ../wrangler.toml
+wrangler secret put JWT_SECRET   # any long random string — signs API tokens
 ```
 
-### 7. Bootstrap your workspace
+For CI deploys, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repo
+Actions secrets. **The API token must include D1** — Cloudflare's built-in "Edit
+Cloudflare Workers" template omits it, which silently breaks migrations. The exact
+token recipe is in the [deploy guide](./docs/deploying.md).
 
-On first load the Worker auto-provisions a workspace for the first user in `ADMIN_EMAILS` via Cloudflare Access. Open your Worker URL, log in through Cloudflare Access, and projektor creates your workspace automatically.
-
-To connect an AI agent immediately (dev/staging only), use the bootstrap endpoint — see [Connect an AI agent](#connect-an-ai-agent) below.
-
-**Updating projektor later:**
+### 5. Deploy
 
 ```bash
-git submodule update --remote --merge
-git add projektor
-git commit -m "chore: bump projektor"
-git push   # GitHub Actions deploys automatically
+./deploy.sh    # locally (wrangler OAuth), or
+git push       # CI deploys on push to main
 ```
+
+On first load the Worker auto-provisions a workspace for the first user in
+`ADMIN_EMAILS`. Open your Worker URL, log in through Cloudflare Access, and you're
+running. To connect an AI agent immediately (dev/staging only), use the bootstrap
+endpoint — see [Connect an AI agent](#connect-an-ai-agent) below.
+
+**Full reference** — release contents, the Cloudflare token, push-based automatic
+updates, and troubleshooting — is in **[docs/deploying.md](./docs/deploying.md)**.
+
+**Updating later:** bump `projektor.version`, commit, and push — CI deploys it (or
+wire push-based auto-updates so new releases deploy themselves).
 
 ## Connect an AI agent
 

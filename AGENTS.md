@@ -22,7 +22,7 @@ Implementation details:
 - **Data:** D1 (SQLite) for relational data, KV for sessions/caches, R2 for file attachments
 - **Schema:** Drizzle (migration + schema source of truth) — but query execution is raw `DB.prepare(...)`
 - **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets — see below), `packages/*` (db, types, plugin-sdk), `plugins/*`
-- **Deploy:** as a git submodule of a private deploy repo (`projektor-workspace`); deployed locally via `projektor-deploy`. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The deploy builds `apps/web` before `wrangler deploy`.
+- **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-workspace`) downloads it and ships it with `wrangler` — no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
 
 ## Architecture: the service-layer contract (most important)
 
@@ -232,8 +232,9 @@ These are the constraints the fleet skill reads to plan batches. Keep them curre
 Frontend islands are **not** domain-locked in the same way, but two agents must never
 own the same island file. Assign each island to exactly one agent per batch.
 
-**Deploy command:** `projektor-deploy` (runs from any directory; requires the
-`projektor-workspace` submodule to be up to date).
+**Deploy:** tag a release (`git tag vX.Y.Z && git push --tags`) — `release.yml`
+builds the artifact and the config-only deploy repo (`projektor-workspace`) picks
+it up. See [docs/deploying.md](./docs/deploying.md).
 
 **CI commands** (must both pass before opening a PR):
 ```bash
