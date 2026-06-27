@@ -216,7 +216,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	const nextCursor = hasMore && lastItem ? lastItem.created_at : null;
 
 	const issueIds = (items as Array<{ id: string }>).map((i) => i.id);
-	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, issueIds);
+	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
 	const itemsWithFields = (items as Array<Record<string, unknown>>).map((i) => ({
 		...i,
 		customFields: customFieldsByIssue[i.id as string] ?? [],
@@ -322,7 +322,7 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const links = await listLinksForIssue(ctx, { issueId });
 
-	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, [issueId]);
+	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, [issueId]);
 	const customFields = customFieldsByIssue[issueId] ?? [];
 
 	const fullIssue = {

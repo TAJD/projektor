@@ -57,6 +57,20 @@ export async function rateLimitMiddleware(
 	await next();
 }
 
+/**
+ * Bump a fixed-window counter and return the new count. Shared so the auth-failure
+ * throttle (middleware/auth.ts, PROJ-198) reuses the same backing table and window math
+ * as the request limiter above.
+ */
+export async function bumpRateCounter(
+	db: D1Database,
+	key: string,
+	windowSecs: number
+): Promise<number> {
+	const slot = Math.floor(Math.floor(Date.now() / 1000) / windowSecs) * windowSecs;
+	return incrementCounter(db, key, slot);
+}
+
 async function sha256Prefix(input: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
 	return Array.from(new Uint8Array(buf).slice(0, 8))

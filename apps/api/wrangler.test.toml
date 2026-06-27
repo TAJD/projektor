@@ -26,3 +26,7 @@ BOOTSTRAP_SECRET = "test-bootstrap-secret-do-not-use-in-production"
 RATE_LIMIT_AUTH_MAX = "3"
 RATE_LIMIT_API_MAX = "5"
 RATE_LIMIT_WINDOW_SECS = "60"
+# Failed-bearer-auth throttle (PROJ-198). Low so the test can trip 429 by seeding a few
+# failures. Safe for existing tests: setup.ts wipes rate_limit before each test, and no
+# single test makes >3 failed bearer-auth requests from the same IP.
+RATE_LIMIT_AUTH_FAIL_MAX = "3"
