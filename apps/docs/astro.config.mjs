@@ -24,6 +24,7 @@ export default defineConfig({
 				// each page's `sidebar.order` frontmatter, set in build-content.mjs).
 				{ label: "Agents & MCP", autogenerate: { directory: "agents" } },
 				{ label: "Architecture", autogenerate: { directory: "architecture" } },
+				{ label: "Philosophy", autogenerate: { directory: "philosophy" } },
 				{ label: "Contributing", autogenerate: { directory: "contributing" } },
 			],
 		}),

@@ -10,12 +10,16 @@ which is why the end-to-end loop is hard to see. Here they are as one picture:
 
 | Layer | Runs where | What it does | Reference |
 |------|-----------|--------------|-----------|
-| **1 · Lifecycle** | The client machine | Spawns an isolated workspace per agent (git worktree + branch + terminal), and reaps it cleanly when done | This page (§1) |
+| **1 · Lifecycle** *(implementation)* | The client machine | Spawns an isolated workspace per agent (git worktree + branch + terminal), and reaps it cleanly when done | This page (§1) |
 | **2 · Coordination** | Projektor MCP | Lets parallel agents announce themselves, claim files, and message each other so they don't clobber each other's work | [Contributor conventions](./AGENTS.md) (Fleet coordination protocol) |
 | **3 · Project management** | Projektor MCP | The actual work: issues, sprints, wiki, links — and "what should I work on next?" | [MCP tool catalog](./mcp-tools.generated.md), [Connect an agent](./mcp.md) |
 
 Layers 2 and 3 are Projektor itself. Layer 1 is the harness around it. You can use any
 layer alone — a single agent needs only Layer 3 — but the power comes from combining them.
+
+> **Where this fits.** For how these three layers sit relative to other tools (Jira,
+> Notion, beads) and why Projektor deliberately spans layers 2–3, see
+> [Where Projektor fits](./philosophy.md). That page is the *why*; this one is the *how*.
 
 ---
 

@@ -61,7 +61,7 @@ flowchart TB
 |-------|------|---------|-------|
 | Frontend | Vite + React 18 | `apps/web` | **Stub** — single static `<h1>`. Dev-proxies `/api` + `/mcp` to `:8787`. |
 | API / edge runtime | Hono on Cloudflare Workers | `apps/api` | REST + MCP, two-mode auth, workspace tenancy. |
-| MCP server | JSON-RPC 2.0 over HTTP | `apps/api/src/routes/mcp.ts` | 13 core tools (projects, issues, comments, wiki). Primary surface. |
+| MCP server | JSON-RPC 2.0 over HTTP | `apps/api/src/routes/mcp.ts` | 64 tools across 14 domains (coordination + project data). Primary surface. |
 | Plugin system | Registry + SDK | `apps/api/src/plugins`, `packages/plugin-sdk` | `definePlugin` / `defineMCPTool`. **Not loaded at runtime.** |
 | Data model | Drizzle ORM → D1 | `packages/db` | 11 tables, 1 migration. Raw `c.env.DB.prepare` used everywhere — Drizzle is schema-only. |
 | Shared types | TS | `packages/types` | `HonoEnv`, `Plugin`, `MCPTool`, `PluginContext`. |

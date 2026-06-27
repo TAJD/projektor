@@ -153,7 +153,7 @@ curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
 
 Then wire up the agent the same way as above.
 
-See **[docs/mcp.md](./docs/mcp.md)** for the full connection guide, protocol reference, and tool catalog (54 tools across workspaces, projects, issues, sprints, wiki, comments, issue links, task types, task statuses, and custom fields).
+See **[docs/mcp.md](./docs/mcp.md)** for the full connection guide, protocol reference, and tool catalog (64 tools across 14 domains — project data plus agent-coordination primitives).
 
 ## Development
 
