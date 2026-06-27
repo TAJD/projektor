@@ -7,7 +7,7 @@
     "predev": "node scripts/build-content.mjs",
     "dev": "astro dev",
     "prebuild": "node scripts/build-content.mjs",
-    "build": "astro build && node scripts/gen-llms-txt.mjs",
+    "build": "astro build",
     "preview": "astro preview",
     "type-check": "astro check",
     "sync:content": "node scripts/build-content.mjs"

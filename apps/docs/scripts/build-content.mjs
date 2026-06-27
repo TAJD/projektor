@@ -11,6 +11,9 @@
  * The MCP tool catalog (docs/mcp-tools.generated.md) is itself generated from code by
  * apps/api/scripts/gen-mcp-catalog.ts — run `pnpm --filter @projektor/api gen:catalog`
  * first if you changed any tool.
+ *
+ * This script also emits public/llms.txt and public/llms-full.txt so they are served
+ * at the docs site root. Astro copies public/ to dist/ automatically during the build.
  */
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -194,3 +197,54 @@ if (existsSync(fontSrc)) {
 
 console.log(`Synced ${synced} pages -> ${outDir}`);
 if (skipped.length) console.log(`Skipped (not present yet): ${skipped.join(", ")}`);
+
+// ── llms.txt + llms-full.txt ──
+const SITE = "https://tajd.github.io/projektor";
+const publicDir = join(docsApp, "public");
+mkdirSync(publicDir, { recursive: true });
+
+const sectionLabels = {
+	guides: "Guides",
+	agents: "Agents & MCP",
+	architecture: "Architecture",
+	contributing: "Contributing",
+};
+
+// Collect available pages grouped by top-level section, preserving PAGES order.
+const groups = {};
+for (const page of PAGES) {
+	if (!existsSync(join(repoRoot, page.src))) continue;
+	const section = page.slug.split("/")[0];
+	if (!groups[section]) groups[section] = [];
+	groups[section].push(page);
+}
+
+// llms.txt — index with absolute URLs (llmstxt.org convention)
+const indexLines = [
+	"# Projektor",
+	"",
+	"> A self-hosted, MCP-native Jira + wiki that runs in a single Cloudflare Worker. AI agents are a first-class client over a JSON-RPC MCP endpoint.",
+	"",
+];
+for (const [section, pages] of Object.entries(groups)) {
+	indexLines.push(`## ${sectionLabels[section] || section}`, "");
+	for (const p of pages) {
+		indexLines.push(`- [${p.title}](${SITE}/${p.slug}/): ${p.description}`);
+	}
+	indexLines.push("");
+}
+writeFileSync(join(publicDir, "llms.txt"), indexLines.join("\n") + "\n", "utf8");
+
+// llms-full.txt — every page's markdown concatenated, for one-shot ingestion
+const fullLines = [];
+for (const [, pages] of Object.entries(groups)) {
+	for (const p of pages) {
+		const srcPath = join(repoRoot, p.src);
+		const raw = readFileSync(srcPath, "utf8");
+		const [, body] = splitTitle(raw);
+		fullLines.push(`# ${p.title}`, "", `Source: ${SITE}/${p.slug}/`, "", body.trim(), "", "---", "");
+	}
+}
+writeFileSync(join(publicDir, "llms-full.txt"), fullLines.join("\n").trimEnd() + "\n", "utf8");
+
+console.log("Wrote public/llms.txt + public/llms-full.txt");
