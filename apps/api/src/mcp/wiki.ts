@@ -1,0 +1,162 @@
+import type { MCPTool } from "@projektor/types";
+import { ValidationError } from "../services/errors";
+import type { ServiceCtx } from "../services/types";
+import * as wikiService from "../services/wiki";
+
+export const wikiTools: MCPTool[] = [
+	{
+		name: "list_wiki_pages",
+		description: "List wiki pages in the workspace, optionally filtered by parent or project",
+		inputSchema: {
+			type: "object",
+			properties: {
+				parentId: { type: "string", description: "Filter to children of this page ID" },
+				projectId: { type: "string", description: "Filter to pages belonging to this project ID" },
+			},
+		},
+		async handler(input, ctx) {
+			return wikiService.listWikiPages(ctx, input);
+		},
+	},
+	{
+		name: "search_wiki",
+		description: "Search wiki pages by keyword in title or content",
+		inputSchema: {
+			type: "object",
+			required: ["query"],
+			properties: {
+				query: { type: "string" },
+				limit: { type: "number", default: 10 },
+				projectId: { type: "string", description: "Restrict search to this project ID" },
+			},
+		},
+		async handler(input, ctx) {
+			return wikiService.searchWiki(ctx, input);
+		},
+	},
+	{
+		name: "get_wiki_page",
+		description: "Get a wiki page by slug, including full content",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: { slug: { type: "string" } },
+		},
+		async handler(input, ctx) {
+			const { slug } = input as { slug: string };
+			return wikiService.getWikiPage(ctx, slug);
+		},
+	},
+	{
+		name: "create_wiki_page",
+		description: "Create a new wiki page",
+		inputSchema: {
+			type: "object",
+			required: ["title"],
+			properties: {
+				title: { type: "string" },
+				slug: {
+					type: "string",
+					description: "URL-safe identifier; auto-generated from title if omitted",
+				},
+				content: { type: "string", description: "Markdown content" },
+				parentId: { type: "string", description: "Parent page ID for nested pages" },
+				projectId: { type: "string", description: "Project ID to scope this page to" },
+			},
+		},
+		async handler(input, ctx) {
+			return wikiService.createWikiPage(ctx, input);
+		},
+	},
+	{
+		name: "update_wiki_page",
+		description: "Update a wiki page by id or slug (saves a revision when content changes)",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: { type: "string", description: "Page ID" },
+				slug: { type: "string", description: "Page slug (alternative to id)" },
+				title: { type: "string" },
+				content: { type: "string" },
+				parentId: {
+					type: "string",
+					nullable: true,
+					description: "Parent page ID (null to unset parent, omit to leave unchanged)",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			const { id, slug, ...rest } = input as {
+				id?: string;
+				slug?: string;
+				title?: string;
+				content?: string;
+				parentId?: string | null;
+			};
+			const idOrSlug = id ?? slug;
+			if (!idOrSlug) {
+				throw new ValidationError({
+					formErrors: ["Either id or slug must be provided"],
+					fieldErrors: {},
+				});
+			}
+			return wikiService.updateWikiPage(ctx, idOrSlug, rest);
+		},
+	},
+	{
+		name: "delete_wiki_page",
+		description: "Delete a wiki page by slug (not allowed for viewers)",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: { slug: { type: "string" } },
+		},
+		async handler(input, ctx) {
+			const { slug } = input as { slug: string };
+			return wikiService.deleteWikiPage(ctx as ServiceCtx, slug);
+		},
+	},
+	{
+		name: "wiki_tree",
+		description: "Get the wiki page hierarchy as a nested tree, optionally filtered by project",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: { type: "string", description: "Filter to pages belonging to this project ID" },
+			},
+		},
+		async handler(input, ctx) {
+			const { projectId } = input as { projectId?: string };
+			return wikiService.getWikiTree(ctx as ServiceCtx, projectId);
+		},
+	},
+	{
+		name: "list_wiki_revisions",
+		description: "List revision history for a wiki page",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: { slug: { type: "string" } },
+		},
+		async handler(input, ctx) {
+			const { slug } = input as { slug: string };
+			return wikiService.listWikiRevisions(ctx as ServiceCtx, slug);
+		},
+	},
+	{
+		name: "get_wiki_revision",
+		description: "Get the content of a specific wiki revision by its ID",
+		inputSchema: {
+			type: "object",
+			required: ["slug", "revisionId"],
+			properties: {
+				slug: { type: "string" },
+				revisionId: { type: "string" },
+			},
+		},
+		async handler(input, ctx) {
+			const { slug, revisionId } = input as { slug: string; revisionId: string };
+			return wikiService.getWikiRevision(ctx as ServiceCtx, slug, revisionId);
+		},
+	},
+];

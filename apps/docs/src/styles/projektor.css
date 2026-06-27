@@ -1,0 +1,95 @@
+/*
+ * Projektor docs theme — mirrors the app's design tokens (apps/web Base.astro)
+ * so the docs site is visually continuous with the product.
+ *
+ * Starlight drives everything off its own --sl-* custom properties and toggles
+ * light/dark via the same `data-theme` attribute the app uses, so we just remap
+ * the handful of semantic tokens to the projektor palette.
+ */
+
+@font-face {
+	font-family: "Monaspace Neon";
+	src: url("/projektor/fonts/MonaspaceNeon-Variable.woff2") format("woff2-variations");
+	font-weight: 100 900;
+	font-style: normal;
+	font-display: swap;
+}
+
+:root {
+	--sl-font: "Monaspace Neon", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+	--sl-font-mono: "Monaspace Neon", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+
+	/* Dark theme (Starlight default) — projektor dark palette */
+	--sl-color-accent-low: #1e1b4b;
+	--sl-color-accent: #6366f1;
+	--sl-color-accent-high: #c7d2fe;
+
+	--sl-color-white: #ffffff;
+	--sl-color-gray-1: #f3f5f9; /* --text */
+	--sl-color-gray-2: #cbd5e1;
+	--sl-color-gray-3: #94a3b8; /* --text-muted */
+	--sl-color-gray-4: #5b6675;
+	--sl-color-gray-5: #2a3242; /* --border */
+	--sl-color-gray-6: #1a1f2e; /* --surface */
+	--sl-color-gray-7: #12161f; /* --nav-bg */
+	--sl-color-black: #0d1117; /* --bg */
+
+	--sl-color-bg: #0d1117;
+	--sl-color-bg-nav: #12161f;
+	--sl-color-bg-sidebar: #12161f;
+	--sl-color-bg-inline-code: #141b2b;
+	--sl-color-hairline-light: #2a3242;
+	--sl-color-hairline: #2a3242;
+	--sl-color-hairline-shade: #1a1f2e;
+	--sl-color-text-accent: #a5b4fc;
+
+	letter-spacing: -0.005em;
+}
+
+:root[data-theme="light"] {
+	/* Light theme — projektor light palette */
+	--sl-color-accent-low: #e0e7ff;
+	--sl-color-accent: #4f46e5;
+	--sl-color-accent-high: #312e81;
+
+	--sl-color-white: #030712; /* --text-strong */
+	--sl-color-gray-1: #111827; /* --text */
+	--sl-color-gray-2: #374151;
+	--sl-color-gray-3: #6b7280; /* --text-muted */
+	--sl-color-gray-4: #9ca3af;
+	--sl-color-gray-5: #e2e8f0; /* --border */
+	--sl-color-gray-6: #f1f5f9;
+	--sl-color-gray-7: #f8fafc; /* --surface */
+	--sl-color-black: #ffffff; /* --bg */
+
+	--sl-color-bg: #ffffff;
+	--sl-color-bg-nav: #ffffff;
+	--sl-color-bg-sidebar: #f8fafc;
+	--sl-color-bg-inline-code: #dde3ea;
+	--sl-color-hairline-light: #e2e8f0;
+	--sl-color-hairline: #e2e8f0;
+	--sl-color-hairline-shade: #f1f5f9;
+	--sl-color-text-accent: #4f46e5;
+}
+
+/* Brand mark: square indigo chip with a white "P", matching the app sidebar. */
+.site-title::before {
+	content: "P";
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.6rem;
+	height: 1.6rem;
+	margin-right: 0.5rem;
+	border-radius: 6px;
+	background: var(--sl-color-accent);
+	color: #fff;
+	font-weight: 700;
+	font-size: 0.95rem;
+	flex-shrink: 0;
+}
+
+.site-title {
+	font-weight: 700;
+	letter-spacing: -0.02em;
+}

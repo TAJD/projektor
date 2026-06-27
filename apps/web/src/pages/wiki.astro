@@ -1,0 +1,11 @@
+---
+import Base from '../layouts/Base.astro';
+import ProjectNav from '../islands/ProjectNav';
+import WikiPage from '../islands/WikiPage';
+
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Wiki — Projektor">
+  <ProjectNav client:load workspaceSlug={workspaceSlug} />
+  <WikiPage client:load workspaceSlug={workspaceSlug} />
+</Base>

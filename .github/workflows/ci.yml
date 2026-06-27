@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - name: MCP catalog is fresh
+        run: |
+          pnpm --filter @projektor/api gen:catalog
+          git diff --exit-code -- docs/mcp-tools.generated.md \
+            || { echo "::error::docs/mcp-tools.generated.md is stale. Run 'pnpm --filter @projektor/api gen:catalog' and commit the result."; exit 1; }
+      - run: pnpm turbo type-check
+      - run: pnpm --filter @projektor/api test
+      - run: pnpm --filter @projektor/web test
+      - name: Island API convention
+        run: bash scripts/check-island-api.sh
+# E2E tests: run manually with 'pnpm --filter @projektor/web test:e2e'
+# Requires: E2E_BASE_URL pointing at a dev deployment with ENVIRONMENT=development and DEV_USER_EMAIL set.

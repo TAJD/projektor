@@ -1,0 +1,28 @@
+---
+import Base from '../../../../../layouts/Base.astro';
+import IssueDetail from '../../../../../islands/IssueDetail';
+
+export async function getStaticPaths() {
+  // Paths are unknown at build time; the island resolves the issue client-side
+  // via the projectSlug+issueNumber props (GET /api/issues/KEY-NUMBER).
+  return [];
+}
+
+const { projectSlug, issueNumber } = Astro.params as {
+  projectSlug: string;
+  issueNumber: string;
+  titleSlug: string;
+};
+const parsedNumber = parseInt(issueNumber, 10);
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Issue — Projektor">
+  <div class="page-container">
+    <IssueDetail
+      client:load
+      projectSlug={projectSlug}
+      issueNumber={parsedNumber}
+      workspaceSlug={workspaceSlug}
+    />
+  </div>
+</Base>

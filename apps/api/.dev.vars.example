@@ -1,0 +1,12 @@
+# Local dev secrets for `wrangler dev`. Copy to `.dev.vars` (gitignored) and edit.
+# These are ONLY honored when ENVIRONMENT=development (see middleware/auth.ts).
+
+# Auth bypass: any request with no Access JWT / Bearer token is treated as this
+# user (created on first use). Lets the browser frontend hit /api/* locally
+# without Cloudflare Access. Leave unset to require real auth.
+DEV_USER_EMAIL=dev@projektor.dev
+
+# Enables GET /bootstrap (disabled unless set). Hit it once to seed a workspace
+# + membership + API token for DEV_USER_EMAIL:
+#   curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
+BOOTSTRAP_SECRET=localdev

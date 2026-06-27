@@ -1,0 +1,30 @@
+{
+  "name": "projektor",
+  "private": true,
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "type-check": "turbo type-check",
+    "deploy": "turbo deploy",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.1",
+    "@biomejs/cli-win32-x64": "2.5.1",
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "lefthook": "^1.11.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.5.0"
+  },
+  "packageManager": "pnpm@10.18.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "workerd", "sharp"]
+  },
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  }
+}

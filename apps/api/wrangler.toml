@@ -1,0 +1,45 @@
+# Local development config. The REAL Cloudflare resource IDs for the deployed
+# instance live in the private projektor-workspace repo's wrangler.toml — never
+# commit real account/database/KV IDs here. Local dev (`wrangler dev` + `--local`
+# migrations) uses Miniflare and does not need real IDs, so placeholders are fine.
+name = "projektor-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+account_id = "REPLACE_WITH_YOUR_CLOUDFLARE_ACCOUNT_ID"
+
+[dev]
+port = 8787
+
+[[d1_databases]]
+binding = "DB"
+database_name = "projektor"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "../../packages/db/migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "projektor-files"
+
+[vars]
+ENVIRONMENT = "development"
+CF_ACCESS_TEAM_DOMAIN = ""
+CF_ACCESS_AUDIENCE = ""
+
+# Login provisioning (services/provisioning.ts). ADMIN_EMAILS should include your
+# DEV_USER_EMAIL so the first local login auto-creates the default workspace as owner.
+ADMIN_EMAILS = "admin@projektor.dev"
+DEFAULT_WORKSPACE_SLUG = "projektor"
+DEFAULT_WORKSPACE_NAME = "Projektor"
+AUTO_JOIN_ROLE = "viewer"
+
+# Secrets (set via: wrangler secret put <NAME>):
+# JWT_SECRET
+# CF_ACCESS_TEAM_DOMAIN  (override here or via secret)
+# CF_ACCESS_AUDIENCE     (override here or via secret)
+# DEV_USER_EMAIL         (local dev only)
+# BOOTSTRAP_SECRET       (local dev only — required to use GET /bootstrap; if unset, the endpoint is disabled)

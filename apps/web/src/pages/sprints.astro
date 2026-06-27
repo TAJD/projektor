@@ -1,0 +1,13 @@
+---
+import Base from '../layouts/Base.astro';
+import ProjectNav from '../islands/ProjectNav';
+import SprintManager from '../islands/SprintManager';
+
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Sprints — Projektor">
+  <ProjectNav client:load workspaceSlug={workspaceSlug} />
+  <div class="page-container">
+    <SprintManager client:load workspaceSlug={workspaceSlug} />
+  </div>
+</Base>

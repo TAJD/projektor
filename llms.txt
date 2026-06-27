@@ -1,0 +1,40 @@
+# projektor
+
+> Wiki + Jira-style issue tracker. MCP-native: AI agents are the primary client.
+> Runs on Cloudflare Workers (Hono). No Node.js. No containers.
+
+## Connect your agent
+
+```bash
+# Dev: one-command bootstrap
+curl -s https://<worker>.workers.dev/bootstrap \
+  -H "X-Bootstrap-Secret: <secret>" | jq -r .mcpAddCommand | sh
+
+# Then use the printed: claude mcp add --transport http ...
+```
+
+## MCP endpoint
+
+POST /mcp/<workspace-uuid>
+Content-Type: application/json
+
+Required headers:
+  Authorization: Bearer pk_<64 hex chars>
+  X-Workspace-Slug: <slug>
+
+Protocol: JSON-RPC 2.0 (MCP Streamable HTTP — not SSE)
+Methods: initialize  tools/list  tools/call
+
+## Core tools (13 total)
+
+Projects:   list_projects  create_project
+Issues:     list_issues  get_issue  create_issue  update_issue
+Comments:   list_comments  add_comment
+Wiki:       list_wiki_pages  search_wiki  get_wiki_page  create_wiki_page  update_wiki_page
+
+## Key docs
+
+- docs/mcp.md        — full connection guide + tool catalog with inputs/outputs
+- AGENTS.md          — contributor conventions and service-layer contract
+- docs/marketecture.md — system diagram (Mermaid)
+- deploy-template/   — self-host on Cloudflare

@@ -1,0 +1,55 @@
+name: Docs
+
+# Builds the documentation site (apps/docs) and deploys it to GitHub Pages.
+# One-time setup: repo Settings → Pages → Source: "GitHub Actions".
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/docs/**"
+      - "docs/**"
+      - "README.md"
+      - "AGENTS.md"
+      - "apps/api/src/mcp/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; don't cancel an in-progress one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+      - run: pnpm install --frozen-lockfile
+      # Generate the tool catalog from source before building, so the site is fresh.
+      - run: pnpm --filter @projektor/api gen:catalog
+      - run: pnpm --filter @projektor/docs build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/docs/dist
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

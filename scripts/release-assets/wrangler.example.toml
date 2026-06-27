@@ -1,0 +1,59 @@
+# projektor deploy config — copy this to ./wrangler.toml and fill in the REPLACE_ values.
+#
+# This file ships inside the release artifact. After you extract the artifact into
+# ./vendor, the paths below (worker.js, web, migrations) resolve relative to your
+# deploy repo root. You own this copy: fill in your Cloudflare resource IDs once;
+# on a version bump, re-extract the artifact — these paths do not change.
+
+name = "projektor"
+main = "./vendor/worker.js"
+compatibility_date = "__COMPAT_DATE__"
+compatibility_flags = ["nodejs_compat"]   # required: the bundled worker imports node:stream / node:events
+
+# ─── Static Assets (pre-built Astro frontend, shipped in the artifact) ─────────
+#   - /api/* and /mcp/*  → always the Worker (run_worker_first)
+#   - everything else     → static assets, asset-first
+[assets]
+directory = "./vendor/web"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/mcp/*"]
+
+# ─── D1 Database ───────────────────────────────────────────────
+# Create with: wrangler d1 create projektor
+[[d1_databases]]
+binding = "DB"
+database_name = "projektor"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "./vendor/migrations"
+
+# ─── KV Namespace ──────────────────────────────────────────────
+# Create with: wrangler kv namespace create projektor
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# ─── R2 Bucket ─────────────────────────────────────────────────
+# Create with: wrangler r2 bucket create projektor-files
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "projektor-files"
+
+# ─── Static vars (non-secret) ──────────────────────────────────
+[vars]
+ENVIRONMENT = "production"
+CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com"
+CF_ACCESS_AUDIENCE   = "REPLACE_WITH_YOUR_CF_ACCESS_AUDIENCE_TAG"
+
+# ─── Login provisioning (services/provisioning.ts) ─────────────
+# Cloudflare Access gates who can log in; these decide what they get inside.
+# ADMIN_EMAILS → owners (the first to log in creates the default workspace).
+# Everyone else CF admits joins as AUTO_JOIN_ROLE (viewer|member|admin|owner|none).
+ADMIN_EMAILS = "REPLACE_WITH_YOUR_ADMIN_EMAILS_COMMA_SEPARATED"
+DEFAULT_WORKSPACE_SLUG = "projektor"
+DEFAULT_WORKSPACE_NAME = "Projektor"
+AUTO_JOIN_ROLE = "viewer"
+
+# ─── Secrets (set ONCE; they persist on the Worker across every deploy) ────────
+#   wrangler secret put JWT_SECRET
+# JWT_SECRET — random string used for API token signing. CI does NOT manage this;
+# set it once and it survives future deploys.

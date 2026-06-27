@@ -1,0 +1,14 @@
+---
+import Base from '../layouts/Base.astro';
+import ProjectList from '../islands/ProjectList';
+
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Projektor">
+  <div class="page-container">
+    <header style="margin-bottom: 1.5rem;">
+      <h1 style="margin: 0; font-size: 1.5rem; font-weight: 700; color: var(--text);">Projects</h1>
+    </header>
+    <ProjectList client:load workspaceSlug={workspaceSlug} />
+  </div>
+</Base>

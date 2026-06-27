@@ -1,0 +1,28 @@
+name = "projektor-api-test"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "projektor-test"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "00000000-0000-0000-0000-000000000001"
+
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "projektor-files-test"
+
+[vars]
+ENVIRONMENT = "development"
+JWT_SECRET = "test-secret-do-not-use-in-production"
+BOOTSTRAP_SECRET = "test-bootstrap-secret-do-not-use-in-production"
+# Low limits so rate-limit tests can trip 429 without looping hundreds of times.
+# Safe for existing tests: auth limit=3 (only 1 unauthenticated /api/* request per file),
+# api limit=5 (no single test makes >4 token-keyed requests with the same token).
+RATE_LIMIT_AUTH_MAX = "3"
+RATE_LIMIT_API_MAX = "5"
+RATE_LIMIT_WINDOW_SECS = "60"

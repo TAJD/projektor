@@ -1,0 +1,44 @@
+name = "projektor"
+main = "./projektor/apps/api/src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# ─── D1 Database ───────────────────────────────────────────────
+# Create with: wrangler d1 create projektor
+[[d1_databases]]
+binding = "DB"
+database_name = "projektor"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "./projektor/packages/db/migrations"
+
+# ─── KV Namespace ──────────────────────────────────────────────
+# Create with: wrangler kv namespace create projektor
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# ─── R2 Bucket ─────────────────────────────────────────────────
+# Create with: wrangler r2 bucket create projektor-files
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "projektor-files"
+
+# ─── Static vars (non-secret) ──────────────────────────────────
+[vars]
+ENVIRONMENT = "production"
+CF_ACCESS_TEAM_DOMAIN = "REPLACE_WITH_YOUR_TEAM.cloudflareaccess.com"
+CF_ACCESS_AUDIENCE   = "REPLACE_WITH_YOUR_CF_ACCESS_AUDIENCE_TAG"
+
+# ─── Login provisioning (services/provisioning.ts) ─────────────
+# Cloudflare Access gates who can log in; these decide what they get inside.
+# ADMIN_EMAILS → owners (the first to log in creates the default workspace).
+# Everyone else CF admits joins as AUTO_JOIN_ROLE (viewer|member|admin|owner|none).
+ADMIN_EMAILS = "REPLACE_WITH_YOUR_ADMIN_EMAILS_COMMA_SEPARATED"
+DEFAULT_WORKSPACE_SLUG = "projektor"
+DEFAULT_WORKSPACE_NAME = "Projektor"
+AUTO_JOIN_ROLE = "viewer"
+
+# ─── Secrets (set via: wrangler secret put <NAME>) ─────────────
+# JWT_SECRET          — random string, used for API token signing
+# CF_ACCESS_TEAM_DOMAIN and CF_ACCESS_AUDIENCE can also be secrets
+# if you prefer them out of the toml.

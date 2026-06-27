@@ -1,0 +1,72 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.1/schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"defaultBranch": "main"
+	},
+	"files": {
+		"includes": [
+			"apps/api/src/**",
+			"apps/web/src/**",
+			"!apps/web/src/pages/**/*.astro",
+			"!apps/web/src/layouts",
+			"packages/**"
+		]
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"correctness": {
+				"noUnusedVariables": "error",
+				"noUnusedImports": "error"
+			},
+			"a11y": {
+				"noLabelWithoutControl": {
+					"level": "error",
+					"options": {
+						"inputComponents": ["Select", "MarkdownEditor"]
+					}
+				}
+			}
+		}
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"lineWidth": 100,
+		"lineEnding": "lf"
+	},
+	"javascript": {
+		"formatter": {
+			"trailingCommas": "es5"
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["apps/api/src/test/**"],
+			"linter": {
+				"rules": {
+					"style": {
+						"noNonNullAssertion": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": ["apps/web/src/islands/IssueList.tsx"],
+			"linter": {
+				"rules": {
+					"a11y": {
+						"noLabelWithoutControl": "off",
+						"noNoninteractiveElementToInteractiveRole": "off",
+						"useFocusableInteractive": "off",
+						"useKeyWithClickEvents": "off",
+						"noStaticElementInteractions": "off"
+					}
+				}
+			}
+		}
+	]
+}

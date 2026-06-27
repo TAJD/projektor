@@ -1,0 +1,12 @@
+---
+import Base from '../../layouts/Base.astro';
+import IssueDetail from '../../islands/IssueDetail';
+
+// Issue ID is read from ?id= at runtime by the island (static output cannot use dynamic routes).
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Issue — Projektor">
+  <div class="page-container">
+    <IssueDetail client:load workspaceSlug={workspaceSlug} />
+  </div>
+</Base>

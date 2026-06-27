@@ -1,0 +1,20 @@
+{
+  "name": "@projektor/docs",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/build-content.mjs",
+    "dev": "astro dev",
+    "prebuild": "node scripts/build-content.mjs",
+    "build": "astro build && node scripts/gen-llms-txt.mjs",
+    "preview": "astro preview",
+    "type-check": "astro check",
+    "sync:content": "node scripts/build-content.mjs"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.30.0",
+    "astro": "^5.0.0",
+    "sharp": "^0.33.5"
+  }
+}

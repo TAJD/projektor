@@ -1,0 +1,102 @@
+---
+import ShareView from '../../islands/ShareView';
+---
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Shared Issue — Projektor</title>
+    <script is:inline>
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+      })();
+    </script>
+    <style is:global>
+      :root {
+        --bg: #ffffff; --surface: #f8fafc; --text: #111827; --text-muted: #6b7280;
+        --border: #e2e8f0; --accent: #4f46e5; --on-accent: #fff;
+        --priority-urgent-text: #dc2626; --priority-urgent-bg: rgba(220,38,38,0.15);
+        --priority-high-text: #d97706; --priority-high-bg: rgba(217,119,6,0.15);
+        --priority-medium-text: #4f46e5; --priority-medium-bg: rgba(79,70,229,0.12);
+        --priority-low-text: #6b7280; --priority-low-bg: rgba(107,114,128,0.12);
+        --priority-none-text: var(--priority-low-text); --priority-none-bg: var(--priority-low-bg);
+        --code-color: #1e293b; --code-bg: #dde3ea;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1117; --surface: #1a1f2e; --text: #f3f5f9; --text-muted: #94a3b8;
+          --border: #2a3242; --accent: #6366f1;
+          --priority-urgent-text: #fca5a5; --priority-urgent-bg: rgba(248,113,113,0.18);
+          --priority-high-text: #fcd34d; --priority-high-bg: rgba(251,191,36,0.18);
+          --priority-medium-text: #a5b4fc; --priority-medium-bg: rgba(129,140,248,0.18);
+          --priority-low-text: #cbd5e1; --priority-low-bg: rgba(148,163,184,0.18);
+          --code-color: #e2e8f0; --code-bg: #141b2b;
+        }
+      }
+      [data-theme='dark'] {
+        --bg: #0d1117; --surface: #1a1f2e; --text: #f3f5f9; --text-muted: #94a3b8;
+        --border: #2a3242; --accent: #6366f1;
+        --priority-urgent-text: #fca5a5; --priority-urgent-bg: rgba(248,113,113,0.18);
+        --priority-high-text: #fcd34d; --priority-high-bg: rgba(251,191,36,0.18);
+        --priority-medium-text: #a5b4fc; --priority-medium-bg: rgba(129,140,248,0.18);
+        --priority-low-text: #cbd5e1; --priority-low-bg: rgba(148,163,184,0.18);
+        --code-color: #e2e8f0; --code-bg: #141b2b;
+      }
+      [data-theme='light'] {
+        --bg: #ffffff; --surface: #f8fafc; --text: #111827; --text-muted: #6b7280;
+        --border: #e2e8f0; --accent: #4f46e5;
+        --priority-urgent-text: #dc2626; --priority-urgent-bg: rgba(220,38,38,0.15);
+        --priority-high-text: #d97706; --priority-high-bg: rgba(217,119,6,0.15);
+        --priority-medium-text: #4f46e5; --priority-medium-bg: rgba(79,70,229,0.12);
+        --priority-low-text: #6b7280; --priority-low-bg: rgba(107,114,128,0.12);
+        --code-color: #1e293b; --code-bg: #dde3ea;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Monaspace Neon', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+      }
+      .page-wrap {
+        width: 100%;
+        max-width: 720px;
+        margin: 0 auto;
+      }
+      .badge {
+        display: inline-flex; align-items: center;
+        padding: 0.125rem 0.5rem; border-radius: 4px;
+        font-size: 0.75rem; font-weight: 500; white-space: nowrap;
+      }
+      /* Markdown prose */
+      .prose { line-height: 1.7; }
+      .prose h1, .prose h2, .prose h3 { margin-top: 1.5em; margin-bottom: 0.5em; font-weight: 700; }
+      .prose p { margin: 0.75em 0; }
+      .prose ul, .prose ol { padding-left: 1.5em; margin: 0.5em 0; }
+      .prose code {
+        font-family: inherit; font-size: 0.875em;
+        background: var(--code-bg); color: var(--code-color);
+        padding: 0.1em 0.3em; border-radius: 3px;
+      }
+      .prose pre { background: var(--code-bg); padding: 1em; border-radius: 6px; overflow-x: auto; }
+      .prose pre code { background: none; padding: 0; }
+      .prose a { color: var(--accent); }
+      .prose blockquote {
+        border-left: 3px solid var(--border); margin: 0.75em 0;
+        padding: 0.25em 1em; color: var(--text-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-wrap">
+      <ShareView client:load />
+    </div>
+  </body>
+</html>

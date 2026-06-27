@@ -1,0 +1,10 @@
+# build output
+dist/
+# astro generated cache + types
+.astro/
+# deps
+node_modules/
+# playwright
+playwright-report/
+test-results/
+e2e/.e2e-ctx.json

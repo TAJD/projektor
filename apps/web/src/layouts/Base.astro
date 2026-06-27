@@ -1,0 +1,598 @@
+---
+interface Props {
+  title?: string;
+}
+const { title = 'Projektor' } = Astro.props;
+
+const path = Astro.url.pathname;
+const isActive = (href: string): boolean =>
+  href === '/' ? path === '/' : path === href || path.startsWith(`${href}/`);
+
+const navItems = [
+  { href: '/', label: 'Projects' },
+  { href: '/my-issues', label: 'My Issues' },
+  { href: '/settings/tokens', label: 'Tokens' },
+] as const;
+---
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#6366f1" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <title>{title}</title>
+    <!-- safe-ls: 'theme' is a cosmetic preference (dark/light). No API dependency — a
+         stale or missing value falls back to the system color-scheme media query. -->
+    <script is:inline>
+      (function () {
+        try {
+          var t = localStorage.getItem('theme');
+          if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+      })();
+    </script>
+    <style is:global>
+      @font-face {
+        font-family: 'Monaspace Neon';
+        src: url('/fonts/MonaspaceNeon-Variable.woff2') format('woff2-variations');
+        font-weight: 100 900;
+        font-style: normal;
+        font-display: swap;
+      }
+      :root {
+        --bg: #ffffff;
+        --surface: #f8fafc;
+        --text: #111827;
+        --text-strong: #030712;
+        --text-muted: #6b7280;
+        --border: #e2e8f0;
+        --nav-bg: #ffffff;
+        --accent: #4f46e5;
+        --on-accent: #fff;
+        /* Layout */
+        --sidebar-width: 220px;
+        --sidebar-width-collapsed: 56px;
+        --topbar-height: 56px;
+        /* Elevation */
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+        /* Priority badge tokens (light) */
+        --priority-urgent-text: #dc2626;
+        --priority-urgent-bg: rgba(220, 38, 38, 0.15);
+        --priority-high-text: #d97706;
+        --priority-high-bg: rgba(217, 119, 6, 0.15);
+        --priority-medium-text: #4f46e5;
+        --priority-medium-bg: rgba(79, 70, 229, 0.12);
+        --priority-low-text: #6b7280;
+        --priority-low-bg: rgba(107, 114, 128, 0.12);
+        --priority-none-text: var(--priority-low-text);
+        --priority-none-bg: var(--priority-low-bg);
+        /* Code tokens (light) — dark text on clearly-distinct slate-200 bg */
+        --code-color: #1e293b;
+        --code-bg: #dde3ea;
+        /* Epic badge tokens (light) — violet-700 on near-white bg */
+        --epic-text: #7c3aed;
+        --epic-bg: rgba(124, 58, 237, 0.10);
+        --epic-border: rgba(124, 58, 237, 0.30);
+        /* Status category tokens (light) */
+        --status-todo: #6b7280;
+        --status-in-progress: #4f46e5;
+        --status-in-review: #7c3aed;
+        --status-done: #16a34a;
+        --status-cancelled: #dc2626;
+        /* Danger action tokens (light) */
+        --danger-text: #dc2626;
+        --danger-bg: rgba(220, 38, 38, 0.10);
+        --danger-border: rgba(220, 38, 38, 0.30);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          /* Cool near-black base with one clear step up to surface (Linear/Vercel feel) */
+          --bg: #0d1117;
+          --surface: #1a1f2e;
+          --text: #f3f5f9;
+          --text-strong: #ffffff;
+          --text-muted: #94a3b8;     /* slate-400 — ~7.4:1 on --bg, passes WCAG AA */
+          --border: #2a3242;
+          --nav-bg: #12161f;          /* sits between bg and surface */
+          --accent: #6366f1;          /* indigo-500 — distinctive on dark */
+          --on-accent: #fff;
+          --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+          /* Priority badge tokens (dark) — lighter tints for WCAG AA on dark surfaces */
+          --priority-urgent-text: #fca5a5;
+          --priority-urgent-bg: rgba(248, 113, 113, 0.18);
+          --priority-high-text: #fcd34d;
+          --priority-high-bg: rgba(251, 191, 36, 0.18);
+          --priority-medium-text: #a5b4fc;   /* indigo-300 — aligns with accent */
+          --priority-medium-bg: rgba(129, 140, 248, 0.18);
+          --priority-low-text: #cbd5e1;
+          --priority-low-bg: rgba(148, 163, 184, 0.18);
+          /* Code tokens (dark) — light text on slightly deeper slate bg */
+          --code-color: #e2e8f0;
+          --code-bg: #141b2b;
+          /* Epic badge tokens (dark) — violet-300 on near-black bg */
+          --epic-text: #c4b5fd;
+          --epic-bg: rgba(196, 181, 253, 0.15);
+          --epic-border: rgba(196, 181, 253, 0.30);
+          /* Status category tokens (dark) */
+          --status-todo: #94a3b8;
+          --status-in-progress: #818cf8;
+          --status-in-review: #c4b5fd;
+          --status-done: #4ade80;
+          --status-cancelled: #f87171;
+          /* Danger action tokens (dark) — brighter red stays readable on near-black */
+          --danger-text: #f87171;
+          --danger-bg: rgba(248, 113, 113, 0.12);
+          --danger-border: rgba(248, 113, 113, 0.32);
+        }
+      }
+      [data-theme='dark'] {
+        --bg: #0d1117;
+        --surface: #1a1f2e;
+        --text: #f3f5f9;
+        --text-strong: #ffffff;
+        --text-muted: #94a3b8;
+        --border: #2a3242;
+        --nav-bg: #12161f;
+        --accent: #6366f1;
+        --on-accent: #fff;
+        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+        --priority-urgent-text: #fca5a5;
+        --priority-urgent-bg: rgba(248, 113, 113, 0.18);
+        --priority-high-text: #fcd34d;
+        --priority-high-bg: rgba(251, 191, 36, 0.18);
+        --priority-medium-text: #a5b4fc;
+        --priority-medium-bg: rgba(129, 140, 248, 0.18);
+        --priority-low-text: #cbd5e1;
+        --priority-low-bg: rgba(148, 163, 184, 0.18);
+        --code-color: #e2e8f0;
+        --code-bg: #141b2b;
+        --epic-text: #c4b5fd;
+        --epic-bg: rgba(196, 181, 253, 0.15);
+        --epic-border: rgba(196, 181, 253, 0.30);
+        --status-todo: #94a3b8;
+        --status-in-progress: #818cf8;
+        --status-in-review: #c4b5fd;
+        --status-done: #4ade80;
+        --status-cancelled: #f87171;
+        --danger-text: #f87171;
+        --danger-bg: rgba(248, 113, 113, 0.12);
+        --danger-border: rgba(248, 113, 113, 0.32);
+      }
+      [data-theme='light'] {
+        --bg: #ffffff;
+        --surface: #f8fafc;
+        --text: #111827;
+        --text-strong: #030712;
+        --text-muted: #6b7280;
+        --border: #e2e8f0;
+        --nav-bg: #ffffff;
+        --accent: #4f46e5;
+        --on-accent: #fff;
+        --priority-urgent-text: #dc2626;
+        --priority-urgent-bg: rgba(220, 38, 38, 0.15);
+        --priority-high-text: #d97706;
+        --priority-high-bg: rgba(217, 119, 6, 0.15);
+        --priority-medium-text: #4f46e5;
+        --priority-medium-bg: rgba(79, 70, 229, 0.12);
+        --priority-low-text: #6b7280;
+        --priority-low-bg: rgba(107, 114, 128, 0.12);
+        --code-color: #1e293b;
+        --code-bg: #dde3ea;
+        --epic-text: #7c3aed;
+        --epic-bg: rgba(124, 58, 237, 0.10);
+        --epic-border: rgba(124, 58, 237, 0.30);
+        --status-todo: #6b7280;
+        --status-in-progress: #4f46e5;
+        --status-in-review: #7c3aed;
+        --status-done: #16a34a;
+        --status-cancelled: #dc2626;
+        --danger-text: #dc2626;
+        --danger-bg: rgba(220, 38, 38, 0.10);
+        --danger-border: rgba(220, 38, 38, 0.30);
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: 'Monaspace Neon', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        overflow-x: hidden; /* guard against accidental horizontal overflow on mobile */
+      }
+      /* Kill the 300ms tap delay on interactive elements */
+      a, button, [role="button"], input, select, textarea, summary, label {
+        touch-action: manipulation;
+      }
+      h1, h2, h3, h4 { letter-spacing: -0.01em; }
+
+      /* ── Shared button utility ─────────────────────────────────────── */
+      .btn {
+        display: inline-flex; align-items: center; gap: 0.375rem;
+        padding: 0.375rem 0.75rem; border-radius: 4px;
+        font-size: 0.875rem; font-weight: 500; line-height: 1.25;
+        cursor: pointer; border: 1px solid transparent;
+        white-space: nowrap; text-decoration: none;
+        transition: opacity 0.1s;
+      }
+      .btn:hover:not(:disabled) { opacity: 0.82; }
+      .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+      .btn-primary { background: var(--accent); color: var(--on-accent); }
+      .btn-outline { background: var(--bg); border-color: var(--border); color: var(--text); }
+      .btn-danger  { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-text); }
+      .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.8rem; }
+
+      /* ── Shared badge utility ──────────────────────────────────────── */
+      .badge {
+        display: inline-flex; align-items: center;
+        padding: 0.125rem 0.5rem; border-radius: 4px;
+        font-size: 0.75rem; font-weight: 500; white-space: nowrap;
+      }
+      /* ── Page padding utility (responsive) ─────────────────────────── */
+      .page-container { padding: 2rem; }
+      @media (max-width: 640px) { .page-container { padding: 1rem; } }
+
+      /* ── App shell: fixed left sidebar + offset main ───────────────── */
+      .app-shell { min-height: 100vh; }
+      .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: var(--sidebar-width);
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        padding: 1rem 0.75rem;
+        background: var(--nav-bg);
+        border-right: 1px solid var(--border);
+        z-index: 100;
+        overflow-y: auto;
+      }
+      .app-main {
+        margin-left: var(--sidebar-width);
+        min-width: 0;
+      }
+      .sidebar-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.25rem 0.5rem 0.75rem;
+        color: var(--text);
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 1.0625rem;
+        letter-spacing: -0.02em;
+      }
+      .sidebar-brand .brand-mark,
+      .topbar-brand .brand-mark {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.75rem;
+        height: 1.75rem;
+        flex-shrink: 0;
+        border-radius: 6px;
+        background: var(--accent);
+        color: var(--on-accent);
+        font-size: 0.95rem;
+        font-weight: 700;
+      }
+      .sidebar-section-label {
+        padding: 0.5rem 0.5rem 0.25rem;
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-muted);
+      }
+      .sidebar-nav {
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+      }
+      .sidebar-link {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        padding: 0.5rem 0.625rem;
+        border-radius: 6px;
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.875rem;
+        font-weight: 500;
+        line-height: 1.25;
+        transition: background 0.1s, color 0.1s;
+      }
+      .sidebar-link svg { flex-shrink: 0; }
+      .sidebar-link:hover { background: var(--surface); color: var(--text); }
+      .sidebar-link.active { background: var(--accent); color: var(--on-accent); }
+      .sidebar-link .link-label { white-space: nowrap; }
+      .sidebar-spacer { flex: 1; }
+      .sidebar-footer {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding-top: 0.5rem;
+        border-top: 1px solid var(--border);
+      }
+      .theme-toggle {
+        background: none;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.375rem 0.5rem;
+        cursor: pointer;
+        font-size: 1rem;
+        color: var(--text-muted);
+        line-height: 1;
+      }
+      .theme-toggle:hover { color: var(--text); }
+
+      /* ── Mobile top bar + hamburger (hidden on desktop) ───────────────── */
+      .mobile-topbar { display: none; }
+      .drawer-overlay { display: none; }
+
+      @media (max-width: 640px) {
+        /* Top app bar holds the hamburger + brand; fixed above content */
+        .mobile-topbar {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: var(--topbar-height);
+          padding: 0 0.5rem;
+          background: var(--nav-bg);
+          border-bottom: 1px solid var(--border);
+          z-index: 90;
+        }
+        .hamburger {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          flex-shrink: 0;
+          border: none;
+          background: none;
+          color: var(--text);
+          cursor: pointer;
+          border-radius: 8px;
+        }
+        .hamburger:hover { background: var(--surface); }
+        .hamburger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .mobile-topbar .topbar-brand {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          text-decoration: none;
+          color: var(--text);
+          font-weight: 700;
+          font-size: 1.0625rem;
+          letter-spacing: -0.02em;
+        }
+
+        /* Sidebar becomes an off-canvas drawer */
+        .sidebar {
+          width: min(82vw, 280px);
+          transform: translateX(-100%);
+          transition: transform 0.22s ease;
+          padding: 1rem 0.875rem;
+          box-shadow: none;
+        }
+        .app-shell.drawer-open .sidebar {
+          transform: translateX(0);
+          box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+        }
+
+        /* Dim + capture taps behind the drawer */
+        .drawer-overlay {
+          display: block;
+          position: fixed;
+          inset: 0;
+          background: rgba(0, 0, 0, 0.45);
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.22s ease;
+          z-index: 99;
+        }
+        .app-shell.drawer-open .drawer-overlay {
+          opacity: 1;
+          pointer-events: auto;
+        }
+
+        /* Content fills the width; offset only for the top bar */
+        .app-main {
+          margin-left: 0;
+          padding-top: var(--topbar-height);
+        }
+
+        /* Roomier tap targets inside the drawer */
+        .sidebar-link { padding: 0.6875rem 0.75rem; }
+        .theme-toggle { padding: 0.5rem 0.625rem; min-height: 44px; }
+      }
+
+      /* ── Custom Select (islands) ───────────────────────────────────── */
+      .select { position: relative; display: inline-block; }
+      .select-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        padding: 0.25rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        background: var(--bg);
+        color: var(--text);
+        font: inherit;
+        font-size: 0.875rem;
+        line-height: 1.25;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: border-color 0.1s;
+      }
+      .select-button:hover:not(:disabled) { border-color: var(--text-muted); }
+      .select-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .select-button:disabled { opacity: 0.6; cursor: wait; }
+      .select-caret { font-size: 0.625rem; opacity: 0.6; margin-left: auto; }
+      .select-menu {
+        position: absolute;
+        z-index: 200;
+        top: calc(100% + 4px);
+        left: 0;
+        min-width: 100%;
+        max-height: 16rem;
+        overflow-y: auto;
+        padding: 0.25rem;
+        margin: 0;
+        list-style: none;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        box-shadow: var(--shadow-sm);
+      }
+      .select-option {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.375rem 0.5rem;
+        border-radius: 4px;
+        font-size: 0.875rem;
+        color: var(--text);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .select-option:hover,
+      .select-option.highlighted { background: var(--surface); }
+      .select-option[data-selected="true"] { font-weight: 600; }
+      .select-option[data-selected="true"]::after {
+        content: "✓";
+        margin-left: auto;
+        font-size: 0.75rem;
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="mobile-topbar">
+        <button
+          class="hamburger"
+          type="button"
+          aria-label="Open navigation menu"
+          aria-controls="app-sidebar"
+          aria-expanded="false"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <a href="/" class="topbar-brand">
+          <span class="brand-mark">P</span>
+          <span>Projektor</span>
+        </a>
+      </header>
+
+      <div class="drawer-overlay" aria-hidden="true"></div>
+
+      <aside class="sidebar" id="app-sidebar">
+        <a href="/" class="sidebar-brand">
+          <span class="brand-mark">P</span>
+          <span class="brand-text">Projektor</span>
+        </a>
+
+        <nav class="sidebar-nav" aria-label="Primary">
+          {navItems.map((item) => (
+            <a
+              href={item.href}
+              class:list={['sidebar-link', { active: isActive(item.href) }]}
+              aria-current={isActive(item.href) ? 'page' : undefined}
+            >
+              {item.label === 'Projects' && (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              )}
+              {item.label === 'My Issues' && (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+              )}
+              {item.label === 'Tokens' && (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              )}
+              <span class="link-label">{item.label}</span>
+            </a>
+          ))}
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+
+        <div class="sidebar-footer">
+          <button class="theme-toggle" aria-label="Toggle colour scheme">🌙</button>
+        </div>
+      </aside>
+
+      <div class="app-main">
+        <slot />
+      </div>
+    </div>
+    <script is:inline>
+      (function () {
+        var shell = document.querySelector('.app-shell');
+        var hamburger = document.querySelector('.hamburger');
+        var overlay = document.querySelector('.drawer-overlay');
+        var sidebar = document.getElementById('app-sidebar');
+        if (!shell || !hamburger) return;
+
+        function setOpen(open) {
+          shell.classList.toggle('drawer-open', open);
+          hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
+          hamburger.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
+        }
+        hamburger.addEventListener('click', function () {
+          setOpen(!shell.classList.contains('drawer-open'));
+        });
+        if (overlay) overlay.addEventListener('click', function () { setOpen(false); });
+        // Tapping any nav link closes the drawer
+        if (sidebar) {
+          sidebar.addEventListener('click', function (e) {
+            if (e.target.closest('a')) setOpen(false);
+          });
+        }
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' && shell.classList.contains('drawer-open')) setOpen(false);
+        });
+        // Reset drawer state if the viewport grows past the mobile breakpoint
+        window.matchMedia('(min-width: 641px)').addEventListener('change', function (e) {
+          if (e.matches) setOpen(false);
+        });
+      })();
+    </script>
+    <script is:inline>
+      (function () {
+        var themeBtn = document.querySelector('.theme-toggle');
+        function updateThemeIcon() {
+          if (!themeBtn) return;
+          var t = document.documentElement.getAttribute('data-theme');
+          var isDark = t === 'dark' ||
+            (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          themeBtn.textContent = isDark ? '☀️' : '🌙';
+          themeBtn.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+        }
+        updateThemeIcon();
+        if (themeBtn) {
+          themeBtn.addEventListener('click', function () {
+            var cur = document.documentElement.getAttribute('data-theme');
+            var isDark = cur === 'dark' ||
+              (!cur && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            var next = isDark ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            try { localStorage.setItem('theme', next); } catch (e) {} // safe-ls: cosmetic only
+            updateThemeIcon();
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

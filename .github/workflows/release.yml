@@ -1,0 +1,57 @@
+name: Release
+
+# Build a self-contained deploy artifact and attach it to a GitHub Release.
+# Trigger by pushing a version tag (git tag v1.2.0 && git push --tags),
+# or run manually via the Actions tab with a version input.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to release (e.g. v1.2.0)'
+        required: true
+
+permissions:
+  contents: write   # create the GitHub Release
+
+jobs:
+  release:
+    name: Build & publish release artifact
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event.inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'   # wrangler 4.x requires Node >= 22
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build release artifact
+        run: bash scripts/build-release.sh "$VERSION"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$VERSION" "dist/projektor-$VERSION.tar.gz" \
+            --title "$VERSION" \
+            --generate-notes
+
+      # Optionally notify a downstream deploy repo so it can auto-deploy this
+      # release. Stays generic: only fires if the DEPLOY_DISPATCH_REPO repo
+      # variable is set (Settings → Secrets and variables → Actions → Variables).
+      # Needs WORKSPACE_PAT with permission to POST dispatches to that repo
+      # (classic PAT: `repo`; fine-grained: Contents read/write on the target).
+      - name: Notify deploy repo
+        if: vars.DEPLOY_DISPATCH_REPO != ''
+        env:
+          GH_TOKEN: ${{ secrets.WORKSPACE_PAT }}
+        run: |
+          gh api "repos/${{ vars.DEPLOY_DISPATCH_REPO }}/dispatches" \
+            -f event_type=projektor-release \
+            -F "client_payload[version]=$VERSION"

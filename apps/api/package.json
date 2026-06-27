@@ -1,0 +1,31 @@
+{
+  "name": "@projektor/api",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm db:migrate:local && wrangler dev",
+    "db:migrate:local": "wrangler d1 migrations apply projektor --local",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
+    "gen:catalog": "tsx scripts/gen-mcp-catalog.ts"
+  },
+  "dependencies": {
+    "@projektor/db": "workspace:*",
+    "@projektor/plugin-sdk": "workspace:*",
+    "@projektor/types": "workspace:*",
+    "drizzle-orm": "^0.33.0",
+    "hono": "^4.6.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.5.0",
+    "@cloudflare/workers-types": "^4.20240924.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0",
+    "wrangler": "^4.0.0"
+  }
+}
