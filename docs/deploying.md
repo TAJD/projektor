@@ -174,11 +174,22 @@ release deploys within seconds and the producer stays generic.
 How it's wired:
 
 1. In `projektor`, set a repository **variable** `DEPLOY_DISPATCH_REPO` to your
-   deploy repo (e.g. `YOU/my-projektor-deploy`) and ensure the `WORKSPACE_PAT`
-   secret can POST dispatches to it (classic PAT: `repo`; fine-grained:
-   `Contents: write` on the deploy repo). The release workflow's final step fires a
-   `repository_dispatch` (`projektor-release`, payload `version`) — but only if
-   `DEPLOY_DISPATCH_REPO` is set, so projektor remains generic for everyone else.
+   deploy repo (e.g. `YOU/my-projektor-deploy`) and add a `WORKSPACE_PAT` secret
+   that can POST dispatches to it:
+   - **Classic PAT:** the `repo` scope.
+   - **Fine-grained PAT:** the deploy repo must be in *Repository access* **and**
+     the token must grant *Repository permissions → Contents: Read and write* —
+     you need **both**. Granting the permission without selecting the repo (or vice
+     versa) silently fails.
+
+   > **Gotcha:** if the PAT can't see the repo or lacks `Contents: write`, the
+   > dispatch fails with **HTTP 404 "Not Found"** — *not* 403. GitHub masks a
+   > permission failure as a missing resource, so a 404 on the dispatch step means
+   > "fix the PAT's repo access / Contents permission," not "wrong URL."
+
+   The release workflow's final step fires a `repository_dispatch`
+   (`projektor-release`, payload `version`) — but only if `DEPLOY_DISPATCH_REPO`
+   is set, so projektor remains generic for everyone else.
 2. Your deploy workflow listens for that dispatch, records the released tag into
    `projektor.version` (a `[skip ci]` commit), and deploys.
 
@@ -201,6 +212,6 @@ commit, and push.
 |---------|-------------|
 | `wrangler d1 migrations apply` fails with an auth error | The API token is missing **D1: Edit** (the "Edit Cloudflare Workers" template omits it). Recreate as a custom token; verify with `wrangler d1 list`. |
 | `Wrangler requires at least Node.js v22` | Your workflow uses an older Node. wrangler 4.x needs **Node ≥ 22** — set `node-version: '22'` in `setup-node`. |
-| Release published but the instance didn't auto-deploy | The `DEPLOY_DISPATCH_REPO` variable is unset, or `WORKSPACE_PAT` lacks permission to POST dispatches to the deploy repo. |
+| Release published but the instance didn't auto-deploy | The `DEPLOY_DISPATCH_REPO` variable is unset, or `WORKSPACE_PAT` can't dispatch to the deploy repo. The dispatch step fails with **HTTP 404** (GitHub masks a permission failure as "Not Found"). Fix: a fine-grained `WORKSPACE_PAT` needs the deploy repo selected in *Repository access* **and** *Contents: Read and write*. |
 | `gh release download` 404 in CI | `projektor` is private and `PROJEKTOR_RELEASE_PAT` (with `Contents: Read`) is missing or expired. |
 | Auto-bump commit triggers a second deploy | The bump commit must include `[skip ci]` and be pushed by `GITHUB_TOKEN` (which doesn't re-trigger workflows). |
