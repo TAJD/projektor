@@ -92,6 +92,23 @@ describe("login provisioning", () => {
 		expect(await memberRole(ws.id, user.id)).toBeNull();
 	});
 
+	it("PROJ-193: defaults to invite-only (no auto-join) when AUTO_JOIN_ROLE is unset", async () => {
+		const slug = "prov-default-invite-only";
+		const ws = await seedWorkspace(slug);
+		const user = await seedUser("unset-autojoin@example.com");
+
+		await provisionUserOnLogin(
+			envWith({
+				ADMIN_EMAILS: "boss@example.com",
+				DEFAULT_WORKSPACE_SLUG: slug,
+				AUTO_JOIN_ROLE: undefined,
+			}),
+			user
+		);
+
+		expect(await memberRole(ws.id, user.id)).toBeNull();
+	});
+
 	it("promotes an existing lower-role member to owner when they are now an admin", async () => {
 		const slug = "prov-promote";
 		const ws = await seedWorkspace(slug);

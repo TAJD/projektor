@@ -17,7 +17,12 @@ function parseEmailSet(raw?: string): Set<string> {
 }
 
 function resolveAutoJoinRole(raw?: string): Role | null {
-	const v = (raw ?? "viewer").trim().toLowerCase();
+	// Safe default for public self-hosting (PROJ-193): invite-only. When AUTO_JOIN_ROLE
+	// is unset we do NOT auto-join CF-Access-admitted users — an operator who wants
+	// open auto-join must opt in explicitly (e.g. AUTO_JOIN_ROLE=viewer). This prevents
+	// a fresh public instance from silently granting every admitted user read access to
+	// the default workspace.
+	const v = (raw ?? "none").trim().toLowerCase();
 	if (v === "none") return null;
 	return (VALID_ROLES as readonly string[]).includes(v) ? (v as Role) : "viewer";
 }

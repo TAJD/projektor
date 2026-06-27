@@ -14,7 +14,7 @@ export interface Env {
 	ADMIN_EMAILS?: string; // comma-separated; these emails become workspace owners
 	DEFAULT_WORKSPACE_SLUG?: string; // default 'projektor' (matches the workers.dev subdomain)
 	DEFAULT_WORKSPACE_NAME?: string; // default 'Projektor'
-	AUTO_JOIN_ROLE?: string; // role for non-admins CF admits: viewer|member|admin|owner|none (default viewer)
+	AUTO_JOIN_ROLE?: string; // role for non-admins CF admits: viewer|member|admin|owner|none (default none = invite-only)
 	// Confine non-admin logins by email domain to a single workspace. JSON object:
 	// {"example.com":{"slug":"example-team","role":"member"}}. Admins (ADMIN_EMAILS) bypass this.
 	WORKSPACE_DOMAIN_MAP?: string;
