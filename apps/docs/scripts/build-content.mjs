@@ -70,6 +70,14 @@ const PAGES = [
 		description: "How Projektor is put together: surfaces, service layer, and storage.",
 	},
 	{
+		src: "docs/philosophy.md",
+		slug: "philosophy/where-projektor-fits",
+		order: 1,
+		title: "Where Projektor fits",
+		description:
+			"How Projektor sits in the agentic dev-tools stack: layers as concerns, the MCP narrow waist, and the empty middle between Jira and beads.",
+	},
+	{
 		src: "AGENTS.md",
 		slug: "contributing/conventions",
 		order: 1,
@@ -88,6 +96,7 @@ function rewriteLinks(md) {
 		"mcp-tools.generated.md": `${BASE}/agents/tool-catalog/`,
 		"agent-workflows.md": `${BASE}/agents/agent-workflows/`,
 		"marketecture.md": `${BASE}/architecture/system-design/`,
+		"philosophy.md": `${BASE}/philosophy/where-projektor-fits/`,
 	};
 	return md.replace(/\]\(([^)]+)\)/g, (whole, target) => {
 		if (/^(https?:|mailto:|#)/.test(target)) return whole;
