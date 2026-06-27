@@ -10,11 +10,6 @@ pre-commit:
 pre-push:
   commands:
     test:
-      # Retry once: on Windows the Cloudflare workers test runtime (workerd)
-      # intermittently fails to start with a loopback socket error
-      # (ConnectEx #1225/#52, ECONNREFUSED 127.0.0.1). It passes on retry. The
-      # real fix is upgrading @cloudflare/vitest-pool-workers (0.5 → 0.16+),
-      # which carries the Windows loopback stability fixes.
-      run: pnpm --filter @projektor/api test || pnpm --filter @projektor/api test
+      run: pnpm --filter @projektor/api test
     test-web:
       run: pnpm --filter @projektor/web test
