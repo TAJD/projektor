@@ -103,3 +103,39 @@ describe("PROJ-19: rate limiting", () => {
 		});
 	});
 });
+
+describe("PROJ-198: failed bearer-auth throttle (IP-keyed)", () => {
+	const ENDPOINT = "http://localhost/api/workspaces";
+	const AUTH_FAIL_LIMIT = 3; // RATE_LIMIT_AUTH_FAIL_MAX in wrangler.test.toml
+
+	it("returns 401 for an invalid bearer token while under the failure limit", async () => {
+		const res = await SELF.fetch(ENDPOINT, {
+			headers: { Authorization: "Bearer pk_not_a_real_token" },
+		});
+		expect(res.status).toBe(401);
+	});
+
+	it("returns 429 once invalid bearer auths from one IP exceed the limit", async () => {
+		// Pre-seed the IP's failure counter at the limit; the next invalid-token attempt trips it.
+		// Without CF-Connecting-IP the middleware keys by the 127.0.0.1 fallback.
+		await seedCounter("authfail:127.0.0.1", AUTH_FAIL_LIMIT);
+
+		const res = await SELF.fetch(ENDPOINT, {
+			headers: { Authorization: "Bearer pk_still_not_a_real_token" },
+		});
+		expect(res.status).toBe(429);
+	});
+
+	it("does not throttle a valid token even when the IP's failure counter is high", async () => {
+		// A successful auth never touches the authfail counter, so legit clients sharing an IP
+		// with an attacker are unaffected.
+		await seedCounter("authfail:127.0.0.1", AUTH_FAIL_LIMIT + 5);
+		const fixture = await seedFixture();
+
+		const res = await SELF.fetch(ENDPOINT, {
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+		});
+		expect(res.status).not.toBe(429);
+		expect(res.status).not.toBe(401);
+	});
+});
