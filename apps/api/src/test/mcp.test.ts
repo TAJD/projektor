@@ -51,9 +51,13 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall(workspaceId, "initialize", {}, headers)) as JsonRpcResult<{
 			protocolVersion: string;
 			serverInfo: { name: string };
+			instructions: string;
 		}>;
 		expect(res.result.protocolVersion).toBe("2024-11-05");
 		expect(res.result.serverInfo.name).toBe("projektor");
+		// Coordination protocol is surfaced to every client (PROJ fleet injection).
+		expect(res.result.instructions).toContain("register_agent");
+		expect(res.result.instructions).toContain("claim_files");
 	});
 
 	it("tools/list returns core tools", async () => {
