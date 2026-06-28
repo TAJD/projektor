@@ -216,7 +216,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	const nextCursor = hasMore && lastItem ? lastItem.created_at : null;
 
 	const issueIds = (items as Array<{ id: string }>).map((i) => i.id);
-	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, issueIds);
+	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
 	const itemsWithFields = (items as Array<Record<string, unknown>>).map((i) => ({
 		...i,
 		customFields: customFieldsByIssue[i.id as string] ?? [],
@@ -322,7 +322,7 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const links = await listLinksForIssue(ctx, { issueId });
 
-	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, [issueId]);
+	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, [issueId]);
 	const customFields = customFieldsByIssue[issueId] ?? [];
 
 	const fullIssue = {
@@ -528,7 +528,10 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 			.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 			.get();
 		if (current) {
-			await ctx.db.prepare("DELETE FROM issues_fts WHERE issue_id = ?").bind(id).run();
+			await ctx.db
+				.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
+				.bind(id, ctx.workspaceId)
+				.run();
 			await ctx.db
 				.prepare("INSERT INTO issues_fts (issue_id, workspace_id, title, body) VALUES (?, ?, ?, ?)")
 				.bind(id, ctx.workspaceId, current.title, current.body)
@@ -582,7 +585,10 @@ export async function deleteIssue(ctx: ServiceCtx, id: string) {
 	await orm
 		.delete(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
-	await ctx.db.prepare("DELETE FROM issues_fts WHERE issue_id = ?").bind(id).run();
+	await ctx.db
+		.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
+		.bind(id, ctx.workspaceId)
+		.run();
 	await recordActivity(ctx, { entityType: "issue", entityId: id, action: "deleted" });
 	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${id}`);
 

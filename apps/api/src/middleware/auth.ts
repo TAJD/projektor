@@ -2,6 +2,20 @@ import type { Env, HonoEnv } from "@projektor/types";
 import type { Context, Next } from "hono";
 import { capabilityForMethod, parseScopes, tokenAllows } from "../auth/scopes";
 import { provisionUserOnLogin } from "../services/provisioning";
+import { bumpRateCounter } from "./rate-limit";
+
+// PROJ-198: bound bearer-token guessing per source IP. The request rate-limiter keys
+// authenticated traffic by token fingerprint, so a flood of *distinct* invalid tokens
+// from one IP would otherwise each land in its own bucket and never throttle. Count
+// failed bearer auths per IP and 429 once they exceed RATE_LIMIT_AUTH_FAIL_MAX. Tokens
+// are 256-bit random, so this is defense-in-depth, not the primary control.
+async function tooManyAuthFailures(c: Context<HonoEnv>): Promise<boolean> {
+	const ip = c.req.header("CF-Connecting-IP") ?? "127.0.0.1";
+	const windowSecs = parseInt(c.env.RATE_LIMIT_WINDOW_SECS ?? "60", 10);
+	const limit = parseInt(c.env.RATE_LIMIT_AUTH_FAIL_MAX ?? "50", 10);
+	const count = await bumpRateCounter(c.env.DB, `authfail:${ip}`, windowSecs);
+	return count > limit;
+}
 
 export interface AuthUser {
 	id: string;
@@ -52,9 +66,15 @@ export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
 				scopes: string | null;
 			}>();
 
-		if (!row) return c.json({ error: "Unauthorized" }, 401);
+		if (!row) {
+			return (await tooManyAuthFailures(c))
+				? c.json({ error: "Too Many Requests" }, 429)
+				: c.json({ error: "Unauthorized" }, 401);
+		}
 		if (row.expires_at && row.expires_at < Date.now() / 1000) {
-			return c.json({ error: "Token expired" }, 401);
+			return (await tooManyAuthFailures(c))
+				? c.json({ error: "Too Many Requests" }, 429)
+				: c.json({ error: "Token expired" }, 401);
 		}
 
 		// PROJ-17: enforce the token's scope. REST is gated here by HTTP method

@@ -304,11 +304,16 @@ export async function writeCustomFieldValues(
 
 export async function batchLoadCustomFields(
 	db: D1Database,
+	workspaceId: string,
 	issueIds: string[]
 ): Promise<Record<string, CustomFieldValue[]>> {
 	if (issueIds.length === 0) return {};
 
 	const orm = drizzle(db, { schema });
+	// PROJ-197: scope by the field definition's workspace. Custom field definitions are
+	// workspace-owned, so this confines results to the caller's workspace even if a
+	// cross-workspace issueId is ever passed in — values whose definition lives in another
+	// workspace are filtered out rather than leaked.
 	const rows = await orm
 		.select({
 			issueId: schema.customFieldValues.issueId,
@@ -322,7 +327,12 @@ export async function batchLoadCustomFields(
 			schema.customFieldDefinitions,
 			eq(schema.customFieldDefinitions.id, schema.customFieldValues.fieldId)
 		)
-		.where(inArray(schema.customFieldValues.issueId, issueIds));
+		.where(
+			and(
+				inArray(schema.customFieldValues.issueId, issueIds),
+				eq(schema.customFieldDefinitions.workspaceId, workspaceId)
+			)
+		);
 
 	const byIssue: Record<string, CustomFieldValue[]> = {};
 	for (const r of rows) {

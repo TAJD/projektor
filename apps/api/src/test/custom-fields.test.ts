@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { batchLoadCustomFields } from "../services/custom-fields";
 import {
 	authHeaders,
 	seedCustomFieldDef,
@@ -577,5 +578,32 @@ describe("Custom Fields — MCP parity", () => {
 		expect(names).toContain("create_custom_field_def");
 		expect(names).toContain("update_custom_field_def");
 		expect(names).toContain("delete_custom_field_def");
+	});
+});
+
+// ─── PROJ-197: batchLoadCustomFields workspace scoping ─────────────────────────
+
+describe("PROJ-197: batchLoadCustomFields is workspace-scoped", () => {
+	it("never returns custom field values from another workspace, even for foreign issue IDs", async () => {
+		const wsA = await seedFixture({ role: "owner" });
+		const wsB = await seedFixture({ role: "owner" });
+		const projA = await seedProject(wsA.workspace.id, "AAA");
+		const projB = await seedProject(wsB.workspace.id, "BBB");
+
+		const issueA = await seedIssue(wsA.workspace.id, projA.id, wsA.user.id);
+		const issueB = await seedIssue(wsB.workspace.id, projB.id, wsB.user.id);
+
+		const defA = await seedCustomFieldDef(wsA.workspace.id, { key: "sev", label: "Severity" });
+		const defB = await seedCustomFieldDef(wsB.workspace.id, { key: "sev", label: "Severity" });
+		await seedCustomFieldValue(issueA.id, defA.id, "high-A");
+		await seedCustomFieldValue(issueB.id, defB.id, "high-B");
+
+		// Pass BOTH issue IDs but scope to workspace A — only A's value may come back.
+		const loaded = await batchLoadCustomFields(env.DB, wsA.workspace.id, [issueA.id, issueB.id]);
+
+		expect(loaded[issueA.id]).toHaveLength(1);
+		expect(loaded[issueA.id][0].value).toBe("high-A");
+		// The foreign workspace's issue must be absent entirely — no cross-tenant leak.
+		expect(loaded[issueB.id]).toBeUndefined();
 	});
 });
