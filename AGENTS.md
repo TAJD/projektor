@@ -7,8 +7,7 @@ Read this before making changes — it captures conventions that aren't obvious 
 
 ## What projektor is
 
-A wiki + Jira-style issue tracker that is **MCP-native**: AI agents are a first-class client,
-not an afterthought. It runs entirely on Cloudflare's edge.
+A project management tool deployed on Cloudflare. Bringing together AI native design and tried and tested principles.
 
 Design principles
 

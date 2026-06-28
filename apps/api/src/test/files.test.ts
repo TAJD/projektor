@@ -307,6 +307,6 @@ describe("Files API", () => {
 		});
 		expect(res.status).toBe(413);
 		const body = (await res.json()) as { error: string };
-		expect(body.error).toBe("Workspace storage quota exceeded (1 GB)");
+		expect(body.error).toBe("Workspace storage quota exceeded (1024 MB)");
 	});
 });

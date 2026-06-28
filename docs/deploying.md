@@ -7,7 +7,10 @@ instance, how releases are cut, and how to keep an instance updated automaticall
 
 > Looking for the 5-minute version? See [Self-hosting](/projektor/guides/self-hosting/).
 > A ready-to-fork template lives at
-> [github.com/TAJD/projektor-deploy-example](https://github.com/TAJD/projektor-deploy-example).
+> [github.com/TAJD/projektor-deploy-example](https://github.com/TAJD/projektor-deploy-example) —
+> including a **Deploy to Cloudflare** button and a zero-config `deploy-auto.sh` (plus
+> `AGENT-DEPLOY.md` / `CONFIGURE.md`) that auto-provision D1/KV/R2 with no manual setup.
+> This page is the manual / CI reference.
 
 ## The model
 

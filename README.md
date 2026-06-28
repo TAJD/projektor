@@ -1,9 +1,7 @@
 # projektor
 
-> A self-hosted Jira + Notion hybrid that runs in a single Cloudflare Worker — no servers, no containers.
+> A self-hosted Jira + Notion hybrid that runs on serverless Cloudflare resources.
 
-Wiki + Jira-style issue tracker built MCP-native, running entirely on Cloudflare's edge.
-AI agents are a first-class client: the primary surface is a JSON-RPC 2.0 MCP endpoint, not a browser UI.
 
 ## What it is
 
@@ -28,6 +26,10 @@ AI agents are a first-class client: the primary surface is a JSON-RPC 2.0 MCP en
 
 ## Features
 
+A complete project tracker — issues, boards, sprints, a wiki — built so an AI agent can
+do everything a person can. The shape of the tool follows from that; see
+[the philosophy](./docs/philosophy.md).
+
 - Issues with status, priority, assignee, labels, parent/child hierarchy, and issue links
 - Kanban board + list view + sprint planning
 - Wiki with nested pages, markdown, full-text search, and revision history
@@ -37,84 +39,47 @@ AI agents are a first-class client: the primary surface is a JSON-RPC 2.0 MCP en
 - API tokens for agent access, workspace-scoped
 - PWA — installable, offline shell
 
-## Self-hosting in 5 minutes
+## Self-hosting
 
-projektor deploys from a **config-only repo** that downloads a pre-built release
-artifact — no source checkout, no submodule, no build step. The fastest path is to
-**fork the deploy example** and deploy from there.
+projektor deploys to **your own Cloudflare account** from a small **config-only repo**
+([`projektor-deploy-example`](https://github.com/TAJD/projektor-deploy-example)) that
+downloads a pre-built release artifact — no source checkout, no build step. Three ways
+in, easiest first.
 
-You need a Cloudflare account and `wrangler` (`npm i -g wrangler`).
+### One click
 
-### 1. Fork the deploy example
+Use the **Deploy to Cloudflare** button in the
+[deploy repo](https://github.com/TAJD/projektor-deploy-example): Cloudflare clones it
+into your account, **auto-provisions D1, KV, and R2**, and deploys. Fill in your admin
+email on the setup page and you're live.
 
-Fork **[`projektor-deploy-example`](https://github.com/TAJD/projektor-deploy-example)** —
-your fork becomes the deploy repo (config only: a `wrangler.toml`, a pinned
-`projektor.version`, and a deploy workflow).
+### One command — or one prompt
 
-```bash
-gh repo fork TAJD/projektor-deploy-example --clone
-cd projektor-deploy-example
-```
-
-> A fork is public. If you'd rather keep your config (Cloudflare resource IDs)
-> private, create from the template instead:
-> `gh repo create my-projektor-deploy --private --template TAJD/projektor-deploy-example`.
-
-### 2. Provision Cloudflare resources
+Clone the deploy repo and run the zero-config script; wrangler auto-provisions the
+resources, applies migrations, and deploys:
 
 ```bash
-wrangler d1 create projektor
-wrangler kv namespace create projektor
-wrangler r2 bucket create projektor-files
+PROJEKTOR_REPO=you/projektor ADMIN_EMAILS=you@example.com ./deploy-auto.sh
 ```
 
-### 3. Configure wrangler.toml
+Or hand the repo to an AI agent — *"deploy projektor to my Cloudflare account"* — and
+let it run the same flow. See
+[AGENT-DEPLOY.md](https://github.com/TAJD/projektor-deploy-example/blob/main/AGENT-DEPLOY.md).
 
-Pin a version and run the deploy script once — it downloads the release and
-scaffolds `wrangler.toml` from the template:
+### Then: configure access
 
-```bash
-echo "v1.0.0" > projektor.version    # a published release tag
-./deploy.sh                          # creates wrangler.toml, then asks you to fill it in
-```
+The Worker is live, but **Cloudflare Access** must front it before anyone can log in
+(a `*.workers.dev` toggle, or a custom domain). Then log in — the first user in
+`ADMIN_EMAILS` becomes owner — and mint a token for agents. Full handoff:
+[CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
-Fill the `REPLACE_` values — D1 `database_id`, KV `id`, your Cloudflare Access team
-domain + audience, and `ADMIN_EMAILS`. The `./vendor/...` paths are artifact-owned;
-leave them.
+### Manual / CI
 
-> **Cloudflare Access is required** for browser auth (SSO / Zero Trust). Set up an
-> Access application pointing at your Worker URL before deploying.
+Prefer to create the resources yourself, keep your config private, or deploy from CI on
+every push? See **[docs/deploying.md](./docs/deploying.md)** for the manual flow, the
+Cloudflare API token recipe (it **must include D1**), and push-based auto-updates.
 
-### 4. Set secrets
-
-On the Worker (set once; persists across deploys):
-
-```bash
-wrangler secret put JWT_SECRET   # any long random string — signs API tokens
-```
-
-For CI deploys, add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repo
-Actions secrets. **The API token must include D1** — Cloudflare's built-in "Edit
-Cloudflare Workers" template omits it, which silently breaks migrations. The exact
-token recipe is in the [deploy guide](./docs/deploying.md).
-
-### 5. Deploy
-
-```bash
-./deploy.sh    # locally (wrangler OAuth), or
-git push       # CI deploys on push to main
-```
-
-On first load the Worker auto-provisions a workspace for the first user in
-`ADMIN_EMAILS`. Open your Worker URL, log in through Cloudflare Access, and you're
-running. To connect an AI agent immediately (dev/staging only), use the bootstrap
-endpoint — see [Connect an AI agent](#connect-an-ai-agent) below.
-
-**Full reference** — release contents, the Cloudflare token, push-based automatic
-updates, and troubleshooting — is in **[docs/deploying.md](./docs/deploying.md)**.
-
-**Updating later:** bump `projektor.version`, commit, and push — CI deploys it (or
-wire push-based auto-updates so new releases deploy themselves).
+**Updating later:** bump `projektor.version` and re-deploy (or just push, if you wired CI).
 
 ## Connect an AI agent
 
@@ -144,14 +109,11 @@ Once connected, the agent has access to the full tool catalog — create issues,
 
 ### Production — mint a long-lived token
 
-```bash
-curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
-  -H "Authorization: Bearer <cf-access-jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"my-agent","workspaceId":"<uuid>","scopes":["read","write"]}'
-```
-
-Then wire up the agent the same way as above.
+`/bootstrap` is disabled in production. Instead, log in through Cloudflare Access and
+open **Settings → Tokens**: create a token and copy the ready-to-run `claude mcp add`
+command shown beside it (token + workspace pre-filled). The full walkthrough — Access
+setup, first login, token, MCP — is in
+[CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
 See **[docs/mcp.md](./docs/mcp.md)** for the full connection guide, protocol reference, and tool catalog (64 tools across 14 domains — project data plus agent-coordination primitives).
 
@@ -197,6 +159,10 @@ Bypass for WIP commits: `git commit --no-verify -m "wip: …"`
 
 ## Architecture (brief)
 
+For a visual of what the system can do, see the
+[marketecture diagram](./docs/marketecture.md); the deep architecture lives in
+[AGENTS.md](./AGENTS.md).
+
 projektor has two surfaces over one service layer:
 
 ```
@@ -211,13 +177,12 @@ Runtime: **Hono on Cloudflare Workers** — no Node.js, no containers.
 Storage: **D1** (relational), **KV** (sessions/cache), **R2** (attachments).
 Frontend: **Astro + Preact**, served as static assets via Workers Static Assets; `/api/*` and `/mcp/*` always hit the Worker.
 
-See [AGENTS.md](./AGENTS.md) for contributor conventions and the full architecture contract.
-See [docs/marketecture.md](./docs/marketecture.md) for a Mermaid system diagram.
-
 ## Roadmap / Contributing
 
 Feature requests and bugs are tracked in the live projektor dogfood instance — projektor is built with itself.
 
 [AGENTS.md](./AGENTS.md) is the contributor guide: conventions, file layout, the service-layer contract, and how to work in parallel without conflicts. Read it before opening a PR.
 
-CONTRIBUTING.md is not yet written; AGENTS.md is the current source of truth.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for how issues and PRs are handled,
+[SECURITY.md](./SECURITY.md) to report vulnerabilities, and [AGENTS.md](./AGENTS.md) for
+the engineering conventions. Licensed under [MIT](./LICENSE).

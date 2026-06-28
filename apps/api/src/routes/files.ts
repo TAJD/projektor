@@ -28,8 +28,14 @@ const ALLOWED_UPLOAD_TYPES = new Set([
 	"application/json",
 ]);
 
-// TODO: make this a configurable env var
-const STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GB per workspace
+const DEFAULT_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GiB per workspace
+
+// Resolve the per-workspace storage quota from env (STORAGE_QUOTA_BYTES), falling
+// back to the default for unset/invalid/non-positive values.
+function storageQuotaBytes(env: { STORAGE_QUOTA_BYTES?: string }): number {
+	const n = Number(env.STORAGE_QUOTA_BYTES);
+	return Number.isFinite(n) && n > 0 ? n : DEFAULT_STORAGE_QUOTA_BYTES;
+}
 
 router.get("/", async (c) => {
 	const workspace = c.get("workspace") as { id: string };
@@ -92,8 +98,10 @@ router.post("/", async (c) => {
 		.bind(workspace.id)
 		.first<{ total: number }>();
 	const bytesUsed = quotaRow?.total ?? 0;
-	if (bytesUsed + file.size > STORAGE_QUOTA_BYTES) {
-		return c.json({ error: "Workspace storage quota exceeded (1 GB)" }, 413);
+	const quota = storageQuotaBytes(c.env);
+	if (bytesUsed + file.size > quota) {
+		const quotaMb = Math.round(quota / (1024 * 1024));
+		return c.json({ error: `Workspace storage quota exceeded (${quotaMb} MB)` }, 413);
 	}
 
 	const id = crypto.randomUUID();
