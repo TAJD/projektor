@@ -205,6 +205,23 @@ This repo is built out via parallel workers in separate git worktrees. To avoid 
 - **Never let two parallel workers edit `routes/mcp.ts`, `index.ts`, or `test/mcp.test.ts`** — serialize those, or assign to exactly one worker.
 - Large refactors that touch shared files go in a **foundation phase first** (behavior-preserving), then fan out per-domain.
 
+### Spawn prompt requirement
+
+Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination` section:
+
+```
+## Coordination (required)
+You are working in a parallel fleet. Use the projektor MCP to coordinate:
+
+1. `register_agent` at session start — link to your issue ID, save the returned `id`.
+2. `claim_files` before touching any file — check `list_file_claims` first; back off if another agent holds a file.
+3. `post_message` to `scope: "issue:<uuid>"` when you start, hit a blocker, and finish. Use `scope: "workspace"` for fleet-wide announcements (e.g. "rebasing mcp.ts, hold off").
+4. `heartbeat_agent` every ~60 s while working (sessions time out after 120 s of silence).
+5. `release_files` then `end_agent` when done.
+```
+
+See `~/.claude/docs/spawning-sessions.md` for the full prompt template (Coordination + Finish line are both required sections).
+
 ### Fleet planning rules (for the `/fleet` skill and human planners)
 
 These are the constraints the fleet skill reads to plan batches. Keep them current when the codebase changes.
