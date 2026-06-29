@@ -6,7 +6,7 @@ Connect Claude Code (or any MCP-compatible agent) to your projektor instance.
 
 ## 1. Prerequisites
 
-- **A running projektor instance.** See the [self-hosting guide](../README.md#self-hosting-in-5-minutes) or the full [deploy guide](deploying.md).
+- **A running projektor instance.** See the [self-hosting guide](self-hosting.md) or the full [deploy guide](deploying.md).
 - **Claude Code installed.** `npm install -g @anthropic-ai/claude-code` (or the desktop/IDE app).
 - **A projektor API token.** Two ways to get one:
   - **Development** — use the bootstrap endpoint (see §2 below). No login required; needs `BOOTSTRAP_SECRET`.

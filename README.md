@@ -2,6 +2,9 @@
 
 > A self-hosted Jira + Notion hybrid that runs on serverless Cloudflare resources.
 
+**Documentation:** <https://tajd.github.io/projektor/> — self-hosting, connecting an
+agent, architecture, and the full MCP tool catalog.
+
 ## What it is
 
 TODO: Replace with a screenshot of the projektor backlog rather than an ascii diagram

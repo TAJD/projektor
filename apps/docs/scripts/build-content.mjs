@@ -1,9 +1,13 @@
 /**
  * Single-source content sync for the docs site.
  *
- * The canonical markdown lives at the repo root (README.md, AGENTS.md, docs/*.md).
+ * The canonical markdown lives at the repo root (AGENTS.md) and docs/*.md.
  * This script copies it into src/content/docs/ with the Starlight frontmatter the
  * docs collection requires, rewriting cross-document links to their site routes.
+ *
+ * README.md is deliberately NOT synced: it's the GitHub front door (dev setup,
+ * contributing, license) and links out to this docs site. The docs site sources its
+ * own focused quickstart from docs/self-hosting.md instead.
  *
  * src/content/docs/ is therefore 100% generated and gitignored — never edit it by
  * hand; edit the canonical file and re-run (`pnpm --filter @projektor/docs sync:content`).
@@ -27,7 +31,7 @@ const GH = "https://github.com/TAJD/projektor";
 /** source (repo-relative) → { slug, title, description, order within sidebar group } */
 const PAGES = [
 	{
-		src: "README.md",
+		src: "docs/self-hosting.md",
 		slug: "guides/self-hosting",
 		order: 1,
 		title: "Self-hosting Projektor",
@@ -89,7 +93,7 @@ const PAGES = [
 /** Rewrite cross-document markdown links to their site routes. */
 function rewriteLinks(md) {
 	const fileRoutes = {
-		"README.md": `${BASE}/guides/self-hosting/`,
+		"self-hosting.md": `${BASE}/guides/self-hosting/`,
 		"deploying.md": `${BASE}/guides/deploying/`,
 		"AGENTS.md": `${BASE}/contributing/conventions/`,
 		"mcp.md": `${BASE}/agents/mcp-connection/`,
