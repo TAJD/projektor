@@ -517,7 +517,7 @@ function setupProjectFetch(projects = PROJECTS, issues = ISSUES) {
 }
 
 describe("project filter API contract", () => {
-	it("issues fetch always includes limit=100", async () => {
+	it("issues fetch uses the default 30-row page in list view (PROJ-201)", async () => {
 		const mockFetch = setupProjectFetch();
 		render(<IssueList />);
 		await waitForLoaded();
@@ -525,7 +525,7 @@ describe("project filter API contract", () => {
 		const calls = mockFetch.mock.calls as [string, RequestInit][];
 		const issueCall = calls.find(([url]) => String(url).includes("/api/issues"));
 		expect(issueCall).toBeDefined();
-		expect(String(issueCall![0])).toContain("limit=100");
+		expect(String(issueCall![0])).toContain("limit=30");
 	});
 
 	it("includes project=<id> in issues fetch when ?project=KEY is active", async () => {
@@ -541,7 +541,7 @@ describe("project filter API contract", () => {
 		});
 
 		const projectCall = calls.find(([url]) => String(url).includes("project=proj-1"));
-		expect(String(projectCall![0])).toContain("limit=100");
+		expect(String(projectCall![0])).toContain("limit=30");
 	});
 
 	it("does not include project param when no project filter is set", async () => {

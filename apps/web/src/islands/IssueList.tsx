@@ -19,6 +19,16 @@ import {
 } from "./board-utils";
 import MarkdownEditor from "./MarkdownEditor";
 import Select from "./Select";
+import {
+	captureView,
+	filtersMatch,
+	parseSavedViews,
+	removeView,
+	type SavedView,
+	type SavedViewFilters,
+	upsertView,
+	viewsStorageKey,
+} from "./saved-views";
 
 interface Props {
 	workspaceSlug?: string;
@@ -42,18 +52,6 @@ interface SearchResult {
 	project_id: string | null;
 	project_key: string | null;
 	project_name: string | null;
-}
-
-interface SavedView {
-	name: string;
-	filters: {
-		statuses: string[];
-		priorities: string[];
-		project: string;
-		type: string;
-		epicId: string;
-		sprintId: string;
-	};
 }
 
 interface SprintDetail {
@@ -432,13 +430,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 
 	// Load saved views from localStorage when the project context changes (PROJ-141)
 	useEffect(() => {
-		const key = `issue-views-${filterProject || "all"}`;
-		try {
-			const raw = localStorage.getItem(key);
-			setSavedViews(raw ? (JSON.parse(raw) as SavedView[]) : []);
-		} catch {
-			setSavedViews([]);
-		}
+		setSavedViews(parseSavedViews(localStorage.getItem(viewsStorageKey(filterProject))));
 	}, [filterProject]);
 
 	// Close views menu on outside click (PROJ-141)
@@ -478,15 +470,16 @@ export default function IssueList({ workspaceSlug }: Props) {
 			setActiveViewName(null);
 			return;
 		}
-		const f = activeView.filters;
-		const matches =
-			JSON.stringify([...filterStatuses].sort()) === JSON.stringify([...f.statuses].sort()) &&
-			JSON.stringify([...filterPriorities].sort()) === JSON.stringify([...f.priorities].sort()) &&
-			filterProject === f.project &&
-			filterType === f.type &&
-			filterEpicId === f.epicId &&
-			filterSprintId === f.sprintId;
-		if (!matches) setActiveViewName(null);
+		const current: SavedViewFilters = {
+			statuses: filterStatuses,
+			priorities: filterPriorities,
+			project: filterProject,
+			type: filterType,
+			epicId: filterEpicId,
+			sprintId: filterSprintId,
+			hideEpics,
+		};
+		if (!filtersMatch(current, activeView.filters)) setActiveViewName(null);
 	}, [
 		filterStatuses,
 		filterPriorities,
@@ -494,6 +487,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 		filterType,
 		filterEpicId,
 		filterSprintId,
+		hideEpics,
 		activeViewName,
 		savedViews,
 	]);
@@ -629,19 +623,17 @@ export default function IssueList({ workspaceSlug }: Props) {
 	function doSaveView() {
 		const name = saveViewName.trim();
 		if (!name) return;
-		const newView: SavedView = {
-			name,
-			filters: {
-				statuses: filterStatuses,
-				priorities: filterPriorities,
-				project: filterProject,
-				type: filterType,
-				epicId: filterEpicId,
-				sprintId: filterSprintId,
-			},
-		};
-		const key = `issue-views-${filterProject || "all"}`;
-		const updated = [...savedViews.filter((v) => v.name !== name), newView];
+		const newView: SavedView = captureView(name, {
+			statuses: filterStatuses,
+			priorities: filterPriorities,
+			project: filterProject,
+			type: filterType,
+			epicId: filterEpicId,
+			sprintId: filterSprintId,
+			hideEpics,
+		});
+		const key = viewsStorageKey(filterProject);
+		const updated = upsertView(savedViews, newView);
 		setSavedViews(updated);
 		// safe-ls: cosmetic filter preference, no API dependency
 		localStorage.setItem(key, JSON.stringify(updated));
@@ -651,8 +643,8 @@ export default function IssueList({ workspaceSlug }: Props) {
 	}
 
 	function deleteView(name: string) {
-		const key = `issue-views-${filterProject || "all"}`;
-		const updated = savedViews.filter((v) => v.name !== name);
+		const key = viewsStorageKey(filterProject);
+		const updated = removeView(savedViews, name);
 		setSavedViews(updated);
 		// safe-ls: cosmetic filter preference, no API dependency
 		localStorage.setItem(key, JSON.stringify(updated));
@@ -713,6 +705,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 		setFilterType(view.filters.type);
 		setFilterEpicId(view.filters.epicId);
 		setFilterSprintId(view.filters.sprintId);
+		setHideEpics(view.filters.hideEpics);
 		setActiveViewName(view.name);
 		setShowViewsMenu(false);
 	}
