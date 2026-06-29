@@ -606,4 +606,30 @@ describe("PROJ-197: batchLoadCustomFields is workspace-scoped", () => {
 		// The foreign workspace's issue must be absent entirely — no cross-tenant leak.
 		expect(loaded[issueB.id]).toBeUndefined();
 	});
+
+	// Regression: a full 100-issue page bound 100 ids + 1 workspaceId = 101 params,
+	// exceeding D1's 100-bound-parameter cap → the query threw and listIssues 500'd
+	// (invisible in CI because SQLite allows 32766 params). batchLoadCustomFields now
+	// chunks the ids; this proves results still merge correctly across chunk boundaries.
+	it("loads values for more issues than the chunk size (spans multiple D1 queries)", async () => {
+		const ws = await seedFixture({ role: "owner" });
+		const proj = await seedProject(ws.workspace.id, "CHK");
+		const def = await seedCustomFieldDef(ws.workspace.id, { key: "sp", label: "Story Points" });
+
+		const COUNT = 95; // > CHUNK_SIZE (90), so ids span two queries
+		const issueIds: string[] = [];
+		for (let i = 0; i < COUNT; i++) {
+			const issue = await seedIssue(ws.workspace.id, proj.id, ws.user.id);
+			await seedCustomFieldValue(issue.id, def.id, String(i));
+			issueIds.push(issue.id);
+		}
+
+		const loaded = await batchLoadCustomFields(env.DB, ws.workspace.id, issueIds);
+
+		expect(Object.keys(loaded)).toHaveLength(COUNT);
+		for (let i = 0; i < COUNT; i++) {
+			expect(loaded[issueIds[i]]).toHaveLength(1);
+			expect(loaded[issueIds[i]][0].value).toBe(String(i));
+		}
+	});
 });
