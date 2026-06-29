@@ -19,6 +19,16 @@ import {
 } from "./board-utils";
 import MarkdownEditor from "./MarkdownEditor";
 import Select from "./Select";
+import {
+	captureView,
+	filtersMatch,
+	parseSavedViews,
+	removeView,
+	type SavedView,
+	type SavedViewFilters,
+	upsertView,
+	viewsStorageKey,
+} from "./saved-views";
 
 interface Props {
 	workspaceSlug?: string;
@@ -42,18 +52,6 @@ interface SearchResult {
 	project_id: string | null;
 	project_key: string | null;
 	project_name: string | null;
-}
-
-interface SavedView {
-	name: string;
-	filters: {
-		statuses: string[];
-		priorities: string[];
-		project: string;
-		type: string;
-		epicId: string;
-		sprintId: string;
-	};
 }
 
 interface SprintDetail {
@@ -95,11 +93,16 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const hasLoadedOnce = useRef(false);
 	const [error, setError] = useState<string | null>(null);
 
+	// Pagination (PROJ-201): list view loads 30 at a time and appends via "Load more".
+	const [nextCursor, setNextCursor] = useState<number | null>(null);
+	const [loadingMore, setLoadingMore] = useState(false);
+
 	const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
 	const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
 	const [filterProject, setFilterProject] = useState("");
 	const [filterType, setFilterType] = useState("");
 	const [filterEpicId, setFilterEpicId] = useState("");
+	const [hideEpics, setHideEpics] = useState(false);
 	const [filterSprintId, setFilterSprintId] = useState("");
 	const [sortBy, setSortBy] = useState<SortKey>("created_at");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -169,35 +172,21 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const [submittingCreate, setSubmittingCreate] = useState(false);
 	const [createError, setCreateError] = useState<string | null>(null);
 
-	const fetchIssues = useCallback(async () => {
-		setLoading(true);
-		setError(null);
-		try {
-			const qs = new URLSearchParams({ limit: "100" });
-			if (filterStatuses.length) qs.set("statusIds", filterStatuses.join(","));
-			if (filterPriorities.length) qs.set("priorities", filterPriorities.join(","));
-			const projectId = filterProject
-				? projects.find((p) => p.key === filterProject)?.id
-				: undefined;
-			if (projectId) qs.set("project", projectId);
-			const typeId = filterType ? taskTypes.find((t) => t.key === filterType)?.id : undefined;
-			if (typeId) qs.set("typeId", typeId);
-			if (filterEpicId && filterEpicId !== "none") qs.set("parentId", filterEpicId);
-			if (filterEpicId === "none") qs.set("noParent", "true");
-			if (filterSprintId) qs.set("sprintId", filterSprintId);
-			const qStr = qs.toString();
-			const data = await apiFetch<{ items: Issue[] }>(`/api/issues${qStr ? `?${qStr}` : ""}`, {
-				workspaceSlug,
-			});
-			setIssues(data.items);
-			hasLoadedOnce.current = true;
-		} catch (e) {
-			setError(String(e));
-		} finally {
-			setLoading(false);
-		}
+	// Build the filter query params shared by the initial fetch and "Load more"
+	// (everything except limit/cursor, which the callers set).
+	const buildFilterParams = useCallback(() => {
+		const qs = new URLSearchParams();
+		if (filterStatuses.length) qs.set("statusIds", filterStatuses.join(","));
+		if (filterPriorities.length) qs.set("priorities", filterPriorities.join(","));
+		const projectId = filterProject ? projects.find((p) => p.key === filterProject)?.id : undefined;
+		if (projectId) qs.set("project", projectId);
+		const typeId = filterType ? taskTypes.find((t) => t.key === filterType)?.id : undefined;
+		if (typeId) qs.set("typeId", typeId);
+		if (filterEpicId && filterEpicId !== "none") qs.set("parentId", filterEpicId);
+		if (filterEpicId === "none") qs.set("noParent", "true");
+		if (filterSprintId) qs.set("sprintId", filterSprintId);
+		return qs;
 	}, [
-		workspaceSlug,
 		filterStatuses,
 		filterPriorities,
 		filterProject,
@@ -207,6 +196,51 @@ export default function IssueList({ workspaceSlug }: Props) {
 		projects,
 		taskTypes,
 	]);
+
+	// List view paginates 30 at a time (PROJ-201). Board/backlog operate on the
+	// whole working set, so they request a larger page.
+	const pageSize = view === "list" ? 30 : 100;
+
+	const fetchIssues = useCallback(async () => {
+		setLoading(true);
+		setError(null);
+		try {
+			const qs = buildFilterParams();
+			qs.set("limit", String(pageSize));
+			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(
+				`/api/issues?${qs.toString()}`,
+				{ workspaceSlug }
+			);
+			setIssues(data.items);
+			setNextCursor(data.nextCursor ?? null);
+			hasLoadedOnce.current = true;
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoading(false);
+		}
+	}, [workspaceSlug, buildFilterParams, pageSize]);
+
+	const loadMore = useCallback(async () => {
+		if (nextCursor == null || loadingMore) return;
+		setLoadingMore(true);
+		setError(null);
+		try {
+			const qs = buildFilterParams();
+			qs.set("limit", String(pageSize));
+			qs.set("cursor", String(nextCursor));
+			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(
+				`/api/issues?${qs.toString()}`,
+				{ workspaceSlug }
+			);
+			setIssues((prev) => [...prev, ...data.items]);
+			setNextCursor(data.nextCursor ?? null);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoadingMore(false);
+		}
+	}, [workspaceSlug, buildFilterParams, pageSize, nextCursor, loadingMore]);
 
 	// Read initial filter state from URL params on mount; also load persisted view.
 	useEffect(() => {
@@ -221,6 +255,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 		if (proj) setFilterProject(proj);
 		if (e) setFilterEpicId(e);
 		if (spr) setFilterSprintId(spr);
+		if (params.get("hideEpics") === "1") setHideEpics(true);
 
 		// safe-ls: cosmetic view preference (list/board/backlog). No API dependency — a stale
 		// or missing value falls back to the "list" default; it never influences API requests.
@@ -251,9 +286,14 @@ export default function IssueList({ workspaceSlug }: Props) {
 		} else {
 			params.delete("sprintId");
 		}
+		if (hideEpics) {
+			params.set("hideEpics", "1");
+		} else {
+			params.delete("hideEpics");
+		}
 		const qs = params.toString();
 		history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-	}, [filterStatuses, filterPriorities, filterEpicId, filterSprintId]);
+	}, [filterStatuses, filterPriorities, filterEpicId, filterSprintId, hideEpics]);
 
 	// safe-ls: cosmetic view preference — no API dependency (see getItem above).
 	useEffect(() => {
@@ -390,13 +430,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 
 	// Load saved views from localStorage when the project context changes (PROJ-141)
 	useEffect(() => {
-		const key = `issue-views-${filterProject || "all"}`;
-		try {
-			const raw = localStorage.getItem(key);
-			setSavedViews(raw ? (JSON.parse(raw) as SavedView[]) : []);
-		} catch {
-			setSavedViews([]);
-		}
+		setSavedViews(parseSavedViews(localStorage.getItem(viewsStorageKey(filterProject))));
 	}, [filterProject]);
 
 	// Close views menu on outside click (PROJ-141)
@@ -436,15 +470,16 @@ export default function IssueList({ workspaceSlug }: Props) {
 			setActiveViewName(null);
 			return;
 		}
-		const f = activeView.filters;
-		const matches =
-			JSON.stringify([...filterStatuses].sort()) === JSON.stringify([...f.statuses].sort()) &&
-			JSON.stringify([...filterPriorities].sort()) === JSON.stringify([...f.priorities].sort()) &&
-			filterProject === f.project &&
-			filterType === f.type &&
-			filterEpicId === f.epicId &&
-			filterSprintId === f.sprintId;
-		if (!matches) setActiveViewName(null);
+		const current: SavedViewFilters = {
+			statuses: filterStatuses,
+			priorities: filterPriorities,
+			project: filterProject,
+			type: filterType,
+			epicId: filterEpicId,
+			sprintId: filterSprintId,
+			hideEpics,
+		};
+		if (!filtersMatch(current, activeView.filters)) setActiveViewName(null);
 	}, [
 		filterStatuses,
 		filterPriorities,
@@ -452,6 +487,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 		filterType,
 		filterEpicId,
 		filterSprintId,
+		hideEpics,
 		activeViewName,
 		savedViews,
 	]);
@@ -587,19 +623,17 @@ export default function IssueList({ workspaceSlug }: Props) {
 	function doSaveView() {
 		const name = saveViewName.trim();
 		if (!name) return;
-		const newView: SavedView = {
-			name,
-			filters: {
-				statuses: filterStatuses,
-				priorities: filterPriorities,
-				project: filterProject,
-				type: filterType,
-				epicId: filterEpicId,
-				sprintId: filterSprintId,
-			},
-		};
-		const key = `issue-views-${filterProject || "all"}`;
-		const updated = [...savedViews.filter((v) => v.name !== name), newView];
+		const newView: SavedView = captureView(name, {
+			statuses: filterStatuses,
+			priorities: filterPriorities,
+			project: filterProject,
+			type: filterType,
+			epicId: filterEpicId,
+			sprintId: filterSprintId,
+			hideEpics,
+		});
+		const key = viewsStorageKey(filterProject);
+		const updated = upsertView(savedViews, newView);
 		setSavedViews(updated);
 		// safe-ls: cosmetic filter preference, no API dependency
 		localStorage.setItem(key, JSON.stringify(updated));
@@ -609,8 +643,8 @@ export default function IssueList({ workspaceSlug }: Props) {
 	}
 
 	function deleteView(name: string) {
-		const key = `issue-views-${filterProject || "all"}`;
-		const updated = savedViews.filter((v) => v.name !== name);
+		const key = viewsStorageKey(filterProject);
+		const updated = removeView(savedViews, name);
 		setSavedViews(updated);
 		// safe-ls: cosmetic filter preference, no API dependency
 		localStorage.setItem(key, JSON.stringify(updated));
@@ -671,6 +705,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 		setFilterType(view.filters.type);
 		setFilterEpicId(view.filters.epicId);
 		setFilterSprintId(view.filters.sprintId);
+		setHideEpics(view.filters.hideEpics);
 		setActiveViewName(view.name);
 		setShowViewsMenu(false);
 	}
@@ -731,13 +766,13 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const epics = issues.filter((i) => i.type_key === "epic");
 
 	const filtered = sortIssues(
-		filterIssues(issues, filterStatuses, filterPriorities, filterProject, filterType).filter(
-			(i) => {
+		filterIssues(issues, filterStatuses, filterPriorities, filterProject, filterType)
+			.filter((i) => !hideEpics || i.type_key !== "epic")
+			.filter((i) => {
 				if (!filterEpicId) return true;
 				if (filterEpicId === "none") return i.parent_id === null && i.type_key !== "epic";
 				return i.parent_id === filterEpicId;
-			}
-		),
+			}),
 		sortBy,
 		sortDir
 	);
@@ -1539,6 +1574,17 @@ export default function IssueList({ workspaceSlug }: Props) {
 					/>
 				)}
 
+				{epics.length > 0 && (
+					<label class="flex items-center gap-1.5 text-[0.8rem] text-text-muted whitespace-nowrap cursor-pointer select-none">
+						<input
+							type="checkbox"
+							checked={hideEpics}
+							onChange={(e) => setHideEpics((e.target as HTMLInputElement).checked)}
+						/>
+						Hide epics
+					</label>
+				)}
+
 				{/* Saved views dropdown (PROJ-141) */}
 				{savedViews.length > 0 && (
 					<div class="relative" ref={viewsContainerRef}>
@@ -1905,6 +1951,20 @@ export default function IssueList({ workspaceSlug }: Props) {
 							</div>
 						))}
 					</div>
+
+					{/* Load more (PROJ-201): visible only while the server has another page */}
+					{nextCursor != null && (
+						<div class="flex justify-center mt-4">
+							<button
+								type="button"
+								class="btn btn-outline"
+								onClick={loadMore}
+								disabled={loadingMore}
+							>
+								{loadingMore ? "Loading…" : "Load more"}
+							</button>
+						</div>
+					)}
 				</>
 			)}
 

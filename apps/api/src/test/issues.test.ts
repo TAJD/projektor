@@ -285,6 +285,27 @@ describe("Issues API", () => {
 		expect(second.nextCursor).toBeNull();
 	});
 
+	it("defaults to 30 rows per page when no limit is given (PROJ-201)", async () => {
+		const base = 1_700_000_000;
+		for (let i = 0; i < 35; i++) {
+			await seedIssue(workspaceId, projectId, userId, {
+				title: `Issue ${i}`,
+				createdAt: base + i,
+			});
+		}
+
+		// No explicit limit → the service default (30) applies, with a cursor for the rest.
+		const { page: first } = await listIssues("http://localhost/api/issues");
+		expect(first.items).toHaveLength(30);
+		expect(first.nextCursor).not.toBeNull();
+
+		const { page: second } = await listIssues(
+			`http://localhost/api/issues?cursor=${first.nextCursor}`
+		);
+		expect(second.items).toHaveLength(5);
+		expect(second.nextCursor).toBeNull();
+	});
+
 	it("projectId filter scopes results to that project only", async () => {
 		const otherProject = await seedProject(workspaceId, "OTH");
 		await seedIssue(workspaceId, projectId, userId, { title: "Project A issue" });
@@ -880,6 +901,17 @@ describe("Issues API", () => {
 		const { page } = await listIssues("http://localhost/api/issues?noParent=true");
 		expect(page.items).toHaveLength(1);
 		expect((page.items[0] as { title: string }).title).toBe("Parent issue");
+	});
+
+	it("excludeTypeIds drops issues of those types but keeps untyped ones (PROJ-202)", async () => {
+		const epic = await seedTaskType(workspaceId, { key: "epic", name: "Epic" });
+		await seedIssue(workspaceId, projectId, userId, { title: "An epic", typeId: epic.id });
+		await seedIssue(workspaceId, projectId, userId, { title: "A plain issue" });
+
+		const { page } = await listIssues(`http://localhost/api/issues?excludeTypeIds=${epic.id}`);
+		const titles = (page.items as Array<{ title: string }>).map((i) => i.title).sort();
+		// The epic is excluded; the untyped (NULL type_id) issue must NOT be dropped.
+		expect(titles).toEqual(["A plain issue"]);
 	});
 });
 

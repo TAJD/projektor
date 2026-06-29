@@ -42,12 +42,13 @@ export const ListIssuesSchema = z.object({
 	parentId: z.string().uuid().optional(),
 	noParent: z.coerce.boolean().optional(),
 	typeId: TaxonomyIdSchema.optional(),
+	excludeTypeIds: z.string().optional(),
 	sprintId: z.string().uuid().optional(),
 	cfKey: z.string().optional(),
 	cfOp: z.enum(["eq", "gt", "gte", "lt", "lte"]).optional(),
 	cfValue: z.string().optional(),
 	cursor: z.coerce.number().optional(),
-	limit: z.coerce.number().min(1).max(100).default(50),
+	limit: z.coerce.number().min(1).max(100).default(30),
 });
 
 export const GetIssueSchema = z

@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, like, notInArray, or, sql } from "drizzle-orm";
 import {
 	CreateIssueSchema,
 	GetIssueSchema,
@@ -15,6 +15,7 @@ import {
 	writeCustomFieldValues,
 } from "./custom-fields";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { liveLeasedIssueIds } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
 import { inChunks } from "./sql";
 import { resolveStatus } from "./task-statuses";
@@ -92,6 +93,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		parentId,
 		noParent,
 		typeId,
+		excludeTypeIds,
 		sprintId,
 		cfKey,
 		cfOp,
@@ -137,6 +139,17 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	if (parentId) conditions.push(eq(schema.issues.parentId, parentId));
 	if (noParent) conditions.push(isNull(schema.issues.parentId));
 	if (typeId) conditions.push(eq(schema.issues.typeId, typeId));
+	if (excludeTypeIds) {
+		const ids = excludeTypeIds
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		// Exclude issues of these types (e.g. epics). Type ids come from workspace config, so the
+		// array is bounded — no D1 chunking needed. Keep untyped issues (NULL type_id): SQL
+		// `type_id NOT IN (...)` is NULL for a NULL type_id, which would otherwise drop them.
+		if (ids.length)
+			conditions.push(or(isNull(schema.issues.typeId), notInArray(schema.issues.typeId, ids)));
+	}
 	if (sprintId) conditions.push(eq(schema.issues.sprintId, sprintId));
 
 	if (cfKey) {
@@ -603,12 +616,13 @@ export async function deleteIssue(ctx: ServiceCtx, id: string) {
 const PRIORITY_SCORE: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1, none: 0 };
 
 export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
-	const input = raw as { limit?: unknown; includeBacklog?: unknown };
+	const input = raw as { limit?: unknown; includeBacklog?: unknown; excludeClaimed?: unknown };
 	const limit =
 		typeof input.limit === "number" && input.limit > 0
 			? Math.min(Math.floor(input.limit), 100)
 			: 10;
 	const includeBacklog = input.includeBacklog !== false;
+	const excludeClaimed = input.excludeClaimed === true;
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -644,7 +658,18 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 
 	if (issues.length === 0) return { issues: [] };
 
-	const issueIds = issues.map((i) => i.id);
+	// excludeClaimed (PROJ-184): drop issues held by a live lease so "what should
+	// I work on next?" skips tickets another agent is already on.
+	const openIssues = excludeClaimed
+		? await (async () => {
+				const leased = await liveLeasedIssueIds(ctx);
+				return issues.filter((i) => !leased.has(i.id));
+			})()
+		: issues;
+
+	if (openIssues.length === 0) return { issues: [] };
+
+	const issueIds = openIssues.map((i) => i.id);
 
 	// inChunks: issueIds is every open issue, so this would otherwise blow past D1's
 	// 100-bound-parameter cap on any reasonably busy workspace. See services/sql.ts.
@@ -696,7 +721,7 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 
 	const maxInDegree = Math.max(...issueIds.map((id) => inDegree[id] ?? 0), 1);
 
-	const scored = issues.map((issue) => {
+	const scored = openIssues.map((issue) => {
 		const centrality = (inDegree[issue.id] ?? 0) / maxInDegree;
 		const priority = (PRIORITY_SCORE[issue.priority] ?? 0) / 4;
 		const sp = storyPoints[issue.id] ?? 1;

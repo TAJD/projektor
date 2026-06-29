@@ -4,6 +4,7 @@ import { agentsTools } from "./agents";
 import { commentsTools } from "./comments";
 import { customFieldsTools } from "./custom-fields";
 import { fileClaimsTools } from "./file-claims";
+import { issueLeasesTools } from "./issue-leases";
 import { issueLinksTools } from "./issue-links";
 import { issuesTools } from "./issues";
 import { projectActivityTools } from "./project-activity";
@@ -33,20 +34,46 @@ export interface ToolDomain {
 }
 
 export const TOOL_DOMAINS: ToolDomain[] = [
-	{ domain: "workspaces", title: "Workspaces & members", group: "Project data", tools: workspacesTools },
+	{
+		domain: "workspaces",
+		title: "Workspaces & members",
+		group: "Project data",
+		tools: workspacesTools,
+	},
 	{ domain: "projects", title: "Projects", group: "Project data", tools: projectsTools },
-	{ domain: "project-activity", title: "Project activity", group: "Project data", tools: projectActivityTools },
+	{
+		domain: "project-activity",
+		title: "Project activity",
+		group: "Project data",
+		tools: projectActivityTools,
+	},
 	{ domain: "issues", title: "Issues", group: "Project data", tools: issuesTools },
 	{ domain: "issue-links", title: "Issue links", group: "Project data", tools: issueLinksTools },
 	{ domain: "comments", title: "Comments", group: "Project data", tools: commentsTools },
 	{ domain: "wiki", title: "Wiki", group: "Project data", tools: wikiTools },
 	{ domain: "task-types", title: "Task types", group: "Project data", tools: taskTypesTools },
-	{ domain: "task-statuses", title: "Task statuses", group: "Project data", tools: taskStatusesTools },
-	{ domain: "custom-fields", title: "Custom fields", group: "Project data", tools: customFieldsTools },
+	{
+		domain: "task-statuses",
+		title: "Task statuses",
+		group: "Project data",
+		tools: taskStatusesTools,
+	},
+	{
+		domain: "custom-fields",
+		title: "Custom fields",
+		group: "Project data",
+		tools: customFieldsTools,
+	},
 	{ domain: "sprints", title: "Sprints", group: "Project data", tools: sprintsTools },
 	{ domain: "agents", title: "Agent sessions", group: "Coordination", tools: agentsTools },
 	{ domain: "file-claims", title: "File claims", group: "Coordination", tools: fileClaimsTools },
-	{ domain: "agent-messages", title: "Agent messages", group: "Coordination", tools: agentMessagesTools },
+	{ domain: "issue-leases", title: "Issue leases", group: "Coordination", tools: issueLeasesTools },
+	{
+		domain: "agent-messages",
+		title: "Agent messages",
+		group: "Coordination",
+		tools: agentMessagesTools,
+	},
 ];
 
 /** Total number of MCP tools across all domains. */

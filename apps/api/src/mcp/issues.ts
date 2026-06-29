@@ -36,6 +36,10 @@ export const issuesTools: MCPTool[] = [
 					description: "Filter by parent issue ID (returns direct children only)",
 				},
 				typeId: { type: "string", description: "Filter by task type ID" },
+				excludeTypeIds: {
+					type: "string",
+					description: "Comma-separated task type IDs to exclude (e.g. the epic type)",
+				},
 				cursor: { type: "number", description: "Pagination cursor (created_at of last item)" },
 				limit: { type: "number", default: 50, description: "Max 100" },
 			},
@@ -173,6 +177,11 @@ export const issuesTools: MCPTool[] = [
 					type: "boolean",
 					default: true,
 					description: "Include backlog-status issues (default true)",
+				},
+				excludeClaimed: {
+					type: "boolean",
+					default: false,
+					description: "Skip issues currently held by a live lease (default false)",
 				},
 			},
 		},
