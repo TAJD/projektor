@@ -1247,6 +1247,22 @@ describe("get_prioritized_issues MCP tool", () => {
 		}
 	});
 
+	it("handles more open issues than a single D1 query can bind (chunked enrichment)", async () => {
+		// getPrioritizedIssues fetches every open issue, then batch-loads links + story points
+		// keyed by those ids. On real D1 (100-param cap) an un-chunked load throws once there
+		// are ~100 open issues; this guards the inChunks split and that results merge across
+		// chunk boundaries. (SQLite's cap is higher, so this asserts correctness, not the cap.)
+		const COUNT = 105;
+		for (let i = 0; i < COUNT; i++) {
+			await seedIssue(workspaceId, projectId, userId, { title: `Open ${i}`, priority: "medium" });
+		}
+
+		const body = await callPrioritized({ limit: 100 });
+		expect(body.error).toBeUndefined();
+		const data = JSON.parse(body.result!.content[0].text) as { issues: Array<{ title: string }> };
+		expect(data.issues).toHaveLength(100);
+	});
+
 	it("excludes done and cancelled issues", async () => {
 		await seedIssue(workspaceId, projectId, userId, { title: "Open" });
 		await seedIssue(workspaceId, projectId, userId, { title: "Done", status: "done" });

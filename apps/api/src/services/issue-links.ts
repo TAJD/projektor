@@ -6,6 +6,7 @@ import {
 	ListIssueLinksSchema,
 } from "../schemas/issues";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 type StoredLinkType = "blocks" | "relates_to" | "duplicates";
@@ -189,19 +190,20 @@ export async function listLinksForIssue(ctx: ServiceCtx, raw: unknown) {
 
 	// Batch-fetch linked issue metadata (title, number, project_key, status_category)
 	const linkedIds = [...new Set(enriched.map((e) => e.linkedIssueId))];
-	const issueRows = await orm
-		.select({
-			id: schema.issues.id,
-			title: schema.issues.title,
-			number: schema.issues.number,
-			statusCategory: schema.issues.statusCategory,
-			projectKey: schema.projects.key,
-		})
-		.from(schema.issues)
-		.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-		.where(
-			and(inArray(schema.issues.id, linkedIds), eq(schema.issues.workspaceId, ctx.workspaceId))
-		);
+	// inChunks keeps the batch fetch under D1's 100-bound-parameter cap. See services/sql.ts.
+	const issueRows = await inChunks(linkedIds, (chunk) =>
+		orm
+			.select({
+				id: schema.issues.id,
+				title: schema.issues.title,
+				number: schema.issues.number,
+				statusCategory: schema.issues.statusCategory,
+				projectKey: schema.projects.key,
+			})
+			.from(schema.issues)
+			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+			.where(and(inArray(schema.issues.id, chunk), eq(schema.issues.workspaceId, ctx.workspaceId)))
+	);
 
 	const issueMap = new Map((issueRows as LinkedIssueRow[]).map((r) => [r.id, r]));
 

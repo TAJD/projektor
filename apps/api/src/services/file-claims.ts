@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../schemas/file-claims";
 import { postMessage } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
@@ -35,17 +36,20 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		if (!agent) throw new NotFoundError("Agent session not found");
 	}
 
-	// Pre-check all paths for active claims — all-or-nothing on conflict
-	const activeClaims = await orm
-		.select()
-		.from(schema.issueFileClaims)
-		.where(
-			and(
-				eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-				inArray(schema.issueFileClaims.path, paths),
-				isNull(schema.issueFileClaims.releasedAt)
+	// Pre-check all paths for active claims — all-or-nothing on conflict.
+	// inChunks keeps each query under D1's 100-bound-parameter cap. See services/sql.ts.
+	const activeClaims = await inChunks(paths, (chunk) =>
+		orm
+			.select()
+			.from(schema.issueFileClaims)
+			.where(
+				and(
+					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+					inArray(schema.issueFileClaims.path, chunk),
+					isNull(schema.issueFileClaims.releasedAt)
+				)
 			)
-		);
+	);
 
 	const claimsByPath = new Map(activeClaims.map((c) => [c.path, c]));
 
@@ -114,49 +118,47 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	const orm = drizzle(ctx.db, { schema });
 	const now = Math.floor(Date.now() / 1000);
 
-	const conditions = [
-		eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-		inArray(schema.issueFileClaims.path, paths),
-		isNull(schema.issueFileClaims.releasedAt),
-	];
-
-	if (issueId) {
-		conditions.push(eq(schema.issueFileClaims.issueId, issueId));
-	}
-
+	// inChunks on every variable-length IN below keeps each query under D1's
+	// 100-bound-parameter cap (paths and ids are caller-/row-scaled). See services/sql.ts.
 	// Fetch the rows that will be released
-	const toRelease = await orm
-		.select()
-		.from(schema.issueFileClaims)
-		.where(and(...conditions));
+	const toRelease = await inChunks(paths, (chunk) => {
+		const conditions = [
+			eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+			inArray(schema.issueFileClaims.path, chunk),
+			isNull(schema.issueFileClaims.releasedAt),
+		];
+		if (issueId) {
+			conditions.push(eq(schema.issueFileClaims.issueId, issueId));
+		}
+		return orm
+			.select()
+			.from(schema.issueFileClaims)
+			.where(and(...conditions));
+	});
 
 	if (toRelease.length === 0) {
 		return { released: [], count: 0 };
 	}
 
-	await orm
-		.update(schema.issueFileClaims)
-		.set({ releasedAt: now })
-		.where(
-			and(
-				eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-				inArray(
-					schema.issueFileClaims.id,
-					toRelease.map((r) => r.id)
-				),
-				isNull(schema.issueFileClaims.releasedAt)
-			)
-		);
+	const releaseIds = toRelease.map((r) => r.id);
 
-	const released = await orm
-		.select()
-		.from(schema.issueFileClaims)
-		.where(
-			inArray(
-				schema.issueFileClaims.id,
-				toRelease.map((r) => r.id)
-			)
-		);
+	await inChunks(releaseIds, async (chunk) => {
+		await orm
+			.update(schema.issueFileClaims)
+			.set({ releasedAt: now })
+			.where(
+				and(
+					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+					inArray(schema.issueFileClaims.id, chunk),
+					isNull(schema.issueFileClaims.releasedAt)
+				)
+			);
+		return [];
+	});
+
+	const released = await inChunks(releaseIds, (chunk) =>
+		orm.select().from(schema.issueFileClaims).where(inArray(schema.issueFileClaims.id, chunk))
+	);
 
 	return { released, count: released.length };
 }
