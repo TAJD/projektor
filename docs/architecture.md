@@ -46,13 +46,13 @@ flowchart TB
             BOOT["/bootstrap · /health<br/>(dev convenience)"]
             REG["PluginRegistry<br/>(in-memory)"]
         end
-        Pages["projektor-web<br/>(Vite + React SPA — stub)"]
+        Pages["projektor-web<br/>(Astro + Preact SPA)"]
     end
 
     subgraph Storage["Cloudflare Data"]
         D1[("D1 / SQLite<br/>workspaces, users, projects,<br/>issues, comments, wiki, tokens,<br/>activity, revisions")]
         KV[("KV<br/>sessions, CF certs,<br/>user-by-email cache")]
-        R2[("R2<br/>file attachments<br/>(bound, unused)")]
+        R2[("R2<br/>file attachments<br/>(upload / download API)")]
     end
 
     Plugins["plugins/github<br/>(defined, NOT wired in)"]
@@ -74,15 +74,15 @@ flowchart TB
 
     classDef gap fill:#ffe0e0,stroke:#c00,color:#900;
     classDef stub fill:#fff5d6,stroke:#c90,color:#960;
-    class Plugins,R2 gap;
-    class Pages,BOOT stub;
+    class Plugins gap;
+    class BOOT stub;
 ```
 
 ## Layer breakdown
 
 | Layer | Tech | Package | Notes |
 |-------|------|---------|-------|
-| Frontend | Vite + React 18 | `apps/web` | **Stub** — single static `<h1>`. Dev-proxies `/api` + `/mcp` to `:8787`. |
+| Frontend | Astro + Preact | `apps/web` | Full SPA — issues, board, sprints, wiki, settings, tokens. Dev-proxies `/api` + `/mcp` to `:8787`. |
 | API / edge runtime | Hono on Cloudflare Workers | `apps/api` | REST + MCP, two-mode auth, workspace tenancy. |
 | MCP server | JSON-RPC 2.0 over HTTP | `apps/api/src/routes/mcp.ts` | 64 tools across 14 domains (coordination + project data). Primary surface. |
 | Plugin system | Registry + SDK | `apps/api/src/plugins`, `packages/plugin-sdk` | `definePlugin` / `defineMCPTool`. **Not loaded at runtime.** |
