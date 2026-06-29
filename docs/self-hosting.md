@@ -2,7 +2,7 @@
 
 Projektor deploys to **your own Cloudflare account** from a small **config-only repo**
 ([`projektor-deploy-example`](https://github.com/TAJD/projektor-deploy-example)) that
-downloads a pre-built release artifact — no source checkout, no build step. Pick the
+downloads a pre-built release artifact — no source checkout and no build step. Pick the
 path that suits you; they're ordered easiest first.
 
 ## One click

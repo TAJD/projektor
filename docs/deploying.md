@@ -1,8 +1,8 @@
 # Deploying Projektor
 
 Projektor ships as a **self-contained release artifact** and deploys from **config
-only** — no source checkout, no submodule, no build step on the machine that
-deploys. This page is the full reference: the model, how to stand up your own
+only**. There is no source checkout, no submodule or any build step on the machine that
+deploys. This page describes how the deployment process works: the model, how to stand up your own
 instance, how releases are cut, and how to keep an instance updated automatically.
 
 > Looking for the 5-minute version? See [Self-hosting](/projektor/guides/self-hosting/).
@@ -16,17 +16,16 @@ instance, how releases are cut, and how to keep an instance updated automaticall
 
 Three repositories, with a clean producer → consumer split:
 
-```
-┌─────────────────┐   tag v*    ┌──────────────────────────┐  repository_dispatch  ┌────────────────────┐
-│   projektor     │ ──────────► │  GitHub Release           │ ────────────────────► │  your deploy repo  │
-│  (source)       │   builds    │  projektor-<ver>.tar.gz   │   "go deploy <ver>"   │  (config only)     │
-└─────────────────┘             └──────────────────────────┘                       └─────────┬──────────┘
-                                                                                              │ wrangler
-                                                                                              ▼
-                                                                                     ┌────────────────────┐
-                                                                                     │ Cloudflare Worker  │
-                                                                                     │  D1 · KV · R2      │
-                                                                                     └────────────────────┘
+```mermaid
+flowchart LR
+    src["projektor<br/>(source)"]
+    rel["GitHub Release<br/>projektor-&lt;ver&gt;.tar.gz"]
+    cfg["your deploy repo<br/>(config only)"]
+    cf["Cloudflare Worker<br/>D1 · KV · R2"]
+
+    src -->|"tag v* · builds"| rel
+    rel -->|"repository_dispatch<br/>&quot;go deploy &lt;ver&gt;&quot;"| cfg
+    cfg -->|"wrangler"| cf
 ```
 
 - **`projektor`** — the source. Tagging `v*` builds a release artifact and publishes

@@ -1,8 +1,5 @@
 # projektor
 
-TODO: Is this in the right place? Does it need to keep up to date with the README.md 
-
-
 > Wiki + Jira-style issue tracker. MCP-native: AI agents are the primary client.
 > Runs on Cloudflare Workers (Hono). No Node.js. No containers.
 
@@ -28,7 +25,7 @@ Required headers:
 Protocol: JSON-RPC 2.0 (MCP Streamable HTTP — not SSE)
 Methods: initialize  tools/list  tools/call
 
-## Core tools (13 total)
+## Core tools (13 essentials; 64 total — see docs/mcp-tools.generated.md)
 
 Projects:   list_projects  create_project
 Issues:     list_issues  get_issue  create_issue  update_issue
@@ -40,4 +37,4 @@ Wiki:       list_wiki_pages  search_wiki  get_wiki_page  create_wiki_page  updat
 - docs/mcp.md        — full connection guide + tool catalog with inputs/outputs
 - AGENTS.md          — contributor conventions and service-layer contract
 - docs/architecture.md — system design: how it works, diagram, layers, request flow
-- deploy-template/   — self-host on Cloudflare
+- docs/self-hosting.md — self-host on Cloudflare in five minutes

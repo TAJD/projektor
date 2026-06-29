@@ -7,22 +7,7 @@ agent, architecture, and the full MCP tool catalog.
 
 ## What it is
 
-TODO: Replace with a screenshot of the projektor backlog rather than an ascii diagram
-
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  projektor                                [+ New Issue]  [you]  │
-├──────────┬──────────────────────────────────────────────────────┤
-│ Projects │  PROJ  ·  Backlog   Board   Sprints   Wiki           │
-│ ──────── │                                                       │
-│ PROJ     │  ● PROJ-7  Fix login redirect          [high] Alice  │
-│ BACKEND  │  ○ PROJ-8  Add attachment upload        [med]  —     │
-│          │  ○ PROJ-9  Rate limiting for /mcp        [low]  —     │
-│ Wiki     │  ✓ PROJ-6  Bootstrap endpoint docs      [low] Alice  │
-│ Settings │                                                       │
-└──────────┴──────────────────────────────────────────────────────┘
-```
+![Projektor issue backlog — list view with projects sidebar, issue refs, status, priority, and assignees](docs/images/backlog.png)
 
 - **Projects** — named with short keys (`PROJ`, `BE`, …); issues reference as `PROJ-42`
 - **Issues** — Jira-style tickets with status, priority, assignee, labels, parent/child hierarchy, and cross-issue links

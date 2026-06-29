@@ -199,7 +199,9 @@ The token is workspace-scoped — a token from workspace A is rejected for works
 
 Error codes: `-32600` invalid request, `-32601` method/tool not found, `-32602` validation error, `-32000` other (not found, forbidden, conflict).
 
-### Stable API contracts (PROJ-26)
+### Stable API contracts
+
+These are the load-bearing shapes the Worker enforces — verified against the source:
 
 - **MCP URL shape:** `POST /mcp/<workspaceId>` — UUID in the path, slug only in the header.
 - **Required headers:** both `Authorization` and `X-Workspace-Slug` must be present on every call.

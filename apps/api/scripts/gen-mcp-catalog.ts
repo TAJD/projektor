@@ -31,7 +31,7 @@ lines.push("# MCP tool catalog");
 lines.push("");
 lines.push(
 	`**${TOOL_COUNT} tools across ${domainCount} domains.** All inputs/outputs are JSON. ` +
-		"Source: `apps/api/src/mcp/*.ts`. This page is generated — see the comment at the top.",
+		"Generated from `apps/api/src/mcp/*.ts` and freshness-checked by CI, so it always matches the running server.",
 );
 lines.push("");
 
