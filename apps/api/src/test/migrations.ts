@@ -21,6 +21,7 @@ import m0017 from "../../../../packages/db/migrations/0017_share_tokens.sql?raw"
 import m0018 from "../../../../packages/db/migrations/0018_agent_sessions.sql?raw";
 import m0019 from "../../../../packages/db/migrations/0019_issue_file_claims.sql?raw";
 import m0020 from "../../../../packages/db/migrations/0020_agent_messages.sql?raw";
+import m0021 from "../../../../packages/db/migrations/0021_issue_leases.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -44,4 +45,5 @@ export const MIGRATIONS = [
 	m0018,
 	m0019,
 	m0020,
+	m0021,
 ];

@@ -8,6 +8,7 @@ import {
 } from "../schemas/agents";
 import { NotFoundError, ValidationError } from "./errors";
 import { releaseClaimsForAgent } from "./file-claims";
+import { releaseLeasesForAgent } from "./issue-leases";
 import type { ServiceCtx } from "./types";
 
 const ACTIVE_TTL = 120;
@@ -115,6 +116,7 @@ export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 		);
 
 	await releaseClaimsForAgent(ctx, id);
+	await releaseLeasesForAgent(ctx, id);
 
 	const row = await orm
 		.select()

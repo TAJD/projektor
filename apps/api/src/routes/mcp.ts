@@ -7,6 +7,7 @@ import { commentsTools } from "../mcp/comments";
 import { customFieldsTools } from "../mcp/custom-fields";
 import { toMcpError } from "../mcp/error-adapter";
 import { fileClaimsTools } from "../mcp/file-claims";
+import { issueLeasesTools } from "../mcp/issue-leases";
 import { issueLinksTools } from "../mcp/issue-links";
 import { issuesTools } from "../mcp/issues";
 import { projectActivityTools } from "../mcp/project-activity";
@@ -141,6 +142,7 @@ const coreMCPTools: MCPTool[] = [
 	...sprintsTools,
 	...agentsTools,
 	...fileClaimsTools,
+	...issueLeasesTools,
 	...agentMessagesTools,
 ];
 

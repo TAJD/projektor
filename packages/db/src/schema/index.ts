@@ -4,6 +4,7 @@ export * from "./attachments";
 export * from "./core";
 export * from "./custom-fields";
 export * from "./file-claims";
+export * from "./issue-leases";
 export * from "./issues";
 export * from "./sprints";
 export * from "./wiki";

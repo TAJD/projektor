@@ -1,6 +1,7 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
+import { claimIssue, listIssueLeases, releaseIssue } from "../services/issue-leases";
 import {
 	createIssue,
 	deleteIssue,
@@ -110,6 +111,39 @@ router.delete("/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(await deleteIssue(ctx, c.req.param("id")));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+// Issue leasing for parallel agents (PROJ-184)
+router.post("/:id/claim", async (c) => {
+	const ctx = ctxFromHono(c);
+	const body = (await c.req.json().catch(() => ({}))) as { agentId?: string };
+	try {
+		return c.json(
+			await claimIssue(ctx, { issueId: c.req.param("id"), agentId: body.agentId }),
+			201
+		);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.post("/:id/release", async (c) => {
+	const ctx = ctxFromHono(c);
+	const body = (await c.req.json().catch(() => ({}))) as { agentId?: string };
+	try {
+		return c.json(await releaseIssue(ctx, { issueId: c.req.param("id"), agentId: body.agentId }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.get("/:id/leases", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await listIssueLeases(ctx, { issueId: c.req.param("id") }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

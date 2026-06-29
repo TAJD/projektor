@@ -178,6 +178,11 @@ export const issuesTools: MCPTool[] = [
 					default: true,
 					description: "Include backlog-status issues (default true)",
 				},
+				excludeClaimed: {
+					type: "boolean",
+					default: false,
+					description: "Skip issues currently held by a live lease (default false)",
+				},
 			},
 		},
 		handler(input, ctx) {
