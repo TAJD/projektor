@@ -16,6 +16,7 @@ import {
 } from "./custom-fields";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { listLinksForIssue } from "./issue-links";
+import { inChunks } from "./sql";
 import { resolveStatus } from "./task-statuses";
 import type { ServiceCtx } from "./types";
 
@@ -645,42 +646,48 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 
 	const issueIds = issues.map((i) => i.id);
 
-	const links = await orm
-		.select({ target_issue_id: schema.issueLinks.targetIssueId })
-		.from(schema.issueLinks)
-		.where(
-			and(
-				eq(schema.issueLinks.workspaceId, ctx.workspaceId),
-				inArray(schema.issueLinks.targetIssueId, issueIds)
+	// inChunks: issueIds is every open issue, so this would otherwise blow past D1's
+	// 100-bound-parameter cap on any reasonably busy workspace. See services/sql.ts.
+	const links = await inChunks(issueIds, (chunk) =>
+		orm
+			.select({ target_issue_id: schema.issueLinks.targetIssueId })
+			.from(schema.issueLinks)
+			.where(
+				and(
+					eq(schema.issueLinks.workspaceId, ctx.workspaceId),
+					inArray(schema.issueLinks.targetIssueId, chunk)
+				)
 			)
-		);
+	);
 
 	const inDegree: Record<string, number> = {};
 	for (const link of links) {
 		inDegree[link.target_issue_id] = (inDegree[link.target_issue_id] ?? 0) + 1;
 	}
 
-	const cfValues = await orm
-		.select({
-			issue_id: schema.customFieldValues.issueId,
-			sp: sql<number>`CAST(${schema.customFieldValues.value} AS REAL)`,
-		})
-		.from(schema.customFieldValues)
-		.innerJoin(
-			schema.customFieldDefinitions,
-			eq(schema.customFieldValues.fieldId, schema.customFieldDefinitions.id)
-		)
-		.where(
-			and(
-				inArray(schema.customFieldValues.issueId, issueIds),
-				or(
-					like(schema.customFieldDefinitions.key, "%story%"),
-					like(schema.customFieldDefinitions.key, "%point%"),
-					like(schema.customFieldDefinitions.label, "%story%"),
-					like(schema.customFieldDefinitions.label, "%point%")
+	const cfValues = await inChunks(issueIds, (chunk) =>
+		orm
+			.select({
+				issue_id: schema.customFieldValues.issueId,
+				sp: sql<number>`CAST(${schema.customFieldValues.value} AS REAL)`,
+			})
+			.from(schema.customFieldValues)
+			.innerJoin(
+				schema.customFieldDefinitions,
+				eq(schema.customFieldValues.fieldId, schema.customFieldDefinitions.id)
+			)
+			.where(
+				and(
+					inArray(schema.customFieldValues.issueId, chunk),
+					or(
+						like(schema.customFieldDefinitions.key, "%story%"),
+						like(schema.customFieldDefinitions.key, "%point%"),
+						like(schema.customFieldDefinitions.label, "%story%"),
+						like(schema.customFieldDefinitions.label, "%point%")
+					)
 				)
 			)
-		);
+	);
 
 	const storyPoints: Record<string, number> = {};
 	for (const cf of cfValues) {

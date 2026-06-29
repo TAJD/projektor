@@ -46,6 +46,20 @@ mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live h
 ### The security invariant: always scope by workspace
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked — e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
 
+### The D1 limit: never bind a row-scaled array into one query
+Cloudflare **D1 rejects any query with more than 100 bound parameters.** A query whose parameter count grows with an input array — drizzle `inArray`, a raw `IN (...)`, or a batched mutation keyed by ids — will throw at runtime (a 500) once the array is large enough. **This is invisible in tests:** the vitest runner backs D1 with SQLite (cap 32766), so an un-chunked query passes CI and only fails on real D1.
+
+Route every variable-length `IN`/`inArray` load through **`inChunks` (`services/sql.ts`)**, which splits the array so each query stays under the cap:
+
+```ts
+const rows = await inChunks(issueIds, (chunk) =>
+  orm.select(...).from(...).where(and(inArray(table.id, chunk), eq(table.workspaceId, ctx.workspaceId)))
+);
+// for a mutation that returns nothing, have the callback return []
+```
+
+Bounded arrays (enums like priority) are fine to bind directly. When in doubt, chunk.
+
 ## File layout per domain
 
 When adding/changing a domain (issues, projects, wiki, comments, …):

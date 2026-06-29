@@ -2,6 +2,7 @@ import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { CreateCustomFieldDefSchema, UpdateCustomFieldDefSchema } from "../schemas/custom-fields";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 export interface CustomFieldDef {
@@ -310,20 +311,15 @@ export async function batchLoadCustomFields(
 	if (issueIds.length === 0) return {};
 
 	const orm = drizzle(db, { schema });
-	const byIssue: Record<string, CustomFieldValue[]> = {};
 
-	// D1 caps a query at 100 bound parameters. We bind one per issue id plus one for
-	// workspaceId, so a full 100-issue page would bind 101 and fail at runtime. Chunk the
-	// ids to stay under the cap. (The test runner is SQLite, whose cap is 32766, so this
-	// limit is invisible there — it only bites on real D1.)
-	const CHUNK_SIZE = 90;
-	for (let i = 0; i < issueIds.length; i += CHUNK_SIZE) {
-		const chunk = issueIds.slice(i, i + CHUNK_SIZE);
+	// inChunks keeps each query under D1's 100-bound-parameter cap (one param per issue id
+	// plus the workspaceId predicate). See services/sql.ts.
+	const rows = await inChunks(issueIds, (chunk) =>
 		// PROJ-197: scope by the field definition's workspace. Custom field definitions are
 		// workspace-owned, so this confines results to the caller's workspace even if a
 		// cross-workspace issueId is ever passed in — values whose definition lives in another
 		// workspace are filtered out rather than leaked.
-		const rows = await orm
+		orm
 			.select({
 				issueId: schema.customFieldValues.issueId,
 				key: schema.customFieldDefinitions.key,
@@ -341,12 +337,13 @@ export async function batchLoadCustomFields(
 					inArray(schema.customFieldValues.issueId, chunk),
 					eq(schema.customFieldDefinitions.workspaceId, workspaceId)
 				)
-			);
+			)
+	);
 
-		for (const r of rows) {
-			if (!byIssue[r.issueId]) byIssue[r.issueId] = [];
-			byIssue[r.issueId].push({ key: r.key, label: r.label, type: r.type, value: r.value });
-		}
+	const byIssue: Record<string, CustomFieldValue[]> = {};
+	for (const r of rows) {
+		if (!byIssue[r.issueId]) byIssue[r.issueId] = [];
+		byIssue[r.issueId].push({ key: r.key, label: r.label, type: r.type, value: r.value });
 	}
 	return byIssue;
 }

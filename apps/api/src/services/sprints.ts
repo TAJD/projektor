@@ -7,6 +7,7 @@ import {
 	UpdateSprintSchema,
 } from "../schemas/sprints";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 export async function listSprints(ctx: ServiceCtx, raw: unknown) {
@@ -166,12 +167,16 @@ export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 		.get();
 	if (!sprint) throw new NotFoundError("Sprint not found");
 
-	await orm
-		.update(schema.issues)
-		.set({ sprintId, updatedAt: Math.floor(Date.now() / 1000) })
-		.where(
-			and(inArray(schema.issues.id, issueIds), eq(schema.issues.workspaceId, ctx.workspaceId))
-		);
+	const now = Math.floor(Date.now() / 1000);
+	// inChunks: issueIds is a caller-supplied batch, so keep each UPDATE under D1's
+	// 100-bound-parameter cap. See services/sql.ts.
+	await inChunks(issueIds, async (chunk) => {
+		await orm
+			.update(schema.issues)
+			.set({ sprintId, updatedAt: now })
+			.where(and(inArray(schema.issues.id, chunk), eq(schema.issues.workspaceId, ctx.workspaceId)));
+		return [];
+	});
 
 	return { ok: true, count: issueIds.length };
 }
