@@ -285,6 +285,27 @@ describe("Issues API", () => {
 		expect(second.nextCursor).toBeNull();
 	});
 
+	it("defaults to 30 rows per page when no limit is given (PROJ-201)", async () => {
+		const base = 1_700_000_000;
+		for (let i = 0; i < 35; i++) {
+			await seedIssue(workspaceId, projectId, userId, {
+				title: `Issue ${i}`,
+				createdAt: base + i,
+			});
+		}
+
+		// No explicit limit → the service default (30) applies, with a cursor for the rest.
+		const { page: first } = await listIssues("http://localhost/api/issues");
+		expect(first.items).toHaveLength(30);
+		expect(first.nextCursor).not.toBeNull();
+
+		const { page: second } = await listIssues(
+			`http://localhost/api/issues?cursor=${first.nextCursor}`
+		);
+		expect(second.items).toHaveLength(5);
+		expect(second.nextCursor).toBeNull();
+	});
+
 	it("projectId filter scopes results to that project only", async () => {
 		const otherProject = await seedProject(workspaceId, "OTH");
 		await seedIssue(workspaceId, projectId, userId, { title: "Project A issue" });

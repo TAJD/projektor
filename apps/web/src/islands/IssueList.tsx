@@ -95,6 +95,10 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const hasLoadedOnce = useRef(false);
 	const [error, setError] = useState<string | null>(null);
 
+	// Pagination (PROJ-201): list view loads 30 at a time and appends via "Load more".
+	const [nextCursor, setNextCursor] = useState<number | null>(null);
+	const [loadingMore, setLoadingMore] = useState(false);
+
 	const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
 	const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
 	const [filterProject, setFilterProject] = useState("");
@@ -170,35 +174,21 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const [submittingCreate, setSubmittingCreate] = useState(false);
 	const [createError, setCreateError] = useState<string | null>(null);
 
-	const fetchIssues = useCallback(async () => {
-		setLoading(true);
-		setError(null);
-		try {
-			const qs = new URLSearchParams({ limit: "100" });
-			if (filterStatuses.length) qs.set("statusIds", filterStatuses.join(","));
-			if (filterPriorities.length) qs.set("priorities", filterPriorities.join(","));
-			const projectId = filterProject
-				? projects.find((p) => p.key === filterProject)?.id
-				: undefined;
-			if (projectId) qs.set("project", projectId);
-			const typeId = filterType ? taskTypes.find((t) => t.key === filterType)?.id : undefined;
-			if (typeId) qs.set("typeId", typeId);
-			if (filterEpicId && filterEpicId !== "none") qs.set("parentId", filterEpicId);
-			if (filterEpicId === "none") qs.set("noParent", "true");
-			if (filterSprintId) qs.set("sprintId", filterSprintId);
-			const qStr = qs.toString();
-			const data = await apiFetch<{ items: Issue[] }>(`/api/issues${qStr ? `?${qStr}` : ""}`, {
-				workspaceSlug,
-			});
-			setIssues(data.items);
-			hasLoadedOnce.current = true;
-		} catch (e) {
-			setError(String(e));
-		} finally {
-			setLoading(false);
-		}
+	// Build the filter query params shared by the initial fetch and "Load more"
+	// (everything except limit/cursor, which the callers set).
+	const buildFilterParams = useCallback(() => {
+		const qs = new URLSearchParams();
+		if (filterStatuses.length) qs.set("statusIds", filterStatuses.join(","));
+		if (filterPriorities.length) qs.set("priorities", filterPriorities.join(","));
+		const projectId = filterProject ? projects.find((p) => p.key === filterProject)?.id : undefined;
+		if (projectId) qs.set("project", projectId);
+		const typeId = filterType ? taskTypes.find((t) => t.key === filterType)?.id : undefined;
+		if (typeId) qs.set("typeId", typeId);
+		if (filterEpicId && filterEpicId !== "none") qs.set("parentId", filterEpicId);
+		if (filterEpicId === "none") qs.set("noParent", "true");
+		if (filterSprintId) qs.set("sprintId", filterSprintId);
+		return qs;
 	}, [
-		workspaceSlug,
 		filterStatuses,
 		filterPriorities,
 		filterProject,
@@ -208,6 +198,51 @@ export default function IssueList({ workspaceSlug }: Props) {
 		projects,
 		taskTypes,
 	]);
+
+	// List view paginates 30 at a time (PROJ-201). Board/backlog operate on the
+	// whole working set, so they request a larger page.
+	const pageSize = view === "list" ? 30 : 100;
+
+	const fetchIssues = useCallback(async () => {
+		setLoading(true);
+		setError(null);
+		try {
+			const qs = buildFilterParams();
+			qs.set("limit", String(pageSize));
+			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(
+				`/api/issues?${qs.toString()}`,
+				{ workspaceSlug }
+			);
+			setIssues(data.items);
+			setNextCursor(data.nextCursor ?? null);
+			hasLoadedOnce.current = true;
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoading(false);
+		}
+	}, [workspaceSlug, buildFilterParams, pageSize]);
+
+	const loadMore = useCallback(async () => {
+		if (nextCursor == null || loadingMore) return;
+		setLoadingMore(true);
+		setError(null);
+		try {
+			const qs = buildFilterParams();
+			qs.set("limit", String(pageSize));
+			qs.set("cursor", String(nextCursor));
+			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(
+				`/api/issues?${qs.toString()}`,
+				{ workspaceSlug }
+			);
+			setIssues((prev) => [...prev, ...data.items]);
+			setNextCursor(data.nextCursor ?? null);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoadingMore(false);
+		}
+	}, [workspaceSlug, buildFilterParams, pageSize, nextCursor, loadingMore]);
 
 	// Read initial filter state from URL params on mount; also load persisted view.
 	useEffect(() => {
@@ -1923,6 +1958,20 @@ export default function IssueList({ workspaceSlug }: Props) {
 							</div>
 						))}
 					</div>
+
+					{/* Load more (PROJ-201): visible only while the server has another page */}
+					{nextCursor != null && (
+						<div class="flex justify-center mt-4">
+							<button
+								type="button"
+								class="btn btn-outline"
+								onClick={loadMore}
+								disabled={loadingMore}
+							>
+								{loadingMore ? "Loading…" : "Load more"}
+							</button>
+						</div>
+					)}
 				</>
 			)}
 
