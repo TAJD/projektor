@@ -63,10 +63,10 @@ const PAGES = [
 		description: "The end-to-end multi-agent loop: lifecycle, coordination, and project management.",
 	},
 	{
-		src: "docs/marketecture.md",
+		src: "docs/architecture.md",
 		slug: "architecture/system-design",
 		order: 1,
-		title: "System design",
+		title: "Architecture",
 		description: "How Projektor is put together: surfaces, service layer, and storage.",
 	},
 	{
@@ -95,7 +95,7 @@ function rewriteLinks(md) {
 		"mcp.md": `${BASE}/agents/mcp-connection/`,
 		"mcp-tools.generated.md": `${BASE}/agents/tool-catalog/`,
 		"agent-workflows.md": `${BASE}/agents/agent-workflows/`,
-		"marketecture.md": `${BASE}/architecture/system-design/`,
+		"architecture.md": `${BASE}/architecture/system-design/`,
 		"philosophy.md": `${BASE}/philosophy/where-projektor-fits/`,
 	};
 	return md.replace(/\]\(([^)]+)\)/g, (whole, target) => {

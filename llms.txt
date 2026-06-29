@@ -39,5 +39,5 @@ Wiki:       list_wiki_pages  search_wiki  get_wiki_page  create_wiki_page  updat
 
 - docs/mcp.md        — full connection guide + tool catalog with inputs/outputs
 - AGENTS.md          — contributor conventions and service-layer contract
-- docs/marketecture.md — system diagram (Mermaid)
+- docs/architecture.md — system design: how it works, diagram, layers, request flow
 - deploy-template/   — self-host on Cloudflare

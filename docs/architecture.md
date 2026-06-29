@@ -1,12 +1,31 @@
-# Projektor — System design
-
-TODO: replace marketecture with architecture everywhere - then make sure to update it to be clear that we are focused on accurate system representations rather than summaries.
-
-TODO: this page needs to have a summary of how the system works
-
+# Projektor — Architecture
 
 > Wiki + Jira-style issue tracker built MCP-native, running entirely on Cloudflare's edge.
-> Monorepo (pnpm + turbo). Generated 2026-06-22.
+> Monorepo (pnpm + turbo).
+
+This page is an accurate map of how Projektor is actually built — its surfaces, the
+service layer, and storage — and it stays honest about what is wired up versus what
+isn't yet (see [Areas for improvement](#areas-for-improvement--development)). It
+describes the real system as it stands today, not an idealised summary of it.
+
+## How it works
+
+Projektor runs as a **single Cloudflare Worker** (`apps/api`, built on Hono). That one
+Worker exposes two surfaces over a shared request pipeline: a **REST API** for the
+browser SPA, and an **MCP endpoint** (JSON-RPC 2.0) that is the primary, first-class
+surface for AI agents. Every request flows through auth middleware — Cloudflare Access
+JWTs for human browser sessions, hashed API tokens for agents — and then workspace
+middleware that resolves the tenant from the slug and verifies membership before any
+handler runs.
+
+State lives entirely on Cloudflare's edge. **D1** (SQLite) holds the relational data —
+workspaces, users, projects, issues, comments, wiki pages, tokens, activity, and
+revisions. **KV** caches sessions, Access certs, and email lookups. **R2** is bound for
+file attachments. There are no servers and no containers: the whole system deploys as a
+Worker plus its bound data stores, which is what makes a five-minute self-host possible.
+
+The sections below give the picture in increasing detail — first a diagram, then a
+layer-by-layer breakdown, then the request flow through a single agent call.
 
 ## System diagram
 
@@ -118,4 +137,3 @@ TODO: File the correctness gaps as feature requests, security and architecture a
 16. **Test coverage is thin.** Only `health`, `issues`, `wiki`, `mcp` have tests; no coverage for auth, workspace tenancy, plugins, or token lifecycle — exactly the security-sensitive code.
 17. **No OpenAPI / MCP tool catalog doc.** A generated reference would help agent integrators.
 18. **Wiki search is `LIKE '%q%'`.** Fine at small scale; consider D1 FTS5 as content grows.
-```

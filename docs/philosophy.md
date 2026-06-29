@@ -110,5 +110,5 @@ These are deliberate bets, not oversights:
 
 - **The operational loop:** [Agentic workflows](./agent-workflows.md) — how the
   three layers combine into a real multi-agent dev cycle.
-- **The system underneath:** [System design](./marketecture.md).
+- **The system underneath:** [Architecture](./architecture.md).
 - **Connect an agent:** [Connect an AI agent](./mcp.md).

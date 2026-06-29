@@ -161,8 +161,8 @@ Bypass for WIP commits: `git commit --no-verify -m "wip: …"`
 
 ## Architecture (brief)
 
-For a visual of what the system can do, see the
-[marketecture diagram](./docs/marketecture.md); the deep architecture lives in
+For a visual of how the system fits together, see the
+[architecture overview](./docs/architecture.md); the deep architecture lives in
 [AGENTS.md](./AGENTS.md).
 
 projektor has two surfaces over one service layer:
