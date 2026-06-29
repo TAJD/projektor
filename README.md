@@ -2,8 +2,10 @@
 
 > A self-hosted Jira + Notion hybrid that runs on serverless Cloudflare resources.
 
-
 ## What it is
+
+TODO: Replace with a screenshot of the projektor backlog rather than an ascii diagram
+
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐

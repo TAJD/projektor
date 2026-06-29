@@ -1,5 +1,8 @@
 # projektor
 
+TODO: Is this in the right place? Does it need to keep up to date with the README.md 
+
+
 > Wiki + Jira-style issue tracker. MCP-native: AI agents are the primary client.
 > Runs on Cloudflare Workers (Hono). No Node.js. No containers.
 

@@ -1,9 +1,16 @@
-# Projektor — Marketecture
+# Projektor — System design
+
+TODO: replace marketecture with architecture everywhere - then make sure to update it to be clear that we are focused on accurate system representations rather than summaries.
+
+TODO: this page needs to have a summary of how the system works
+
 
 > Wiki + Jira-style issue tracker built MCP-native, running entirely on Cloudflare's edge.
 > Monorepo (pnpm + turbo). Generated 2026-06-22.
 
 ## System diagram
+
+TODO: Mermaid isn't rendering on the docs website.
 
 ```mermaid
 flowchart TB
@@ -76,6 +83,8 @@ flowchart TB
 4. MCP router dispatches `initialize` / `tools/list` / `tools/call` → core tool handler → D1.
 
 ---
+
+TODO: File the correctness gaps as feature requests, security and architecture and consistency as feature requests - validate if they are all true, I'm not sure they are.
 
 # Areas for improvement / development
 
