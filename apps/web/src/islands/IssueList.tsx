@@ -100,6 +100,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const [filterProject, setFilterProject] = useState("");
 	const [filterType, setFilterType] = useState("");
 	const [filterEpicId, setFilterEpicId] = useState("");
+	const [hideEpics, setHideEpics] = useState(false);
 	const [filterSprintId, setFilterSprintId] = useState("");
 	const [sortBy, setSortBy] = useState<SortKey>("created_at");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -221,6 +222,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 		if (proj) setFilterProject(proj);
 		if (e) setFilterEpicId(e);
 		if (spr) setFilterSprintId(spr);
+		if (params.get("hideEpics") === "1") setHideEpics(true);
 
 		// safe-ls: cosmetic view preference (list/board/backlog). No API dependency — a stale
 		// or missing value falls back to the "list" default; it never influences API requests.
@@ -251,9 +253,14 @@ export default function IssueList({ workspaceSlug }: Props) {
 		} else {
 			params.delete("sprintId");
 		}
+		if (hideEpics) {
+			params.set("hideEpics", "1");
+		} else {
+			params.delete("hideEpics");
+		}
 		const qs = params.toString();
 		history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-	}, [filterStatuses, filterPriorities, filterEpicId, filterSprintId]);
+	}, [filterStatuses, filterPriorities, filterEpicId, filterSprintId, hideEpics]);
 
 	// safe-ls: cosmetic view preference — no API dependency (see getItem above).
 	useEffect(() => {
@@ -731,13 +738,13 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const epics = issues.filter((i) => i.type_key === "epic");
 
 	const filtered = sortIssues(
-		filterIssues(issues, filterStatuses, filterPriorities, filterProject, filterType).filter(
-			(i) => {
+		filterIssues(issues, filterStatuses, filterPriorities, filterProject, filterType)
+			.filter((i) => !hideEpics || i.type_key !== "epic")
+			.filter((i) => {
 				if (!filterEpicId) return true;
 				if (filterEpicId === "none") return i.parent_id === null && i.type_key !== "epic";
 				return i.parent_id === filterEpicId;
-			}
-		),
+			}),
 		sortBy,
 		sortDir
 	);
@@ -1537,6 +1544,17 @@ export default function IssueList({ workspaceSlug }: Props) {
 							})),
 						]}
 					/>
+				)}
+
+				{epics.length > 0 && (
+					<label class="flex items-center gap-1.5 text-[0.8rem] text-text-muted whitespace-nowrap cursor-pointer select-none">
+						<input
+							type="checkbox"
+							checked={hideEpics}
+							onChange={(e) => setHideEpics((e.target as HTMLInputElement).checked)}
+						/>
+						Hide epics
+					</label>
 				)}
 
 				{/* Saved views dropdown (PROJ-141) */}

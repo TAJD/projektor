@@ -881,6 +881,17 @@ describe("Issues API", () => {
 		expect(page.items).toHaveLength(1);
 		expect((page.items[0] as { title: string }).title).toBe("Parent issue");
 	});
+
+	it("excludeTypeIds drops issues of those types but keeps untyped ones (PROJ-202)", async () => {
+		const epic = await seedTaskType(workspaceId, { key: "epic", name: "Epic" });
+		await seedIssue(workspaceId, projectId, userId, { title: "An epic", typeId: epic.id });
+		await seedIssue(workspaceId, projectId, userId, { title: "A plain issue" });
+
+		const { page } = await listIssues(`http://localhost/api/issues?excludeTypeIds=${epic.id}`);
+		const titles = (page.items as Array<{ title: string }>).map((i) => i.title).sort();
+		// The epic is excluded; the untyped (NULL type_id) issue must NOT be dropped.
+		expect(titles).toEqual(["A plain issue"]);
+	});
 });
 
 describe("Issues MCP — typeId", () => {

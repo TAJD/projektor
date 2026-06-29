@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, like, notInArray, or, sql } from "drizzle-orm";
 import {
 	CreateIssueSchema,
 	GetIssueSchema,
@@ -92,6 +92,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		parentId,
 		noParent,
 		typeId,
+		excludeTypeIds,
 		sprintId,
 		cfKey,
 		cfOp,
@@ -137,6 +138,17 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	if (parentId) conditions.push(eq(schema.issues.parentId, parentId));
 	if (noParent) conditions.push(isNull(schema.issues.parentId));
 	if (typeId) conditions.push(eq(schema.issues.typeId, typeId));
+	if (excludeTypeIds) {
+		const ids = excludeTypeIds
+			.split(",")
+			.map((s) => s.trim())
+			.filter(Boolean);
+		// Exclude issues of these types (e.g. epics). Type ids come from workspace config, so the
+		// array is bounded — no D1 chunking needed. Keep untyped issues (NULL type_id): SQL
+		// `type_id NOT IN (...)` is NULL for a NULL type_id, which would otherwise drop them.
+		if (ids.length)
+			conditions.push(or(isNull(schema.issues.typeId), notInArray(schema.issues.typeId, ids)));
+	}
 	if (sprintId) conditions.push(eq(schema.issues.sprintId, sprintId));
 
 	if (cfKey) {
