@@ -3,7 +3,7 @@
 
 # MCP tool catalog
 
-**64 tools across 14 domains.** All inputs/outputs are JSON. Source: `apps/api/src/mcp/*.ts`. This page is generated — see the comment at the top.
+**67 tools across 15 domains.** All inputs/outputs are JSON. Source: `apps/api/src/mcp/*.ts`. This page is generated — see the comment at the top.
 
 ## Coordination
 
@@ -23,6 +23,14 @@
 | `claim_files` | Claim one or more repo file paths for an issue so the parallel fleet can see what is taken |
 | `release_files` | Release active file claims in the workspace, optionally scoped to an issue |
 | `list_file_claims` | List active file claims in the workspace, optionally filtered by issue or path |
+
+### Issue leases
+
+| Tool | Description |
+|------|-------------|
+| `claim_issue` | Atomically lease an issue to an agent session so the parallel fleet doesn't double-work it. Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating. |
+| `release_issue` | Release the active lease on an issue, optionally only if held by a given agent session |
+| `list_issue_leases` | List active issue leases in the workspace, optionally filtered by issue or agent. Each entry's `live` flag is false when the holder stopped heartbeating (lease is reclaimable). |
 
 ### Agent messages
 
