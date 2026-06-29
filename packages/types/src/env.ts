@@ -24,6 +24,9 @@ export interface Env {
 	RATE_LIMIT_API_MAX?: string; // max requests per token per window when a bearer token is present
 	RATE_LIMIT_WINDOW_SECS?: string; // window size in seconds (default 60)
 	RATE_LIMIT_AUTH_FAIL_MAX?: string; // max failed bearer-token auths per IP per window before 429 (default 50)
+	// Per-workspace attachment storage quota in bytes (default 1 GiB). Override in
+	// wrangler.toml [vars]; invalid or non-positive values fall back to the default.
+	STORAGE_QUOTA_BYTES?: string;
 	// Static assets binding (production wrangler.toml only — absent in local dev).
 	ASSETS?: Fetcher;
 }
