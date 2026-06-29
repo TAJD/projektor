@@ -10,8 +10,6 @@ TODO: this page needs to have a summary of how the system works
 
 ## System diagram
 
-TODO: Mermaid isn't rendering on the docs website.
-
 ```mermaid
 flowchart TB
     subgraph Clients

@@ -1,11 +1,16 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import mermaid from "astro-mermaid";
 
 // Project GitHub Pages: served at https://tajd.github.io/projektor/
 export default defineConfig({
 	site: "https://tajd.github.io",
 	base: "/projektor",
 	integrations: [
+		// Must come before starlight() — it rewrites ```mermaid fences before
+		// Starlight's Expressive Code claims them as plain code blocks. autoTheme
+		// follows the site's light/dark toggle.
+		mermaid({ autoTheme: true }),
 		starlight({
 			title: "Projektor",
 			description:
