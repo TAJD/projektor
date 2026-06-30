@@ -695,3 +695,112 @@ describe("sprint banner", () => {
 		});
 	});
 });
+
+// ─── PROJ-212: date-range filter (server-side) ───────────────────────────────
+//
+// The range bounds run server-side: the island converts the chosen field +
+// from/to dates into completed*/updated* query params. These assert the request
+// contract reaching /api/issues, not client-side filtering.
+
+function setupDateFetch() {
+	const mock = vi.fn().mockImplementation((url: string) =>
+		Promise.resolve({
+			ok: true,
+			json: () =>
+				Promise.resolve(String(url).includes("task-statuses") ? STATUSES : { items: ISSUES }),
+		})
+	);
+	vi.stubGlobal("fetch", mock);
+	return mock;
+}
+
+/** Latest /api/issues list request URL. */
+function lastIssuesUrl(mock: ReturnType<typeof vi.fn>): string {
+	const urls = (mock.mock.calls as [string, RequestInit][])
+		.map((c) => String(c[0]))
+		.filter((u) => u.includes("/api/issues"));
+	return urls[urls.length - 1] ?? "";
+}
+
+describe("date-range filter (server-side, PROJ-212)", () => {
+	it("sends completedAfter when field=Completed and a From date is set", async () => {
+		const mock = setupDateFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+		openFiltersPopover();
+
+		fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {
+			target: { value: "completed" },
+		});
+		fireEvent.input(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
+
+		await waitFor(() => expect(lastIssuesUrl(mock)).toMatch(/completedAfter=\d+/));
+		expect(lastIssuesUrl(mock)).not.toContain("updatedAfter=");
+	});
+
+	it("sends updatedBefore when field=Last edited and a To date is set", async () => {
+		const mock = setupDateFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+		openFiltersPopover();
+
+		fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {
+			target: { value: "updated" },
+		});
+		fireEvent.input(screen.getByLabelText("To date"), { target: { value: "2026-03-01" } });
+
+		await waitFor(() => expect(lastIssuesUrl(mock)).toMatch(/updatedBefore=\d+/));
+		expect(lastIssuesUrl(mock)).not.toContain("completedBefore=");
+	});
+
+	it("sends no date params while the field is 'No date filter' even with dates entered", async () => {
+		const mock = setupDateFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+		openFiltersPopover();
+
+		// Pick a field, set a date, then switch the field back off.
+		fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {
+			target: { value: "completed" },
+		});
+		fireEvent.input(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
+		await waitFor(() => expect(lastIssuesUrl(mock)).toContain("completedAfter="));
+
+		fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {
+			target: { value: "" },
+		});
+
+		await waitFor(() => {
+			const url = lastIssuesUrl(mock);
+			expect(url).not.toContain("completedAfter=");
+			expect(url).not.toContain("updatedAfter=");
+		});
+	});
+
+	it("syncs the date filter to the URL and reads it back on mount", async () => {
+		setupDateFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+		openFiltersPopover();
+
+		fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {
+			target: { value: "completed" },
+		});
+		fireEvent.input(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
+
+		await waitFor(() => {
+			const params = new URLSearchParams(window.location.search);
+			expect(params.get("dateField")).toBe("completed");
+			expect(params.get("dateFrom")).toBe("2026-01-01");
+		});
+
+		// Remount from the synced URL — the field + From date are restored and
+		// the very first list request already carries completedAfter.
+		cleanup();
+		const mock2 = setupDateFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+
+		await waitFor(() => expect(lastIssuesUrl(mock2)).toMatch(/completedAfter=\d+/));
+	});
+});

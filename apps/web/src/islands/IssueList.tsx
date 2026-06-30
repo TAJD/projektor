@@ -76,6 +76,14 @@ function tsToDateInput(ts: number): string {
 	return `${y}-${m}-${day}`;
 }
 
+// Convert a YYYY-MM-DD date-input value to epoch seconds in local time
+// (PROJ-212). `endOfDay` makes the upper bound inclusive of the whole day.
+function dateInputToTs(dateStr: string, endOfDay: boolean): number {
+	const [y, m, d] = dateStr.split("-").map(Number);
+	const date = endOfDay ? new Date(y, m - 1, d, 23, 59, 59) : new Date(y, m - 1, d, 0, 0, 0);
+	return Math.floor(date.getTime() / 1000);
+}
+
 function spBadge(pts: string) {
 	return (
 		<span class="text-[0.68rem] text-text-muted bg-surface border border-border rounded-[3px] px-[0.3rem] font-semibold whitespace-nowrap leading-[1.6]">
@@ -106,6 +114,11 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const [filterType, setFilterType] = useState("");
 	const [filterEpicId, setFilterEpicId] = useState("");
 	const [hideEpics, setHideEpics] = useState(false);
+	// Date-range filter (PROJ-212): which timestamp to bound ("" = off), plus
+	// inclusive from/to as YYYY-MM-DD date-input strings.
+	const [filterDateField, setFilterDateField] = useState<"" | "completed" | "updated">("");
+	const [filterDateFrom, setFilterDateFrom] = useState("");
+	const [filterDateTo, setFilterDateTo] = useState("");
 	const [filterSprintId, setFilterSprintId] = useState("");
 	const [sortBy, setSortBy] = useState<SortKey>("created_at");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -193,6 +206,14 @@ export default function IssueList({ workspaceSlug }: Props) {
 		// is correct across pagination rather than only on the loaded page.
 		const epicTypeId = taskTypes.find((t) => t.key === "epic")?.id;
 		if (epicTypeId && (hideEpics || filterEpicId === "none")) qs.set("excludeTypeIds", epicTypeId);
+		// Date-range filter (PROJ-212) runs server-side against the chosen
+		// timestamp column; bounds are inclusive (from = start of day, to = end).
+		if (filterDateField && (filterDateFrom || filterDateTo)) {
+			const afterKey = filterDateField === "completed" ? "completedAfter" : "updatedAfter";
+			const beforeKey = filterDateField === "completed" ? "completedBefore" : "updatedBefore";
+			if (filterDateFrom) qs.set(afterKey, String(dateInputToTs(filterDateFrom, false)));
+			if (filterDateTo) qs.set(beforeKey, String(dateInputToTs(filterDateTo, true)));
+		}
 		return qs;
 	}, [
 		filterStatuses,
@@ -202,6 +223,9 @@ export default function IssueList({ workspaceSlug }: Props) {
 		filterEpicId,
 		filterSprintId,
 		hideEpics,
+		filterDateField,
+		filterDateFrom,
+		filterDateTo,
 		projects,
 		taskTypes,
 	]);
@@ -265,6 +289,12 @@ export default function IssueList({ workspaceSlug }: Props) {
 		if (e) setFilterEpicId(e);
 		if (spr) setFilterSprintId(spr);
 		if (params.get("hideEpics") === "1") setHideEpics(true);
+		const df = params.get("dateField");
+		if (df === "completed" || df === "updated") setFilterDateField(df);
+		const dfrom = params.get("dateFrom");
+		const dto = params.get("dateTo");
+		if (dfrom) setFilterDateFrom(dfrom);
+		if (dto) setFilterDateTo(dto);
 
 		// safe-ls: cosmetic view preference (list/board/backlog). No API dependency — a stale
 		// or missing value falls back to the "list" default; it never influences API requests.
@@ -300,9 +330,33 @@ export default function IssueList({ workspaceSlug }: Props) {
 		} else {
 			params.delete("hideEpics");
 		}
+		if (filterDateField) {
+			params.set("dateField", filterDateField);
+		} else {
+			params.delete("dateField");
+		}
+		if (filterDateFrom) {
+			params.set("dateFrom", filterDateFrom);
+		} else {
+			params.delete("dateFrom");
+		}
+		if (filterDateTo) {
+			params.set("dateTo", filterDateTo);
+		} else {
+			params.delete("dateTo");
+		}
 		const qs = params.toString();
 		history.replaceState(null, "", qs ? `?${qs}` : window.location.pathname);
-	}, [filterStatuses, filterPriorities, filterEpicId, filterSprintId, hideEpics]);
+	}, [
+		filterStatuses,
+		filterPriorities,
+		filterEpicId,
+		filterSprintId,
+		hideEpics,
+		filterDateField,
+		filterDateFrom,
+		filterDateTo,
+	]);
 
 	// safe-ls: cosmetic view preference — no API dependency (see getItem above).
 	useEffect(() => {
@@ -512,6 +566,9 @@ export default function IssueList({ workspaceSlug }: Props) {
 			epicId: filterEpicId,
 			sprintId: filterSprintId,
 			hideEpics,
+			dateField: filterDateField,
+			dateFrom: filterDateFrom,
+			dateTo: filterDateTo,
 		};
 		if (!filtersMatch(current, activeView.filters)) setActiveViewName(null);
 	}, [
@@ -522,6 +579,9 @@ export default function IssueList({ workspaceSlug }: Props) {
 		filterEpicId,
 		filterSprintId,
 		hideEpics,
+		filterDateField,
+		filterDateFrom,
+		filterDateTo,
 		activeViewName,
 		savedViews,
 	]);
@@ -665,6 +725,9 @@ export default function IssueList({ workspaceSlug }: Props) {
 			epicId: filterEpicId,
 			sprintId: filterSprintId,
 			hideEpics,
+			dateField: filterDateField,
+			dateFrom: filterDateFrom,
+			dateTo: filterDateTo,
 		});
 		const key = viewsStorageKey(filterProject);
 		const updated = upsertView(savedViews, newView);
@@ -740,6 +803,13 @@ export default function IssueList({ workspaceSlug }: Props) {
 		setFilterEpicId(view.filters.epicId);
 		setFilterSprintId(view.filters.sprintId);
 		setHideEpics(view.filters.hideEpics);
+		setFilterDateField(
+			view.filters.dateField === "completed" || view.filters.dateField === "updated"
+				? view.filters.dateField
+				: ""
+		);
+		setFilterDateFrom(view.filters.dateFrom);
+		setFilterDateTo(view.filters.dateTo);
 		setActiveViewName(view.name);
 		setShowViewsMenu(false);
 	}
@@ -1402,7 +1472,9 @@ export default function IssueList({ workspaceSlug }: Props) {
 
 				{/* Filters button + popover (status & priority) */}
 				{(() => {
-					const activeFilterCount = filterStatuses.length + filterPriorities.length;
+					const dateFilterActive = !!(filterDateField && (filterDateFrom || filterDateTo));
+					const activeFilterCount =
+						filterStatuses.length + filterPriorities.length + (dateFilterActive ? 1 : 0);
 					const PILL_COLORS: Record<string, { bg: string; text: string }> = {
 						urgent: { bg: "#dc2626", text: "#fff" },
 						high: { bg: "#d97706", text: "#fff" },
@@ -1521,6 +1593,48 @@ export default function IssueList({ workspaceSlug }: Props) {
 											);
 										})}
 									</div>
+									{/* Date range (PROJ-212) — bound a chosen timestamp column server-side */}
+									<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2 mt-3">
+										Date range
+									</div>
+									<select
+										aria-label="Date filter field"
+										value={filterDateField}
+										onChange={(e) =>
+											setFilterDateField(
+												(e.target as HTMLSelectElement).value as "" | "completed" | "updated"
+											)
+										}
+										class="w-full px-2 py-[0.3rem] border border-border rounded text-sm bg-bg text-text-base cursor-pointer"
+									>
+										<option value="">No date filter</option>
+										<option value="completed">Completed date</option>
+										<option value="updated">Last edited date</option>
+									</select>
+									{filterDateField && (
+										<div class="flex gap-2 mt-2">
+											<label class="flex-1 text-[0.7rem] text-text-muted">
+												From
+												<input
+													type="date"
+													aria-label="From date"
+													value={filterDateFrom}
+													onInput={(e) => setFilterDateFrom((e.target as HTMLInputElement).value)}
+													class="w-full px-2 py-[0.3rem] border border-border rounded text-sm bg-bg text-text-base mt-[0.2rem]"
+												/>
+											</label>
+											<label class="flex-1 text-[0.7rem] text-text-muted">
+												To
+												<input
+													type="date"
+													aria-label="To date"
+													value={filterDateTo}
+													onInput={(e) => setFilterDateTo((e.target as HTMLInputElement).value)}
+													class="w-full px-2 py-[0.3rem] border border-border rounded text-sm bg-bg text-text-base mt-[0.2rem]"
+												/>
+											</label>
+										</div>
+									)}
 									{activeFilterCount > 0 && (
 										<div class="border-t border-border pt-2 mt-3">
 											<button
@@ -1528,6 +1642,9 @@ export default function IssueList({ workspaceSlug }: Props) {
 												onClick={() => {
 													setFilterStatuses([]);
 													setFilterPriorities([]);
+													setFilterDateField("");
+													setFilterDateFrom("");
+													setFilterDateTo("");
 												}}
 												class="bg-transparent border-none text-text-muted cursor-pointer text-[0.8rem] p-0"
 											>
