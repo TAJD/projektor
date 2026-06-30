@@ -19,6 +19,11 @@ export interface SavedViewFilters {
 	epicId: string;
 	sprintId: string;
 	hideEpics: boolean;
+	/** Date-range filter field: "" (off), "completed", or "updated" (PROJ-212). */
+	dateField: string;
+	/** Inclusive range bounds as YYYY-MM-DD date-input strings ("" when unset). */
+	dateFrom: string;
+	dateTo: string;
 }
 
 export interface SavedView {
@@ -51,6 +56,9 @@ export function normalizeFilters(
 		epicId: str(r.epicId),
 		sprintId: str(r.sprintId),
 		hideEpics: r.hideEpics === true,
+		dateField: str(r.dateField),
+		dateFrom: str(r.dateFrom),
+		dateTo: str(r.dateTo),
 	};
 }
 
@@ -104,6 +112,9 @@ export function filtersMatch(a: SavedViewFilters, b: SavedViewFilters): boolean 
 		a.type === b.type &&
 		a.epicId === b.epicId &&
 		a.sprintId === b.sprintId &&
-		a.hideEpics === b.hideEpics
+		a.hideEpics === b.hideEpics &&
+		a.dateField === b.dateField &&
+		a.dateFrom === b.dateFrom &&
+		a.dateTo === b.dateTo
 	);
 }

@@ -33,6 +33,10 @@ router.get("/", async (c) => {
 		cfKey,
 		cfOp,
 		cfValue,
+		completedAfter,
+		completedBefore,
+		updatedAfter,
+		updatedBefore,
 		cursor,
 		limit,
 	} = c.req.query();
@@ -55,6 +59,10 @@ router.get("/", async (c) => {
 				cfKey,
 				cfOp,
 				cfValue,
+				completedAfter,
+				completedBefore,
+				updatedAfter,
+				updatedBefore,
 				cursor,
 				limit,
 			})

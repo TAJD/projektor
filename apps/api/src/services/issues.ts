@@ -1,5 +1,18 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, inArray, isNotNull, isNull, like, notInArray, or, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	gte,
+	inArray,
+	isNotNull,
+	isNull,
+	like,
+	lte,
+	notInArray,
+	or,
+	sql,
+} from "drizzle-orm";
 import {
 	CreateIssueSchema,
 	GetIssueSchema,
@@ -98,6 +111,10 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		cfKey,
 		cfOp,
 		cfValue,
+		completedAfter,
+		completedBefore,
+		updatedAfter,
+		updatedBefore,
 		cursor,
 		limit,
 	} = result.data;
@@ -182,6 +199,12 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		}
 	}
 
+	// Date-range filters (PROJ-212) — inclusive bounds, index-backed.
+	if (completedAfter) conditions.push(gte(schema.issues.completedAt, completedAfter));
+	if (completedBefore) conditions.push(lte(schema.issues.completedAt, completedBefore));
+	if (updatedAfter) conditions.push(gte(schema.issues.updatedAt, updatedAfter));
+	if (updatedBefore) conditions.push(lte(schema.issues.updatedAt, updatedBefore));
+
 	if (cursor) conditions.push(sql`${schema.issues.createdAt} < ${cursor}`);
 
 	// Select with snake_case aliases to preserve the same response shape as the raw-SQL version.
@@ -207,6 +230,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			created_by_id: schema.issues.createdById,
 			created_at: schema.issues.createdAt,
 			updated_at: schema.issues.updatedAt,
+			completed_at: schema.issues.completedAt,
 			assignee_name: schema.users.name,
 			project_key: schema.projects.key,
 			project_name: schema.projects.name,
@@ -275,6 +299,7 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 		created_by_id: schema.issues.createdById,
 		created_at: schema.issues.createdAt,
 		updated_at: schema.issues.updatedAt,
+		completed_at: schema.issues.completedAt,
 		type_key: schema.taskTypes.key,
 		type_name: schema.taskTypes.name,
 		status_key: schema.taskStatuses.key,
@@ -498,7 +523,12 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 	const orm = drizzle(ctx.db, { schema });
 
 	const existing = await orm
-		.select({ id: schema.issues.id, parentId: schema.issues.parentId })
+		.select({
+			id: schema.issues.id,
+			parentId: schema.issues.parentId,
+			status: schema.issues.status,
+			statusCategory: schema.issues.statusCategory,
+		})
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
@@ -524,6 +554,23 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 		setValues.status = resolvedStatusKey;
 		setValues.statusId = resolvedStatusId;
 		setValues.statusCategory = sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${resolvedStatusId}), '')`;
+
+		// PROJ-212: stamp completed_at when an issue first enters a done-category
+		// status, clear it when it leaves. We keep the original completion time if
+		// the issue was already done and is merely re-saved. Done is detected from
+		// either the configured status category or the legacy `status` enum, so it
+		// works whether or not the workspace uses custom task statuses.
+		const newStatus = resolvedStatusId
+			? await orm
+					.select({ category: schema.taskStatuses.category })
+					.from(schema.taskStatuses)
+					.where(eq(schema.taskStatuses.id, resolvedStatusId))
+					.get()
+			: undefined;
+		const wasDone = existing.statusCategory === "done" || existing.status === "done";
+		const isDone = newStatus?.category === "done" || resolvedStatusKey === "done";
+		if (isDone && !wasDone) setValues.completedAt = now;
+		else if (!isDone && wasDone) setValues.completedAt = null;
 	}
 
 	if ("typeId" in data) {

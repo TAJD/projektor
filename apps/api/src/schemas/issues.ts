@@ -47,6 +47,11 @@ export const ListIssuesSchema = z.object({
 	cfKey: z.string().optional(),
 	cfOp: z.enum(["eq", "gt", "gte", "lt", "lte"]).optional(),
 	cfValue: z.string().optional(),
+	// Date-range filters (PROJ-212), epoch seconds; inclusive bounds.
+	completedAfter: z.coerce.number().optional(),
+	completedBefore: z.coerce.number().optional(),
+	updatedAfter: z.coerce.number().optional(),
+	updatedBefore: z.coerce.number().optional(),
 	cursor: z.coerce.number().optional(),
 	limit: z.coerce.number().min(1).max(100).default(30),
 });

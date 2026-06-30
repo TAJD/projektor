@@ -20,6 +20,9 @@ function makeFilters(overrides: Partial<SavedViewFilters> = {}): SavedViewFilter
 		epicId: "",
 		sprintId: "",
 		hideEpics: false,
+		dateField: "",
+		dateFrom: "",
+		dateTo: "",
 		...overrides,
 	};
 }
@@ -105,6 +108,18 @@ describe("filtersMatch", () => {
 		const a = makeFilters({ statuses: ["a", "b"], priorities: ["high", "low"] });
 		const b = makeFilters({ statuses: ["b", "a"], priorities: ["low", "high"] });
 		expect(filtersMatch(a, b)).toBe(true);
+	});
+
+	it("distinguishes on the date-range filter (PROJ-212)", () => {
+		expect(
+			filtersMatch(
+				makeFilters({ dateField: "completed", dateFrom: "2026-01-01" }),
+				makeFilters({ dateField: "completed", dateFrom: "2026-02-01" })
+			)
+		).toBe(false);
+		expect(
+			filtersMatch(makeFilters({ dateField: "completed" }), makeFilters({ dateField: "updated" }))
+		).toBe(false);
 	});
 
 	it("distinguishes on hideEpics", () => {
