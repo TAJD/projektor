@@ -8,7 +8,6 @@ import {
 	assigneeInitials,
 	BOARD_COLUMNS,
 	categoryColor,
-	filterIssues,
 	getBacklogIssues,
 	getBoardColumnIssues,
 	getFirstStatusForCategory,
@@ -89,6 +88,10 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const [issues, setIssues] = useState<Issue[]>([]);
 	const [statuses, setStatuses] = useState<TaskStatus[]>([]);
 	const [projects, setProjects] = useState<ProjectMeta[]>([]);
+	// Epics for the epic filter dropdown — fetched independently of the paginated
+	// list (PROJ-211) so the dropdown is complete and survives "Hide epics", which
+	// now excludes epic-typed issues from the list server-side.
+	const [epics, setEpics] = useState<Issue[]>([]);
 	const [loading, setLoading] = useState(true);
 	const hasLoadedOnce = useRef(false);
 	const [error, setError] = useState<string | null>(null);
@@ -185,6 +188,11 @@ export default function IssueList({ workspaceSlug }: Props) {
 		if (filterEpicId && filterEpicId !== "none") qs.set("parentId", filterEpicId);
 		if (filterEpicId === "none") qs.set("noParent", "true");
 		if (filterSprintId) qs.set("sprintId", filterSprintId);
+		// Epic exclusion runs server-side (PROJ-211): both "Hide epics" and the
+		// "No epic" option drop epic-typed issues via excludeTypeIds, so the result
+		// is correct across pagination rather than only on the loaded page.
+		const epicTypeId = taskTypes.find((t) => t.key === "epic")?.id;
+		if (epicTypeId && (hideEpics || filterEpicId === "none")) qs.set("excludeTypeIds", epicTypeId);
 		return qs;
 	}, [
 		filterStatuses,
@@ -193,6 +201,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 		filterType,
 		filterEpicId,
 		filterSprintId,
+		hideEpics,
 		projects,
 		taskTypes,
 	]);
@@ -341,6 +350,31 @@ export default function IssueList({ workspaceSlug }: Props) {
 			}
 		})();
 	}, [workspaceSlug]);
+
+	// Fetch epics for the epic filter dropdown, independent of the paginated list
+	// (PROJ-211). Scoped to the active project filter when set.
+	useEffect(() => {
+		const epicTypeId = taskTypes.find((t) => t.key === "epic")?.id;
+		if (!epicTypeId) {
+			setEpics([]);
+			return;
+		}
+		(async () => {
+			try {
+				const qs = new URLSearchParams({ typeId: epicTypeId, limit: "100" });
+				const projectId = filterProject
+					? projects.find((p) => p.key === filterProject)?.id
+					: undefined;
+				if (projectId) qs.set("project", projectId);
+				const data = await apiFetch<{ items: Issue[] }>(`/api/issues?${qs.toString()}`, {
+					workspaceSlug,
+				});
+				setEpics(Array.isArray(data.items) ? data.items : []);
+			} catch {
+				// non-fatal — epic dropdown just won't populate
+			}
+		})();
+	}, [workspaceSlug, taskTypes, filterProject, projects]);
 
 	// Fetch project's sprints when project filter is active, or when a sprintId is set
 	// (so the sprint selector appears even when navigating directly to a ?sprintId= URL).
@@ -763,19 +797,10 @@ export default function IssueList({ workspaceSlug }: Props) {
 		).entries(),
 	];
 
-	const epics = issues.filter((i) => i.type_key === "epic");
-
-	const filtered = sortIssues(
-		filterIssues(issues, filterStatuses, filterPriorities, filterProject, filterType)
-			.filter((i) => !hideEpics || i.type_key !== "epic")
-			.filter((i) => {
-				if (!filterEpicId) return true;
-				if (filterEpicId === "none") return i.parent_id === null && i.type_key !== "epic";
-				return i.parent_id === filterEpicId;
-			}),
-		sortBy,
-		sortDir
-	);
+	// Filtering happens server-side (PROJ-211): `issues` is already the filtered,
+	// paginated result set, so the client only sorts the loaded rows. (Sorting is
+	// still page-local — tracked separately as a follow-up.)
+	const filtered = sortIssues(issues, sortBy, sortDir);
 
 	// Project description derived from loaded projects
 	const projectDescription = filterProject

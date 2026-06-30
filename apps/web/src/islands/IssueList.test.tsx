@@ -339,97 +339,127 @@ describe("filter pill toggle", () => {
 	});
 });
 
-// ─── PROJ-84/86: epic filter ──────────────────────────────────────────────────
+// ─── PROJ-84/86/211: epic filter (server-side) ───────────────────────────────
+//
+// Filtering runs server-side (PROJ-211): the island sends query params and the
+// API filters. These tests assert the request contract — that the right params
+// reach /api/issues — not client-side DOM filtering (the mock returns a fixed
+// set regardless of params, exactly as a real server boundary would hide from
+// the client). The epic dropdown is also fetched independently (typeId=epic),
+// so it must be awaited rather than read synchronously.
 
-describe("epic filter", () => {
-	beforeEach(() => {
-		setupFetch(EPIC_ISSUES);
+function setupEpicFetch() {
+	const mockFetch = vi.fn().mockImplementation((url: string) => {
+		const u = String(url);
+		let body: unknown;
+		if (u.includes("task-statuses")) body = STATUSES;
+		else if (u.includes("task-types")) body = [{ id: "type-epic", key: "epic", name: "Epic" }];
+		else if (u.includes("/api/projects")) body = [];
+		else if (u.includes("typeId=type-epic"))
+			body = { items: [EPIC_ISSUE] }; // epic-dropdown lookup
+		else body = { items: EPIC_ISSUES }; // main list
+		return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
 	});
+	vi.stubGlobal("fetch", mockFetch);
+	return mockFetch;
+}
 
-	it("filtering by a specific epic ID shows only issues that are children of that epic", async () => {
+/** Latest /api/issues *list* request URL (excludes the epic-dropdown lookup). */
+function lastListUrl(mockFetch: ReturnType<typeof vi.fn>): string {
+	const urls = (mockFetch.mock.calls as [string, RequestInit][])
+		.map((c) => String(c[0]))
+		.filter((u) => u.includes("/api/issues") && !u.includes("typeId=type-epic"));
+	return urls[urls.length - 1] ?? "";
+}
+
+async function selectEpicOption(name: string) {
+	fireEvent.click(await screen.findByRole("combobox", { name: "Filter by epic" }));
+	fireEvent.click(await screen.findByRole("option", { name }));
+}
+
+describe("epic filter (server-side, PROJ-211)", () => {
+	it("sends parentId when a specific epic is selected", async () => {
+		const mockFetch = setupEpicFetch();
 		render(<IssueList />);
 		await waitForLoaded();
 
-		// Select uses a custom combobox (button + listbox) — must click to open then click option
-		fireEvent.click(screen.getByRole("combobox", { name: "Filter by epic" }));
-		fireEvent.click(await screen.findByRole("option", { name: "PROJ-10 Epic One" }));
+		await selectEpicOption("PROJ-10 Epic One");
+
+		await waitFor(() => expect(lastListUrl(mockFetch)).toContain("parentId=epic1"));
+	});
+
+	it("sends noParent + excludeTypeIds for the 'No epic' option", async () => {
+		const mockFetch = setupEpicFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+
+		await selectEpicOption("No epic");
 
 		await waitFor(() => {
-			expect(screen.getAllByText("Child of Epic").length).toBeGreaterThan(0);
-			expect(screen.queryAllByText("Orphan issue")).toHaveLength(0);
-			expect(screen.queryAllByText("Epic One")).toHaveLength(0);
+			const url = lastListUrl(mockFetch);
+			expect(url).toContain("noParent=true");
+			expect(url).toContain("excludeTypeIds=type-epic");
 		});
 	});
 
-	it("the 'No epic' filter shows only issues with parent_id null that are not themselves epics", async () => {
+	it("sends neither parentId nor noParent when reset to all epics", async () => {
+		const mockFetch = setupEpicFetch();
 		render(<IssueList />);
 		await waitForLoaded();
 
-		fireEvent.click(screen.getByRole("combobox", { name: "Filter by epic" }));
-		fireEvent.click(await screen.findByRole("option", { name: "No epic" }));
+		await selectEpicOption("PROJ-10 Epic One");
+		await waitFor(() => expect(lastListUrl(mockFetch)).toContain("parentId=epic1"));
 
+		await selectEpicOption("All epics");
 		await waitFor(() => {
-			expect(screen.getAllByText("Orphan issue").length).toBeGreaterThan(0);
-			expect(screen.queryAllByText("Child of Epic")).toHaveLength(0);
-			// The epic itself (parent_id null, type_key "epic") should not appear
-			expect(screen.queryAllByText("Epic One")).toHaveLength(0);
-		});
-	});
-
-	it("clearing the epic filter restores the full list", async () => {
-		render(<IssueList />);
-		await waitForLoaded();
-
-		fireEvent.click(screen.getByRole("combobox", { name: "Filter by epic" }));
-		fireEvent.click(await screen.findByRole("option", { name: "PROJ-10 Epic One" }));
-		await waitFor(() => expect(screen.queryAllByText("Orphan issue")).toHaveLength(0));
-
-		fireEvent.click(screen.getByRole("combobox", { name: "Filter by epic" }));
-		fireEvent.click(await screen.findByRole("option", { name: "All epics" }));
-
-		await waitFor(() => {
-			expect(screen.getAllByText("Epic One").length).toBeGreaterThan(0);
-			expect(screen.getAllByText("Child of Epic").length).toBeGreaterThan(0);
-			expect(screen.getAllByText("Orphan issue").length).toBeGreaterThan(0);
+			const url = lastListUrl(mockFetch);
+			expect(url).not.toContain("parentId=");
+			expect(url).not.toContain("noParent=");
 		});
 	});
 
 	it("writes the epic filter to URL when a specific epic is selected", async () => {
+		setupEpicFetch();
 		render(<IssueList />);
 		await waitForLoaded();
 
-		fireEvent.click(screen.getByRole("combobox", { name: "Filter by epic" }));
-		fireEvent.click(await screen.findByRole("option", { name: "PROJ-10 Epic One" }));
+		await selectEpicOption("PROJ-10 Epic One");
 
-		await waitFor(() => {
-			const params = new URLSearchParams(window.location.search);
-			expect(params.get("epic")).toBe("epic1");
-		});
+		await waitFor(() =>
+			expect(new URLSearchParams(window.location.search).get("epic")).toBe("epic1")
+		);
 	});
 
-	it("reads ?epic= from URL on mount and pre-selects the epic filter", async () => {
+	it("reads ?epic= from URL on mount and sends parentId on the first fetch", async () => {
 		history.replaceState(null, "", "/?epic=epic1");
+		const mockFetch = setupEpicFetch();
 		render(<IssueList />);
 		await waitForLoaded();
 
-		await waitFor(() => {
-			expect(screen.queryAllByText("Orphan issue")).toHaveLength(0);
-			expect(screen.getAllByText("Child of Epic").length).toBeGreaterThan(0);
-		});
+		await waitFor(() => expect(lastListUrl(mockFetch)).toContain("parentId=epic1"));
 	});
 
 	it("removes the epic param from URL when filter is reset to all", async () => {
 		history.replaceState(null, "", "/?epic=epic1");
+		setupEpicFetch();
 		render(<IssueList />);
 		await waitForLoaded();
 
-		fireEvent.click(screen.getByRole("combobox", { name: "Filter by epic" }));
-		fireEvent.click(await screen.findByRole("option", { name: "All epics" }));
+		await selectEpicOption("All epics");
 
-		await waitFor(() => {
-			const params = new URLSearchParams(window.location.search);
-			expect(params.get("epic")).toBeNull();
-		});
+		await waitFor(() => expect(new URLSearchParams(window.location.search).get("epic")).toBeNull());
+	});
+});
+
+describe("hide epics (server-side, PROJ-211)", () => {
+	it("sends excludeTypeIds for the epic type when 'Hide epics' is checked", async () => {
+		const mockFetch = setupEpicFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+
+		fireEvent.click(await screen.findByRole("checkbox", { name: /Hide epics/i }));
+
+		await waitFor(() => expect(lastListUrl(mockFetch)).toContain("excludeTypeIds=type-epic"));
 	});
 });
 
