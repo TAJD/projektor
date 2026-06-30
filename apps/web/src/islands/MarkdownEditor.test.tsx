@@ -50,6 +50,16 @@ describe("MarkdownEditor", () => {
 		expect(labels.some((l) => l?.includes("Preview"))).toBe(true);
 	});
 
+	it("resets text-transform so it can't inherit an ancestor's uppercase (PROJ-210)", () => {
+		// The create-issue Description sits inside a <label class="uppercase">, and
+		// text-transform inherits — without this guard everything typed renders as
+		// caps. The reset must live on the editor's own root so it holds wherever
+		// the editor is mounted.
+		const { container } = render(<MarkdownEditor value="" onChange={() => {}} />);
+		const root = container.firstElementChild;
+		expect(root?.className).toContain("normal-case");
+	});
+
 	it("switches to preview pane when the mobile Preview button is clicked", () => {
 		render(<MarkdownEditor value="" onChange={() => {}} />);
 		const buttons = screen.getAllByRole("button");

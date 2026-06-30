@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "preact/hooks";
-import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
+import { EditorSelection, EditorState } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { renderMarkdown } from "../utils/markdown";
 
 interface Props {
@@ -11,7 +11,6 @@ interface Props {
 	minHeight?: string;
 }
 
-
 function wrapSelection(view: EditorView, before: string, after: string): boolean {
 	const tr = view.state.changeByRange((range) => {
 		const selected = view.state.sliceDoc(range.from, range.to);
@@ -19,7 +18,7 @@ function wrapSelection(view: EditorView, before: string, after: string): boolean
 			changes: { from: range.from, to: range.to, insert: before + selected + after },
 			range: EditorSelection.range(
 				range.from + before.length,
-				range.from + before.length + selected.length,
+				range.from + before.length + selected.length
 			),
 		};
 	});
@@ -42,7 +41,7 @@ function prefixLines(view: EditorView, prefix: string): boolean {
 			changes,
 			range: EditorSelection.range(
 				range.from + prefix.length,
-				range.to + lineCount * prefix.length,
+				range.to + lineCount * prefix.length
 			),
 		};
 	});
@@ -155,35 +154,80 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 	}
 
 	return (
-		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg">
+		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case">
 			<div class="flex gap-[2px] px-[6px] py-1 bg-surface border-b border-border flex-wrap items-center">
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border" onClick={bold} title="Bold (Ctrl+B)">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
+					onClick={bold}
+					title="Bold (Ctrl+B)"
+				>
 					<strong>B</strong>
 				</button>
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] italic hover:bg-border" onClick={italic} title="Italic (Ctrl+I)">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] italic hover:bg-border"
+					onClick={italic}
+					title="Italic (Ctrl+I)"
+				>
 					I
 				</button>
 				<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border" onClick={() => heading(1)} title="Heading 1">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
+					onClick={() => heading(1)}
+					title="Heading 1"
+				>
 					H1
 				</button>
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border" onClick={() => heading(2)} title="Heading 2">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
+					onClick={() => heading(2)}
+					title="Heading 2"
+				>
 					H2
 				</button>
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border" onClick={() => heading(3)} title="Heading 3">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
+					onClick={() => heading(3)}
+					title="Heading 3"
+				>
 					H3
 				</button>
 				<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border" onClick={link} title="Link">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
+					onClick={link}
+					title="Link"
+				>
 					Link
 				</button>
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border" onClick={codeBlock} title="Code block">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
+					onClick={codeBlock}
+					title="Code block"
+				>
 					Code
 				</button>
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border" onClick={bulletList} title="Bullet list">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
+					onClick={bulletList}
+					title="Bullet list"
+				>
 					• List
 				</button>
-				<button type="button" class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border" onClick={numberedList} title="Numbered list">
+				<button
+					type="button"
+					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
+					onClick={numberedList}
+					title="Numbered list"
+				>
 					1. List
 				</button>
 			</div>
@@ -211,11 +255,16 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 					class={`flex-1 min-w-0 overflow-auto flex flex-col${mobilePreview ? " max-sm:hidden" : ""}`}
 					ref={containerRef}
 				/>
-				<div class={mobilePreview
-					? "flex-1 flex flex-col min-w-0"
-					: "flex-1 flex flex-col border-l border-border min-w-0 max-sm:hidden"
-				}>
-					<div class="px-2 py-[2px] text-[0.7rem] text-text-muted bg-surface border-b border-border shrink-0 uppercase tracking-[0.06em]">Preview</div>
+				<div
+					class={
+						mobilePreview
+							? "flex-1 flex flex-col min-w-0"
+							: "flex-1 flex flex-col border-l border-border min-w-0 max-sm:hidden"
+					}
+				>
+					<div class="px-2 py-[2px] text-[0.7rem] text-text-muted bg-surface border-b border-border shrink-0 uppercase tracking-[0.06em]">
+						Preview
+					</div>
 					{preview ? (
 						<div
 							class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-base prose prose-sm max-w-none"
@@ -223,7 +272,9 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 							dangerouslySetInnerHTML={{ __html: preview }}
 						/>
 					) : (
-						<div class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-muted italic">Nothing to preview.</div>
+						<div class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-muted italic">
+							Nothing to preview.
+						</div>
 					)}
 				</div>
 			</div>
