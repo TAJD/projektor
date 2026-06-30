@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { IdSchema } from "../schemas/common";
 import {
 	CreateSprintSchema,
 	ListSprintsSchema,
@@ -111,6 +112,9 @@ export async function updateSprint(ctx: ServiceCtx, id: string, raw: unknown) {
 }
 
 export async function completeSprint(ctx: ServiceCtx, id: string) {
+	const idCheck = IdSchema.safeParse(id);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 	const orm = drizzle(ctx.db, { schema });
 	const sprint = await orm
@@ -137,6 +141,9 @@ export async function completeSprint(ctx: ServiceCtx, id: string) {
 }
 
 export async function deleteSprint(ctx: ServiceCtx, id: string) {
+	const idCheck = IdSchema.safeParse(id);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm

@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq } from "drizzle-orm";
+import { IdSchema } from "../schemas/common";
 import { CreateTaskStatusSchema, UpdateTaskStatusSchema } from "../schemas/task-statuses";
 import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
@@ -108,6 +109,9 @@ export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown
 }
 
 export async function deleteTaskStatus(ctx: ServiceCtx, id: string) {
+	const idCheck = IdSchema.safeParse(id);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 
 	const orm = drizzle(ctx.db, { schema });

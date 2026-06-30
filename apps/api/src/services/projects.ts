@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq } from "drizzle-orm";
+import { IdSchema } from "../schemas/common";
 import { CreateProjectSchema, UpdateProjectSchema } from "../schemas/projects";
 import { recordActivity } from "./activity";
 import * as cache from "./cache";
@@ -147,6 +148,9 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 }
 
 export async function deleteProject(ctx: ServiceCtx, id: string) {
+	const idCheck = IdSchema.safeParse(id);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	if (ctx.role !== "owner") throw new ForbiddenError();
 
 	const orm = drizzle(ctx.db, { schema });

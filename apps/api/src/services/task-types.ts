@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq } from "drizzle-orm";
+import { IdSchema } from "../schemas/common";
 import { CreateTaskTypeSchema, UpdateTaskTypeSchema } from "../schemas/task-types";
 import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
@@ -102,6 +103,9 @@ export async function updateTaskType(ctx: ServiceCtx, id: string, raw: unknown) 
 }
 
 export async function deleteTaskType(ctx: ServiceCtx, id: string) {
+	const idCheck = IdSchema.safeParse(id);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 
 	const orm = drizzle(ctx.db, { schema });

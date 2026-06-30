@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { IdSchema } from "../schemas/common";
 import {
 	CreateTokenSchema,
 	CreateWorkspaceSchema,
@@ -138,6 +139,9 @@ export async function inviteMember(ctx: ServiceCtx, input: unknown) {
 }
 
 export async function removeMember(ctx: ServiceCtx, targetUserId: string) {
+	const idCheck = IdSchema.safeParse(targetUserId);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	if (ctx.role !== "owner") throw new ForbiddenError();
 	if (ctx.userId === targetUserId) {
 		throw new ValidationError({ formErrors: ["Cannot remove yourself as owner"], fieldErrors: {} });

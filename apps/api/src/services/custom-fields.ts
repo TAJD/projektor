@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { IdSchema } from "../schemas/common";
 import { CreateCustomFieldDefSchema, UpdateCustomFieldDefSchema } from "../schemas/custom-fields";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
@@ -158,6 +159,9 @@ export async function updateCustomFieldDef(ctx: ServiceCtx, id: string, raw: unk
 }
 
 export async function deleteCustomFieldDef(ctx: ServiceCtx, id: string) {
+	const idCheck = IdSchema.safeParse(id);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 
 	const orm = drizzle(ctx.db, { schema });
