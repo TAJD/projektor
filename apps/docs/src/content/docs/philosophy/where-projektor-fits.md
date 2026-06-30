@@ -1,5 +1,9 @@
-# Philosophy: where Projektor fits
-
+---
+title: "Where Projektor fits"
+description: "How Projektor sits in the agentic dev-tools stack: layers as concerns, the MCP narrow waist, and the empty middle between Jira and beads."
+sidebar:
+  order: 1
+---
 Tools for agentic development split into three concerns: running the agents,
 coordinating them, and tracking the work. The mistake is to treat each concern
 as its own product. They are not products — they are concerns, and the real
@@ -9,7 +13,7 @@ interface stays coherent. That is what Projektor is: not one layer, but a slice
 across several.
 
 This page is the *why*. For the *how* — the multi-agent loop these concerns
-combine into — see [Agentic workflows](./agent-workflows.md).
+combine into — see [Agentic workflows](/projektor/agents/agent-workflows/).
 
 ## The three concerns
 
@@ -111,7 +115,7 @@ These are deliberate bets, not oversights:
 
 ## Where to go next
 
-- **The operational loop:** [Agentic workflows](./agent-workflows.md) — how the
+- **The operational loop:** [Agentic workflows](/projektor/agents/agent-workflows/) — how the
   three concerns combine into a real multi-agent dev cycle.
-- **The system underneath:** [Architecture](./architecture.md).
-- **Connect an agent:** [Connect an AI agent](./mcp.md).
+- **The system underneath:** [Architecture](/projektor/architecture/system-design/).
+- **Connect an agent:** [Connect an AI agent](/projektor/agents/mcp-connection/).

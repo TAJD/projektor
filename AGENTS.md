@@ -264,7 +264,7 @@ own the same island file. Assign each island to exactly one agent per batch.
 
 **Deploy:** tag a release (`git tag vX.Y.Z && git push --tags`) — `release.yml`
 builds the artifact and the config-only deploy repo (`projektor-workspace`) picks
-it up. See [docs/deploying.md](./docs/deploying.md).
+it up. See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/).
 
 **CI commands** (must both pass before opening a PR):
 ```bash
@@ -289,7 +289,8 @@ claude mcp add projektor --transport http https://<host>/mcp/<workspaceId> \
 ```
 
 **The full tool list is generated from source — do not hand-maintain a copy here.**
-See **[`docs/mcp-tools.generated.md`](./docs/mcp-tools.generated.md)** (produced by
+See the **[MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/)**
+(generated into `apps/docs/src/content/docs/agents/tool-catalog.md` by
 `apps/api/scripts/gen-mcp-catalog.ts` from `apps/api/src/mcp/*.ts`; CI fails if it is
 stale). The grouping there separates **Coordination** tools (the agent-native primitives
 used by the fleet protocol above) from **Project data** tools.

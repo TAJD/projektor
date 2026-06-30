@@ -1,5 +1,9 @@
-# Projektor — Architecture
-
+---
+title: "Architecture"
+description: "How Projektor is put together: surfaces, service layer, and storage."
+sidebar:
+  order: 1
+---
 > Wiki + Jira-style issue tracker built MCP-native, running entirely on Cloudflare's edge.
 > Monorepo (pnpm + turbo).
 

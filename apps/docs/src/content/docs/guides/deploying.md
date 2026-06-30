@@ -1,5 +1,9 @@
-# Deploying Projektor
-
+---
+title: "Deploying & operating"
+description: "The deployment model in full: release artifacts, config-only deploys, the Cloudflare API token, secrets, and automatic updates."
+sidebar:
+  order: 2
+---
 Projektor ships as a **self-contained release artifact** and deploys from **config
 only**. There is no source checkout, no submodule or any build step on the machine that
 deploys. This page describes how the deployment process works: the model, how to stand up your own

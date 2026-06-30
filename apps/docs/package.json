@@ -4,13 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node scripts/build-content.mjs",
     "dev": "astro dev",
-    "prebuild": "node scripts/build-content.mjs",
     "build": "astro build && node scripts/gen-llms-txt.mjs",
     "preview": "astro preview",
-    "type-check": "astro check",
-    "sync:content": "node scripts/build-content.mjs"
+    "type-check": "astro check"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.30.0",

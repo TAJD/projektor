@@ -1,5 +1,9 @@
-# Self-hosting Projektor
-
+---
+title: "Self-hosting Projektor"
+description: "Deploy your own Projektor instance on Cloudflare in five minutes."
+sidebar:
+  order: 1
+---
 Projektor deploys to **your own Cloudflare account** from a small **config-only repo**
 ([`projektor-deploy-example`](https://github.com/TAJD/projektor-deploy-example)) that
 downloads a pre-built release artifact — no source checkout and no build step. Pick the
@@ -37,10 +41,10 @@ The Worker is live, but **Cloudflare Access** must front it before anyone can lo
 ## Manual or CI deploys
 
 Prefer to create the resources yourself, keep your config private, or deploy from CI on
-every push? The [full deploy guide](deploying.md) covers the manual flow, the Cloudflare
+every push? The [full deploy guide](/projektor/guides/deploying/) covers the manual flow, the Cloudflare
 API token recipe (it **must include D1**), and push-based auto-updates.
 
 ## Next: connect an agent
 
-Once your instance is up, [connect an AI agent](mcp.md) over MCP — that's the primary
+Once your instance is up, [connect an AI agent](/projektor/agents/mcp-connection/) over MCP — that's the primary
 way to drive Projektor. Anything a browser user can do, an agent can do too.

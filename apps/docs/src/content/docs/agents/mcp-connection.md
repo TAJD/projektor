@@ -1,12 +1,16 @@
-# projektor MCP connection guide
-
+---
+title: "Connect an AI agent"
+description: "Connect Claude Code or any MCP-compatible agent to your Projektor instance."
+sidebar:
+  order: 1
+---
 Connect Claude Code (or any MCP-compatible agent) to your projektor instance.
 
 ---
 
 ## 1. Prerequisites
 
-- **A running projektor instance.** See the [self-hosting guide](self-hosting.md) or the full [deploy guide](deploying.md).
+- **A running projektor instance.** See the [self-hosting guide](/projektor/guides/self-hosting/) or the full [deploy guide](/projektor/guides/deploying/).
 - **Claude Code installed.** `npm install -g @anthropic-ai/claude-code` (or the desktop/IDE app).
 - **A projektor API token.** Two ways to get one:
   - **Development** — use the bootstrap endpoint (see §2 below). No login required; needs `BOOTSTRAP_SECRET`.
@@ -94,7 +98,7 @@ claude mcp call projektor list_members '{}'
 The complete, always-current catalog is **generated from source** — every tool,
 grouped by domain, rendered from `apps/api/src/mcp/*.ts`:
 
-➡️ **[MCP tool catalog](./mcp-tools.generated.md)** (on the docs site: *Agents & MCP → MCP tool catalog*).
+➡️ **[MCP tool catalog](/projektor/agents/tool-catalog/)** (on the docs site: *Agents & MCP → MCP tool catalog*).
 
 It is regenerated and freshness-checked by CI, so it can never drift from the code.
 This guide intentionally does **not** repeat the table — there is one source of truth.

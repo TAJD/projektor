@@ -18,7 +18,7 @@ agent, architecture, and the full MCP tool catalog.
 
 A complete project tracker — issues, boards, sprints, a wiki — built so an AI agent can
 do everything a person can. The shape of the tool follows from that; see
-[the philosophy](./docs/philosophy.md).
+[the philosophy](https://tajd.github.io/projektor/philosophy/where-projektor-fits/).
 
 - Issues with status, priority, assignee, labels, parent/child hierarchy, and issue links
 - Kanban board + list view + sprint planning
@@ -66,7 +66,7 @@ The Worker is live, but **Cloudflare Access** must front it before anyone can lo
 ### Manual / CI
 
 Prefer to create the resources yourself, keep your config private, or deploy from CI on
-every push? See **[docs/deploying.md](./docs/deploying.md)** for the manual flow, the
+every push? See the **[deploy guide](https://tajd.github.io/projektor/guides/deploying/)** for the manual flow, the
 Cloudflare API token recipe (it **must include D1**), and push-based auto-updates.
 
 **Updating later:** bump `projektor.version` and re-deploy (or just push, if you wired CI).
@@ -105,7 +105,7 @@ command shown beside it (token + workspace pre-filled). The full walkthrough —
 setup, first login, token, MCP — is in
 [CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
-See **[docs/mcp.md](./docs/mcp.md)** for the full connection guide, protocol reference, and tool catalog (64 tools across 14 domains — project data plus agent-coordination primitives).
+See the **[agent connection guide](https://tajd.github.io/projektor/agents/mcp-connection/)** for the full connection guide, protocol reference, and tool catalog (64 tools across 14 domains — project data plus agent-coordination primitives).
 
 ## Development
 
@@ -150,7 +150,7 @@ Bypass for WIP commits: `git commit --no-verify -m "wip: …"`
 ## Architecture (brief)
 
 For a visual of how the system fits together, see the
-[architecture overview](./docs/architecture.md); the deep architecture lives in
+[architecture overview](https://tajd.github.io/projektor/architecture/system-design/); the deep architecture lives in
 [AGENTS.md](./AGENTS.md).
 
 projektor has two surfaces over one service layer:
