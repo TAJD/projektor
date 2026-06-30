@@ -40,6 +40,22 @@ export const issuesTools: MCPTool[] = [
 					type: "string",
 					description: "Comma-separated task type IDs to exclude (e.g. the epic type)",
 				},
+				completedAfter: {
+					type: "number",
+					description: "Only issues marked completed at or after this epoch-seconds time",
+				},
+				completedBefore: {
+					type: "number",
+					description: "Only issues marked completed at or before this epoch-seconds time",
+				},
+				updatedAfter: {
+					type: "number",
+					description: "Only issues last edited at or after this epoch-seconds time",
+				},
+				updatedBefore: {
+					type: "number",
+					description: "Only issues last edited at or before this epoch-seconds time",
+				},
 				cursor: { type: "number", description: "Pagination cursor (created_at of last item)" },
 				limit: { type: "number", default: 50, description: "Max 100" },
 			},

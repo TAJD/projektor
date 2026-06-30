@@ -95,6 +95,9 @@ export const issues = sqliteTable(
 			.references(() => users.id),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
+		// Stamped when the issue enters a done-category status, cleared when it
+		// leaves (PROJ-212). Indexed for completed-date range filtering.
+		completedAt: integer("completed_at"),
 	},
 	(t) => ({
 		projectIdx: index("issues_project_idx").on(t.projectId),
@@ -108,6 +111,7 @@ export const issues = sqliteTable(
 			t.statusCategory,
 			t.createdAt
 		),
+		wsCompletedIdx: index("idx_issues_workspace_completed").on(t.workspaceId, t.completedAt),
 	})
 );
 

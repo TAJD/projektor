@@ -913,6 +913,91 @@ describe("Issues API", () => {
 		// The epic is excluded; the untyped (NULL type_id) issue must NOT be dropped.
 		expect(titles).toEqual(["A plain issue"]);
 	});
+
+	// ─── PROJ-212: completed_at + date-range filters ──────────────────────────
+	// The test rate limiter allows only RATE_LIMIT_API_MAX (5) API requests per
+	// window, so set up state via env.DB and assert via env.DB where possible —
+	// DB access bypasses both the rate limiter and the getIssue KV cache.
+	async function patch(id: string, body: Record<string, unknown>) {
+		return SELF.fetch(`http://localhost/api/issues/${id}`, {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify(body),
+		});
+	}
+
+	async function completedAtOf(id: string): Promise<number | null> {
+		const row = await env.DB.prepare("SELECT completed_at FROM issues WHERE id = ?")
+			.bind(id)
+			.first<{ completed_at: number | null }>();
+		return row?.completed_at ?? null;
+	}
+
+	it("stamps completed_at when an issue enters a done status and clears it on exit (PROJ-212)", async () => {
+		// 3 API requests (DB seed + 3 patch), under the rate-limit window.
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Will complete" });
+		const id = issue.id;
+		expect(await completedAtOf(id)).toBeNull();
+
+		await patch(id, { status: "done" });
+		const completed = await completedAtOf(id);
+		expect(typeof completed).toBe("number");
+
+		// Re-saving while still done keeps the original completion time.
+		await patch(id, { priority: "high" });
+		expect(await completedAtOf(id)).toBe(completed);
+
+		// Leaving done clears it.
+		await patch(id, { status: "in_progress" });
+		expect(await completedAtOf(id)).toBeNull();
+	});
+
+	it("filters by completedAfter / completedBefore (PROJ-212)", async () => {
+		// Seed + stamp completion via env.DB so only the 2 list calls hit the API.
+		const older = await seedIssue(workspaceId, projectId, userId, { title: "Completed long ago" });
+		const recent = await seedIssue(workspaceId, projectId, userId, { title: "Completed just now" });
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare("UPDATE issues SET completed_at = ? WHERE id = ?")
+			.bind(now - 10 * 86400, older.id)
+			.run();
+		await env.DB.prepare("UPDATE issues SET completed_at = ? WHERE id = ?")
+			.bind(now, recent.id)
+			.run();
+
+		const cutoff = now - 86400; // 1 day ago
+
+		const before = await listIssues(`http://localhost/api/issues?completedBefore=${cutoff}`);
+		expect((before.page.items as Array<{ title: string }>).map((i) => i.title)).toEqual([
+			"Completed long ago",
+		]);
+
+		const after = await listIssues(`http://localhost/api/issues?completedAfter=${cutoff}`);
+		expect((after.page.items as Array<{ title: string }>).map((i) => i.title)).toEqual([
+			"Completed just now",
+		]);
+	});
+
+	it("filters by updatedAfter / updatedBefore (PROJ-212)", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const stale = await seedIssue(workspaceId, projectId, userId, { title: "Edited long ago" });
+		const fresh = await seedIssue(workspaceId, projectId, userId, { title: "Edited just now" });
+		await env.DB.prepare("UPDATE issues SET updated_at = ? WHERE id = ?")
+			.bind(now - 10 * 86400, stale.id)
+			.run();
+		await env.DB.prepare("UPDATE issues SET updated_at = ? WHERE id = ?").bind(now, fresh.id).run();
+
+		const cutoff = now - 86400;
+
+		const before = await listIssues(`http://localhost/api/issues?updatedBefore=${cutoff}`);
+		expect((before.page.items as Array<{ title: string }>).map((i) => i.title)).toEqual([
+			"Edited long ago",
+		]);
+
+		const after = await listIssues(`http://localhost/api/issues?updatedAfter=${cutoff}`);
+		expect((after.page.items as Array<{ title: string }>).map((i) => i.title)).toEqual([
+			"Edited just now",
+		]);
+	});
 });
 
 describe("Issues MCP — typeId", () => {
