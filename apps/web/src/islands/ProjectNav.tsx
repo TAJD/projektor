@@ -31,15 +31,18 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 		const rawId = params.get("id") || params.get("projectId");
 		const rawProject = params.get("project");
 
-		if (!rawId && !rawProject) return;
-
 		const headers = buildHeaders(workspaceSlug);
+
+		const resolve = (p: Project) => {
+			setProject(p);
+			localStorage.setItem("projektor-last-project-id", p.id);
+		};
 
 		if (rawId) {
 			fetch(`/api/projects/${encodeURIComponent(rawId)}`, { credentials: "include", headers })
 				.then((r) => (r.ok ? r.json() : null))
 				.then((p) => {
-					if (p) setProject(p as Project);
+					if (p) resolve(p as Project);
 				})
 				.catch(() => {});
 		} else if (rawProject) {
@@ -49,10 +52,37 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 				.then((list: Project[]) => {
 					if (Array.isArray(list)) {
 						const found = list.find((p) => p.key === rawProject || p.id === rawProject);
-						if (found) setProject(found);
+						if (found) resolve(found);
 					}
 				})
 				.catch(() => {});
+		} else {
+			// No project param in URL — recover from localStorage, then fall back to first project
+			const storedId = localStorage.getItem("projektor-last-project-id");
+			if (storedId) {
+				fetch(`/api/projects/${encodeURIComponent(storedId)}`, { credentials: "include", headers })
+					.then((r) => (r.ok ? r.json() : null))
+					.then((p) => {
+						if (p) {
+							resolve(p as Project);
+						} else {
+							// Stored id is stale — fall back to first project
+							return fetch("/api/projects", { credentials: "include", headers })
+								.then((r) => (r.ok ? r.json() : []))
+								.then((list: Project[]) => {
+									if (Array.isArray(list) && list.length > 0) resolve(list[0]);
+								});
+						}
+					})
+					.catch(() => {});
+			} else {
+				fetch("/api/projects", { credentials: "include", headers })
+					.then((r) => (r.ok ? r.json() : []))
+					.then((list: Project[]) => {
+						if (Array.isArray(list) && list.length > 0) resolve(list[0]);
+					})
+					.catch(() => {});
+			}
 		}
 	}, [workspaceSlug]);
 

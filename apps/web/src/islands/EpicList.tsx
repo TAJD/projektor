@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
-import { CATEGORY_COLORS, type Issue, type SortKey, sortIssues } from "./board-utils";
+import { CATEGORY_COLORS, categoryColor, type Issue, type SortKey, sortIssues } from "./board-utils";
 import Select from "./Select";
 
 interface Props {
@@ -41,6 +41,15 @@ export default function EpicList({ workspaceSlug }: Props) {
 	const [sortBy, setSortBy] = useState<SortKey>("created_at");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
+	const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
+	const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
+	const [showFiltersPopover, setShowFiltersPopover] = useState(false);
+
+	const filtersContainerRef = useRef<HTMLDivElement>(null);
+	const filtersPopoverRef = useRef<HTMLDivElement>(null);
+	const filtersButtonRef = useRef<HTMLButtonElement>(null);
+	const filtersPopoverPos = useRef({ top: 0, left: 0 });
+
 	// Create modal state
 	const [showCreate, setShowCreate] = useState(false);
 	const [createTitle, setCreateTitle] = useState("");
@@ -50,8 +59,31 @@ export default function EpicList({ workspaceSlug }: Props) {
 	const [createError, setCreateError] = useState<string | null>(null);
 
 	useEffect(() => {
-		setProjectId(new URLSearchParams(window.location.search).get("projectId"));
-		setProjectIdReady(true);
+		const params = new URLSearchParams(window.location.search);
+
+		// Read filters from URL
+		const s = params.get("status");
+		const p = params.get("priority");
+		if (s) setFilterStatuses(s.split(",").filter(Boolean));
+		if (p) setFilterPriorities(p.split(",").filter(Boolean));
+
+		// Resolve projectId: URL param → localStorage → defer to projects fetch
+		const fromUrl = params.get("projectId");
+		if (fromUrl) {
+			setProjectId(fromUrl);
+			localStorage.setItem("projektor-last-project-id", fromUrl);
+			setProjectIdReady(true);
+		} else {
+			const stored = localStorage.getItem("projektor-last-project-id");
+			if (stored) {
+				setProjectId(stored);
+				const newParams = new URLSearchParams(window.location.search);
+				newParams.set("projectId", stored);
+				history.replaceState(null, "", `?${newParams.toString()}`);
+				setProjectIdReady(true);
+			}
+			// else: projects fetch effect will set projectId and mark ready
+		}
 	}, []);
 
 	// Fetch epic task type ID
@@ -72,14 +104,29 @@ export default function EpicList({ workspaceSlug }: Props) {
 		})();
 	}, [workspaceSlug]);
 
-	// Fetch projects for create form
+	// Fetch projects for create form; also provides API fallback when no projectId in URL/localStorage
 	useEffect(() => {
 		(async () => {
 			try {
 				const data = await apiFetch<ProjectMeta[]>("/api/projects", { workspaceSlug });
-				if (Array.isArray(data)) setProjects(data);
+				if (Array.isArray(data)) {
+					setProjects(data);
+					setProjectId((prev) => {
+						if (prev) return prev;
+						const first = data[0]?.id ?? null;
+						if (first) {
+							localStorage.setItem("projektor-last-project-id", first);
+							const p = new URLSearchParams(window.location.search);
+							p.set("projectId", first);
+							history.replaceState(null, "", `?${p.toString()}`);
+						}
+						return first;
+					});
+				}
 			} catch {
 				// non-fatal
+			} finally {
+				setProjectIdReady(true);
 			}
 		})();
 	}, [workspaceSlug]);
@@ -131,6 +178,38 @@ export default function EpicList({ workspaceSlug }: Props) {
 		if (projectIdReady) fetchEpics();
 	}, [fetchEpics, projectIdReady]);
 
+	// Sync filter state to URL without page reload
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		if (filterStatuses.length > 0) {
+			params.set("status", filterStatuses.join(","));
+		} else {
+			params.delete("status");
+		}
+		if (filterPriorities.length > 0) {
+			params.set("priority", filterPriorities.join(","));
+		} else {
+			params.delete("priority");
+		}
+		history.replaceState(null, "", `?${params.toString()}`);
+	}, [filterStatuses, filterPriorities]);
+
+	// Close filters popover on outside click
+	useEffect(() => {
+		if (!showFiltersPopover) return;
+		function onPointer(e: MouseEvent) {
+			const target = e.target as Node;
+			if (
+				!filtersContainerRef.current?.contains(target) &&
+				!filtersPopoverRef.current?.contains(target)
+			) {
+				setShowFiltersPopover(false);
+			}
+		}
+		document.addEventListener("mousedown", onPointer);
+		return () => document.removeEventListener("mousedown", onPointer);
+	}, [showFiltersPopover]);
+
 	function openCreate() {
 		const defaultProjectId = projectId
 			? (projects.find((p) => p.id === projectId)?.id ?? projects[0]?.id ?? "")
@@ -181,6 +260,38 @@ export default function EpicList({ workspaceSlug }: Props) {
 		return <span class="ml-1 opacity-60">{sortDir === "asc" ? "↑" : "↓"}</span>;
 	}
 
+	const filteredEpics = epics.filter((ep) => {
+		if (filterStatuses.length > 0 && (!ep.status_id || !filterStatuses.includes(ep.status_id)))
+			return false;
+		if (filterPriorities.length > 0 && !filterPriorities.includes(ep.priority)) return false;
+		return true;
+	});
+
+	// Derive unique statuses from fetched epics for the filter popover
+	const derivedStatuses: { id: string; name: string; category: string }[] = [];
+	{
+		const seen = new Set<string>();
+		for (const ep of epics) {
+			if (ep.status_id && !seen.has(ep.status_id)) {
+				seen.add(ep.status_id);
+				derivedStatuses.push({
+					id: ep.status_id,
+					name: ep.status_name ?? ep.status_key ?? ep.status_id,
+					category: ep.status_category ?? "",
+				});
+			}
+		}
+	}
+
+	const activeFilterCount = filterStatuses.length + filterPriorities.length;
+
+	const PILL_COLORS: Record<string, { bg: string; text: string }> = {
+		urgent: { bg: "#dc2626", text: "#fff" },
+		high: { bg: "#d97706", text: "#fff" },
+		medium: { bg: "#2563eb", text: "#fff" },
+		low: { bg: "#6b7280", text: "#fff" },
+	};
+
 	if (!projectIdReady || loading) return <p aria-live="polite">Loading…</p>;
 	if (error)
 		return (
@@ -191,7 +302,138 @@ export default function EpicList({ workspaceSlug }: Props) {
 
 	return (
 		<div>
-			<div class="flex justify-end mb-4">
+			<div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
+				{/* Filters button + popover */}
+				<div class="relative" ref={filtersContainerRef}>
+					<button
+						ref={filtersButtonRef}
+						type="button"
+						onClick={() => {
+							if (showFiltersPopover) {
+								setShowFiltersPopover(false);
+							} else {
+								const rect = filtersButtonRef.current?.getBoundingClientRect();
+								if (rect) filtersPopoverPos.current = { top: rect.bottom + 4, left: rect.left };
+								setShowFiltersPopover(true);
+							}
+						}}
+						style={{
+							padding: "0.25rem 0.625rem",
+							borderRadius: "9999px",
+							border: activeFilterCount > 0 ? "none" : "1px solid var(--border)",
+							background: activeFilterCount > 0 ? "var(--accent)" : "var(--bg)",
+							color: activeFilterCount > 0 ? "#fff" : "var(--text)",
+							cursor: "pointer",
+							fontSize: "0.8rem",
+							fontWeight: activeFilterCount > 0 ? 600 : 400,
+						}}
+					>
+						{activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
+					</button>
+					{showFiltersPopover && (
+						<div
+							ref={filtersPopoverRef}
+							style={{
+								position: "fixed",
+								top: `${filtersPopoverPos.current.top}px`,
+								left: `${filtersPopoverPos.current.left}px`,
+								zIndex: 100,
+								background: "var(--surface)",
+								border: "1px solid var(--border)",
+								borderRadius: "0.5rem",
+								padding: "0.75rem",
+								boxShadow: "var(--shadow-sm)",
+								minWidth: "16rem",
+							}}
+						>
+							<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
+								Status
+							</div>
+							<div class="flex flex-wrap gap-1 mb-3">
+								{derivedStatuses.length === 0 ? (
+									<span class="text-[0.78rem] text-text-muted">No epics loaded</span>
+								) : (
+									derivedStatuses.map((s) => {
+										const active = filterStatuses.includes(s.id);
+										return (
+											<button
+												type="button"
+												key={s.id}
+												aria-pressed={active}
+												onClick={() =>
+													setFilterStatuses((prev) =>
+														active ? prev.filter((id) => id !== s.id) : [...prev, s.id]
+													)
+												}
+												style={{
+													padding: "0.25rem 0.625rem",
+													borderRadius: "9999px",
+													border: active ? "none" : "1px solid var(--border)",
+													background: active ? categoryColor(s.category) : "var(--bg)",
+													color: active ? "#fff" : "var(--text)",
+													cursor: "pointer",
+													fontSize: "0.8rem",
+													fontWeight: active ? 600 : 400,
+												}}
+											>
+												{s.name}
+											</button>
+										);
+									})
+								)}
+							</div>
+							<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
+								Priority
+							</div>
+							<div class="flex flex-wrap gap-1">
+								{(["urgent", "high", "medium", "low"] as const).map((pr) => {
+									const active = filterPriorities.includes(pr);
+									const col = PILL_COLORS[pr];
+									return (
+										<button
+											type="button"
+											key={pr}
+											aria-pressed={active}
+											onClick={() =>
+												setFilterPriorities((prev) =>
+													active ? prev.filter((k) => k !== pr) : [...prev, pr]
+												)
+											}
+											style={{
+												padding: "0.25rem 0.625rem",
+												borderRadius: "9999px",
+												border: active ? "none" : "1px solid var(--border)",
+												background: active ? col.bg : "var(--bg)",
+												color: active ? col.text : "var(--text)",
+												cursor: "pointer",
+												fontSize: "0.8rem",
+												fontWeight: active ? 600 : 400,
+												textTransform: "capitalize" as const,
+											}}
+										>
+											{pr}
+										</button>
+									);
+								})}
+							</div>
+							{activeFilterCount > 0 && (
+								<div class="border-t border-border pt-2 mt-3">
+									<button
+										type="button"
+										onClick={() => {
+											setFilterStatuses([]);
+											setFilterPriorities([]);
+										}}
+										class="bg-transparent border-none text-text-muted cursor-pointer text-[0.8rem] p-0"
+									>
+										✕ Clear all
+									</button>
+								</div>
+							)}
+						</div>
+					)}
+				</div>
+
 				{epicTypeId && (
 					<button type="button" onClick={openCreate} class="btn btn-primary btn-sm">
 						+ New Epic
@@ -201,6 +443,8 @@ export default function EpicList({ workspaceSlug }: Props) {
 
 			{epics.length === 0 ? (
 				<p class="text-text-muted text-sm">No epics found. Use the button above to create one.</p>
+			) : filteredEpics.length === 0 ? (
+				<p class="text-text-muted text-sm">No epics match the active filters.</p>
 			) : (
 				<div class="overflow-x-auto">
 					<table class="w-full border-collapse text-sm" aria-label="Epics">
@@ -224,7 +468,7 @@ export default function EpicList({ workspaceSlug }: Props) {
 							</tr>
 						</thead>
 						<tbody>
-							{sortIssues(epics, sortBy, sortDir).map((ep) => {
+							{sortIssues(filteredEpics, sortBy, sortDir).map((ep) => {
 								const statusColor =
 									CATEGORY_COLORS[ep.status_category ?? ""] ?? "var(--text-muted)";
 								return (
