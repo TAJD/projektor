@@ -1,4 +1,4 @@
-import type { HonoEnv } from "@projektor/types";
+import type { Env, HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -32,10 +32,21 @@ import { createWorkspace, listUserWorkspaces } from "./services/workspaces";
 const app = new Hono<HonoEnv>();
 
 app.use("*", logger());
+// CORS is an allowlist, not "*" (PROJ-203). The served SPA is same-origin, so it
+// is unaffected by CORS; this only governs cross-origin *browser* clients. Set
+// CORS_ALLOWED_ORIGINS (comma-separated) to permit a browser app on another
+// origin. Unset/empty = deny cross-origin. Non-browser bearer clients never send
+// an Origin header and so are never constrained here.
 app.use(
 	"*",
 	cors({
-		origin: "*",
+		origin: (origin, c) => {
+			const allowed = ((c.env as Env).CORS_ALLOWED_ORIGINS ?? "")
+				.split(",")
+				.map((s) => s.trim())
+				.filter(Boolean);
+			return allowed.includes(origin) ? origin : null;
+		},
 		allowHeaders: ["Authorization", "Content-Type", "Cf-Access-Jwt-Assertion", "X-Workspace-Slug"],
 	})
 );

@@ -27,6 +27,12 @@ export interface Env {
 	// Per-workspace attachment storage quota in bytes (default 1 GiB). Override in
 	// wrangler.toml [vars]; invalid or non-positive values fall back to the default.
 	STORAGE_QUOTA_BYTES?: string;
+	// Comma-separated allowlist of browser origins permitted for cross-origin
+	// requests (CORS). The served SPA is same-origin, so it never needs this;
+	// set it only when a browser app on a DIFFERENT origin calls this API.
+	// Unset/empty = no cross-origin browser access (non-browser bearer clients
+	// are unaffected — CORS only constrains browsers). (PROJ-203)
+	CORS_ALLOWED_ORIGINS?: string;
 	// Static assets binding (production wrangler.toml only — absent in local dev).
 	ASSETS?: Fetcher;
 }
