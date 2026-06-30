@@ -209,7 +209,7 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 			const ref = document.referrer;
 			if (!ref) return;
 			const url = new URL(ref);
-			if (url.pathname.startsWith("/issues") && url.search) {
+			if ((url.pathname.startsWith("/issues") || url.pathname.startsWith("/epics")) && url.search) {
 				setBackHref(url.pathname + url.search);
 			}
 		} catch {
@@ -755,9 +755,15 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 		<article class="max-w-[900px] mx-auto">
 			{/* Breadcrumb */}
 			<nav class="text-sm text-text-muted mb-5">
-				<a href={backHref ?? `/issues${issue.project_key ? `?project=${issue.project_key}` : ""}`} class="text-text-muted no-underline">
-					← Issues
-				</a>
+				{issue.type_key === "epic" ? (
+					<a href={backHref ?? "/epics"} class="text-text-muted no-underline">
+						← Epics
+					</a>
+				) : (
+					<a href={backHref ?? `/issues${issue.project_key ? `?project=${issue.project_key}` : ""}`} class="text-text-muted no-underline">
+						← Issues
+					</a>
+				)}
 			</nav>
 
 			{/* Blocked-by banner */}
