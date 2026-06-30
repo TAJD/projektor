@@ -13,6 +13,7 @@ import {
 	or,
 	sql,
 } from "drizzle-orm";
+import { IdSchema } from "../schemas/common";
 import {
 	CreateIssueSchema,
 	GetIssueSchema,
@@ -633,6 +634,9 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 }
 
 export async function deleteIssue(ctx: ServiceCtx, id: string) {
+	const idCheck = IdSchema.safeParse(id);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	if (ctx.role !== "admin" && ctx.role !== "owner")
 		throw new ForbiddenError("Insufficient permissions");
 	const orm = drizzle(ctx.db, { schema });

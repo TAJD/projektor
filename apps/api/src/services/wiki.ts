@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, desc, eq, or } from "drizzle-orm";
+import { IdSchema } from "../schemas/common";
 import {
 	CreatePageSchema,
 	ListPagesInputSchema,
@@ -285,7 +286,11 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 }
 
 export async function deleteWikiPage(ctx: ServiceCtx, slug: string) {
-	if (ctx.role !== "admin" && ctx.role !== "owner") throw new ForbiddenError("Insufficient permissions");
+	const idCheck = IdSchema.safeParse(slug);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
+	if (ctx.role !== "admin" && ctx.role !== "owner")
+		throw new ForbiddenError("Insufficient permissions");
 	const orm = drizzle(ctx.db, { schema });
 	const page = await orm
 		.select({ id: schema.wikiPages.id })
