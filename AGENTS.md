@@ -43,6 +43,32 @@ mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live h
    - MCP: `mcp/error-adapter.ts` → JSON-RPC code (`-32602` for validation, `-32000` otherwise). Never return raw `String(err)` to clients.
 5. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role? }`. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
 
+### Deliberate REST↔MCP parity exceptions
+
+The parity audit (PROJ-236) confirmed these surface-only features are intentional, not
+drift — don't re-flag them in future audits:
+
+- **File attachments (`routes/files.ts`)** — REST-only. Binary/multipart upload and
+  streamed download can't cross JSON-RPC. Tracked separately as PROJ-234 (no MCP surface
+  at all for this domain).
+- **Auth (`routes/auth.ts`): login redirect, API token minting/revocation** — REST-only.
+  CF Access login is a browser redirect flow; token minting/revocation is a sensitive
+  credential operation kept off the MCP surface.
+- **Workspace-scoped API tokens (`POST/GET/DELETE /api/workspaces/:slug/tokens`)** —
+  REST-only, same rationale as auth tokens above.
+- **`GET /api/workspaces/:slug/mcp-info`** — REST-only. Bootstraps how to connect an MCP
+  client in the first place; inherently can't be an MCP tool.
+- **Cross-workspace project list (`GET /api/projects` → `listAllProjects`)** — REST-only.
+  MCP connections are bound to a single workspace (`/mcp/<workspaceId>`), so a
+  cross-workspace listing doesn't fit the MCP connection model. MCP's `list_projects` is
+  the single-workspace equivalent (different, plainer shape — no `open_issue_count` /
+  `workspace_name` rollups).
+- **Public issue sharing (`POST /api/issues/:id/share`, `GET /api/share/:token`)** —
+  REST-only. Share-link creation/redemption is a browser-facing feature (the redemption
+  endpoint is intentionally unauthenticated by token).
+- **`get_prioritized_issues`** — MCP-only. An agent-productivity tool ("what should I
+  work on next") with no natural REST/browser analog.
+
 ### The security invariant: always scope by workspace
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked - e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
 
