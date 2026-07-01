@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
 import { apiFetch } from "../utils/api-client";
-import { renderMdWithWikilinks } from "../utils/markdown";
+import { renderMdWithWikilinks, renderMermaidDiagrams } from "../utils/markdown";
 import MarkdownEditor from "./MarkdownEditor";
 
 interface SearchResult {
@@ -321,6 +321,15 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		);
 	}, [page?.content]);
 
+	// Hydrate ```mermaid code blocks into rendered diagrams
+	useEffect(() => {
+		const container = contentRef.current;
+		if (!container || !page) return;
+		renderMermaidDiagrams(container).catch(() => {
+			// non-fatal — leave the raw code block visible
+		});
+	}, [page?.content]);
+
 	// PROJ-113: IntersectionObserver for active heading
 	useEffect(() => {
 		if (toc.length < 3) return;
@@ -617,6 +626,8 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 				.wiki-link-broken { color: var(--text-muted); text-decoration: underline; text-decoration-style: dashed; text-underline-offset: 2px; }
 				.wiki-link-broken a { font-size: 0.8em; margin-left: 0.2em; color: var(--text-muted); text-decoration: none; border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
 				.wiki-link-broken a:hover { color: var(--accent); border-color: var(--accent); }
+				.prose pre.mermaid { display: flex; justify-content: center; background: none; padding: 0; }
+				.prose pre.mermaid svg { max-width: 100%; width: auto; height: auto; }
 				@media (max-width: 640px) {
 					.wiki-breadcrumb button { max-width: 8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 				}
