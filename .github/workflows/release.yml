@@ -16,8 +16,16 @@ permissions:
   contents: write   # create the GitHub Release
 
 jobs:
+  # Run the full CI suite (tests, type-check, catalog freshness, island API) as a
+  # gate. Reuses ci.yml so the checks never drift from the branch/PR CI. The
+  # release job below won't start unless this passes.
+  ci:
+    name: CI checks
+    uses: ./.github/workflows/ci.yml
+
   release:
     name: Build & publish release artifact
+    needs: ci
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ github.event.inputs.version || github.ref_name }}
