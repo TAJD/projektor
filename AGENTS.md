@@ -137,16 +137,16 @@ curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 Then open **http://localhost:4321** - with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
-**Before opening a PR:** `pnpm turbo type-check` and `pnpm --filter @projektor/api test` must both be green. CI runs exactly these.
+**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/api test`, `pnpm --filter @projektor/web test`, and `pnpm --filter @projektor/web build` must all be green. CI runs exactly these.
 
 ## Git hooks (lefthook)
 
 `pnpm install` runs `prepare`, which calls `lefthook install` and wires two hooks:
 
-- **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages).
-- **pre-push** - `pnpm --filter @projektor/api test` (the ~8s vitest suite; too slow for every commit but catches the failures that most often break CI).
+- **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages), `pnpm biome check --changed --no-errors-on-unmatched` (lint, changed files only), and the island API convention check.
+- **pre-push** - `pnpm --filter @projektor/api test` and `pnpm --filter @projektor/web test` (too slow for every commit but catches the failures that most often break CI).
 
-These mirror CI (`.github/workflows/ci.yml`) exactly. New contributors get them automatically after `pnpm install`.
+These mirror CI (`.github/workflows/ci.yml`), which additionally runs `pnpm lint` (full repo) and `pnpm --filter @projektor/web build` as PR gates. New contributors get the hooks automatically after `pnpm install`.
 
 **Bypass for WIP commits/pushes:** pass `--no-verify` (or `-n`) to git:
 
@@ -266,10 +266,13 @@ own the same island file. Assign each island to exactly one agent per batch.
 builds the artifact and the config-only deploy repo (`projektor-workspace`) picks
 it up. See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/).
 
-**CI commands** (must both pass before opening a PR):
+**CI commands** (must all pass before opening a PR):
 ```bash
+pnpm lint
 pnpm turbo type-check
 pnpm --filter @projektor/api test
+pnpm --filter @projektor/web test
+pnpm --filter @projektor/web build
 ```
 
 **Merge ordering rule:** if two agents both touch the same frontend file (e.g.
