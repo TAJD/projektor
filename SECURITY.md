@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security issues **privately** — do not open a public issue.
+Please report security issues **privately** - do not open a public issue.
 
 Email the maintainer directly at **tajdickson@protonmail.com** with:
 
@@ -20,4 +20,4 @@ projektor is a self-hosted application: each deployment runs on the operator's
 own Cloudflare account, behind their own Cloudflare Access configuration. Reports
 about the projektor codebase itself are in scope; misconfiguration of an
 individual deployment (e.g. a missing Access policy) is the operator's
-responsibility — see [CONFIGURE.md in the deploy repo](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
+responsibility - see [CONFIGURE.md in the deploy repo](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).

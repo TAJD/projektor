@@ -1,9 +1,9 @@
-# projektor deploy config — copy this to ./wrangler.toml and fill in the REPLACE_ values.
+# projektor deploy config - copy this to ./wrangler.toml and fill in the REPLACE_ values.
 #
 # This file ships inside the release artifact. After you extract the artifact into
 # ./vendor, the paths below (worker.js, web, migrations) resolve relative to your
 # deploy repo root. You own this copy: fill in your Cloudflare resource IDs once;
-# on a version bump, re-extract the artifact — these paths do not change.
+# on a version bump, re-extract the artifact - these paths do not change.
 
 name = "projektor"
 main = "./vendor/worker.js"
@@ -55,5 +55,5 @@ AUTO_JOIN_ROLE = "viewer"
 
 # ─── Secrets (set ONCE; they persist on the Worker across every deploy) ────────
 #   wrangler secret put JWT_SECRET
-# JWT_SECRET — random string used for API token signing. CI does NOT manage this;
+# JWT_SECRET - random string used for API token signing. CI does NOT manage this;
 # set it once and it survives future deploys.

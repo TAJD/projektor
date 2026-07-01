@@ -1,5 +1,5 @@
 # Local development config. The REAL Cloudflare resource IDs for the deployed
-# instance live in the private projektor-workspace repo's wrangler.toml — never
+# instance live in the private projektor-workspace repo's wrangler.toml - never
 # commit real account/database/KV IDs here. Local dev (`wrangler dev` + `--local`
 # migrations) uses Miniflare and does not need real IDs, so placeholders are fine.
 name = "projektor-api"
@@ -42,4 +42,4 @@ AUTO_JOIN_ROLE = "viewer"
 # CF_ACCESS_TEAM_DOMAIN  (override here or via secret)
 # CF_ACCESS_AUDIENCE     (override here or via secret)
 # DEV_USER_EMAIL         (local dev only)
-# BOOTSTRAP_SECRET       (local dev only — required to use GET /bootstrap; if unset, the endpoint is disabled)
+# BOOTSTRAP_SECRET       (local dev only - required to use GET /bootstrap; if unset, the endpoint is disabled)

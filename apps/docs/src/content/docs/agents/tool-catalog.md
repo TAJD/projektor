@@ -9,7 +9,7 @@ All inputs and outputs are JSON. The table below is generated from
 `apps/api/src/mcp/*.ts` and freshness-checked by CI, so it always matches the
 running server.
 
-<!-- gen-mcp-catalog:start — generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
+<!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
 **67 tools across 15 domains.**
 
@@ -84,7 +84,7 @@ running server.
 | `list_issues` | List issues in the workspace, optionally filtered by status, priority, project, or assignee |
 | `get_issue` | Get a single issue by ID or project key + number (e.g. "PROJ-42") |
 | `create_issue` | Create a new issue in a project |
-| `update_issue` | Update an issue — status, priority, title, body, assignee, or labels |
+| `update_issue` | Update an issue - status, priority, title, body, assignee, or labels |
 | `search_issues` | Search issues by keyword in title or body |
 | `delete_issue` | Delete an issue by ID |
 | `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. |
@@ -154,7 +154,7 @@ running server.
 | `list_sprints` | List sprints for a project, ordered by creation date |
 | `get_sprint` | Get a sprint by ID |
 | `create_sprint` | Create a new sprint in a project |
-| `update_sprint` | Update sprint fields — name, goal, status, start/end dates |
+| `update_sprint` | Update sprint fields - name, goal, status, start/end dates |
 | `complete_sprint` | Mark an active sprint as completed |
 | `delete_sprint` | Delete a sprint (issues in the sprint will have their sprint_id cleared) |
 | `move_issues_to_sprint` | Bulk move issues into a sprint by setting their sprint_id |

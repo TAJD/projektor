@@ -1,4 +1,4 @@
-# Playwright E2E — Kanban Board (PROJ-61)
+# Playwright E2E - Kanban Board (PROJ-61)
 
 End-to-end tests for the board drag-and-drop feature and its mobile guards.
 These tests target a **deployed dev instance**, not a local dev server.
@@ -76,7 +76,7 @@ Removes `e2e/.e2e-ctx.json`.  The test workspace itself is left on the deploymen
 (no delete-workspace API endpoint exists); old `e2e-*` workspaces can be cleaned
 up manually via the API if needed.
 
-### Test: Desktop drag (`board.spec.ts` — `desktop` project)
+### Test: Desktop drag (`board.spec.ts` - `desktop` project)
 
 1. Navigates to `/issues`, injects the test workspace slug + board view into
    `localStorage`, reloads.
@@ -109,7 +109,7 @@ The `onDragStart` handler in IssueList.tsx calls `e.preventDefault()` when
 | Check | Status |
 |---|---|
 | `pnpm lint` (Biome) | ✅ Run against this codebase |
-| `pnpm --filter @projektor/web type-check` (astro check) | ✅ Run — e2e/ is outside `src/` so not processed |
+| `pnpm --filter @projektor/web type-check` (astro check) | ✅ Run - e2e/ is outside `src/` so not processed |
 | `playwright test --list` (config parse) | ✅ Run after `pnpm install` |
 | Actual browser tests (drag, PATCH, mobile layout) | ⏳ **Requires** `E2E_BASE_URL` pointing at a live dev deployment |
 
