@@ -1,8 +1,11 @@
 ---
+import pkg from '../../package.json';
+
 interface Props {
   title?: string;
 }
 const { title = 'Projektor' } = Astro.props;
+const appVersion = pkg.version;
 
 const path = Astro.url.pathname;
 const isActive = (href: string): boolean =>
@@ -333,6 +336,13 @@ const navItems = [
       }
       .theme-toggle:hover { color: var(--text); }
 
+      .sidebar-version {
+        padding: 0.375rem 0.5rem 0;
+        font-size: 0.6875rem;
+        color: var(--text-muted);
+        user-select: none;
+      }
+
       /* ── Mobile top bar + hamburger (hidden on desktop) ───────────────── */
       .mobile-topbar { display: none; }
       .drawer-overlay { display: none; }
@@ -531,6 +541,7 @@ const navItems = [
         <div class="sidebar-footer">
           <button class="theme-toggle" aria-label="Toggle colour scheme">🌙</button>
         </div>
+        <div class="sidebar-version">v{appVersion}</div>
       </aside>
 
       <div class="app-main">
