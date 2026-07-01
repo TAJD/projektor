@@ -25,9 +25,11 @@ jobs:
           pnpm --filter @projektor/api gen:catalog
           git diff --exit-code -- apps/docs/src/content/docs/agents/tool-catalog.md \
             || { echo "::error::MCP tool catalog is stale. Run 'pnpm --filter @projektor/api gen:catalog' and commit the result."; exit 1; }
+      - run: pnpm lint
       - run: pnpm turbo type-check
       - run: pnpm --filter @projektor/api test
       - run: pnpm --filter @projektor/web test
+      - run: pnpm --filter @projektor/web build
       - name: Island API convention
         run: bash scripts/check-island-api.sh
 # E2E tests: run manually with 'pnpm --filter @projektor/web test:e2e'
