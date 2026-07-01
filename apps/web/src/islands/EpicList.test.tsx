@@ -148,7 +148,10 @@ describe("EpicList", () => {
 					});
 				}
 				if (u.includes("/api/issues")) {
-					return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [EPIC_ISSUE] }) });
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve({ items: [EPIC_ISSUE] }),
+					});
 				}
 				return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
 			})
