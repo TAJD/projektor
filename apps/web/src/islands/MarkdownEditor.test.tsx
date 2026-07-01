@@ -4,7 +4,7 @@
 // renders a live preview pane. The pattern: render with props, assert on the
 // toolbar buttons and preview pane content. cleanup runs via setup.ts afterEach.
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MarkdownEditor from "./MarkdownEditor";
 
 describe("MarkdownEditor", () => {
@@ -58,6 +58,47 @@ describe("MarkdownEditor", () => {
 		const { container } = render(<MarkdownEditor value="" onChange={() => {}} />);
 		const root = container.firstElementChild;
 		expect(root?.className).toContain("normal-case");
+	});
+
+	describe("debounced preview render (PROJ-227)", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("does not update the preview pane until the debounce elapses", async () => {
+			const { rerender } = render(<MarkdownEditor value="" onChange={() => {}} />);
+			expect(screen.getByText(/Nothing to preview/i)).toBeTruthy();
+
+			rerender(<MarkdownEditor value="Fresh text" onChange={() => {}} />);
+
+			// Preview state hasn't re-rendered yet — the empty-state message still shows.
+			expect(screen.getByText(/Nothing to preview/i)).toBeTruthy();
+
+			await vi.advanceTimersByTimeAsync(200);
+
+			expect(screen.queryByText(/Nothing to preview/i)).toBeNull();
+		});
+
+		it("restarts the debounce timer on rapid successive edits instead of rendering each keystroke", async () => {
+			const { rerender } = render(<MarkdownEditor value="" onChange={() => {}} />);
+
+			rerender(<MarkdownEditor value="F" onChange={() => {}} />);
+			await vi.advanceTimersByTimeAsync(150);
+			rerender(<MarkdownEditor value="Fr" onChange={() => {}} />);
+			await vi.advanceTimersByTimeAsync(150);
+			rerender(<MarkdownEditor value="Fresh text" onChange={() => {}} />);
+
+			// Each edit arrived within 200ms of the last, so no render has fired yet.
+			expect(screen.getByText(/Nothing to preview/i)).toBeTruthy();
+
+			await vi.advanceTimersByTimeAsync(200);
+
+			expect(screen.queryByText(/Nothing to preview/i)).toBeNull();
+		});
 	});
 
 	it("switches to preview pane when the mobile Preview button is clicked", () => {

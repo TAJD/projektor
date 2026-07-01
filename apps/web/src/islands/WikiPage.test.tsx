@@ -199,5 +199,43 @@ describe("WikiPage", () => {
 				expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
 			});
 		});
+
+		it("keeps the draft in localStorage when editing is cancelled", async () => {
+			history.replaceState(null, "", "?slug=my-page");
+			mockFetchWiki(PAGE);
+			render(<WikiPage />);
+			await screen.findByText("My Page");
+
+			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+			const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
+			fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
+			await vi.advanceTimersByTimeAsync(1000);
+			expect(localStorage.getItem("wiki-draft:w1")).toBeTruthy();
+
+			fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+			const raw = localStorage.getItem("wiki-draft:w1");
+			expect(raw).toBeTruthy();
+			expect(JSON.parse(raw as string).title).toBe("My Page Edited");
+		});
+
+		it("flushes unflushed edits to the draft when leaving edit mode via navigation", async () => {
+			history.replaceState(null, "", "?slug=my-page");
+			mockFetchWiki(PAGE);
+			render(<WikiPage />);
+			await screen.findByText("My Page");
+
+			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+			const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
+			fireEvent.input(titleInput, { target: { value: "Typed just before navigating away" } });
+
+			// Navigate away (e.g. clicking a sidebar link) before the 1s debounce fires.
+			expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
+			fireEvent.click(screen.getByRole("button", { name: "+ New page" }));
+
+			const raw = localStorage.getItem("wiki-draft:w1");
+			expect(raw).toBeTruthy();
+			expect(JSON.parse(raw as string).title).toBe("Typed just before navigating away");
+		});
 	});
 });

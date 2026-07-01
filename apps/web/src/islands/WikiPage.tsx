@@ -360,6 +360,44 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		return () => clearTimeout(timer);
 	}, [editing, editTitle, editContent, page, draftBanner]);
 
+	// Latest edit state for the flush-on-leave effect below, since its cleanup
+	// closure would otherwise only see the values from when `editing` last changed.
+	const latestDraftStateRef = useRef({ editTitle, editContent, page, draftBanner });
+	latestDraftStateRef.current = { editTitle, editContent, page, draftBanner };
+
+	// save() clears the draft itself right before leaving edit mode; set this to
+	// suppress the flush below so it doesn't resurrect the just-cleared draft.
+	const skipLeaveFlushRef = useRef(false);
+
+	// Flush any not-yet-debounced edits to localStorage when leaving edit mode
+	// via navigation (not just Save/Cancel), so a quick click-away doesn't drop
+	// the last <1s of keystrokes from the safety-net draft.
+	useEffect(() => {
+		const wasEditing = editing;
+		return () => {
+			if (!wasEditing) return;
+			if (skipLeaveFlushRef.current) {
+				skipLeaveFlushRef.current = false;
+				return;
+			}
+			const {
+				editTitle: t,
+				editContent: c,
+				page: p,
+				draftBanner: db,
+			} = latestDraftStateRef.current;
+			if (!p || db) return;
+			try {
+				localStorage.setItem(
+					draftKey(p.id),
+					JSON.stringify({ title: t, content: c, savedAt: Date.now() })
+				);
+			} catch {
+				// non-fatal
+			}
+		};
+	}, [editing]);
+
 	function navigateTo(s: string) {
 		setCreating(false);
 		setEditing(false);
@@ -434,6 +472,7 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 			}
 			await fetchPage(page.slug);
 			await fetchRevisions(page.slug);
+			skipLeaveFlushRef.current = true;
 			setEditing(false);
 		} catch (e) {
 			setSaveError(`Save failed: ${String(e)}`);
