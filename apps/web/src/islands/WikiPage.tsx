@@ -67,6 +67,10 @@ function formatBytes(bytes: number): string {
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function draftKey(pageId: string): string {
+	return `wiki-draft:${pageId}`;
+}
+
 function flattenTree(nodes: TreeNode[], parentId: string | null = null): Record<string, FlatEntry> {
 	const map: Record<string, FlatEntry> = {};
 	for (const node of nodes) {
@@ -145,6 +149,11 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 	const [editContent, setEditContent] = useState("");
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
+	const [draftBanner, setDraftBanner] = useState<{
+		title: string;
+		content: string;
+		savedAt: number;
+	} | null>(null);
 
 	const [creating, setCreating] = useState(false);
 	const [createTitle, setCreateTitle] = useState("");
@@ -335,6 +344,22 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		return () => observer.disconnect();
 	}, [toc]);
 
+	// PROJ-227: debounced draft autosave to localStorage while editing
+	useEffect(() => {
+		if (!editing || !page || draftBanner) return;
+		const timer = setTimeout(() => {
+			try {
+				localStorage.setItem(
+					draftKey(page.id),
+					JSON.stringify({ title: editTitle, content: editContent, savedAt: Date.now() })
+				);
+			} catch {
+				// non-fatal
+			}
+		}, 1000);
+		return () => clearTimeout(timer);
+	}, [editing, editTitle, editContent, page, draftBanner]);
+
 	function navigateTo(s: string) {
 		setCreating(false);
 		setEditing(false);
@@ -347,15 +372,49 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 
 	function startEdit() {
 		if (!page) return;
+		setSaveError(null);
+		setDraftBanner(null);
+		try {
+			const raw = localStorage.getItem(draftKey(page.id));
+			if (raw) {
+				const draft = JSON.parse(raw);
+				if (draft && typeof draft.savedAt === "number" && draft.savedAt > page.updated_at * 1000) {
+					setDraftBanner(draft);
+					setEditing(true);
+					return;
+				}
+			}
+		} catch {
+			// non-fatal — treat as no draft
+		}
 		setEditTitle(page.title);
 		setEditContent(page.content);
-		setSaveError(null);
 		setEditing(true);
+	}
+
+	function restoreDraft() {
+		if (!draftBanner) return;
+		setEditTitle(draftBanner.title);
+		setEditContent(draftBanner.content);
+		setDraftBanner(null);
+	}
+
+	function discardDraft() {
+		if (!page) return;
+		try {
+			localStorage.removeItem(draftKey(page.id));
+		} catch {
+			// non-fatal
+		}
+		setEditTitle(page.title);
+		setEditContent(page.content);
+		setDraftBanner(null);
 	}
 
 	function cancelEdit() {
 		setEditing(false);
 		setSaveError(null);
+		setDraftBanner(null);
 	}
 
 	async function save() {
@@ -368,6 +427,11 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 				workspaceSlug,
 				body: { title: editTitle, content: editContent },
 			});
+			try {
+				localStorage.removeItem(draftKey(page.id));
+			} catch {
+				// non-fatal
+			}
 			await fetchPage(page.slug);
 			await fetchRevisions(page.slug);
 			setEditing(false);
@@ -770,6 +834,22 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 								<p role="alert" class="text-[var(--danger-text)] mb-3">
 									{saveError}
 								</p>
+							)}
+
+							{editing && draftBanner && (
+								<div class="mb-3 px-3 py-2 border border-border rounded bg-surface text-sm flex items-center justify-between gap-3 flex-wrap">
+									<span>
+										Restore unsaved draft from {new Date(draftBanner.savedAt).toLocaleString()}?
+									</span>
+									<div class="flex gap-2 shrink-0">
+										<button type="button" onClick={restoreDraft} class="btn btn-primary btn-sm">
+											Restore
+										</button>
+										<button type="button" onClick={discardDraft} class="btn btn-outline btn-sm">
+											Discard
+										</button>
+									</div>
+								</div>
 							)}
 
 							{editing ? (
