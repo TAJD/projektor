@@ -124,7 +124,7 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 		if (viewRef.current) wrapSelection(viewRef.current, "_", "_");
 	}
 	function heading(n: 1 | 2 | 3) {
-		if (viewRef.current) prefixLines(viewRef.current, "#".repeat(n) + " ");
+		if (viewRef.current) prefixLines(viewRef.current, `${"#".repeat(n)} `);
 	}
 	function link() {
 		const view = viewRef.current;
@@ -268,7 +268,6 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 					{preview ? (
 						<div
 							class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-base prose prose-sm max-w-none"
-							// biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized by DOMPurify in renderMarkdown
 							dangerouslySetInnerHTML={{ __html: preview }}
 						/>
 					) : (

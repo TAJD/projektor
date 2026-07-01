@@ -66,7 +66,8 @@ describe("MarkdownEditor", () => {
 		// The mobile Preview toggle is a button with text 'Preview'
 		const previewToggle = buttons.find((b) => b.textContent === "Preview");
 		expect(previewToggle).toBeDefined();
-		fireEvent.click(previewToggle!);
+		if (!previewToggle) throw new Error("Preview toggle not found");
+		fireEvent.click(previewToggle);
 		// After click the Edit button loses its active styles (class contains bg-transparent)
 		const editToggle = buttons.find((b) => b.textContent === "Edit");
 		expect(editToggle?.className).toContain("border-border");

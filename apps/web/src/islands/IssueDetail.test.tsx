@@ -224,10 +224,14 @@ describe("URL path parsing (pretty-URL fallback)", () => {
 
 		const mockFetch = vi.fn().mockImplementation((url: string) => {
 			const u = String(url);
-			if (u.includes("/comments")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("/links")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("task-statuses")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("?parentId=")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
+			if (u.includes("/comments"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("/links"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("task-statuses"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("?parentId="))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
 			// Ref lookup: GET /api/issues/PROJ-87 → returns the UUID
 			if (u.endsWith("/api/issues/PROJ-87")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "plain-1" }) });
@@ -251,10 +255,14 @@ describe("URL path parsing (pretty-URL fallback)", () => {
 
 		const mockFetch = vi.fn().mockImplementation((url: string) => {
 			const u = String(url);
-			if (u.includes("/comments")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("/links")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("task-statuses")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("?parentId=")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
+			if (u.includes("/comments"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("/links"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("task-statuses"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("?parentId="))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
 		});
 		vi.stubGlobal("fetch", mockFetch);
@@ -274,10 +282,13 @@ describe("URL path parsing (pretty-URL fallback)", () => {
 function makeFetchForDetail(issueData: IssueFixture) {
 	return vi.fn().mockImplementation((url: string) => {
 		const u = String(url);
-		if (u.includes("/comments")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+		if (u.includes("/comments"))
+			return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 		if (u.includes("/links")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-		if (u.includes("task-statuses")) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-		if (u.includes("?parentId=")) return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
+		if (u.includes("task-statuses"))
+			return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+		if (u.includes("?parentId="))
+			return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
 		return Promise.resolve({ ok: true, json: () => Promise.resolve(issueData) });
 	});
 }
@@ -296,7 +307,7 @@ describe("workspace-slug header contract (PROJ-98)", () => {
 			([url]) => String(url).includes("/api/issues/plain-1") && !String(url).includes("?")
 		);
 		expect(issueCall).toBeDefined();
-		const headers = (issueCall![1].headers as Record<string, string>) ?? {};
+		const headers = (issueCall?.[1].headers as Record<string, string>) ?? {};
 		expect(headers["X-Workspace-Slug"]).toBe("my-workspace");
 	});
 

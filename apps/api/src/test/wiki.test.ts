@@ -209,10 +209,9 @@ describe("Wiki API", () => {
 			body: JSON.stringify({ title: "Workspace Page", content: "global" }),
 		});
 
-		const projectRes = await SELF.fetch(
-			`http://localhost/api/wiki?projectId=${project.id}`,
-			{ headers: authHeaders(token, slug) }
-		);
+		const projectRes = await SELF.fetch(`http://localhost/api/wiki?projectId=${project.id}`, {
+			headers: authHeaders(token, slug),
+		});
 		const projectPages = (await projectRes.json()) as Array<{ title: string }>;
 		expect(projectPages).toHaveLength(1);
 		expect(projectPages[0].title).toBe("Project Page");

@@ -1,6 +1,6 @@
 import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { workspaces } from "./core";
 import { agentSessions } from "./agents";
+import { workspaces } from "./core";
 
 export const agentMessages = sqliteTable(
 	"agent_messages",

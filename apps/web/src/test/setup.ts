@@ -14,10 +14,7 @@ import { cleanup } from "@testing-library/preact";
 import { afterEach, beforeEach, vi } from "vitest";
 
 beforeEach(() => {
-	vi.stubGlobal(
-		"fetch",
-		vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) })
-	);
+	vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
 });
 
 afterEach(() => {

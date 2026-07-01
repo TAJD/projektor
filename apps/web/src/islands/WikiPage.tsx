@@ -109,9 +109,7 @@ function TreeNodeItem({
 				style={{ paddingLeft: `${0.5 + depth * 1}rem` }}
 				onClick={() => onNavigate(node.slug)}
 			>
-				{depth > 0 && (
-					<span class="text-text-muted mr-1">{"›"}</span>
-				)}
+				{depth > 0 && <span class="text-text-muted mr-1">{"›"}</span>}
 				{node.title}
 			</button>
 			{node.children.length > 0 && (
@@ -130,8 +128,6 @@ function TreeNodeItem({
 		</li>
 	);
 }
-
-
 
 export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Props) {
 	const [slug, setSlug] = useState("");
@@ -240,7 +236,9 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 			setToc([]);
 			setAttachments([]);
 			try {
-				setPage(await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, { workspaceSlug }));
+				setPage(
+					await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, { workspaceSlug })
+				);
 			} catch (e) {
 				setError(String(e));
 			} finally {
@@ -253,7 +251,10 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 	const fetchRevisions = useCallback(
 		async (s: string) => {
 			try {
-				const data = await apiFetch<WikiRevision[]>(`/api/wiki/${encodeURIComponent(s)}/revisions`, { workspaceSlug });
+				const data = await apiFetch<WikiRevision[]>(
+					`/api/wiki/${encodeURIComponent(s)}/revisions`,
+					{ workspaceSlug }
+				);
 				setRevisions(Array.isArray(data) ? data : []);
 			} catch {
 				// non-fatal
@@ -293,9 +294,7 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 			setToc([]);
 			return;
 		}
-		const headings = Array.from(
-			container.querySelectorAll("h1, h2, h3")
-		) as HTMLElement[];
+		const headings = Array.from(container.querySelectorAll("h1, h2, h3")) as HTMLElement[];
 		headings.forEach((h) => {
 			if (!h.id) {
 				h.id = (h.textContent ?? "")
@@ -306,7 +305,7 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		});
 		setToc(
 			headings.map((h) => ({
-				level: parseInt(h.tagName[1]),
+				level: parseInt(h.tagName[1], 10),
 				text: h.textContent ?? "",
 				id: h.id,
 			}))
@@ -330,7 +329,9 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 			{ rootMargin: "-10% 0% -70% 0%", threshold: 0 }
 		);
 		const headings = container.querySelectorAll("h1[id], h2[id], h3[id]");
-		headings.forEach((h) => observer.observe(h));
+		headings.forEach((h) => {
+			observer.observe(h);
+		});
 		return () => observer.disconnect();
 	}, [toc]);
 
@@ -546,7 +547,10 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 									<button
 										type="button"
 										class="block w-full text-left py-[0.375rem] px-2 rounded border-none cursor-pointer text-sm bg-transparent text-text-base hover:bg-border focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-										onClick={() => { setSearchQuery(""); navigateTo(r.slug); }}
+										onClick={() => {
+											setSearchQuery("");
+											navigateTo(r.slug);
+										}}
 									>
 										<span class="font-medium">{r.title}</span>
 										{r.excerpt && (
@@ -570,361 +574,359 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 								onNavigate={navigateTo}
 							/>
 						))}
-						{pageTree.length === 0 && (
-							<li class="text-[0.8rem] text-text-muted">No pages yet</li>
-						)}
+						{pageTree.length === 0 && <li class="text-[0.8rem] text-text-muted">No pages yet</li>}
 					</ul>
 				)}
 			</aside>
 
 			{/* Main */}
 			<main class="flex-1 p-8 min-w-0">
-					{creating ? (
-						<div>
-							<h2 class="mb-6 text-2xl font-bold text-text-base">
-								{createParentTitle ? `New child page under "${createParentTitle}"` : "New page"}
-							</h2>
-							{createError && (
-								<p role="alert" class="text-[var(--danger-text)] mb-3">
-									{createError}
-								</p>
-							)}
-							<div class="mb-4">
-								<label
-									htmlFor="create-title"
-									class="block font-medium text-sm text-text-base mb-1"
-								>
-									Title <span class="text-[var(--danger-text)]">*</span>
-								</label>
-								<input
-									id="create-title"
-									type="text"
-									value={createTitle}
-									onInput={(e) => {
-										const v = (e.target as HTMLInputElement).value;
-										setCreateTitle(v);
-										if (!slugManuallyEdited) setCreateSlug(slugify(v));
-									}}
-									placeholder="Page title"
-									class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border text-base"
-								/>
-							</div>
-							<div class="mb-4">
-								<label
-									htmlFor="create-slug"
-									class="block font-medium text-sm text-text-base mb-1"
-								>
-									Slug
-								</label>
-								<input
-									id="create-slug"
-									type="text"
-									value={createSlug}
-									onInput={(e) => {
-										setCreateSlug((e.target as HTMLInputElement).value);
-										setSlugManuallyEdited(true);
-									}}
-									placeholder="auto-derived-from-title"
-									class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border font-mono"
-								/>
-							</div>
-							<div class="mb-5">
-								<label class="block font-medium text-sm text-text-base mb-1">
-									Content (Markdown)
-								</label>
-								<MarkdownEditor
-									value={createContent}
-									onChange={setCreateContent}
-									minHeight="280px"
-								/>
-							</div>
-							<div class="flex gap-2">
-								<button
-									type="button"
-									onClick={submitCreate}
-									disabled={createSaving}
-									class="btn btn-primary"
-								>
-									{createSaving ? "Creating…" : "Create page"}
-								</button>
-								<button
-									type="button"
-									onClick={cancelCreate}
-									disabled={createSaving}
-									class="btn btn-outline"
-								>
-									Cancel
-								</button>
-							</div>
+				{creating ? (
+					<div>
+						<h2 class="mb-6 text-2xl font-bold text-text-base">
+							{createParentTitle ? `New child page under "${createParentTitle}"` : "New page"}
+						</h2>
+						{createError && (
+							<p role="alert" class="text-[var(--danger-text)] mb-3">
+								{createError}
+							</p>
+						)}
+						<div class="mb-4">
+							<label htmlFor="create-title" class="block font-medium text-sm text-text-base mb-1">
+								Title <span class="text-[var(--danger-text)]">*</span>
+							</label>
+							<input
+								id="create-title"
+								type="text"
+								value={createTitle}
+								onInput={(e) => {
+									const v = (e.target as HTMLInputElement).value;
+									setCreateTitle(v);
+									if (!slugManuallyEdited) setCreateSlug(slugify(v));
+								}}
+								placeholder="Page title"
+								class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border text-base"
+							/>
 						</div>
-					) : !slug ? (
-						<p class="text-text-muted">
-							Select a page from the sidebar or create a new one.
-						</p>
-					) : loading ? (
-						<p aria-live="polite">Loading…</p>
-					) : error ? (
-						<p role="alert" class="text-[var(--danger-text)]">
-							Failed to load page: {error}
-						</p>
-					) : !page ? null : (
-						<div class="flex gap-8 items-start">
-							<article class="flex-1 min-w-0">
-								{/* Breadcrumbs (PROJ-114) */}
-								{breadcrumbs.length > 1 && (
-									<nav class="wiki-breadcrumb text-[0.8rem] text-text-muted mb-3 flex flex-wrap gap-1 items-center" aria-label="Breadcrumb">
-										<button type="button" class="bg-transparent border-none cursor-pointer text-text-muted text-[0.8rem] p-0 underline decoration-transparent hover:text-accent hover:decoration-accent" onClick={() => navigateTo(breadcrumbs[0].slug)}>
-											Home
-										</button>
-										{breadcrumbs.slice(1, -1).map((crumb) => (
-											<>
-												<span>›</span>
-												<button
-													key={crumb.id}
-													type="button"
-													class="bg-transparent border-none cursor-pointer text-text-muted text-[0.8rem] p-0 underline decoration-transparent hover:text-accent hover:decoration-accent"
-													onClick={() => navigateTo(crumb.slug)}
-												>
-													{crumb.title}
-												</button>
-											</>
-										))}
-										<span>›</span>
-										<span class="text-text-base">
-											{breadcrumbs[breadcrumbs.length - 1].title}
-										</span>
-									</nav>
-								)}
+						<div class="mb-4">
+							<label htmlFor="create-slug" class="block font-medium text-sm text-text-base mb-1">
+								Slug
+							</label>
+							<input
+								id="create-slug"
+								type="text"
+								value={createSlug}
+								onInput={(e) => {
+									setCreateSlug((e.target as HTMLInputElement).value);
+									setSlugManuallyEdited(true);
+								}}
+								placeholder="auto-derived-from-title"
+								class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border font-mono"
+							/>
+						</div>
+						<div class="mb-5">
+							{/* biome-ignore lint/a11y/noLabelWithoutControl: caption for the MarkdownEditor rich-text component, which exposes no associable form control */}
+							<label class="block font-medium text-sm text-text-base mb-1">
+								Content (Markdown)
+							</label>
+							<MarkdownEditor value={createContent} onChange={setCreateContent} minHeight="280px" />
+						</div>
+						<div class="flex gap-2">
+							<button
+								type="button"
+								onClick={submitCreate}
+								disabled={createSaving}
+								class="btn btn-primary"
+							>
+								{createSaving ? "Creating…" : "Create page"}
+							</button>
+							<button
+								type="button"
+								onClick={cancelCreate}
+								disabled={createSaving}
+								class="btn btn-outline"
+							>
+								Cancel
+							</button>
+						</div>
+					</div>
+				) : !slug ? (
+					<p class="text-text-muted">Select a page from the sidebar or create a new one.</p>
+				) : loading ? (
+					<p aria-live="polite">Loading…</p>
+				) : error ? (
+					<p role="alert" class="text-[var(--danger-text)]">
+						Failed to load page: {error}
+					</p>
+				) : !page ? null : (
+					<div class="flex gap-8 items-start">
+						<article class="flex-1 min-w-0">
+							{/* Breadcrumbs (PROJ-114) */}
+							{breadcrumbs.length > 1 && (
+								<nav
+									class="wiki-breadcrumb text-[0.8rem] text-text-muted mb-3 flex flex-wrap gap-1 items-center"
+									aria-label="Breadcrumb"
+								>
+									<button
+										type="button"
+										class="bg-transparent border-none cursor-pointer text-text-muted text-[0.8rem] p-0 underline decoration-transparent hover:text-accent hover:decoration-accent"
+										onClick={() => navigateTo(breadcrumbs[0].slug)}
+									>
+										Home
+									</button>
+									{breadcrumbs.slice(1, -1).map((crumb) => (
+										<>
+											<span>›</span>
+											<button
+												key={crumb.id}
+												type="button"
+												class="bg-transparent border-none cursor-pointer text-text-muted text-[0.8rem] p-0 underline decoration-transparent hover:text-accent hover:decoration-accent"
+												onClick={() => navigateTo(crumb.slug)}
+											>
+												{crumb.title}
+											</button>
+										</>
+									))}
+									<span>›</span>
+									<span class="text-text-base">{breadcrumbs[breadcrumbs.length - 1].title}</span>
+								</nav>
+							)}
 
-								{/* Mobile ToC (PROJ-113) */}
-								{showToc && (
-									<details class="mb-4 max-[900px]:block min-[901px]:hidden">
-										<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">Contents ({toc.length})</summary>
-										<div class="pt-2">
-											<TocList />
-										</div>
-									</details>
-								)}
-
-								<header class="flex items-start justify-between gap-4 mb-1">
-									{editing ? (
-										<input
-											id="wiki-title"
-											type="text"
-											value={editTitle}
-											onInput={(e) => setEditTitle((e.target as HTMLInputElement).value)}
-											aria-label="Page title"
-											class="flex-1 px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border text-2xl font-bold"
-										/>
-									) : (
-										<h1 class="m-0 text-[1.75rem] font-bold text-text-base">
-											{page.title}
-										</h1>
-									)}
-
-									<div class="flex gap-2 shrink-0">
-										{editing ? (
-											<>
-												<button
-													type="button"
-													onClick={save}
-													disabled={saving}
-													class="btn btn-primary"
-												>
-													{saving ? "Saving…" : "Save"}
-												</button>
-												<button
-													type="button"
-													onClick={cancelEdit}
-													disabled={saving}
-													class="btn btn-outline"
-												>
-													Cancel
-												</button>
-											</>
-										) : (
-											<>
-												<button
-													type="button"
-													onClick={() => startCreate(page.id)}
-													class="btn btn-outline btn-sm"
-												>
-													+ Child page
-												</button>
-												<button type="button" onClick={startEdit} class="btn btn-outline">
-													Edit
-												</button>
-												<button type="button" onClick={deletePage} class="btn btn-danger">
-													Delete
-												</button>
-											</>
-										)}
+							{/* Mobile ToC (PROJ-113) */}
+							{showToc && (
+								<details class="mb-4 max-[900px]:block min-[901px]:hidden">
+									<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">
+										Contents ({toc.length})
+									</summary>
+									<div class="pt-2">
+										<TocList />
 									</div>
-								</header>
+								</details>
+							)}
 
-								{latestRevision && (
-									<p class="text-[0.8rem] text-text-muted mt-1 mb-5">
-										Last edited by{" "}
-										<strong class="text-text-base">
-											{latestRevision.author_name ?? "Unknown"}
-										</strong>{" "}
-										at {new Date(latestRevision.created_at * 1000).toLocaleString()}
-									</p>
-								)}
-
-								{saveError && (
-									<p role="alert" class="text-[var(--danger-text)] mb-3">
-										{saveError}
-									</p>
-								)}
-
+							<header class="flex items-start justify-between gap-4 mb-1">
 								{editing ? (
-									<div class="mb-3">
-										<MarkdownEditor
-											value={editContent}
-											onChange={setEditContent}
-											minHeight="320px"
-										/>
-									</div>
-								) : (
-									<div
-										ref={contentRef}
-										class="prose prose-sm max-w-none"
-										dangerouslySetInnerHTML={{ __html: renderMdWithWikilinks(page.content, wikiPages) }}
+									<input
+										id="wiki-title"
+										type="text"
+										value={editTitle}
+										onInput={(e) => setEditTitle((e.target as HTMLInputElement).value)}
+										aria-label="Page title"
+										class="flex-1 px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border text-2xl font-bold"
 									/>
+								) : (
+									<h1 class="m-0 text-[1.75rem] font-bold text-text-base">{page.title}</h1>
 								)}
 
-								{revisions.length > 0 && (
-									<div class="mt-8">
-										<button
-											type="button"
-											onClick={() => setShowHistory((h) => !h)}
-											class="btn btn-outline btn-sm text-text-muted"
-										>
-											{showHistory ? "▲ Hide history" : "▼ History"} ({revisions.length})
-										</button>
-										{showHistory && (
-											<ul class="mt-3 list-none p-0">
-												{revisions.map((r) => (
-													<li
-														key={r.id}
-														class="py-[0.375rem] border-b border-border text-[0.8rem] text-text-muted"
-													>
-														<strong class="text-text-base">
-															{r.author_name ?? "Unknown"}
-														</strong>
-														{" — "}
-														{new Date(r.created_at * 1000).toLocaleString()}
-													</li>
-												))}
-											</ul>
-										)}
-									</div>
-								)}
-
-								{/* Attachments */}
-								<div class="mt-8">
-									<h3 class="text-xs uppercase tracking-[0.05em] text-text-muted font-semibold mb-3 pb-2 border-b border-border">
-										{`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`}
-									</h3>
-
-									{attachments.length > 0 && (
-										<div class="mb-4 flex flex-col gap-2">
-											{attachments.map((a) => {
-												const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
-												return (
-													<div
-														key={a.id}
-														class="flex items-center gap-3 px-3 py-2 border border-border rounded-md bg-surface"
-													>
-														<a
-															href={`/api/files/${a.id}${qs}`}
-															target="_blank"
-															rel="noreferrer"
-															class="text-accent text-sm no-underline hover:underline flex-1 min-w-0 truncate"
-														>
-															{a.filename}
-														</a>
-														<span class="text-xs text-text-muted shrink-0">
-															{formatBytes(a.size)}
-														</span>
-														<button
-															type="button"
-															onClick={() => deleteAttachment(a.id)}
-															aria-label={`Delete ${a.filename}`}
-															class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
-														>
-															×
-														</button>
-													</div>
-												);
-											})}
-										</div>
-									)}
-
-									{uploadFormOpen ? (
-										<div class="flex flex-wrap gap-2 items-center">
-											<label class="relative cursor-pointer">
-												<input
-													type="file"
-													class="sr-only"
-													onChange={(e) => {
-														const f = (e.target as HTMLInputElement).files?.[0] ?? null;
-														setUploadFile(f);
-														setUploadError(null);
-													}}
-												/>
-												<span class="btn btn-outline btn-sm">
-													{uploadFile ? uploadFile.name : "Choose file"}
-												</span>
-											</label>
+								<div class="flex gap-2 shrink-0">
+									{editing ? (
+										<>
 											<button
 												type="button"
-												onClick={uploadAttachment}
-												disabled={!uploadFile || uploading}
+												onClick={save}
+												disabled={saving}
 												class="btn btn-primary"
 											>
-												{uploading ? "Uploading…" : "Upload"}
+												{saving ? "Saving…" : "Save"}
 											</button>
 											<button
 												type="button"
-												onClick={() => { setUploadFormOpen(false); setUploadFile(null); setUploadError(null); }}
+												onClick={cancelEdit}
+												disabled={saving}
 												class="btn btn-outline"
 											>
 												Cancel
 											</button>
-											{uploadError && (
-												<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
-													{uploadError}
-												</span>
-											)}
-										</div>
+										</>
 									) : (
-										<button
-											type="button"
-											onClick={() => setUploadFormOpen(true)}
-											class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1"
-										>
-											<span class="text-base leading-none">+</span>
-											<span>Attach file</span>
-										</button>
+										<>
+											<button
+												type="button"
+												onClick={() => startCreate(page.id)}
+												class="btn btn-outline btn-sm"
+											>
+												+ Child page
+											</button>
+											<button type="button" onClick={startEdit} class="btn btn-outline">
+												Edit
+											</button>
+											<button type="button" onClick={deletePage} class="btn btn-danger">
+												Delete
+											</button>
+										</>
 									)}
 								</div>
+							</header>
 
-								<footer class="mt-8 pt-4 border-t border-border text-xs text-text-muted">
-									Last updated: {new Date(page.updated_at * 1000).toLocaleString()}
-								</footer>
-							</article>
-
-							{/* Sticky ToC sidebar — desktop only (PROJ-113) */}
-							{showToc && (
-								<nav class="w-[190px] shrink-0 sticky top-6 self-start max-h-[calc(100vh-3rem)] overflow-y-auto text-[0.8rem] max-[900px]:hidden" aria-label="Table of contents">
-									<h3 class="m-0 mb-2 text-xs uppercase tracking-[0.05em] text-text-muted font-semibold">Contents</h3>
-									<TocList />
-								</nav>
+							{latestRevision && (
+								<p class="text-[0.8rem] text-text-muted mt-1 mb-5">
+									Last edited by{" "}
+									<strong class="text-text-base">{latestRevision.author_name ?? "Unknown"}</strong>{" "}
+									at {new Date(latestRevision.created_at * 1000).toLocaleString()}
+								</p>
 							)}
-						</div>
-					)}
+
+							{saveError && (
+								<p role="alert" class="text-[var(--danger-text)] mb-3">
+									{saveError}
+								</p>
+							)}
+
+							{editing ? (
+								<div class="mb-3">
+									<MarkdownEditor value={editContent} onChange={setEditContent} minHeight="320px" />
+								</div>
+							) : (
+								<div
+									ref={contentRef}
+									class="prose prose-sm max-w-none"
+									dangerouslySetInnerHTML={{
+										__html: renderMdWithWikilinks(page.content, wikiPages),
+									}}
+								/>
+							)}
+
+							{revisions.length > 0 && (
+								<div class="mt-8">
+									<button
+										type="button"
+										onClick={() => setShowHistory((h) => !h)}
+										class="btn btn-outline btn-sm text-text-muted"
+									>
+										{showHistory ? "▲ Hide history" : "▼ History"} ({revisions.length})
+									</button>
+									{showHistory && (
+										<ul class="mt-3 list-none p-0">
+											{revisions.map((r) => (
+												<li
+													key={r.id}
+													class="py-[0.375rem] border-b border-border text-[0.8rem] text-text-muted"
+												>
+													<strong class="text-text-base">{r.author_name ?? "Unknown"}</strong>
+													{" — "}
+													{new Date(r.created_at * 1000).toLocaleString()}
+												</li>
+											))}
+										</ul>
+									)}
+								</div>
+							)}
+
+							{/* Attachments */}
+							<div class="mt-8">
+								<h3 class="text-xs uppercase tracking-[0.05em] text-text-muted font-semibold mb-3 pb-2 border-b border-border">
+									{`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`}
+								</h3>
+
+								{attachments.length > 0 && (
+									<div class="mb-4 flex flex-col gap-2">
+										{attachments.map((a) => {
+											const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
+											return (
+												<div
+													key={a.id}
+													class="flex items-center gap-3 px-3 py-2 border border-border rounded-md bg-surface"
+												>
+													<a
+														href={`/api/files/${a.id}${qs}`}
+														target="_blank"
+														rel="noreferrer"
+														class="text-accent text-sm no-underline hover:underline flex-1 min-w-0 truncate"
+													>
+														{a.filename}
+													</a>
+													<span class="text-xs text-text-muted shrink-0">
+														{formatBytes(a.size)}
+													</span>
+													<button
+														type="button"
+														onClick={() => deleteAttachment(a.id)}
+														aria-label={`Delete ${a.filename}`}
+														class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
+													>
+														×
+													</button>
+												</div>
+											);
+										})}
+									</div>
+								)}
+
+								{uploadFormOpen ? (
+									<div class="flex flex-wrap gap-2 items-center">
+										<label class="relative cursor-pointer">
+											<input
+												type="file"
+												class="sr-only"
+												onChange={(e) => {
+													const f = (e.target as HTMLInputElement).files?.[0] ?? null;
+													setUploadFile(f);
+													setUploadError(null);
+												}}
+											/>
+											<span class="btn btn-outline btn-sm">
+												{uploadFile ? uploadFile.name : "Choose file"}
+											</span>
+										</label>
+										<button
+											type="button"
+											onClick={uploadAttachment}
+											disabled={!uploadFile || uploading}
+											class="btn btn-primary"
+										>
+											{uploading ? "Uploading…" : "Upload"}
+										</button>
+										<button
+											type="button"
+											onClick={() => {
+												setUploadFormOpen(false);
+												setUploadFile(null);
+												setUploadError(null);
+											}}
+											class="btn btn-outline"
+										>
+											Cancel
+										</button>
+										{uploadError && (
+											<span
+												role="alert"
+												class="text-[0.8rem] text-[var(--danger-text)] self-center"
+											>
+												{uploadError}
+											</span>
+										)}
+									</div>
+								) : (
+									<button
+										type="button"
+										onClick={() => setUploadFormOpen(true)}
+										class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1"
+									>
+										<span class="text-base leading-none">+</span>
+										<span>Attach file</span>
+									</button>
+								)}
+							</div>
+
+							<footer class="mt-8 pt-4 border-t border-border text-xs text-text-muted">
+								Last updated: {new Date(page.updated_at * 1000).toLocaleString()}
+							</footer>
+						</article>
+
+						{/* Sticky ToC sidebar — desktop only (PROJ-113) */}
+						{showToc && (
+							<nav
+								class="w-[190px] shrink-0 sticky top-6 self-start max-h-[calc(100vh-3rem)] overflow-y-auto text-[0.8rem] max-[900px]:hidden"
+								aria-label="Table of contents"
+							>
+								<h3 class="m-0 mb-2 text-xs uppercase tracking-[0.05em] text-text-muted font-semibold">
+									Contents
+								</h3>
+								<TocList />
+							</nav>
+						)}
+					</div>
+				)}
 			</main>
 		</div>
 	);

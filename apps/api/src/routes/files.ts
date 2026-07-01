@@ -50,7 +50,13 @@ router.get("/", async (c) => {
 		"SELECT id, filename, content_type, size, created_at FROM attachments WHERE workspace_id = ? AND entity_type = ? AND entity_id = ? ORDER BY created_at ASC"
 	)
 		.bind(workspace.id, parsed.data, entityId)
-		.all<{ id: string; filename: string; content_type: string; size: number; created_at: number }>();
+		.all<{
+			id: string;
+			filename: string;
+			content_type: string;
+			size: number;
+			created_at: number;
+		}>();
 
 	return c.json(
 		(rows.results ?? []).map((r) => ({

@@ -2,12 +2,12 @@ import { useCallback, useEffect, useState } from "preact/hooks";
 import { formatIssueRef, isValidIssueRef, normalizeIssueRef } from "../lib/issue-ref";
 import { parseStoryPoints } from "../lib/story-points";
 import { apiFetch } from "../utils/api-client";
-import { renderMd } from "../utils/markdown";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
-import Select from "./Select";
-import MarkdownEditor from "./MarkdownEditor";
+import { renderMd } from "../utils/markdown";
 import { categoryColor } from "./board-utils";
+import MarkdownEditor from "./MarkdownEditor";
+import Select from "./Select";
 
 interface TaskStatus {
 	id: string;
@@ -144,6 +144,7 @@ const PencilIcon = () => (
 		stroke-linecap="round"
 		stroke-linejoin="round"
 	>
+		<title>Edit</title>
 		<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
 		<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
 	</svg>
@@ -171,7 +172,12 @@ function SidebarField({ label, children }: { label: string; children: preact.Com
 	);
 }
 
-export default function IssueDetail({ issueId: issueIdProp, issueNumber, projectSlug, workspaceSlug }: Props) {
+export default function IssueDetail({
+	issueId: issueIdProp,
+	issueNumber,
+	projectSlug,
+	workspaceSlug,
+}: Props) {
 	const [issueId, setIssueId] = useState(issueIdProp ?? "");
 	const [issue, setIssue] = useState<IssueData | null>(null);
 	const [comments, setComments] = useState<Comment[]>([]);
@@ -396,7 +402,9 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 			(async () => {
 				if (!workspaceSlug) return;
 				try {
-					const data = await apiFetch<{ members: Member[] }>(`/api/workspaces/${workspaceSlug}`, { workspaceSlug });
+					const data = await apiFetch<{ members: Member[] }>(`/api/workspaces/${workspaceSlug}`, {
+						workspaceSlug,
+					});
 					if (Array.isArray(data?.members)) setMembers(data.members);
 				} catch {
 					// non-fatal — assignee field falls back to display-only
@@ -424,7 +432,11 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 
 		setUpdatingStatus(true);
 		try {
-			await apiFetch(`/api/issues/${issueId}`, { workspaceSlug, method: "PATCH", body: { statusId } });
+			await apiFetch(`/api/issues/${issueId}`, {
+				workspaceSlug,
+				method: "PATCH",
+				body: { statusId },
+			});
 		} catch {
 			await fetchIssue();
 		} finally {
@@ -439,7 +451,11 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 
 		setUpdatingPriority(true);
 		try {
-			await apiFetch(`/api/issues/${issueId}`, { workspaceSlug, method: "PATCH", body: { priority } });
+			await apiFetch(`/api/issues/${issueId}`, {
+				workspaceSlug,
+				method: "PATCH",
+				body: { priority },
+			});
 		} catch {
 			await fetchIssue();
 		} finally {
@@ -453,7 +469,11 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 
 		setIssue((prev) =>
 			prev
-				? { ...prev, assignee_id: assigneeId || null, assignee_name: member?.name ?? member?.email ?? null }
+				? {
+						...prev,
+						assignee_id: assigneeId || null,
+						assignee_name: member?.name ?? member?.email ?? null,
+					}
 				: prev
 		);
 
@@ -519,7 +539,11 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 		setSavingBody(true);
 		setSaveBodyError(null);
 		try {
-			await apiFetch(`/api/issues/${issueId}`, { workspaceSlug, method: "PATCH", body: { body: editBody } });
+			await apiFetch(`/api/issues/${issueId}`, {
+				workspaceSlug,
+				method: "PATCH",
+				body: { body: editBody },
+			});
 			await fetchIssue();
 			setEditingBody(false);
 		} catch (e) {
@@ -682,7 +706,10 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 	async function doDeleteComment(commentId: string) {
 		if (!window.confirm("Delete this comment?")) return;
 		try {
-			await apiFetch(`/api/issues/${issueId}/comments/${commentId}`, { workspaceSlug, method: "DELETE" });
+			await apiFetch(`/api/issues/${issueId}/comments/${commentId}`, {
+				workspaceSlug,
+				method: "DELETE",
+			});
 			await fetchComments();
 		} catch {
 			// non-fatal
@@ -760,7 +787,10 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 						← Epics
 					</a>
 				) : (
-					<a href={backHref ?? `/issues${issue.project_key ? `?project=${issue.project_key}` : ""}`} class="text-text-muted no-underline">
+					<a
+						href={backHref ?? `/issues${issue.project_key ? `?project=${issue.project_key}` : ""}`}
+						class="text-text-muted no-underline"
+					>
 						← Issues
 					</a>
 				)}
@@ -792,11 +822,31 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 							class="text-text-muted hover:text-text-base transition-colors leading-none"
 						>
 							{copiedRef ? (
-								<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+								<svg
+									width="12"
+									height="12"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2.5"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<title>Copied</title>
 									<polyline points="20 6 9 17 4 12" />
 								</svg>
 							) : (
-								<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<svg
+									width="12"
+									height="12"
+									viewBox="0 0 24 24"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
+									stroke-linecap="round"
+									stroke-linejoin="round"
+								>
+									<title>Copy</title>
 									<rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
 									<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
 								</svg>
@@ -845,7 +895,12 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 					{/* Parent badge */}
 					{parentEpic && (
 						<a
-							href={issueUrl(parentEpic.project_key, parentEpic.number, parentEpic.title, parentEpic.id)}
+							href={issueUrl(
+								parentEpic.project_key,
+								parentEpic.number,
+								parentEpic.title,
+								parentEpic.id
+							)}
 							class={`inline-flex items-center gap-1 px-2 py-[0.125rem] rounded no-underline text-xs font-medium border ${parentEpic.type_key === "epic" ? "bg-[var(--epic-bg)] text-[var(--epic-text)] border-[var(--epic-border)]" : "bg-surface text-text-muted border-border"}`}
 						>
 							<span>{parentEpic.type_key === "epic" ? "⬡" : "↑"}</span>
@@ -877,14 +932,25 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 								if (e.key === "Escape") cancelEditTitle();
 							}}
 							disabled={savingTitle}
+							// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline editor opens
 							autoFocus
 							class="w-full text-2xl font-bold text-text-base bg-bg border border-border rounded-md px-3 py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
 						/>
 						<div class="flex gap-2">
-							<button type="button" onClick={saveTitle} disabled={savingTitle} class="btn btn-primary btn-sm">
+							<button
+								type="button"
+								onClick={saveTitle}
+								disabled={savingTitle}
+								class="btn btn-primary btn-sm"
+							>
 								{savingTitle ? "Saving…" : "Save"}
 							</button>
-							<button type="button" onClick={cancelEditTitle} disabled={savingTitle} class="btn btn-outline btn-sm">
+							<button
+								type="button"
+								onClick={cancelEditTitle}
+								disabled={savingTitle}
+								class="btn btn-outline btn-sm"
+							>
 								Cancel
 							</button>
 						</div>
@@ -894,6 +960,9 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 						<h1
 							class="m-0 text-2xl font-bold text-text-base leading-tight cursor-pointer"
 							onClick={startEditTitle}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") startEditTitle();
+							}}
 							title="Click to edit title"
 						>
 							{issue.title}
@@ -912,10 +981,8 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 
 			{/* Two-column body */}
 			<div class="flex gap-8 items-start max-sm:flex-col">
-
 				{/* ── Main column ── */}
 				<div class="flex-1 min-w-0">
-
 					{/* Description */}
 					<section class="mb-8">
 						<div class="flex items-center gap-3 mb-4">
@@ -947,10 +1014,20 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 									<MarkdownEditor value={editBody} onChange={setEditBody} minHeight="240px" />
 								</div>
 								<div class="flex gap-2">
-									<button type="button" onClick={saveBody} disabled={savingBody} class="btn btn-primary">
+									<button
+										type="button"
+										onClick={saveBody}
+										disabled={savingBody}
+										class="btn btn-primary"
+									>
 										{savingBody ? "Saving…" : "Save"}
 									</button>
-									<button type="button" onClick={cancelEditBody} disabled={savingBody} class="btn btn-outline">
+									<button
+										type="button"
+										onClick={cancelEditBody}
+										disabled={savingBody}
+										class="btn btn-outline"
+									>
 										Cancel
 									</button>
 								</div>
@@ -1032,9 +1109,7 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 					<section class="mb-8">
 						<SectionDivider title={`Relations${links.length > 0 ? ` (${links.length})` : ""}`} />
 
-						{fetchingLinks && links.length === 0 && (
-							<p class="text-text-muted text-sm">Loading…</p>
-						)}
+						{fetchingLinks && links.length === 0 && <p class="text-text-muted text-sm">Loading…</p>}
 
 						{linksByType.length > 0 && (
 							<div class="mb-4">
@@ -1045,14 +1120,22 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 										</p>
 										<div class="flex flex-wrap gap-2">
 											{group.items.map((link) => {
-												const ref = formatIssueRef(link.linkedIssueProjectKey, link.linkedIssueNumber);
+												const ref = formatIssueRef(
+													link.linkedIssueProjectKey,
+													link.linkedIssueNumber
+												);
 												return (
 													<span
 														key={link.id}
 														class="inline-flex items-center gap-[0.375rem] px-2 py-1 border border-border rounded-md bg-surface text-[0.8rem]"
 													>
 														<a
-															href={issueUrl(link.linkedIssueProjectKey, link.linkedIssueNumber, link.linkedIssueTitle, link.linkedIssueId)}
+															href={issueUrl(
+																link.linkedIssueProjectKey,
+																link.linkedIssueNumber,
+																link.linkedIssueTitle,
+																link.linkedIssueId
+															)}
 															class="text-accent no-underline inline-flex items-center gap-[0.375rem]"
 														>
 															<span class="font-mono text-text-muted">{ref}</span>
@@ -1103,13 +1186,23 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 										if (e.key === "Escape") setLinkFormOpen(false);
 									}}
 									placeholder="PROJ-12"
+									// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline editor opens
 									autoFocus
 									class="px-[0.625rem] py-[0.375rem] border border-border rounded text-sm w-28 max-sm:w-full bg-bg text-text-base"
 								/>
-								<button type="button" onClick={addLink} disabled={addingLink} class="btn btn-primary">
+								<button
+									type="button"
+									onClick={addLink}
+									disabled={addingLink}
+									class="btn btn-primary"
+								>
 									{addingLink ? "Adding…" : "Add"}
 								</button>
-								<button type="button" onClick={() => setLinkFormOpen(false)} class="btn btn-outline">
+								<button
+									type="button"
+									onClick={() => setLinkFormOpen(false)}
+									class="btn btn-outline"
+								>
 									Cancel
 								</button>
 								{linkFormError && (
@@ -1132,7 +1225,9 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 
 					{/* Attachments */}
 					<section class="mb-8">
-						<SectionDivider title={`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`} />
+						<SectionDivider
+							title={`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`}
+						/>
 
 						{attachments.length > 0 && (
 							<div class="mb-4 flex flex-col gap-2">
@@ -1151,9 +1246,7 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 											>
 												{a.filename}
 											</a>
-											<span class="text-xs text-text-muted shrink-0">
-												{formatBytes(a.size)}
-											</span>
+											<span class="text-xs text-text-muted shrink-0">{formatBytes(a.size)}</span>
 											<button
 												type="button"
 												onClick={() => deleteAttachment(a.id)}
@@ -1194,7 +1287,11 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 								</button>
 								<button
 									type="button"
-									onClick={() => { setUploadFormOpen(false); setUploadFile(null); setUploadError(null); }}
+									onClick={() => {
+										setUploadFormOpen(false);
+										setUploadFile(null);
+										setUploadError(null);
+									}}
 									class="btn btn-outline"
 								>
 									Cancel
@@ -1219,7 +1316,9 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 
 					{/* Comments */}
 					<section>
-						<SectionDivider title={`Comments${comments.length > 0 ? ` (${comments.length})` : ""}`} />
+						<SectionDivider
+							title={`Comments${comments.length > 0 ? ` (${comments.length})` : ""}`}
+						/>
 
 						{comments.length === 0 ? (
 							<p class="text-text-muted mb-4">No comments yet.</p>
@@ -1238,24 +1337,26 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 												<span class="text-xs text-text-muted" title={formatDate(c.created_at)}>
 													{relativeTime(c.created_at)}
 												</span>
-												{currentUserId && c.author_id === currentUserId && editingCommentId !== c.id && (
-													<>
-														<button
-															type="button"
-															onClick={() => startEditComment(c)}
-															class="btn btn-outline btn-sm"
-														>
-															Edit
-														</button>
-														<button
-															type="button"
-															onClick={() => doDeleteComment(c.id)}
-															class="btn btn-sm bg-transparent border border-[var(--danger-text)] text-[var(--danger-text)]"
-														>
-															Delete
-														</button>
-													</>
-												)}
+												{currentUserId &&
+													c.author_id === currentUserId &&
+													editingCommentId !== c.id && (
+														<>
+															<button
+																type="button"
+																onClick={() => startEditComment(c)}
+																class="btn btn-outline btn-sm"
+															>
+																Edit
+															</button>
+															<button
+																type="button"
+																onClick={() => doDeleteComment(c.id)}
+																class="btn btn-sm bg-transparent border border-[var(--danger-text)] text-[var(--danger-text)]"
+															>
+																Delete
+															</button>
+														</>
+													)}
 											</div>
 										</div>
 										{editingCommentId === c.id ? (
@@ -1267,7 +1368,9 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 												)}
 												<textarea
 													value={editCommentBody}
-													onInput={(e) => setEditCommentBody((e.target as HTMLTextAreaElement).value)}
+													onInput={(e) =>
+														setEditCommentBody((e.target as HTMLTextAreaElement).value)
+													}
 													rows={4}
 													class="w-full px-3 py-2 border border-border rounded text-sm resize-y box-border mb-2 bg-bg text-text-base"
 												/>
@@ -1329,7 +1432,6 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 				{/* ── Sidebar ── */}
 				<div class="w-[240px] shrink-0 max-sm:w-full sticky top-4 self-start">
 					<div class="rounded-lg border border-border bg-surface px-4 py-2 divide-y divide-[var(--border)]">
-
 						{/* Status */}
 						<SidebarField label="Status">
 							{statuses.length > 0 ? (
@@ -1403,6 +1505,7 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 										}}
 										onBlur={savePoints}
 										disabled={savingPoints}
+										// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline editor opens
 										autoFocus
 										class="w-16 px-[0.375rem] py-[0.125rem] border border-border rounded text-[0.8rem] text-center bg-bg text-text-base"
 									/>
@@ -1428,9 +1531,7 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 							<SidebarField label="Project">
 								<span class="text-sm text-text-base">
 									{issue.project_name}
-									{issue.project_key && (
-										<span class="text-text-muted"> ({issue.project_key})</span>
-									)}
+									{issue.project_key && <span class="text-text-muted"> ({issue.project_key})</span>}
 								</span>
 							</SidebarField>
 						)}
@@ -1444,7 +1545,6 @@ export default function IssueDetail({ issueId: issueIdProp, issueNumber, project
 						<SidebarField label="Updated">
 							<span class="text-sm text-text-base">{formatDate(issue.updated_at)}</span>
 						</SidebarField>
-
 					</div>
 				</div>
 			</div>

@@ -37,11 +37,26 @@ describe("Agent Messages API", () => {
 		});
 	}
 
-	async function mcpCall(method: string, args: Record<string, unknown>, t = token, s = slug, wsId = workspaceId) {
+	async function mcpCall(
+		method: string,
+		args: Record<string, unknown>,
+		t = token,
+		s = slug,
+		wsId = workspaceId
+	) {
 		return SELF.fetch(`http://localhost/mcp/${wsId}`, {
 			method: "POST",
-			headers: { Authorization: `Bearer ${t}`, "X-Workspace-Slug": s, "Content-Type": "application/json" },
-			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: method, arguments: args } }),
+			headers: {
+				Authorization: `Bearer ${t}`,
+				"X-Workspace-Slug": s,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: method, arguments: args },
+			}),
 		});
 	}
 
@@ -67,7 +82,10 @@ describe("Agent Messages API", () => {
 		// Confirm all 3 messages land in the scope before testing pagination
 		const allRes = await listMessages({ scope }, token2, slug);
 		expect(allRes.status).toBe(200);
-		const all = (await allRes.json()) as { items: Array<{ body: string }>; nextCursor: string | null };
+		const all = (await allRes.json()) as {
+			items: Array<{ body: string }>;
+			nextCursor: string | null;
+		};
 		expect(all.items).toHaveLength(3);
 
 		// token3 for page 1 (fresh budget)
@@ -76,7 +94,10 @@ describe("Agent Messages API", () => {
 		// Page 1: limit=2 — composite cursor is "createdAt:id" for same-second stability
 		const page1Res = await listMessages({ scope, limit: "2" }, token3, slug);
 		expect(page1Res.status).toBe(200);
-		const page1 = (await page1Res.json()) as { items: Array<{ body: string }>; nextCursor: string | null };
+		const page1 = (await page1Res.json()) as {
+			items: Array<{ body: string }>;
+			nextCursor: string | null;
+		};
 		expect(page1.items).toHaveLength(2);
 		expect(page1.items[0].body).toBe("message one");
 		expect(page1.items[1].body).toBe("message two");
@@ -89,7 +110,10 @@ describe("Agent Messages API", () => {
 			slug
 		);
 		expect(page2Res.status).toBe(200);
-		const page2 = (await page2Res.json()) as { items: Array<{ body: string }>; nextCursor: string | null };
+		const page2 = (await page2Res.json()) as {
+			items: Array<{ body: string }>;
+			nextCursor: string | null;
+		};
 		expect(page2.items).toHaveLength(1);
 		expect(page2.items[0].body).toBe("message three");
 		expect(page2.nextCursor).toBeNull();
@@ -99,7 +123,9 @@ describe("Agent Messages API", () => {
 		const mcpRes = await mcpCall("list_messages", { scope }, token4, slug);
 		expect(mcpRes.status).toBe(200);
 		const mcpBody = (await mcpRes.json()) as { result: { content: Array<{ text: string }> } };
-		const mcpData = JSON.parse(mcpBody.result.content[0].text) as { items: Array<{ body: string }> };
+		const mcpData = JSON.parse(mcpBody.result.content[0].text) as {
+			items: Array<{ body: string }>;
+		};
 		expect(mcpData.items).toHaveLength(3);
 	});
 
@@ -154,7 +180,9 @@ describe("Agent Messages API", () => {
 		});
 		expect(claimRes.status).toBe(200);
 		const claimBody = (await claimRes.json()) as { result: { content: Array<{ text: string }> } };
-		expect(JSON.parse(claimBody.result.content[0].text)).toMatchObject({ created: [{ path: "src/coord.ts" }] });
+		expect(JSON.parse(claimBody.result.content[0].text)).toMatchObject({
+			created: [{ path: "src/coord.ts" }],
+		});
 
 		// agent2 tries to claim path A without force — expect conflict
 		const conflictRes = await mcpCall("claim_files", {
@@ -164,7 +192,9 @@ describe("Agent Messages API", () => {
 			force: false,
 		});
 		expect(conflictRes.status).toBe(200);
-		const conflictBody = (await conflictRes.json()) as { error?: { code: number; message: string } };
+		const conflictBody = (await conflictRes.json()) as {
+			error?: { code: number; message: string };
+		};
 		expect(conflictBody.error?.code).toBe(-32000);
 
 		// agent2 posts a message to the issue channel
@@ -181,45 +211,73 @@ describe("Agent Messages API", () => {
 		const readRes = await mcpCall("list_messages", { scope }, token2, slug);
 		expect(readRes.status).toBe(200);
 		const readBody = (await readRes.json()) as { result: { content: Array<{ text: string }> } };
-		const readData = JSON.parse(readBody.result.content[0].text) as { items: Array<{ body: string }> };
+		const readData = JSON.parse(readBody.result.content[0].text) as {
+			items: Array<{ body: string }>;
+		};
 		expect(readData.items.some((m) => m.body.includes("can you release?"))).toBe(true);
 
 		// agent1 releases path A
-		const releaseRes = await mcpCall("release_files", { paths: ["src/coord.ts"], issueId: issue2.id }, token2, slug);
+		const releaseRes = await mcpCall(
+			"release_files",
+			{ paths: ["src/coord.ts"], issueId: issue2.id },
+			token2,
+			slug
+		);
 		expect(releaseRes.status).toBe(200);
 
 		// agent2 re-claims path A successfully
-		const reclaimRes = await mcpCall("claim_files", {
-			issueId: issue2.id,
-			agentId: agent2.id,
-			paths: ["src/coord.ts"],
-		}, token2, slug);
+		const reclaimRes = await mcpCall(
+			"claim_files",
+			{
+				issueId: issue2.id,
+				agentId: agent2.id,
+				paths: ["src/coord.ts"],
+			},
+			token2,
+			slug
+		);
 		expect(reclaimRes.status).toBe(200);
-		const reclaimBody = (await reclaimRes.json()) as { result: { content: Array<{ text: string }> } };
-		const reclaimData = JSON.parse(reclaimBody.result.content[0].text) as { created: Array<{ issueId: string }> };
+		const reclaimBody = (await reclaimRes.json()) as {
+			result: { content: Array<{ text: string }> };
+		};
+		const reclaimData = JSON.parse(reclaimBody.result.content[0].text) as {
+			created: Array<{ issueId: string }>;
+		};
 		expect(reclaimData.created[0].issueId).toBe(issue2.id);
 
 		// agent1 claims path B so agent2 can force-steal it
-		const claimBRes = await mcpCall("claim_files", {
-			issueId: issue2.id,
-			agentId: agent1.id,
-			paths: ["src/forced.ts"],
-		}, token2, slug);
+		const claimBRes = await mcpCall(
+			"claim_files",
+			{
+				issueId: issue2.id,
+				agentId: agent1.id,
+				paths: ["src/forced.ts"],
+			},
+			token2,
+			slug
+		);
 		expect(claimBRes.status).toBe(200);
 
 		// Phase 3 (token3): agent2 force-claims path B; assert override notice in list_messages
 		const token3 = await seedToken(workspaceId, userId);
 		const issue3 = await seedIssue(workspaceId, projectId, userId, { title: "Force Issue" });
 
-		const forceRes = await mcpCall("claim_files", {
-			issueId: issue3.id,
-			agentId: agent2.id,
-			paths: ["src/forced.ts"],
-			force: true,
-		}, token3, slug);
+		const forceRes = await mcpCall(
+			"claim_files",
+			{
+				issueId: issue3.id,
+				agentId: agent2.id,
+				paths: ["src/forced.ts"],
+				force: true,
+			},
+			token3,
+			slug
+		);
 		expect(forceRes.status).toBe(200);
 		const forceBody = (await forceRes.json()) as { result: { content: Array<{ text: string }> } };
-		const forceData = JSON.parse(forceBody.result.content[0].text) as { overridden: Array<unknown> };
+		const forceData = JSON.parse(forceBody.result.content[0].text) as {
+			overridden: Array<unknown>;
+		};
 		expect(forceData.overridden).toHaveLength(1);
 
 		// The force-override notice should appear in the issue3 scope channel (Epic B wiring)
@@ -227,8 +285,14 @@ describe("Agent Messages API", () => {
 		const noticeRes = await mcpCall("list_messages", { scope: noticeScope }, token3, slug);
 		expect(noticeRes.status).toBe(200);
 		const noticeBody = (await noticeRes.json()) as { result: { content: Array<{ text: string }> } };
-		const noticeData = JSON.parse(noticeBody.result.content[0].text) as { items: Array<{ body: string }> };
-		expect(noticeData.items.some((m) => m.body.includes("force-claimed") && m.body.includes("src/forced.ts"))).toBe(true);
+		const noticeData = JSON.parse(noticeBody.result.content[0].text) as {
+			items: Array<{ body: string }>;
+		};
+		expect(
+			noticeData.items.some(
+				(m) => m.body.includes("force-claimed") && m.body.includes("src/forced.ts")
+			)
+		).toBe(true);
 	});
 
 	// C4: workspace isolation; issue-scope isolation; cursor stability
@@ -242,7 +306,9 @@ describe("Agent Messages API", () => {
 		// Workspace Y should not see workspace X's messages
 		const other = await seedFixture();
 		const otherProject = await seedProject(other.workspace.id);
-		const otherIssue = await seedIssue(other.workspace.id, otherProject.id, other.user.id, { title: "Other" });
+		const otherIssue = await seedIssue(other.workspace.id, otherProject.id, other.user.id, {
+			title: "Other",
+		});
 		const otherScope = `issue:${otherIssue.id}`;
 
 		// Post in workspace Y's issue scope

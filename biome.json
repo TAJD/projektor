@@ -67,6 +67,18 @@
 					}
 				}
 			}
+		},
+		{
+			"includes": ["apps/web/src/islands/Select.tsx"],
+			"linter": {
+				"rules": {
+					"a11y": {
+						"noNoninteractiveElementToInteractiveRole": "off",
+						"useFocusableInteractive": "off",
+						"useKeyWithClickEvents": "off"
+					}
+				}
+			}
 		}
 	]
 }

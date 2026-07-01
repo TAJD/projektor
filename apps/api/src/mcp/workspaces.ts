@@ -78,7 +78,11 @@ export const workspacesTools: MCPTool[] = [
 		async handler(_input, ctx) {
 			const orm = drizzle(ctx.db, { schema });
 			const ws = await orm
-				.select({ id: schema.workspaces.id, name: schema.workspaces.name, slug: schema.workspaces.slug })
+				.select({
+					id: schema.workspaces.id,
+					name: schema.workspaces.name,
+					slug: schema.workspaces.slug,
+				})
 				.from(schema.workspaces)
 				.where(eq(schema.workspaces.id, ctx.workspaceId))
 				.get();

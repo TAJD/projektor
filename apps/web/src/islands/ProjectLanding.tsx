@@ -42,7 +42,6 @@ const CATEGORY_COLORS: Record<string, string> = {
 	cancelled: "var(--status-cancelled)",
 };
 
-
 export default function ProjectLanding({ workspaceSlug }: Props) {
 	const [projectId, setProjectId] = useState<string | null>(null);
 	useEffect(() => {
@@ -72,7 +71,10 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 				const [projRes, issuesRes, wikiRes] = await Promise.all([
 					fetch(`/api/projects/${id}`, { credentials: "include", headers }),
 					fetch(`/api/issues?project=${id}`, { credentials: "include", headers }),
-					fetch(`/api/wiki?projectId=${encodeURIComponent(id)}`, { credentials: "include", headers }),
+					fetch(`/api/wiki?projectId=${encodeURIComponent(id)}`, {
+						credentials: "include",
+						headers,
+					}),
 				]);
 
 				if (!projRes.ok) throw new Error(`Failed to load project (HTTP ${projRes.status})`);
@@ -172,9 +174,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 				</nav>
 
 				<div class="flex items-center gap-3 mb-2">
-					<h1 class="m-0 text-2xl font-bold text-text-base">
-						{project.name}
-					</h1>
+					<h1 class="m-0 text-2xl font-bold text-text-base">{project.name}</h1>
 					<span class="font-mono text-xs font-medium px-2 py-[0.125rem] rounded bg-surface border border-border text-text-muted">
 						{project.key}
 					</span>
@@ -218,6 +218,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 							</div>
 						</div>
 					) : (
+						// biome-ignore lint/a11y/useSemanticElements: div contains block-level <p> content, so a native <button> would be invalid HTML; implemented as a fully-keyboard-accessible ARIA button
 						<div
 							role="button"
 							tabIndex={0}
@@ -234,9 +235,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 									{project.description}
 								</p>
 							) : (
-								<p class="m-0 text-text-muted text-sm italic">
-									Add a description…
-								</p>
+								<p class="m-0 text-text-muted text-sm italic">Add a description…</p>
 							)}
 						</div>
 					)}
@@ -245,7 +244,10 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 
 			{/* Recent Issues */}
 			<section class="mb-8" aria-labelledby="recent-issues-heading">
-				<h2 id="recent-issues-heading" class="text-xs font-semibold text-text-muted m-0 mb-3 uppercase tracking-[0.05em]">
+				<h2
+					id="recent-issues-heading"
+					class="text-xs font-semibold text-text-muted m-0 mb-3 uppercase tracking-[0.05em]"
+				>
 					Recent Issues
 				</h2>
 				{recentIssues.length === 0 ? (
@@ -258,10 +260,11 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 								: `#${issue.number}`;
 							const color = CATEGORY_COLORS[issue.status_category ?? ""] ?? "var(--text-muted)";
 							return (
-								<div key={issue.id} class="flex items-baseline gap-2 py-2 border-b border-border last:border-b-0">
-									<span class="font-mono text-xs text-text-muted shrink-0">
-										{ref}
-									</span>
+								<div
+									key={issue.id}
+									class="flex items-baseline gap-2 py-2 border-b border-border last:border-b-0"
+								>
+									<span class="font-mono text-xs text-text-muted shrink-0">{ref}</span>
 									<span class="text-[0.8rem] font-medium shrink-0 min-w-[4rem]" style={{ color }}>
 										{statusDisplayName(issue.status_name, issue.status_key)}
 									</span>
@@ -283,7 +286,10 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 
 			{/* Recent Wiki Pages */}
 			<section class="mb-8" aria-labelledby="recent-wiki-heading">
-				<h2 id="recent-wiki-heading" class="text-xs font-semibold text-text-muted m-0 mb-3 uppercase tracking-[0.05em]">
+				<h2
+					id="recent-wiki-heading"
+					class="text-xs font-semibold text-text-muted m-0 mb-3 uppercase tracking-[0.05em]"
+				>
 					Recent Wiki Pages
 				</h2>
 				{recentWiki.length === 0 ? (

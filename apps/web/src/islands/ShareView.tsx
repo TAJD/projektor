@@ -66,7 +66,12 @@ export default function ShareView() {
 			});
 	}, []);
 
-	if (loading) return <p aria-live="polite" style={{ padding: "2rem" }}>Loading…</p>;
+	if (loading)
+		return (
+			<p aria-live="polite" style={{ padding: "2rem" }}>
+				Loading…
+			</p>
+		);
 
 	if (error) {
 		const isExpired = error === "not_found";
@@ -81,7 +86,15 @@ export default function ShareView() {
 						? "This share link may have expired (links are valid for 3 days) or the URL is incorrect."
 						: "Unable to load the shared issue. Please try again later."}
 				</p>
-				<a href="/" style={{ color: "var(--accent)", textDecoration: "none", marginTop: "1.5rem", display: "inline-block" }}>
+				<a
+					href="/"
+					style={{
+						color: "var(--accent)",
+						textDecoration: "none",
+						marginTop: "1.5rem",
+						display: "inline-block",
+					}}
+				>
 					← Go to Projektor
 				</a>
 			</div>
@@ -111,9 +124,7 @@ export default function ShareView() {
 					color: "var(--text-muted)",
 				}}
 			>
-				<span>
-					Shared view · Expires {formatDate(issue.expires_at)}
-				</span>
+				<span>Shared view · Expires {formatDate(issue.expires_at)}</span>
 				<a href="/" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
 					Sign in to collaborate →
 				</a>
@@ -121,19 +132,28 @@ export default function ShareView() {
 
 			{/* Header */}
 			<header style={{ marginBottom: "1.5rem" }}>
-				<div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+				<div
+					style={{
+						display: "flex",
+						alignItems: "center",
+						gap: "0.5rem",
+						marginBottom: "0.75rem",
+						flexWrap: "wrap",
+					}}
+				>
 					{/* Priority badge */}
-					<span
-						class="badge"
-						style={{ background: priorityStyle.bg, color: priorityStyle.text }}
-					>
+					<span class="badge" style={{ background: priorityStyle.bg, color: priorityStyle.text }}>
 						{PRIORITY_LABELS[issue.priority] ?? issue.priority}
 					</span>
 					{/* Status badge */}
 					{issue.status_name && (
 						<span
 							class="badge"
-							style={{ background: "var(--surface)", color: "var(--text-muted)", border: "1px solid var(--border)" }}
+							style={{
+								background: "var(--surface)",
+								color: "var(--text-muted)",
+								border: "1px solid var(--border)",
+							}}
 						>
 							{issue.status_name}
 						</span>
@@ -141,14 +161,24 @@ export default function ShareView() {
 					{/* Project */}
 					{issue.project_name && (
 						<span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-							{issue.project_name}{issue.project_key ? ` (${issue.project_key})` : ""}
+							{issue.project_name}
+							{issue.project_key ? ` (${issue.project_key})` : ""}
 						</span>
 					)}
 				</div>
 				<h1 style={{ margin: 0, fontSize: "1.375rem", fontWeight: 700, lineHeight: 1.3 }}>
 					{issue.title}
 				</h1>
-				<div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--text-muted)", display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+				<div
+					style={{
+						marginTop: "0.5rem",
+						fontSize: "0.8rem",
+						color: "var(--text-muted)",
+						display: "flex",
+						gap: "1rem",
+						flexWrap: "wrap",
+					}}
+				>
 					{issue.assignee_name && <span>Assignee: {issue.assignee_name}</span>}
 					<span>Created {formatDate(issue.created_at)}</span>
 				</div>
@@ -162,16 +192,34 @@ export default function ShareView() {
 					style={{ marginBottom: "1.5rem" }}
 				/>
 			) : (
-				<p style={{ color: "var(--text-muted)", fontStyle: "italic", marginBottom: "1.5rem" }}>No description.</p>
+				<p style={{ color: "var(--text-muted)", fontStyle: "italic", marginBottom: "1.5rem" }}>
+					No description.
+				</p>
 			)}
 
 			{/* Custom fields */}
 			{issue.customFields.length > 0 && (
 				<div style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
-					<p style={{ fontSize: "0.7rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)", marginBottom: "0.75rem" }}>
+					<p
+						style={{
+							fontSize: "0.7rem",
+							fontWeight: 600,
+							textTransform: "uppercase",
+							letterSpacing: "0.06em",
+							color: "var(--text-muted)",
+							marginBottom: "0.75rem",
+						}}
+					>
 						Fields
 					</p>
-					<dl style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "0.4rem 1rem", fontSize: "0.8125rem" }}>
+					<dl
+						style={{
+							display: "grid",
+							gridTemplateColumns: "max-content 1fr",
+							gap: "0.4rem 1rem",
+							fontSize: "0.8125rem",
+						}}
+					>
 						{issue.customFields.map((f) => (
 							<>
 								<dt style={{ color: "var(--text-muted)", fontWeight: 500 }}>{f.label}</dt>

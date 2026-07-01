@@ -61,7 +61,7 @@ async function validateParentDepth(
 			.prepare("SELECT parent_id FROM wiki_pages WHERE id = ? AND workspace_id = ?")
 			.bind(cur, workspaceId)
 			.first<{ parent_id: string | null }>();
-		if (!row || !row.parent_id) break;
+		if (!row?.parent_id) break;
 		const pid = row.parent_id;
 		if (seen.has(pid)) break;
 		seen.add(pid);

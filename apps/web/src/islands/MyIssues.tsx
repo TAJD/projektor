@@ -91,11 +91,13 @@ export default function MyIssues({ workspaceSlug }: Props) {
 	for (const issue of visible) {
 		const key = issue.project_key ?? "__none__";
 		const name = issue.project_name ?? issue.project_key ?? "No project";
-		if (!byProject.has(key)) {
+		let group = byProject.get(key);
+		if (!group) {
+			group = { name, issues: [] };
+			byProject.set(key, group);
 			projectOrder.push(key);
-			byProject.set(key, { name, issues: [] });
 		}
-		byProject.get(key)!.issues.push(issue);
+		group.issues.push(issue);
 	}
 
 	const hasAny = visible.length > 0;
@@ -129,7 +131,8 @@ export default function MyIssues({ workspaceSlug }: Props) {
 			) : (
 				<div class="flex flex-col gap-8">
 					{projectOrder.map((key) => {
-						const group = byProject.get(key)!;
+						const group = byProject.get(key);
+						if (!group) return null;
 						return (
 							<section key={key}>
 								<h2 class="text-sm font-semibold text-text-muted uppercase tracking-[0.05em] mb-2 pb-1 border-b border-border">
@@ -141,10 +144,18 @@ export default function MyIssues({ workspaceSlug }: Props) {
 									<table class="w-full border-collapse text-[0.9rem]">
 										<thead>
 											<tr class="bg-surface">
-												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">#</th>
-												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold w-full text-text-base">Title</th>
-												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">Priority</th>
-												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">Status</th>
+												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
+													#
+												</th>
+												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold w-full text-text-base">
+													Title
+												</th>
+												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
+													Priority
+												</th>
+												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
+													Status
+												</th>
 											</tr>
 										</thead>
 										<tbody>
@@ -159,7 +170,12 @@ export default function MyIssues({ workspaceSlug }: Props) {
 														</td>
 														<td class="px-3 py-2 align-middle text-text-base">
 															<a
-																href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
+																href={issueUrl(
+																	issue.project_key,
+																	issue.number,
+																	issue.title,
+																	issue.id
+																)}
 																class="text-text-base no-underline hover:underline focus:underline"
 															>
 																{issue.title}
@@ -184,12 +200,20 @@ export default function MyIssues({ workspaceSlug }: Props) {
 								{/* Mobile cards */}
 								<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
 									{group.issues.map((issue) => (
-										<div key={issue.id} class="py-3 px-4 border border-border rounded-md bg-surface">
+										<div
+											key={issue.id}
+											class="py-3 px-4 border border-border rounded-md bg-surface"
+										>
 											<div class="font-mono text-[0.8rem] text-text-muted mb-1">
 												{formatIssueRef(issue.project_key, issue.number)}
 											</div>
-											<a href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)} class="no-underline">
-												<div class="text-[0.9rem] text-text-base font-medium mb-2">{issue.title}</div>
+											<a
+												href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
+												class="no-underline"
+											>
+												<div class="text-[0.9rem] text-text-base font-medium mb-2">
+													{issue.title}
+												</div>
 											</a>
 											<div class="flex gap-[0.375rem] flex-wrap items-center">
 												{priorityBadge(issue)}

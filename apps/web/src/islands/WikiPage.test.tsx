@@ -55,7 +55,10 @@ afterEach(() => {
 
 describe("WikiPage", () => {
 	it("shows 'Select a page' message when no slug in URL", async () => {
-		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }));
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+		);
 		render(<WikiPage />);
 		await waitFor(() => {
 			expect(screen.getByText(/Select a page from the sidebar/i)).toBeTruthy();
