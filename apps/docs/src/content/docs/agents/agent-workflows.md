@@ -1,25 +1,28 @@
-# Agentic workflows
-
+---
+title: "Agentic workflows"
+description: "The end-to-end multi-agent loop: lifecycle, coordination, and project management."
+sidebar:
+  order: 3
+---
 Projektor is **MCP-native**: AI agents are a first-class client, not an afterthought.
 Everything a browser user can do, an agent can do over a JSON-RPC MCP endpoint. This
-page is the map of *how* agents actually work with Projektor — from a single assistant
-triaging your backlog to a fleet of parallel coding agents that never collide.
+page is an overview of the different processes and methods agents can use to enable your work.
 
-The agentic story has **three layers**. Most tools and guides only describe one of them,
-which is why the end-to-end loop is hard to see. Here they are as one picture:
+It's possible to analyse agentic development through three different concerns. Projektor integrates across all of them.
+
 
 | Layer | Runs where | What it does | Reference |
 |------|-----------|--------------|-----------|
 | **1 · Lifecycle** *(implementation)* | The client machine | Spawns an isolated workspace per agent (git worktree + branch + terminal), and reaps it cleanly when done | This page (§1) |
-| **2 · Coordination** | Projektor MCP | Lets parallel agents announce themselves, claim files, and message each other so they don't clobber each other's work | [Contributor conventions](./AGENTS.md) (Fleet coordination protocol) |
-| **3 · Project management** | Projektor MCP | The actual work: issues, sprints, wiki, links — and "what should I work on next?" | [MCP tool catalog](./mcp-tools.generated.md), [Connect an agent](./mcp.md) |
+| **2 · Coordination** | Projektor MCP | Lets parallel agents announce themselves, claim files, and message each other so they don't clobber each other's work | [Contributor conventions](https://github.com/TAJD/projektor/blob/main/AGENTS.md) (Fleet coordination protocol) |
+| **3 · Project management** | Projektor MCP | The actual work: issues, sprints, wiki, links — and "what should I work on next?" | [MCP tool catalog](/projektor/agents/tool-catalog/), [Connect an agent](/projektor/agents/mcp-connection/) |
 
 Layers 2 and 3 are Projektor itself. Layer 1 is the harness around it. You can use any
 layer alone — a single agent needs only Layer 3 — but the power comes from combining them.
 
 > **Where this fits.** For how these three layers sit relative to other tools (Jira,
 > Notion, beads) and why Projektor deliberately spans layers 2–3, see
-> [Where Projektor fits](./philosophy.md). That page is the *why*; this one is the *how*.
+> [Where Projektor fits](/projektor/philosophy/where-projektor-fits/). That page is the *why*; this one is the *how*.
 
 ---
 
@@ -68,7 +71,7 @@ backed by MCP tools:
 
 The **step-by-step protocol** — exact call order, payloads, and the file-ownership rules
 that keep agents on disjoint file sets — lives in
-[Contributor conventions → Fleet coordination protocol](./AGENTS.md). That's the operational
+[Contributor conventions → Fleet coordination protocol](https://github.com/TAJD/projektor/blob/main/AGENTS.md). That's the operational
 home; this page is the why.
 
 ---
@@ -78,7 +81,7 @@ home; this page is the why.
 This is the layer most people start with — and a single agent needs nothing else. Over MCP,
 an agent can do everything the UI does: create and triage issues, plan sprints, write wiki
 pages, link related issues, manage members. See the full, generated-from-source list in the
-[MCP tool catalog](./mcp-tools.generated.md), and [Connect an agent](./mcp.md) to wire one up.
+[MCP tool catalog](/projektor/agents/tool-catalog/), and [Connect an agent](/projektor/agents/mcp-connection/) to wire one up.
 
 Two tools matter especially for *autonomous* work:
 
@@ -127,7 +130,7 @@ each layer looks like a curiosity; together they're a reliable multi-agent dev l
 
 ## Where to go next
 
-- **Run a single agent:** [Connect an agent](./mcp.md) → then try the prompts in §3.
-- **Run a fleet on this repo:** [Contributor conventions](./AGENTS.md) — the coordination
+- **Run a single agent:** [Connect an agent](/projektor/agents/mcp-connection/) → then try the prompts in §3.
+- **Run a fleet on this repo:** [Contributor conventions](https://github.com/TAJD/projektor/blob/main/AGENTS.md) — the coordination
   protocol, serialized-file rules, and per-domain file ownership.
-- **Every tool, by domain:** [MCP tool catalog](./mcp-tools.generated.md).
+- **Every tool, by domain:** [MCP tool catalog](/projektor/agents/tool-catalog/).

@@ -7,9 +7,6 @@ on:
     branches: [main]
     paths:
       - "apps/docs/**"
-      - "docs/**"
-      - "README.md"
-      - "AGENTS.md"
       - "apps/api/src/mcp/**"
       - ".github/workflows/docs.yml"
   workflow_dispatch:

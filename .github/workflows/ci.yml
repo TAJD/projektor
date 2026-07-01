@@ -21,8 +21,8 @@ jobs:
       - name: MCP catalog is fresh
         run: |
           pnpm --filter @projektor/api gen:catalog
-          git diff --exit-code -- docs/mcp-tools.generated.md \
-            || { echo "::error::docs/mcp-tools.generated.md is stale. Run 'pnpm --filter @projektor/api gen:catalog' and commit the result."; exit 1; }
+          git diff --exit-code -- apps/docs/src/content/docs/agents/tool-catalog.md \
+            || { echo "::error::MCP tool catalog is stale. Run 'pnpm --filter @projektor/api gen:catalog' and commit the result."; exit 1; }
       - run: pnpm turbo type-check
       - run: pnpm --filter @projektor/api test
       - run: pnpm --filter @projektor/web test

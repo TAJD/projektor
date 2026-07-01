@@ -1,0 +1,36 @@
+---
+title: Projektor
+description: A self-hosted, MCP-native Jira + wiki that runs in a single Cloudflare Worker.
+template: splash
+hero:
+  tagline: A self-hosted Jira + wiki, MCP-native, running entirely on Cloudflare's edge. AI agents are a first-class client — not an afterthought.
+  actions:
+    - text: Connect an agent
+      link: /projektor/agents/mcp-connection/
+      icon: right-arrow
+      variant: primary
+    - text: Self-host in 5 minutes
+      link: /projektor/guides/self-hosting/
+      icon: rocket
+    - text: GitHub
+      link: https://github.com/TAJD/projektor
+      icon: github
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="MCP-native" icon="puzzle">
+    Every action available in the browser is available to an agent over JSON-RPC. The MCP server is the primary surface.
+  </Card>
+  <Card title="Edge-native" icon="cloudflare">
+    Hono on Cloudflare Workers. D1 for data, KV for sessions, R2 for attachments. No servers, no containers.
+  </Card>
+  <Card title="Built for fleets" icon="seti:notebook">
+    Agent sessions, file claims, and coordination messages let parallel agents work the same repo without colliding.
+  </Card>
+  <Card title="Dogfooded" icon="approve-check">
+    Projektor's own roadmap is tracked inside Projektor. The docs you're reading are generated from the same repo.
+  </Card>
+</CardGrid>
