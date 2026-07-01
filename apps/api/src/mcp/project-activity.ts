@@ -14,7 +14,7 @@ export const projectActivityTools: MCPTool[] = [
 				projectId: { type: "string", description: "The project UUID to fetch activity for" },
 				since: {
 					type: "number",
-					description: "Unix timestamp — only return events created at or after this time",
+					description: "Unix timestamp - only return events created at or after this time",
 				},
 				limit: {
 					type: "number",
