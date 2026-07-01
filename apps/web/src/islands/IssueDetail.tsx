@@ -348,6 +348,7 @@ export default function IssueDetail({
 		if (issue.project_key) {
 			const canonical = issueUrl(issue.project_key, issue.number, issue.title, issue.id);
 			history.replaceState(null, "", canonical);
+			document.title = `${formatIssueRef(issue.project_key, issue.number)} - ${issue.title}`;
 		}
 
 		// Fetch parent issue (any type — not just epics)

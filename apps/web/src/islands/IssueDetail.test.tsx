@@ -293,6 +293,19 @@ function makeFetchForDetail(issueData: IssueFixture) {
 	});
 }
 
+// ─── PROJ-226: tab title reflects the loaded issue ────────────────────────────
+
+describe("document title (PROJ-226)", () => {
+	it("sets the tab title to '<ref> - <title>' once the issue loads", async () => {
+		setupFetch(PLAIN_ISSUE_DATA);
+		render(<IssueDetail issueId="plain-1" />);
+
+		await waitFor(() => {
+			expect(document.title).toBe("PROJ-7 - Plain Task");
+		});
+	});
+});
+
 describe("workspace-slug header contract (PROJ-98)", () => {
 	it("includes X-Workspace-Slug header when workspaceSlug prop is passed", async () => {
 		const mockFetch = makeFetchForDetail(PLAIN_ISSUE_DATA);
