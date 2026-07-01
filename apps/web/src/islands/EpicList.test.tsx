@@ -101,10 +101,12 @@ function mockFetchEpics(issues: Issue[] = [EPIC_ISSUE]) {
 
 beforeEach(() => {
 	history.replaceState(null, "", "/");
+	localStorage.clear();
 });
 
 afterEach(() => {
 	history.replaceState(null, "", "/");
+	localStorage.clear();
 });
 
 describe("EpicList", () => {
@@ -122,6 +124,47 @@ describe("EpicList", () => {
 		render(<EpicList />);
 		// No projectId → fetchEpics sets loading=false and returns early → empty state
 		expect(await screen.findByText(/No epics found/i)).toBeTruthy();
+	});
+
+	it("ignores a stale localStorage project id not present in the project list", async () => {
+		// No projectId in the URL; localStorage points at a project that no longer exists.
+		localStorage.setItem("projektor-last-project-id", "stale-deleted-project");
+		const calledUrls: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				calledUrls.push(u);
+				if (u.includes("/api/task-types")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([{ id: "tt1", key: "epic", name: "Epic" }]),
+					});
+				}
+				if (u.includes("/api/projects")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([{ id: "p1", key: "PROJ", name: "Projektor" }]),
+					});
+				}
+				if (u.includes("/api/issues")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [EPIC_ISSUE] }) });
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+			})
+		);
+
+		render(<EpicList />);
+
+		// Sensible default rendered: falls back to the first project and loads its epics.
+		expect(await screen.findByText("Big Epic")).toBeTruthy();
+
+		// The stale id never reached an API call.
+		expect(calledUrls.some((u) => u.includes("stale-deleted-project"))).toBe(false);
+		expect(calledUrls.some((u) => u.includes("/api/issues") && u.includes("project=p1"))).toBe(
+			true
+		);
+		expect(localStorage.getItem("projektor-last-project-id")).toBe("p1");
 	});
 
 	it("renders epic rows after fetch resolves", async () => {

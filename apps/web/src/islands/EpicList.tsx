@@ -51,6 +51,8 @@ export default function EpicList({ workspaceSlug }: Props) {
 	const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
 	const [showFiltersPopover, setShowFiltersPopover] = useState(false);
 
+	const storedProjectIdRef = useRef<string | null>(null);
+
 	const filtersContainerRef = useRef<HTMLDivElement>(null);
 	const filtersPopoverRef = useRef<HTMLDivElement>(null);
 	const filtersButtonRef = useRef<HTMLButtonElement>(null);
@@ -73,22 +75,20 @@ export default function EpicList({ workspaceSlug }: Props) {
 		if (s) setFilterStatuses(s.split(",").filter(Boolean));
 		if (p) setFilterPriorities(p.split(",").filter(Boolean));
 
-		// Resolve projectId: URL param → localStorage → defer to projects fetch
+		// Resolve projectId: URL param (trusted) → localStorage (validated against the
+		// fetched project list in the projects effect below) → defer to projects fetch.
 		const fromUrl = params.get("projectId");
 		if (fromUrl) {
 			setProjectId(fromUrl);
+			// safe-ls: remembers the last-viewed project id so a future visit without a
+			// URL param can skip re-selection. Never trusted directly — the projects
+			// effect below validates it against the fetched project list and falls back
+			// to the first project if it's missing (e.g. the project was deleted).
 			localStorage.setItem("projektor-last-project-id", fromUrl);
 			setProjectIdReady(true);
 		} else {
-			const stored = localStorage.getItem("projektor-last-project-id");
-			if (stored) {
-				setProjectId(stored);
-				const newParams = new URLSearchParams(window.location.search);
-				newParams.set("projectId", stored);
-				history.replaceState(null, "", `?${newParams.toString()}`);
-				setProjectIdReady(true);
-			}
-			// else: projects fetch effect will set projectId and mark ready
+			storedProjectIdRef.current = localStorage.getItem("projektor-last-project-id");
+			// projects fetch effect validates the stored id (if any) and marks ready
 		}
 	}, []);
 
@@ -119,14 +119,19 @@ export default function EpicList({ workspaceSlug }: Props) {
 					setProjects(data);
 					setProjectId((prev) => {
 						if (prev) return prev;
-						const first = data[0]?.id ?? null;
-						if (first) {
-							localStorage.setItem("projektor-last-project-id", first);
+						const stored = storedProjectIdRef.current;
+						const validated = stored && data.some((p) => p.id === stored) ? stored : null;
+						const resolved = validated ?? data[0]?.id ?? null;
+						if (resolved) {
+							// safe-ls: resolved id is either the stored value (just confirmed to
+							// exist in the fetched project list) or the first project — never a
+							// stale reference, so it can't cause an API 4xx.
+							localStorage.setItem("projektor-last-project-id", resolved);
 							const p = new URLSearchParams(window.location.search);
-							p.set("projectId", first);
+							p.set("projectId", resolved);
 							history.replaceState(null, "", `?${p.toString()}`);
 						}
-						return first;
+						return resolved;
 					});
 				}
 			} catch {
