@@ -52,9 +52,30 @@ const EPIC_ISSUE: Issue = {
 
 // Fixtures for priority sort tests — created_at descending so the API returns them
 // in LOW → MEDIUM → URGENT order (newest last); clicking Priority sorts differently.
-const URGENT_EPIC: Issue = { ...EPIC_ISSUE, id: "e-urgent", number: 11, title: "Urgent Epic", priority: "urgent", created_at: 3000 };
-const MEDIUM_EPIC: Issue = { ...EPIC_ISSUE, id: "e-medium", number: 12, title: "Medium Epic", priority: "medium", created_at: 2000 };
-const LOW_EPIC:    Issue = { ...EPIC_ISSUE, id: "e-low",    number: 13, title: "Low Epic",    priority: "low",    created_at: 1000 };
+const URGENT_EPIC: Issue = {
+	...EPIC_ISSUE,
+	id: "e-urgent",
+	number: 11,
+	title: "Urgent Epic",
+	priority: "urgent",
+	created_at: 3000,
+};
+const MEDIUM_EPIC: Issue = {
+	...EPIC_ISSUE,
+	id: "e-medium",
+	number: 12,
+	title: "Medium Epic",
+	priority: "medium",
+	created_at: 2000,
+};
+const LOW_EPIC: Issue = {
+	...EPIC_ISSUE,
+	id: "e-low",
+	number: 13,
+	title: "Low Epic",
+	priority: "low",
+	created_at: 1000,
+};
 
 function mockFetchEpics(issues: Issue[] = [EPIC_ISSUE]) {
 	vi.stubGlobal(

@@ -110,12 +110,14 @@ describe("SprintManager", () => {
 			target: { value: "Sprint 2" },
 		});
 
-		fireEvent.submit(screen.getByRole("button", { name: /Create sprint/i }).closest("form")!);
+		const form = screen.getByRole("button", { name: /Create sprint/i }).closest("form");
+		if (!form) throw new Error("Create sprint form not found");
+		fireEvent.submit(form);
 
 		await waitFor(() => {
 			const calls = mockFetch.mock.calls as [string, RequestInit][];
-			const postCall = calls.find(([url, init]) =>
-				String(url).includes("/api/sprints") && init?.method === "POST"
+			const postCall = calls.find(
+				([url, init]) => String(url).includes("/api/sprints") && init?.method === "POST"
 			);
 			expect(postCall).toBeDefined();
 		});

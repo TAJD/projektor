@@ -94,9 +94,7 @@ function CompletionSummaryPanel({
 	return (
 		<div class="mb-6 px-5 py-4 bg-[rgba(22,163,74,0.06)] border border-[rgba(22,163,74,0.3)] rounded-lg">
 			<div class="flex justify-between items-start mb-3">
-				<h3 class="m-0 text-base font-semibold text-text-base">
-					Sprint complete: {sprint.name}
-				</h3>
+				<h3 class="m-0 text-base font-semibold text-text-base">Sprint complete: {sprint.name}</h3>
 				<button
 					type="button"
 					class="text-sm text-text-muted hover:text-text-base"
@@ -120,7 +118,9 @@ function CompletionSummaryPanel({
 				{totalSP > 0 && (
 					<div>
 						<span class="text-text-muted">Story points:</span>{" "}
-						<strong class="text-text-base">{doneSP}/{totalSP}</strong>
+						<strong class="text-text-base">
+							{doneSP}/{totalSP}
+						</strong>
 					</div>
 				)}
 			</div>
@@ -149,13 +149,7 @@ function CompletionSummaryPanel({
 
 const BAR_AREA_PX = 100;
 
-function VelocityChart({
-	data,
-	loading,
-}: {
-	data: SprintVelocity[];
-	loading: boolean;
-}) {
+function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boolean }) {
 	const maxPts = Math.max(...data.map((d) => d.pointsTotal), 1);
 
 	return (
@@ -170,10 +164,7 @@ function VelocityChart({
 					<div class="flex items-end gap-2" style={{ height: `${BAR_AREA_PX + 48}px` }}>
 						{data.map(({ sprint, pointsCompleted, pointsTotal }) => {
 							const totalH = Math.round((pointsTotal / maxPts) * BAR_AREA_PX);
-							const doneH =
-								totalH > 0
-									? Math.round((pointsCompleted / pointsTotal) * totalH)
-									: 0;
+							const doneH = totalH > 0 ? Math.round((pointsCompleted / pointsTotal) * totalH) : 0;
 							return (
 								<div
 									key={sprint.id}
@@ -183,9 +174,7 @@ function VelocityChart({
 									<div class="text-[0.7rem] font-semibold text-text-base mb-1">
 										{pointsCompleted}
 										{pointsTotal > 0 && pointsCompleted !== pointsTotal && (
-											<span class="font-normal text-text-muted">
-												/{pointsTotal}
-											</span>
+											<span class="font-normal text-text-muted">/{pointsTotal}</span>
 										)}
 									</div>
 									<div
@@ -432,10 +421,7 @@ export default function SprintManager({ workspaceSlug }: Props) {
 						Projects
 					</a>
 					<span class="mx-[0.375rem]">/</span>
-					<a
-						href={`/projects/view?id=${project.id}`}
-						class="text-text-muted no-underline"
-					>
+					<a href={`/projects/view?id=${project.id}`} class="text-text-muted no-underline">
 						{project.name}
 					</a>
 					<span class="mx-[0.375rem]">/</span>
@@ -445,9 +431,7 @@ export default function SprintManager({ workspaceSlug }: Props) {
 
 			{/* Title */}
 			<div class="flex items-center gap-3 mb-5">
-				<h1 class="m-0 text-2xl font-bold text-text-base">
-					Sprints
-				</h1>
+				<h1 class="m-0 text-2xl font-bold text-text-base">Sprints</h1>
 				{project && (
 					<span class="font-mono text-xs px-2 py-[0.125rem] rounded bg-surface border border-border text-text-muted">
 						{project.key}
@@ -496,14 +480,17 @@ export default function SprintManager({ workspaceSlug }: Props) {
 							role="alert"
 							class="mb-[0.875rem] px-3 py-2 bg-[var(--danger-bg)] border border-[var(--danger-border)] rounded text-[0.8rem] text-[var(--danger-text)]"
 						>
-							A sprint is already active. Only one sprint can be active at a time — the backend
-							will reject activating a second one.
+							A sprint is already active. Only one sprint can be active at a time — the backend will
+							reject activating a second one.
 						</div>
 					)}
 
 					<form onSubmit={handleCreate}>
 						<div class="mb-4">
-							<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]" for="spr-name">
+							<label
+								class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
+								for="spr-name"
+							>
 								Name *
 							</label>
 							<input
@@ -519,7 +506,10 @@ export default function SprintManager({ workspaceSlug }: Props) {
 						</div>
 
 						<div class="mb-4">
-							<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]" for="spr-goal">
+							<label
+								class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
+								for="spr-goal"
+							>
 								Goal (optional)
 							</label>
 							<input
@@ -535,7 +525,10 @@ export default function SprintManager({ workspaceSlug }: Props) {
 
 						<div class="flex flex-col sm:flex-row gap-4 mb-4">
 							<div class="flex-1">
-								<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]" for="spr-start">
+								<label
+									class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
+									for="spr-start"
+								>
 									Start date (optional)
 								</label>
 								<input
@@ -547,7 +540,10 @@ export default function SprintManager({ workspaceSlug }: Props) {
 								/>
 							</div>
 							<div class="flex-1">
-								<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]" for="spr-end">
+								<label
+									class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
+									for="spr-end"
+								>
 									End date (optional)
 								</label>
 								<input
@@ -591,14 +587,15 @@ export default function SprintManager({ workspaceSlug }: Props) {
 			{sprints.length === 0 ? (
 				<div class="p-8 text-center text-text-muted bg-surface rounded-lg border border-border">
 					<p class="m-0 mb-2">No sprints yet.</p>
-					<p class="m-0 text-sm">
-						Create a sprint to organise issues into time-boxed iterations.
-					</p>
+					<p class="m-0 text-sm">Create a sprint to organise issues into time-boxed iterations.</p>
 				</div>
 			) : (
 				<div>
 					{sprints.map((sprint) => (
-						<div key={sprint.id} class="px-5 py-4 bg-surface border border-border rounded-lg mb-3 last:mb-0">
+						<div
+							key={sprint.id}
+							class="px-5 py-4 bg-surface border border-border rounded-lg mb-3 last:mb-0"
+						>
 							<div class="flex items-center gap-3 flex-wrap mb-[0.375rem]">
 								<span class="font-semibold text-base text-text-base">{sprint.name}</span>
 								{statusBadge(sprint.status)}
@@ -606,14 +603,10 @@ export default function SprintManager({ workspaceSlug }: Props) {
 							{sprint.goal && <p class="text-sm text-text-muted italic mb-2">{sprint.goal}</p>}
 							<div class="text-[0.8rem] text-text-muted flex gap-4 flex-wrap mb-2">
 								<span>
-									Start:{" "}
-									<strong class="text-text-base">
-										{formatDate(sprint.startDate)}
-									</strong>
+									Start: <strong class="text-text-base">{formatDate(sprint.startDate)}</strong>
 								</span>
 								<span>
-									End:{" "}
-									<strong class="text-text-base">{formatDate(sprint.endDate)}</strong>
+									End: <strong class="text-text-base">{formatDate(sprint.endDate)}</strong>
 								</span>
 							</div>
 							<div class="flex gap-2 items-center flex-wrap">
@@ -624,49 +617,42 @@ export default function SprintManager({ workspaceSlug }: Props) {
 									View issues →
 								</a>
 
-								{sprint.status === "active" && (
-									<>
-										{completeId === sprint.id ? (
-											<span class="inline-flex gap-[0.375rem] items-center">
-												<span class="text-[0.8rem] text-text-muted">
-													Mark complete?
-												</span>
-												<button
-													type="button"
-													class="btn btn-danger btn-sm"
-													disabled={completing}
-													onClick={() => handleComplete(sprint.id)}
-												>
-													{completing ? "…" : "Yes, complete"}
-												</button>
-												<button
-													type="button"
-													class="btn btn-outline btn-sm"
-													disabled={completing}
-													onClick={() => setCompleteId(null)}
-												>
-													Cancel
-												</button>
-												{completeError && (
-													<span class="text-[var(--danger-text)] text-xs">
-														{completeError}
-													</span>
-												)}
-											</span>
-										) : (
+								{sprint.status === "active" &&
+									(completeId === sprint.id ? (
+										<span class="inline-flex gap-[0.375rem] items-center">
+											<span class="text-[0.8rem] text-text-muted">Mark complete?</span>
+											<button
+												type="button"
+												class="btn btn-danger btn-sm"
+												disabled={completing}
+												onClick={() => handleComplete(sprint.id)}
+											>
+												{completing ? "…" : "Yes, complete"}
+											</button>
 											<button
 												type="button"
 												class="btn btn-outline btn-sm"
-												onClick={() => {
-													setCompleteId(sprint.id);
-													setCompleteError(null);
-												}}
+												disabled={completing}
+												onClick={() => setCompleteId(null)}
 											>
-												Complete sprint
+												Cancel
 											</button>
-										)}
-									</>
-								)}
+											{completeError && (
+												<span class="text-[var(--danger-text)] text-xs">{completeError}</span>
+											)}
+										</span>
+									) : (
+										<button
+											type="button"
+											class="btn btn-outline btn-sm"
+											onClick={() => {
+												setCompleteId(sprint.id);
+												setCompleteError(null);
+											}}
+										>
+											Complete sprint
+										</button>
+									))}
 							</div>
 						</div>
 					))}

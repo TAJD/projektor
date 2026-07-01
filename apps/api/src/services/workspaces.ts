@@ -275,7 +275,7 @@ export async function deleteWorkspace(
 }
 
 export async function getWorkspaceMcpInfo(
-	ctx: ServiceCtx,
+	_ctx: ServiceCtx,
 	workspace: { id: string; slug: string },
 	origin: string
 ): Promise<{

@@ -124,7 +124,10 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 			>
 				<div class="flex gap-3 flex-wrap">
 					<div class="flex-[2_1_160px] min-w-0">
-						<label htmlFor="new-project-name" class="block mb-1 text-xs font-semibold text-[var(--text-muted)]">
+						<label
+							htmlFor="new-project-name"
+							class="block mb-1 text-xs font-semibold text-[var(--text-muted)]"
+						>
 							Name{" "}
 							<span aria-hidden="true" style={{ color: "var(--accent)" }}>
 								*
@@ -143,7 +146,10 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 						/>
 					</div>
 					<div class="flex-[1_1_100px] min-w-0">
-						<label htmlFor="new-project-key" class="block mb-1 text-xs font-semibold text-[var(--text-muted)]">
+						<label
+							htmlFor="new-project-key"
+							class="block mb-1 text-xs font-semibold text-[var(--text-muted)]"
+						>
 							Key{" "}
 							<span aria-hidden="true" style={{ color: "var(--accent)" }}>
 								*
@@ -164,7 +170,10 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 						/>
 					</div>
 					<div class="flex-[3_1_220px] min-w-0">
-						<label htmlFor="new-project-desc" class="block mb-1 text-xs font-semibold text-[var(--text-muted)]">
+						<label
+							htmlFor="new-project-desc"
+							class="block mb-1 text-xs font-semibold text-[var(--text-muted)]"
+						>
 							Description
 						</label>
 						<input
@@ -228,11 +237,12 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 			{formOpen && renderForm()}
 
 			{projects.length === 0 ? (
-				<p class="text-[var(--text-muted)] text-center py-12">
-					No projects yet.
-				</p>
+				<p class="text-[var(--text-muted)] text-center py-12">No projects yet.</p>
 			) : (
-				<div class="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+				<div
+					class="grid gap-4"
+					style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}
+				>
 					{projects.map((p) => {
 						const count = p.open_issue_count ?? 0;
 						const countLabel =
@@ -245,9 +255,7 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 								class="flex flex-col gap-2 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg no-underline shadow-sm transition-all duration-150 hover:border-[var(--accent)] hover:-translate-y-px"
 							>
 								<div class="flex items-center gap-2">
-									<span class="font-bold text-[var(--text)] text-base">
-										{p.name}
-									</span>
+									<span class="font-bold text-[var(--text)] text-base">{p.name}</span>
 									<span class="font-mono text-[0.7rem] font-medium px-1.5 py-0.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text-muted)] leading-6">
 										{p.key}
 									</span>
@@ -256,7 +264,11 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 								{p.description && (
 									<span
 										class="text-sm text-[var(--text-muted)] overflow-hidden"
-										style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}
+										style={{
+											display: "-webkit-box",
+											WebkitLineClamp: 2,
+											WebkitBoxOrient: "vertical",
+										}}
 									>
 										{p.description}
 									</span>

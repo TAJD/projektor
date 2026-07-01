@@ -3,7 +3,13 @@ import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
-import { CATEGORY_COLORS, categoryColor, type Issue, type SortKey, sortIssues } from "./board-utils";
+import {
+	CATEGORY_COLORS,
+	categoryColor,
+	type Issue,
+	type SortKey,
+	sortIssues,
+} from "./board-utils";
 import Select from "./Select";
 
 interface Props {

@@ -80,7 +80,7 @@ export async function listMessages(ctx: ServiceCtx, raw: unknown) {
 			eq(schema.agentMessages.scope, scope),
 			// Next page: rows strictly after (cursorTime, cursorId) in ASC order
 			// (createdAt > cursorTime) OR (createdAt = cursorTime AND id > cursorId)
-			sql`(${schema.agentMessages.createdAt} > ${cursorTime} OR (${schema.agentMessages.createdAt} = ${cursorTime} AND ${schema.agentMessages.id} > ${cursorId}))`,
+			sql`(${schema.agentMessages.createdAt} > ${cursorTime} OR (${schema.agentMessages.createdAt} = ${cursorTime} AND ${schema.agentMessages.id} > ${cursorId}))`
 		);
 	}
 
@@ -91,8 +91,8 @@ export async function listMessages(ctx: ServiceCtx, raw: unknown) {
 			cursorFilter ??
 				and(
 					eq(schema.agentMessages.workspaceId, ctx.workspaceId),
-					eq(schema.agentMessages.scope, scope),
-				),
+					eq(schema.agentMessages.scope, scope)
+				)
 		)
 		.orderBy(asc(schema.agentMessages.createdAt), asc(schema.agentMessages.id))
 		.limit(limit + 1);

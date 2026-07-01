@@ -124,9 +124,7 @@ describe("KV caching", () => {
 			const firstBody = (await first.json()) as unknown[];
 			expect(firstBody.length).toBeGreaterThan(0);
 
-			await env.DB.prepare("DELETE FROM task_types WHERE workspace_id = ?")
-				.bind(workspaceId)
-				.run();
+			await env.DB.prepare("DELETE FROM task_types WHERE workspace_id = ?").bind(workspaceId).run();
 
 			const second = await SELF.fetch(url, { headers: hdrs });
 			expect(second.status).toBe(200);
@@ -159,9 +157,7 @@ describe("KV caching", () => {
 			expect(first.length).toBeGreaterThan(0);
 
 			// Delete from D1 — cache should serve the next request
-			await env.DB.prepare("DELETE FROM projects WHERE workspace_id = ?")
-				.bind(workspaceId)
-				.run();
+			await env.DB.prepare("DELETE FROM projects WHERE workspace_id = ?").bind(workspaceId).run();
 
 			// Second call — served from KV cache
 			const second = await mcpListProjects();

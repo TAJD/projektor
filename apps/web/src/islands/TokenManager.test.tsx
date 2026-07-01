@@ -17,7 +17,7 @@ const TOKEN = {
 	createdAt: 1000,
 };
 
-function mockFetchTokens(tokens: typeof TOKEN[] = [TOKEN]) {
+function mockFetchTokens(tokens: (typeof TOKEN)[] = [TOKEN]) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {
@@ -26,7 +26,10 @@ function mockFetchTokens(tokens: typeof TOKEN[] = [TOKEN]) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve(tokens) });
 			}
 			if (u.includes("/mcp-info")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve({ mcpAddCommandTemplate: null }) });
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ mcpAddCommandTemplate: null }),
+				});
 			}
 			// workspace info
 			return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "w1" }) });

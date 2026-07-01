@@ -60,7 +60,11 @@ interface SharedIssueRow {
 export async function getSharedIssue(
 	db: D1Database,
 	token: string
-): Promise<SharedIssueRow & { customFields: Array<{ key: string; label: string; type: string; value: string }> }> {
+): Promise<
+	SharedIssueRow & {
+		customFields: Array<{ key: string; label: string; type: string; value: string }>;
+	}
+> {
 	const now = Math.floor(Date.now() / 1000);
 
 	const row = await db
@@ -88,6 +92,8 @@ export async function getSharedIssue(
 		.bind(token)
 		.first<{ issue_id: string }>();
 
+	if (!tokenMeta) throw new NotFoundError("Share link not found or expired");
+
 	const cfRows = await db
 		.prepare(
 			`SELECT cfd.key, cfd.label, cfd.type, cfv.value
@@ -95,7 +101,7 @@ export async function getSharedIssue(
        JOIN custom_field_definitions cfd ON cfd.id = cfv.field_id
        WHERE cfv.issue_id = ?`
 		)
-		.bind(tokenMeta!.issue_id)
+		.bind(tokenMeta.issue_id)
 		.all<{ key: string; label: string; type: string; value: string }>();
 
 	return { ...row, customFields: cfRows.results ?? [] };

@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-const scopeSchema = z
-	.string()
-	.refine((v) => v === "workspace" || /^issue:[0-9a-f-]{36}$/.test(v), {
-		message: 'scope must be "workspace" or "issue:<uuid>"',
-	});
+const scopeSchema = z.string().refine((v) => v === "workspace" || /^issue:[0-9a-f-]{36}$/.test(v), {
+	message: 'scope must be "workspace" or "issue:<uuid>"',
+});
 
 export const PostMessageSchema = z.object({
 	scope: scopeSchema,

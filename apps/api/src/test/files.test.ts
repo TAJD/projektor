@@ -1,4 +1,4 @@
-import { SELF, env } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedFixture } from "./helpers";
 
@@ -61,10 +61,9 @@ describe("Files API", () => {
 	});
 
 	it("GET /api/files returns 400 for missing entityId", async () => {
-		const res = await SELF.fetch(
-			"http://localhost/api/files?entityType=issue",
-			{ headers: authHeaders(token, slug) }
-		);
+		const res = await SELF.fetch("http://localhost/api/files?entityType=issue", {
+			headers: authHeaders(token, slug),
+		});
 		expect(res.status).toBe(400);
 	});
 

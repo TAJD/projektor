@@ -29,10 +29,7 @@ const ISSUE = {
 	updated_at: 1000,
 };
 
-function mockFetchProject(
-	issues: typeof ISSUE[] = [ISSUE],
-	wiki: unknown[] = []
-) {
+function mockFetchProject(issues: (typeof ISSUE)[] = [ISSUE], wiki: unknown[] = []) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {
@@ -89,10 +86,7 @@ describe("ProjectLanding", () => {
 
 	it("shows an error message when the project fetch fails", async () => {
 		history.replaceState(null, "", "?id=p1");
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockResolvedValue({ ok: false, status: 500 })
-		);
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
 		render(<ProjectLanding />);
 		expect(await screen.findByRole("alert")).toBeTruthy();
 	});

@@ -46,7 +46,6 @@ function formatScopes(raw: string): string {
 	return scopes.join(", ") || "—";
 }
 
-
 export default function TokenManager({ workspaceSlug }: Props) {
 	const [tokens, setTokens] = useState<ApiToken[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -78,7 +77,9 @@ export default function TokenManager({ workspaceSlug }: Props) {
 		setError(null);
 		setForbidden(false);
 		try {
-			const data = await apiFetch<ApiToken[]>(`/api/workspaces/${workspaceSlug}/tokens`, { workspaceSlug });
+			const data = await apiFetch<ApiToken[]>(`/api/workspaces/${workspaceSlug}/tokens`, {
+				workspaceSlug,
+			});
 			setTokens(Array.isArray(data) ? data : []);
 		} catch (e) {
 			if (String(e).includes(": 403")) {
@@ -95,13 +96,18 @@ export default function TokenManager({ workspaceSlug }: Props) {
 		(async () => {
 			if (!workspaceSlug) return;
 			try {
-				const data = await apiFetch<{ id: string }>(`/api/workspaces/${workspaceSlug}`, { workspaceSlug });
+				const data = await apiFetch<{ id: string }>(`/api/workspaces/${workspaceSlug}`, {
+					workspaceSlug,
+				});
 				setWorkspaceId(data.id);
 			} catch {
 				// non-fatal
 			}
 			try {
-				const data = await apiFetch<{ mcpAddCommandTemplate: string }>(`/api/workspaces/${workspaceSlug}/mcp-info`, { workspaceSlug });
+				const data = await apiFetch<{ mcpAddCommandTemplate: string }>(
+					`/api/workspaces/${workspaceSlug}/mcp-info`,
+					{ workspaceSlug }
+				);
 				setMcpCommandTemplate(data.mcpAddCommandTemplate);
 			} catch {
 				// non-fatal
@@ -230,13 +236,16 @@ export default function TokenManager({ workspaceSlug }: Props) {
 					{newToken ? (
 						<div class="bg-surface border border-border rounded-md p-4 mt-4">
 							<p class="m-0 mb-2 font-semibold text-[0.9rem] text-text-base">
-								Token created: <span class="font-mono text-[0.8rem] text-text-muted">{newToken.name}</span>
+								Token created:{" "}
+								<span class="font-mono text-[0.8rem] text-text-muted">{newToken.name}</span>
 							</p>
 							<p class="text-[var(--danger-text)] text-[0.8rem] my-1">
 								⚠ Copy this token now — you won't be able to see it again.
 							</p>
 							<div class="flex items-center gap-2 my-2">
-								<code class="flex-1 font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded text-text-base break-all">{newToken.token}</code>
+								<code class="flex-1 font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded text-text-base break-all">
+									{newToken.token}
+								</code>
 								<button
 									type="button"
 									class="btn btn-outline btn-sm"
@@ -251,7 +260,9 @@ export default function TokenManager({ workspaceSlug }: Props) {
 									<p class="m-0 mb-[0.375rem] text-[0.8rem] font-semibold text-text-muted">
 										Connect to Claude:
 									</p>
-									<div class="font-mono text-xs px-3 py-2 bg-bg border border-border rounded text-text-muted break-all whitespace-pre-wrap leading-[1.6]">{mcpCommand(newToken.token)}</div>
+									<div class="font-mono text-xs px-3 py-2 bg-bg border border-border rounded text-text-muted break-all whitespace-pre-wrap leading-[1.6]">
+										{mcpCommand(newToken.token)}
+									</div>
 									<button
 										type="button"
 										class="btn btn-outline btn-sm mt-2"
@@ -273,9 +284,7 @@ export default function TokenManager({ workspaceSlug }: Props) {
 						</div>
 					) : (
 						<form onSubmit={handleCreate}>
-							<h3 class="m-0 mb-4 text-base font-semibold text-text-base">
-								New API token
-							</h3>
+							<h3 class="m-0 mb-4 text-base font-semibold text-text-base">New API token</h3>
 
 							<div class="flex flex-col gap-1 mb-[0.875rem]">
 								<label class="text-[0.8rem] font-semibold text-text-muted" for="tok-name">
@@ -366,29 +375,43 @@ export default function TokenManager({ workspaceSlug }: Props) {
 			{tokens.length === 0 ? (
 				<div class="p-8 text-center text-text-muted bg-surface rounded-lg border border-border">
 					<p class="m-0 mb-2">No API tokens yet.</p>
-					<p class="m-0 text-sm">
-						Create a token to allow agents and scripts to authenticate.
-					</p>
+					<p class="m-0 text-sm">Create a token to allow agents and scripts to authenticate.</p>
 				</div>
 			) : (
 				<div class="overflow-x-auto">
 					<table class="w-full border-collapse text-[0.9rem]">
 						<thead>
 							<tr>
-								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">Name</th>
-								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">Scope</th>
-								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">Created</th>
-								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">Expires</th>
-								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">Last used</th>
+								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">
+									Name
+								</th>
+								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">
+									Scope
+								</th>
+								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">
+									Created
+								</th>
+								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">
+									Expires
+								</th>
+								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap">
+									Last used
+								</th>
 								<th class="text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap"></th>
 							</tr>
 						</thead>
 						<tbody>
 							{tokens.map((tok) => (
 								<tr key={tok.id}>
-									<td class="px-3 py-2 border-b border-border align-middle text-text-base font-medium [tr:last-child_&]:border-b-0">{tok.name}</td>
-									<td class="px-3 py-2 border-b border-border align-middle font-mono text-[0.8rem] text-text-muted [tr:last-child_&]:border-b-0">{formatScopes(tok.scopes)}</td>
-									<td class="px-3 py-2 border-b border-border align-middle font-mono text-[0.8rem] text-text-muted [tr:last-child_&]:border-b-0">{formatDate(tok.createdAt)}</td>
+									<td class="px-3 py-2 border-b border-border align-middle text-text-base font-medium [tr:last-child_&]:border-b-0">
+										{tok.name}
+									</td>
+									<td class="px-3 py-2 border-b border-border align-middle font-mono text-[0.8rem] text-text-muted [tr:last-child_&]:border-b-0">
+										{formatScopes(tok.scopes)}
+									</td>
+									<td class="px-3 py-2 border-b border-border align-middle font-mono text-[0.8rem] text-text-muted [tr:last-child_&]:border-b-0">
+										{formatDate(tok.createdAt)}
+									</td>
 									<td
 										class={`px-3 py-2 border-b border-border align-middle font-mono text-[0.8rem] [tr:last-child_&]:border-b-0 ${
 											tok.expiresAt && tok.expiresAt < Date.now() / 1000
@@ -398,13 +421,13 @@ export default function TokenManager({ workspaceSlug }: Props) {
 									>
 										{tok.expiresAt === null ? "No expiry" : formatDate(tok.expiresAt)}
 									</td>
-									<td class="px-3 py-2 border-b border-border align-middle font-mono text-[0.8rem] text-text-muted [tr:last-child_&]:border-b-0">{formatDate(tok.lastUsedAt)}</td>
+									<td class="px-3 py-2 border-b border-border align-middle font-mono text-[0.8rem] text-text-muted [tr:last-child_&]:border-b-0">
+										{formatDate(tok.lastUsedAt)}
+									</td>
 									<td class="px-3 py-2 border-b border-border align-middle whitespace-nowrap [tr:last-child_&]:border-b-0">
 										{revokeId === tok.id ? (
 											<span class="inline-flex gap-[0.375rem] items-center">
-												<span class="text-[0.8rem] text-text-muted">
-													Revoke?
-												</span>
+												<span class="text-[0.8rem] text-text-muted">Revoke?</span>
 												<button
 													type="button"
 													class="btn btn-danger btn-sm"
@@ -422,9 +445,7 @@ export default function TokenManager({ workspaceSlug }: Props) {
 													No
 												</button>
 												{revokeError && (
-													<span class="text-[var(--danger-text)] text-xs">
-														{revokeError}
-													</span>
+													<span class="text-[var(--danger-text)] text-xs">{revokeError}</span>
 												)}
 											</span>
 										) : (

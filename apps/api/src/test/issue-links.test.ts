@@ -201,8 +201,12 @@ describe("Issue Links role guards", () => {
 	it("viewer cannot create a link (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
-		const issue1 = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, { title: "A" });
-		const issue2 = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, { title: "B" });
+		const issue1 = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, {
+			title: "A",
+		});
+		const issue2 = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, {
+			title: "B",
+		});
 
 		const res = await SELF.fetch(`http://localhost/api/issues/${issue1.id}/links`, {
 			method: "POST",
@@ -215,8 +219,12 @@ describe("Issue Links role guards", () => {
 	it("viewer cannot delete a link (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
-		const issue1 = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, { title: "A" });
-		const issue2 = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, { title: "B" });
+		const issue1 = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, {
+			title: "A",
+		});
+		const issue2 = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, {
+			title: "B",
+		});
 
 		const createRes = await SELF.fetch(`http://localhost/api/issues/${issue1.id}/links`, {
 			method: "POST",

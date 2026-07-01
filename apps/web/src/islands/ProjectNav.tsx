@@ -11,7 +11,6 @@ interface Props {
 	workspaceSlug?: string;
 }
 
-
 const TABS = [
 	{ label: "Overview", path: "/projects/view" },
 	{ label: "Issues", path: "/issues" },
@@ -106,10 +105,7 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 	return (
 		<div class="border-b border-border bg-[var(--nav-bg)]">
 			<div class="flex items-center gap-2 px-6 pt-3 pb-[0.375rem]">
-				<a
-					href={`/projects/view?id=${encodeURIComponent(project.id)}`}
-					class="no-underline"
-				>
+				<a href={`/projects/view?id=${encodeURIComponent(project.id)}`} class="no-underline">
 					<h2 class="m-0 text-[0.9375rem] font-semibold text-text-base">{project.name}</h2>
 				</a>
 				<span class="font-mono text-[0.72rem] font-medium px-[0.4rem] py-[0.1rem] rounded-[3px] bg-surface border border-border text-text-muted">

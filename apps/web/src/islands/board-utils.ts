@@ -36,7 +36,14 @@ export interface Issue {
 	customFields?: CustomFieldValue[];
 }
 
-export type SortKey = "number" | "priority" | "updated" | "status" | "assignee" | "created_at" | "title";
+export type SortKey =
+	| "number"
+	| "priority"
+	| "updated"
+	| "status"
+	| "assignee"
+	| "created_at"
+	| "title";
 
 export const PRIORITY_ORDER: Record<string, number> = {
 	urgent: 0,
@@ -132,11 +139,7 @@ export function filterIssues(
 }
 
 /** Sorts a copy of an issue list by the given SortKey. */
-export function sortIssues(
-	issues: Issue[],
-	sortBy: SortKey,
-	sortDir: "asc" | "desc"
-): Issue[] {
+export function sortIssues(issues: Issue[], sortBy: SortKey, sortDir: "asc" | "desc"): Issue[] {
 	return [...issues].sort((a, b) => {
 		let diff = 0;
 		if (sortBy === "number") {
@@ -153,8 +156,10 @@ export function sortIssues(
 			diff = (a.assignee_name ?? "").localeCompare(b.assignee_name ?? "");
 		} else if (sortBy === "status") {
 			// backlog issues: status_category=todo, status_key=backlog → order slot 4
-			const aOrder = a.status_key === "backlog" ? 4 : (STATUS_CATEGORY_ORDER[a.status_category ?? ""] ?? 99);
-			const bOrder = b.status_key === "backlog" ? 4 : (STATUS_CATEGORY_ORDER[b.status_category ?? ""] ?? 99);
+			const aOrder =
+				a.status_key === "backlog" ? 4 : (STATUS_CATEGORY_ORDER[a.status_category ?? ""] ?? 99);
+			const bOrder =
+				b.status_key === "backlog" ? 4 : (STATUS_CATEGORY_ORDER[b.status_category ?? ""] ?? 99);
 			diff = aOrder - bOrder;
 		}
 		return sortDir === "asc" ? diff : -diff;
