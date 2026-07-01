@@ -57,7 +57,10 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 	const [preview, setPreview] = useState("");
 
 	useEffect(() => {
-		setPreview(renderMarkdown(value));
+		const timer = setTimeout(() => {
+			setPreview(renderMarkdown(value));
+		}, 200);
+		return () => clearTimeout(timer);
 	}, [value]);
 
 	useEffect(() => {
