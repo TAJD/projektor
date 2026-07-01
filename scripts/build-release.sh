@@ -4,7 +4,7 @@
 #   scripts/build-release.sh <version>
 #
 # Produces dist/projektor-<version>.tar.gz containing everything a consumer needs
-# to deploy with only `wrangler` — no source, no node_modules, no build step:
+# to deploy with only `wrangler` - no source, no node_modules, no build step:
 #
 #   worker.js              bundled, self-contained Worker (deps inlined)
 #   web/                   pre-built Astro frontend (apps/web/dist)

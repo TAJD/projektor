@@ -13,8 +13,8 @@ Connect Claude Code (or any MCP-compatible agent) to your projektor instance.
 - **A running projektor instance.** See the [self-hosting guide](/projektor/guides/self-hosting/) or the full [deploy guide](/projektor/guides/deploying/).
 - **Claude Code installed.** `npm install -g @anthropic-ai/claude-code` (or the desktop/IDE app).
 - **A projektor API token.** Two ways to get one:
-  - **Development** — use the bootstrap endpoint (see §2 below). No login required; needs `BOOTSTRAP_SECRET`.
-  - **Production** — log in through the UI → Settings → Tokens → "New token"; or mint one via the REST API (see §3).
+  - **Development** - use the bootstrap endpoint (see §2 below). No login required; needs `BOOTSTRAP_SECRET`.
+  - **Production** - log in through the UI → Settings → Tokens → "New token"; or mint one via the REST API (see §3).
 
 ---
 
@@ -27,7 +27,7 @@ The bootstrap endpoint provisions a workspace, user, and token in a single call,
 curl -s "https://<your-worker>.workers.dev/bootstrap" \
   -H "X-Bootstrap-Secret: <your-secret>"
 
-# Response includes mcpAddCommand — pipe it straight to your shell:
+# Response includes mcpAddCommand - pipe it straight to your shell:
 curl -s "https://<your-worker>.workers.dev/bootstrap" \
   -H "X-Bootstrap-Secret: <your-secret>" \
   | jq -r .mcpAddCommand | sh
@@ -41,7 +41,7 @@ curl -s http://127.0.0.1:8787/bootstrap \
   | jq -r .mcpAddCommand | sh
 ```
 
-The bootstrap endpoint is disabled when `ENVIRONMENT=production`. It is safe to call multiple times — it is idempotent.
+The bootstrap endpoint is disabled when `ENVIRONMENT=production`. It is safe to call multiple times - it is idempotent.
 
 ---
 
@@ -84,7 +84,7 @@ curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
 # projektor should appear in the list
 claude mcp list
 
-# Smoke test — list issues (returns empty array if no issues yet)
+# Smoke test - list issues (returns empty array if no issues yet)
 claude mcp call projektor list_issues '{}'
 
 # Get workspace membership
@@ -95,13 +95,13 @@ claude mcp call projektor list_members '{}'
 
 ## 5. Tool catalog
 
-The complete, always-current catalog is **generated from source** — every tool,
+The complete, always-current catalog is **generated from source** - every tool,
 grouped by domain, rendered from `apps/api/src/mcp/*.ts`:
 
 ➡️ **[MCP tool catalog](/projektor/agents/tool-catalog/)** (on the docs site: *Agents & MCP → MCP tool catalog*).
 
 It is regenerated and freshness-checked by CI, so it can never drift from the code.
-This guide intentionally does **not** repeat the table — there is one source of truth.
+This guide intentionally does **not** repeat the table - there is one source of truth.
 
 ---
 
@@ -110,22 +110,22 @@ This guide intentionally does **not** repeat the table — there is one source o
 Once connected, give Claude Code natural-language instructions:
 
 **Create and triage issues**
-> "Create a ticket for fixing the login redirect in the PROJ project — high priority, assign it to me."
+> "Create a ticket for fixing the login redirect in the PROJ project - high priority, assign it to me."
 
 **Query and summarise work**
-> "Show me all open issues in PROJ, grouped by status."  
+> "Show me all open issues in PROJ, grouped by status."
 > "What are the highest-priority issues I should work on next?"
 
 **Sprint planning**
-> "Create a sprint called 'Week 24' in PROJ, then move all in-progress and high-priority backlog issues into it."  
+> "Create a sprint called 'Week 24' in PROJ, then move all in-progress and high-priority backlog issues into it."
 > "Mark the current sprint complete and show me what's left unfinished."
 
 **Wiki writing**
-> "Write a wiki page summarising what we shipped in this sprint — use the completed issues as your source."  
+> "Write a wiki page summarising what we shipped in this sprint - use the completed issues as your source."
 > "Search the wiki for 'auth flow' and show me what we've documented."
 
 **Member management**
-> "List workspace members and their roles."  
+> "List workspace members and their roles."
 > "Invite user@example.com as a member."
 
 **Cross-issue work**
@@ -149,7 +149,7 @@ claude mcp add --transport http \
   "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
 ```
 
-Without a valid CF Access service token, the Worker will return a `403` before the MCP layer is reached — the agent connection will silently fail. The bootstrap flow bypasses Access; agent workflows in production need both headers. (Tracked in PROJ-129.)
+Without a valid CF Access service token, the Worker will return a `403` before the MCP layer is reached - the agent connection will silently fail. The bootstrap flow bypasses Access; agent workflows in production need both headers. (Tracked in PROJ-129.)
 
 ---
 
@@ -162,7 +162,7 @@ POST /mcp/<workspaceId>
 Content-Type: application/json
 ```
 
-**Transport:** MCP Streamable HTTP (JSON-RPC 2.0).  
+**Transport:** MCP Streamable HTTP (JSON-RPC 2.0).
 **`<workspaceId>`** is the workspace UUID (not the slug). The bootstrap response and `GET /api/workspaces` both return it.
 
 ### Required headers
@@ -172,7 +172,7 @@ Content-Type: application/json
 | `Authorization` | `Bearer pk_<64 hex chars>` |
 | `X-Workspace-Slug` | `<slug>` |
 
-The token is workspace-scoped — a token from workspace A is rejected for workspace B.
+The token is workspace-scoped - a token from workspace A is rejected for workspace B.
 
 ### initialize
 
@@ -205,9 +205,9 @@ Error codes: `-32600` invalid request, `-32601` method/tool not found, `-32602` 
 
 ### Stable API contracts
 
-These are the load-bearing shapes the Worker enforces — verified against the source:
+These are the load-bearing shapes the Worker enforces - verified against the source:
 
-- **MCP URL shape:** `POST /mcp/<workspaceId>` — UUID in the path, slug only in the header.
+- **MCP URL shape:** `POST /mcp/<workspaceId>` - UUID in the path, slug only in the header.
 - **Required headers:** both `Authorization` and `X-Workspace-Slug` must be present on every call.
 - **Token prefix:** `pk_` (64 hex chars); verified via SHA-256 hash lookup against D1.
 - **CORS:** both headers are in the Worker's explicit `allowHeaders` list.

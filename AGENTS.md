@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Guidance for AI agents (and humans) working **on** the projektor codebase.
-Read this before making changes — it captures conventions that aren't obvious from the code alone.
+Read this before making changes - it captures conventions that aren't obvious from the code alone.
 
 > Portable source of truth across agent tools (Claude Code, Codex, Cursor, …). `CLAUDE.md` points here.
 
@@ -19,13 +19,13 @@ Implementation details:
 - When implementing features or fixing bugs you must always implement a test or tests to confirm the functionality is implemented.
 - **Runtime:** Hono on Cloudflare Workers
 - **Data:** D1 (SQLite) for relational data, KV for sessions/caches, R2 for file attachments
-- **Schema:** Drizzle (migration + schema source of truth) — but query execution is raw `DB.prepare(...)`
-- **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets — see below), `packages/*` (db, types, plugin-sdk), `plugins/*`
-- **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-workspace`) downloads it and ships it with `wrangler` — no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
+- **Schema:** Drizzle (migration + schema source of truth) - but query execution is raw `DB.prepare(...)`
+- **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets - see below), `packages/*` (db, types, plugin-sdk), `plugins/*`
+- **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-workspace`) downloads it and ships it with `wrangler` - no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
 
 ## Architecture: the service-layer contract (most important)
 
-There are **two surfaces** over the same data — a REST API and an MCP (JSON-RPC) server.
+There are **two surfaces** over the same data - a REST API and an MCP (JSON-RPC) server.
 They MUST behave identically. The mechanism that guarantees this:
 
 ```
@@ -35,19 +35,19 @@ mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live h
 ```
 
 **Rules:**
-1. **All business logic and SQL live in `services/<domain>.ts`.** Routes and MCP tools are thin wrappers — resolve context, call the service, adapt the result/error. No SQL in `routes/` or `mcp/`.
+1. **All business logic and SQL live in `services/<domain>.ts`.** Routes and MCP tools are thin wrappers - resolve context, call the service, adapt the result/error. No SQL in `routes/` or `mcp/`.
 2. **REST and MCP must stay at parity.** If you add or change behavior, do it in the service so *both* surfaces get it. Adding a feature to only one surface is a bug.
-3. **Validation happens inside the service** via a shared Zod schema in `schemas/<domain>.ts` — so REST and MCP are validated identically. Never trust raw `unknown` input in a wrapper.
+3. **Validation happens inside the service** via a shared Zod schema in `schemas/<domain>.ts` - so REST and MCP are validated identically. Never trust raw `unknown` input in a wrapper.
 4. **Services throw typed errors** from `services/errors.ts` (`ValidationError`, `NotFoundError`, `ForbiddenError`, `ConflictError`). The wrappers translate them:
    - REST: `http/error-adapter.ts` → HTTP status (400/404/403/409)
    - MCP: `mcp/error-adapter.ts` → JSON-RPC code (`-32602` for validation, `-32000` otherwise). Never return raw `String(err)` to clients.
 5. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role? }`. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
 
 ### The security invariant: always scope by workspace
-Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked — e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
+Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked - e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
 
 ### The D1 limit: never bind a row-scaled array into one query
-Cloudflare **D1 rejects any query with more than 100 bound parameters.** A query whose parameter count grows with an input array — drizzle `inArray`, a raw `IN (...)`, or a batched mutation keyed by ids — will throw at runtime (a 500) once the array is large enough. **This is invisible in tests:** the vitest runner backs D1 with SQLite (cap 32766), so an un-chunked query passes CI and only fails on real D1.
+Cloudflare **D1 rejects any query with more than 100 bound parameters.** A query whose parameter count grows with an input array - drizzle `inArray`, a raw `IN (...)`, or a batched mutation keyed by ids - will throw at runtime (a 500) once the array is large enough. **This is invisible in tests:** the vitest runner backs D1 with SQLite (cap 32766), so an un-chunked query passes CI and only fails on real D1.
 
 Route every variable-length `IN`/`inArray` load through **`inChunks` (`services/sql.ts`)**, which splits the array so each query stays under the cap:
 
@@ -72,25 +72,25 @@ When adding/changing a domain (issues, projects, wiki, comments, …):
 | `apps/api/src/mcp/<domain>.ts` | MCP tool array (composed in `routes/mcp.ts`) |
 | `apps/api/src/test/<domain>.test.ts` | **domain tests go here** |
 
-**Test convention (don't skip this):** put a domain's tests in its own `<domain>.test.ts`. Do **not** pile MCP tests into the shared `test/mcp.test.ts` — parallel work on multiple domains will collide there on merge. (`mcp.test.ts` is for cross-cutting dispatch behavior only.)
+**Test convention (don't skip this):** put a domain's tests in its own `<domain>.test.ts`. Do **not** pile MCP tests into the shared `test/mcp.test.ts` - parallel work on multiple domains will collide there on merge. (`mcp.test.ts` is for cross-cutting dispatch behavior only.)
 
 ## Conventions & gotchas
 
 - **Adding a migration?** After adding a new `.sql` file to `packages/db/migrations/`, you must also add a corresponding `?raw` import to `apps/api/src/test/migrations.ts` and append it to the `MIGRATIONS` array. Without this the test DB won't have the new table and integration tests will silently fail or error.
 - **camelCase at the boundary, snake_case in the DB.** Input schemas use `assigneeId`, `parentId`, etc.; the service maps to the `assignee_id` column. Keep both surfaces on the same naming.
-- **JSON columns** (`labels`, `scopes`) are stored via `JSON.stringify` and returned as raw JSON strings — callers `JSON.parse` on read. There is no automatic (de)serialization.
+- **JSON columns** (`labels`, `scopes`) are stored via `JSON.stringify` and returned as raw JSON strings - callers `JSON.parse` on read. There is no automatic (de)serialization.
 - **Timestamps** are unix seconds: `Math.floor(Date.now() / 1000)`.
 - **IDs** are `crypto.randomUUID()`.
-- **Issue numbers** use `COALESCE(MAX(number),0)+1` per project — known race under concurrency (tracked as a follow-up).
-- **Auth** (`middleware/auth.ts`): Cloudflare Access JWT (browser) OR `Authorization: Bearer <token>` (agents) OR a dev bypass (`DEV_USER_EMAIL`, non-prod only). API tokens are workspace-scoped — don't widen that.
-- **Login provisioning** (`services/provisioning.ts`): runs on every CF Access / dev-bypass login (not the token path). Cloudflare Access is the gate; config decides what a user gets inside — `ADMIN_EMAILS` → `owner` (first admin login also creates the `DEFAULT_WORKSPACE_SLUG` workspace), everyone else → `AUTO_JOIN_ROLE` (default `viewer`; `none` = invite-only). Idempotent; safe to run per request.
+- **Issue numbers** use `COALESCE(MAX(number),0)+1` per project - known race under concurrency (tracked as a follow-up).
+- **Auth** (`middleware/auth.ts`): Cloudflare Access JWT (browser) OR `Authorization: Bearer <token>` (agents) OR a dev bypass (`DEV_USER_EMAIL`, non-prod only). API tokens are workspace-scoped - don't widen that.
+- **Login provisioning** (`services/provisioning.ts`): runs on every CF Access / dev-bypass login (not the token path). Cloudflare Access is the gate; config decides what a user gets inside - `ADMIN_EMAILS` → `owner` (first admin login also creates the `DEFAULT_WORKSPACE_SLUG` workspace), everyone else → `AUTO_JOIN_ROLE` (default `viewer`; `none` = invite-only). Idempotent; safe to run per request.
 - **Roles** (`owner`/`admin`/`member`/`viewer`) are enforced in services via `ctx.role`. Mutations generally block `viewer`; destructive ops may require `owner`.
 - **The plugin system is not wired at runtime yet** (`pluginRegistry` is empty; `enabled_plugins` is unread). Treat `plugins/*` as not-yet-functional until that lands.
 
 ## localStorage policy (frontend)
 
 `localStorage` may only store **cosmetic preferences** (theme, view mode, layout choices).
-Never store server-side entity references (workspace slug, project ID, user ID) — a deleted
+Never store server-side entity references (workspace slug, project ID, user ID) - a deleted
 or renamed entity leaves a stale value that will silently cause API 4xx errors.
 
 **Before adding a new `localStorage.setItem` call, ask:**
@@ -105,8 +105,8 @@ degrades gracefully). This is the convention established in PR #99.
 ## Frontend: islands and the API layer
 
 All island↔API calls go through `apps/web/src/utils/api-client.ts`:
-- `buildHeaders(workspaceSlug, extra?)` — adds the X-Workspace-Slug header
-- `apiFetch<T>(path, opts)` — wraps fetch with headers, credentials, JSON parse, and error throwing
+- `buildHeaders(workspaceSlug, extra?)` - adds the X-Workspace-Slug header
+- `apiFetch<T>(path, opts)` - wraps fetch with headers, credentials, JSON parse, and error throwing
 
 No raw `fetch(` calls in island components. No local `buildHeaders` copies.
 This mirrors the backend service-layer contract: routes are thin wrappers; islands are thin callers.
@@ -122,7 +122,7 @@ pnpm --filter @projektor/api test      # vitest against an in-process Worker + D
 cp apps/api/.dev.vars.example apps/api/.dev.vars   # DEV_USER_EMAIL + BOOTSTRAP_SECRET
 cp apps/web/.env.example apps/web/.env             # PUBLIC_WORKSPACE_SLUG=projektor
 
-pnpm dev                               # local dev — API on :8787, web on :4321
+pnpm dev                               # local dev - API on :8787, web on :4321
 # `dev` auto-applies D1 migrations to the local Miniflare DB first (db:migrate:local),
 # so /api/* won't 500 with "no such table" on a fresh checkout.
 ```
@@ -134,7 +134,7 @@ pnpm dev                               # local dev — API on :8787, web on :432
 curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 ```
 
-Then open **http://localhost:4321** — with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
+Then open **http://localhost:4321** - with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
 **Before opening a PR:** `pnpm turbo type-check` and `pnpm --filter @projektor/api test` must both be green. CI runs exactly these.
@@ -143,8 +143,8 @@ as that user (a member of the seeded `projektor` workspace), and the islands loa
 
 `pnpm install` runs `prepare`, which calls `lefthook install` and wires two hooks:
 
-- **pre-commit** — `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages).
-- **pre-push** — `pnpm --filter @projektor/api test` (the ~8s vitest suite; too slow for every commit but catches the failures that most often break CI).
+- **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages).
+- **pre-push** - `pnpm --filter @projektor/api test` (the ~8s vitest suite; too slow for every commit but catches the failures that most often break CI).
 
 These mirror CI (`.github/workflows/ci.yml`) exactly. New contributors get them automatically after `pnpm install`.
 
@@ -169,7 +169,7 @@ Call `register_agent` at the top of every session. Link to the issue you are imp
 { "name": "wt/my-feature", "issueId": "<issue-uuid>", "kind": "agent" }
 ```
 
-Save the returned `id` — you'll need it for heartbeats and messages.
+Save the returned `id` - you'll need it for heartbeats and messages.
 
 ### 2. Claim files before touching them
 
@@ -215,7 +215,7 @@ Sessions time out after 120 s without a heartbeat. Keep alive while working:
 
 This repo is built out via parallel workers in separate git worktrees. To avoid conflicts:
 - Give each worker a **disjoint file set** (one domain = its 4-5 files above). Domains don't share files *except* read-only shared scaffolding (`services/types.ts`, `services/errors.ts`, `schemas/common.ts`, the adapters) and `routes/mcp.ts`/`index.ts`.
-- **Never let two parallel workers edit `routes/mcp.ts`, `index.ts`, or `test/mcp.test.ts`** — serialize those, or assign to exactly one worker.
+- **Never let two parallel workers edit `routes/mcp.ts`, `index.ts`, or `test/mcp.test.ts`** - serialize those, or assign to exactly one worker.
 - Large refactors that touch shared files go in a **foundation phase first** (behavior-preserving), then fan out per-domain.
 
 ### Spawn prompt requirement
@@ -226,8 +226,8 @@ Workers will not use the coordination primitives unless explicitly told to. Ever
 ## Coordination (required)
 You are working in a parallel fleet. Use the projektor MCP to coordinate:
 
-1. `register_agent` at session start — link to your issue ID, save the returned `id`.
-2. `claim_files` before touching any file — check `list_file_claims` first; back off if another agent holds a file.
+1. `register_agent` at session start - link to your issue ID, save the returned `id`.
+2. `claim_files` before touching any file - check `list_file_claims` first; back off if another agent holds a file.
 3. `post_message` to `scope: "issue:<uuid>"` when you start, hit a blocker, and finish. Use `scope: "workspace"` for fleet-wide announcements (e.g. "rebasing mcp.ts, hold off").
 4. `heartbeat_agent` every ~60 s while working (sessions time out after 120 s of silence).
 5. `release_files` then `end_agent` when done.
@@ -239,15 +239,15 @@ See `~/.claude/docs/spawning-sessions.md` for the full prompt template (Coordina
 
 These are the constraints the fleet skill reads to plan batches. Keep them current when the codebase changes.
 
-**Serialized files** — only one worker at a time, ever:
+**Serialized files** - only one worker at a time, ever:
 
 | File | Reason |
 |------|--------|
-| `apps/api/src/routes/mcp.ts` | MCP tool registry — all domains compose here |
-| `apps/api/src/index.ts` | Hono app root — route mounting |
-| `apps/api/src/test/mcp.test.ts` | Cross-cutting dispatch tests — domain tests go in `test/<domain>.test.ts` |
+| `apps/api/src/routes/mcp.ts` | MCP tool registry - all domains compose here |
+| `apps/api/src/index.ts` | Hono app root - route mounting |
+| `apps/api/src/test/mcp.test.ts` | Cross-cutting dispatch tests - domain tests go in `test/<domain>.test.ts` |
 
-**Domain → file ownership** — one agent per row, no overlap:
+**Domain → file ownership** - one agent per row, no overlap:
 
 | Domain | Service | Schema | Routes | MCP | Tests |
 |--------|---------|--------|--------|-----|-------|
@@ -262,7 +262,7 @@ These are the constraints the fleet skill reads to plan batches. Keep them curre
 Frontend islands are **not** domain-locked in the same way, but two agents must never
 own the same island file. Assign each island to exactly one agent per batch.
 
-**Deploy:** tag a release (`git tag vX.Y.Z && git push --tags`) — `release.yml`
+**Deploy:** tag a release (`git tag vX.Y.Z && git push --tags`) - `release.yml`
 builds the artifact and the config-only deploy repo (`projektor-workspace`) picks
 it up. See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/).
 
@@ -288,11 +288,11 @@ claude mcp add projektor --transport http https://<host>/mcp/<workspaceId> \
   --header "Authorization: Bearer <token>"
 ```
 
-**The full tool list is generated from source — do not hand-maintain a copy here.**
+**The full tool list is generated from source - do not hand-maintain a copy here.**
 See the **[MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/)**
 (generated into `apps/docs/src/content/docs/agents/tool-catalog.md` by
 `apps/api/scripts/gen-mcp-catalog.ts` from `apps/api/src/mcp/*.ts`; CI fails if it is
 stale). The grouping there separates **Coordination** tools (the agent-native primitives
 used by the fleet protocol above) from **Project data** tools.
 
-**Tip:** `get_issue` accepts `ref: "PROJ-42"` (project key + number) — you don't need the UUID when you have the display key.
+**Tip:** `get_issue` accepts `ref: "PROJ-42"` (project key + number) - you don't need the UUID when you have the display key.

@@ -7,8 +7,8 @@ sidebar:
 > Wiki + Jira-style issue tracker built MCP-native, running entirely on Cloudflare's edge.
 > Monorepo (pnpm + turbo).
 
-This page is an accurate map of how Projektor is actually built — its surfaces, the
-service layer, and storage — and it stays honest about what is wired up versus what
+This page is an accurate map of how Projektor is actually built - its surfaces, the
+service layer, and storage - and it stays honest about what is wired up versus what
 isn't yet. It describes the real system as it stands today, not an idealised summary of it.
 
 ## How it works
@@ -16,18 +16,18 @@ isn't yet. It describes the real system as it stands today, not an idealised sum
 Projektor runs as a **single Cloudflare Worker** (`apps/api`, built on Hono). That one
 Worker exposes two surfaces over a shared request pipeline: a **REST API** for the
 browser SPA, and an **MCP endpoint** (JSON-RPC 2.0) that is the primary, first-class
-surface for AI agents. Every request flows through auth middleware — Cloudflare Access
-JWTs for human browser sessions, hashed API tokens for agents — and then workspace
+surface for AI agents. Every request flows through auth middleware - Cloudflare Access
+JWTs for human browser sessions, hashed API tokens for agents - and then workspace
 middleware that resolves the tenant from the slug and verifies membership before any
 handler runs.
 
-State lives entirely on Cloudflare's edge. **D1** (SQLite) holds the relational data —
+State lives entirely on Cloudflare's edge. **D1** (SQLite) holds the relational data -
 workspaces, users, projects, issues, comments, wiki pages, tokens, activity, and
 revisions. **KV** caches sessions, Access certs, and email lookups. **R2** is bound for
 file attachments. There are no servers and no containers: the whole system deploys as a
 Worker plus its bound data stores, which is what makes a five-minute self-host possible.
 
-The sections below give the picture in increasing detail — first a diagram, then a
+The sections below give the picture in increasing detail - first a diagram, then a
 layer-by-layer breakdown, then the request flow through a single agent call.
 
 ## System diagram
@@ -86,7 +86,7 @@ flowchart TB
 
 | Layer | Tech | Package | Notes |
 |-------|------|---------|-------|
-| Frontend | Astro + Preact | `apps/web` | Full SPA — issues, board, sprints, wiki, settings, tokens. Dev-proxies `/api` + `/mcp` to `:8787`. |
+| Frontend | Astro + Preact | `apps/web` | Full SPA - issues, board, sprints, wiki, settings, tokens. Dev-proxies `/api` + `/mcp` to `:8787`. |
 | API / edge runtime | Hono on Cloudflare Workers | `apps/api` | REST + MCP, two-mode auth, workspace tenancy. |
 | MCP server | JSON-RPC 2.0 over HTTP | `apps/api/src/routes/mcp.ts` | 64 tools across 14 domains (coordination + project data). Primary surface. |
 | Plugin system | Registry + SDK | `apps/api/src/plugins`, `packages/plugin-sdk` | `definePlugin` / `defineMCPTool`. **Not loaded at runtime.** |

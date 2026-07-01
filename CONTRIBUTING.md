@@ -1,13 +1,13 @@
 # Contributing
 
 projektor is a personal project, built and maintained by one person (with AI
-agents). It's open source under the [MIT licence](./LICENSE) — fork it, deploy
+agents). It's open source under the [MIT licence](./LICENSE) - fork it, deploy
 it, modify it, learn from it.
 
 ## Issues and pull requests
 
 **External issues and pull requests are automatically closed.** This isn't
-hostility — it's how a solo project stays sustainable. But **everything is
+hostility - it's how a solo project stays sustainable. But **everything is
 read.** If you open an issue or PR:
 
 - it will be closed automatically, and
@@ -15,7 +15,7 @@ read.** If you open an issue or PR:
   idea, reply) on their own schedule.
 
 So: a closed issue is not an ignored issue. If something is broken or you have an
-idea, you're welcome to file it — just don't expect a back-and-forth thread.
+idea, you're welcome to file it - just don't expect a back-and-forth thread.
 
 For security issues, follow [SECURITY.md](./SECURITY.md) (report privately, not
 via a public issue).
