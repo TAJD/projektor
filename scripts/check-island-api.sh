@@ -19,7 +19,7 @@ while IFS= read -r match; do
   echo "ERROR: raw fetch() found in $file - use apiFetch from utils/api-client.ts instead"
   ERRORS=$((ERRORS + 1))
 done < <(grep -rn --include="*.ts" --include="*.tsx" \
-  -E "(=\s*fetch\(|await fetch\()" \
+  -E "[^a-zA-Z0-9_.]fetch\(" \
   "$ISLANDS_DIR")
 
 if [ "$ERRORS" -gt 0 ]; then
