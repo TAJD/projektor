@@ -109,7 +109,7 @@ export const issuesTools: MCPTool[] = [
 	},
 	{
 		name: "update_issue",
-		description: "Update an issue — status, priority, title, body, assignee, or labels",
+		description: "Update an issue - status, priority, title, body, assignee, or labels",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
