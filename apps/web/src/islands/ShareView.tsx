@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { apiFetch } from "../utils/api-client";
 import { renderMd } from "../utils/markdown";
 
 interface SharedIssue {
@@ -51,17 +52,15 @@ export default function ShareView() {
 			return;
 		}
 		const token = m[1];
-		fetch(`/api/share/${token}`)
-			.then(async (res) => {
-				if (!res.ok) throw new Error(res.status === 404 ? "not_found" : "error");
-				return res.json() as Promise<SharedIssue>;
-			})
+		// Public/unauthenticated endpoint - apiFetch's credentials: "include" and
+		// missing workspace header are both no-ops here since /api/share is open.
+		apiFetch<SharedIssue>(`/api/share/${token}`)
 			.then((data) => {
 				setIssue(data);
 				setLoading(false);
 			})
 			.catch((e) => {
-				setError(String(e.message));
+				setError(String(e.message?.includes("404") ? "not_found" : "error"));
 				setLoading(false);
 			});
 	}, []);

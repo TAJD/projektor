@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
-import { apiFetch, buildHeaders } from "../utils/api-client";
+import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
 
 interface Sprint {
@@ -262,20 +262,16 @@ export default function SprintManager({ workspaceSlug }: Props) {
 			setLoading(true);
 			setError(null);
 			try {
-				const headers = buildHeaders(workspaceSlug);
-				const [projRes, sprintRes] = await Promise.all([
-					fetch(`/api/projects/${pid}`, { credentials: "include", headers }),
-					fetch(`/api/sprints?projectId=${encodeURIComponent(pid)}`, {
-						credentials: "include",
-						headers,
-					}),
+				const [proj, sprintData] = await Promise.all([
+					apiFetch<Project>(`/api/projects/${pid}`, { workspaceSlug }),
+					apiFetch<{ items: Sprint[] }>(`/api/sprints?projectId=${encodeURIComponent(pid)}`, {
+						workspaceSlug,
+					}).catch(() => null),
 				]);
-				if (!projRes.ok) throw new Error(`Failed to load project (HTTP ${projRes.status})`);
-				setProject((await projRes.json()) as Project);
+				setProject(proj);
 
-				if (sprintRes.ok) {
-					const data = (await sprintRes.json()) as { items: Sprint[] };
-					setSprints(Array.isArray(data?.items) ? data.items : []);
+				if (sprintData) {
+					setSprints(Array.isArray(sprintData?.items) ? sprintData.items : []);
 				}
 			} catch (e) {
 				setError(String(e));

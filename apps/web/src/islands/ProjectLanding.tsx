@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
-import { apiFetch, buildHeaders } from "../utils/api-client";
+import { apiFetch } from "../utils/api-client";
 
 interface Project {
 	id: string;
@@ -67,33 +67,28 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 			setLoading(true);
 			setError(null);
 			try {
-				const headers = buildHeaders(workspaceSlug);
-				const [projRes, issuesRes, wikiRes] = await Promise.all([
-					fetch(`/api/projects/${id}`, { credentials: "include", headers }),
-					fetch(`/api/issues?project=${id}`, { credentials: "include", headers }),
-					fetch(`/api/wiki?projectId=${encodeURIComponent(id)}`, {
-						credentials: "include",
-						headers,
-					}),
+				const [proj, issuesData, wikiData] = await Promise.all([
+					apiFetch<Project>(`/api/projects/${id}`, { workspaceSlug }),
+					apiFetch<{ items: RecentIssue[] }>(`/api/issues?project=${id}`, { workspaceSlug }).catch(
+						() => null
+					),
+					apiFetch<RecentWikiPage[]>(`/api/wiki?projectId=${encodeURIComponent(id)}`, {
+						workspaceSlug,
+					}).catch(() => null),
 				]);
 
-				if (!projRes.ok) throw new Error(`Failed to load project (HTTP ${projRes.status})`);
-
-				const proj = (await projRes.json()) as Project;
 				setProject(proj);
 
-				if (issuesRes.ok) {
-					const data = (await issuesRes.json()) as { items: RecentIssue[] };
-					const sorted = (Array.isArray(data?.items) ? data.items : [])
+				if (issuesData) {
+					const sorted = (Array.isArray(issuesData?.items) ? issuesData.items : [])
 						.slice()
 						.sort((a, b) => b.updated_at - a.updated_at)
 						.slice(0, 5);
 					setRecentIssues(sorted);
 				}
 
-				if (wikiRes.ok) {
-					const wiki = (await wikiRes.json()) as RecentWikiPage[];
-					const sorted = (Array.isArray(wiki) ? wiki : [])
+				if (wikiData) {
+					const sorted = (Array.isArray(wikiData) ? wikiData : [])
 						.slice()
 						.sort((a, b) => b.updated_at - a.updated_at)
 						.slice(0, 5);

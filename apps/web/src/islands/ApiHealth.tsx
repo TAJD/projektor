@@ -1,11 +1,12 @@
 import { useEffect, useState } from "preact/hooks";
+import { apiFetch } from "../utils/api-client";
 
 export default function ApiHealth() {
 	const [status, setStatus] = useState<string>("checking…");
 
 	useEffect(() => {
-		fetch("/api/health")
-			.then((r) => (r.ok ? "ok" : `error ${r.status}`))
+		apiFetch("/api/health")
+			.then(() => "ok")
 			.catch(() => "unreachable")
 			.then(setStatus);
 	}, []);

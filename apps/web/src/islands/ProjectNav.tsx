@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { buildHeaders } from "../utils/api-client";
+import { apiFetch } from "../utils/api-client";
 
 interface Project {
 	id: string;
@@ -30,25 +30,19 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 		const rawId = params.get("id") || params.get("projectId");
 		const rawProject = params.get("project");
 
-		const headers = buildHeaders(workspaceSlug);
-
 		const resolve = (p: Project) => {
 			setProject(p);
 			localStorage.setItem("projektor-last-project-id", p.id);
 		};
 
 		if (rawId) {
-			fetch(`/api/projects/${encodeURIComponent(rawId)}`, { credentials: "include", headers })
-				.then((r) => (r.ok ? r.json() : null))
-				.then((p) => {
-					if (p) resolve(p as Project);
-				})
+			apiFetch<Project>(`/api/projects/${encodeURIComponent(rawId)}`, { workspaceSlug })
+				.then((p) => resolve(p))
 				.catch(() => {});
 		} else if (rawProject) {
 			// ?project may be a key (e.g. "PROJ") or UUID; fetch list and find by either
-			fetch("/api/projects", { credentials: "include", headers: buildHeaders(workspaceSlug) })
-				.then((r) => (r.ok ? r.json() : []))
-				.then((list: Project[]) => {
+			apiFetch<Project[]>("/api/projects", { workspaceSlug })
+				.then((list) => {
 					if (Array.isArray(list)) {
 						const found = list.find((p) => p.key === rawProject || p.id === rawProject);
 						if (found) resolve(found);
@@ -59,25 +53,18 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 			// No project param in URL — recover from localStorage, then fall back to first project
 			const storedId = localStorage.getItem("projektor-last-project-id");
 			if (storedId) {
-				fetch(`/api/projects/${encodeURIComponent(storedId)}`, { credentials: "include", headers })
-					.then((r) => (r.ok ? r.json() : null))
-					.then((p) => {
-						if (p) {
-							resolve(p as Project);
-						} else {
-							// Stored id is stale — fall back to first project
-							return fetch("/api/projects", { credentials: "include", headers })
-								.then((r) => (r.ok ? r.json() : []))
-								.then((list: Project[]) => {
-									if (Array.isArray(list) && list.length > 0) resolve(list[0]);
-								});
-						}
-					})
+				apiFetch<Project>(`/api/projects/${encodeURIComponent(storedId)}`, { workspaceSlug })
+					.then((p) => resolve(p))
+					.catch(() =>
+						// Stored id is stale (or the request failed) — fall back to first project
+						apiFetch<Project[]>("/api/projects", { workspaceSlug }).then((list) => {
+							if (Array.isArray(list) && list.length > 0) resolve(list[0]);
+						})
+					)
 					.catch(() => {});
 			} else {
-				fetch("/api/projects", { credentials: "include", headers })
-					.then((r) => (r.ok ? r.json() : []))
-					.then((list: Project[]) => {
+				apiFetch<Project[]>("/api/projects", { workspaceSlug })
+					.then((list) => {
 						if (Array.isArray(list) && list.length > 0) resolve(list[0]);
 					})
 					.catch(() => {});
