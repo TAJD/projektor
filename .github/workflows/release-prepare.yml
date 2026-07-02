@@ -1,0 +1,54 @@
+name: Prepare release
+
+# Manually triggered: bumps apps/web/package.json (the nav version) and opens a PR.
+# main is ruleset-protected (PR + passing CI required), so this can't commit directly
+# to main. Once the PR merges, release-tag.yml tags it, which fires release.yml.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+jobs:
+  prepare:
+    name: Bump version and open PR
+    runs-on: ubuntu-latest
+    steps:
+      # A PR opened with the default GITHUB_TOKEN doesn't trigger ci.yml's
+      # `pull_request` gate (GitHub suppresses that to avoid recursive runs),
+      # so the bump PR would sit with no CI status. Use WORKSPACE_PAT instead
+      # (same one release-tag.yml and release.yml's dispatch step use).
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.WORKSPACE_PAT }}
+
+      - name: Bump version
+        id: bump
+        working-directory: apps/web
+        run: |
+          NEW_VERSION=$(npm version "${{ inputs.bump }}" --no-git-tag-version | sed 's/^v//')
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Open release PR
+        env:
+          GH_TOKEN: ${{ secrets.WORKSPACE_PAT }}
+        run: |
+          VERSION="${{ steps.bump.outputs.version }}"
+          BRANCH="chore/release-v$VERSION"
+          git checkout -b "$BRANCH"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apps/web/package.json
+          git commit -m "chore(web): bump version to $VERSION for release"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --title "chore(web): bump version to $VERSION for release" \
+            --body "Automated version bump ahead of cutting v$VERSION. Merging this will trigger release-tag.yml to tag and publish the release." \
+            --label release \
+            --base main \
+            --head "$BRANCH"
