@@ -20,10 +20,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: /^\/(?:api|mcp)\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-            },
+            handler: 'NetworkOnly',
           },
         ],
       },
