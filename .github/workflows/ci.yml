@@ -1,8 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
   # Allow other workflows (e.g. release.yml) to run these exact checks as a gate.
