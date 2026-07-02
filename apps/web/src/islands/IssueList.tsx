@@ -102,6 +102,9 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const [epics, setEpics] = useState<Issue[]>([]);
 	const [loading, setLoading] = useState(true);
 	const hasLoadedOnce = useRef(false);
+	// Guards against out-of-order responses when filters change rapidly: only the
+	// response from the most recently issued fetchIssues call is applied.
+	const fetchSeq = useRef(0);
 	const [error, setError] = useState<string | null>(null);
 
 	// Pagination (PROJ-201): list view loads 30 at a time and appends via "Load more".
@@ -235,6 +238,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 	const pageSize = view === "list" ? 30 : 100;
 
 	const fetchIssues = useCallback(async () => {
+		const seq = ++fetchSeq.current;
 		setLoading(true);
 		setError(null);
 		try {
@@ -244,13 +248,15 @@ export default function IssueList({ workspaceSlug }: Props) {
 				`/api/issues?${qs.toString()}`,
 				{ workspaceSlug }
 			);
+			if (seq !== fetchSeq.current) return; // superseded by a newer request
 			setIssues(data.items);
 			setNextCursor(data.nextCursor ?? null);
 			hasLoadedOnce.current = true;
 		} catch (e) {
+			if (seq !== fetchSeq.current) return;
 			setError(String(e));
 		} finally {
-			setLoading(false);
+			if (seq === fetchSeq.current) setLoading(false);
 		}
 	}, [workspaceSlug, buildFilterParams, pageSize]);
 

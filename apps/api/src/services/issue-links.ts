@@ -5,6 +5,7 @@ import {
 	DeleteIssueLinkSchema,
 	ListIssueLinksSchema,
 } from "../schemas/issues";
+import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -102,6 +103,9 @@ export async function createLink(ctx: ServiceCtx, raw: unknown) {
 		createdAt: now,
 	});
 
+	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${canon.source}`);
+	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${canon.target}`);
+
 	return { id };
 }
 
@@ -113,7 +117,11 @@ export async function deleteLink(ctx: ServiceCtx, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
-		.select({ id: schema.issueLinks.id })
+		.select({
+			id: schema.issueLinks.id,
+			sourceIssueId: schema.issueLinks.sourceIssueId,
+			targetIssueId: schema.issueLinks.targetIssueId,
+		})
 		.from(schema.issueLinks)
 		.where(and(eq(schema.issueLinks.id, id), eq(schema.issueLinks.workspaceId, ctx.workspaceId)))
 		.get();
@@ -122,6 +130,9 @@ export async function deleteLink(ctx: ServiceCtx, raw: unknown) {
 	await orm
 		.delete(schema.issueLinks)
 		.where(and(eq(schema.issueLinks.id, id), eq(schema.issueLinks.workspaceId, ctx.workspaceId)));
+
+	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.sourceIssueId}`);
+	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.targetIssueId}`);
 
 	return { ok: true };
 }
