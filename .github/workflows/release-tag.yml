@@ -8,18 +8,20 @@ on:
     types: [closed]
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   tag:
     name: Create and push release tag
     if: github.event.pull_request.merged == true && contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest
     steps:
+      # Tags pushed with the default GITHUB_TOKEN don't trigger other workflows
+      # (GitHub suppresses that to avoid runaway loops), so release.yml's
+      # `on: push: tags: ['v*']` would never fire. Use the same WORKSPACE_PAT
+      # release.yml already relies on for its cross-repo dispatch step.
       - uses: actions/checkout@v4
         with:
           ref: main
+          token: ${{ secrets.WORKSPACE_PAT }}
 
       - name: Determine version
         id: version
@@ -28,8 +30,6 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Tag and push
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ steps.version.outputs.version }}"
           if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then

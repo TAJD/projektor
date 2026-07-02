@@ -13,18 +13,19 @@ on:
         options: [patch, minor, major]
         default: patch
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   prepare:
     name: Bump version and open PR
     runs-on: ubuntu-latest
     steps:
+      # A PR opened with the default GITHUB_TOKEN doesn't trigger ci.yml's
+      # `pull_request` gate (GitHub suppresses that to avoid recursive runs),
+      # so the bump PR would sit with no CI status. Use WORKSPACE_PAT instead
+      # (same one release-tag.yml and release.yml's dispatch step use).
       - uses: actions/checkout@v4
         with:
           ref: main
+          token: ${{ secrets.WORKSPACE_PAT }}
 
       - name: Bump version
         id: bump
@@ -35,7 +36,7 @@ jobs:
 
       - name: Open release PR
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.WORKSPACE_PAT }}
         run: |
           VERSION="${{ steps.bump.outputs.version }}"
           BRANCH="chore/release-v$VERSION"
