@@ -421,21 +421,19 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		if (!page) return;
 		setSaveError(null);
 		setDraftBanner(null);
+		setEditTitle(page.title);
+		setEditContent(page.content);
 		try {
 			const raw = localStorage.getItem(draftKey(page.id));
 			if (raw) {
 				const draft = JSON.parse(raw);
 				if (draft && typeof draft.savedAt === "number" && draft.savedAt > page.updated_at * 1000) {
 					setDraftBanner(draft);
-					setEditing(true);
-					return;
 				}
 			}
 		} catch {
 			// non-fatal — treat as no draft
 		}
-		setEditTitle(page.title);
-		setEditContent(page.content);
 		setEditing(true);
 	}
 
