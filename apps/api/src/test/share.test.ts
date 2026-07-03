@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedProject } from "./helpers";
+import { authHeaders, hashToken, seedFixture, seedIssue, seedProject } from "./helpers";
 
 describe("Share tokens", () => {
 	let token: string;
@@ -58,11 +58,27 @@ describe("Share tokens", () => {
 		await env.DB.prepare(
 			"INSERT INTO share_tokens (id, issue_id, workspace_id, created_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
 		)
-			.bind(expiredToken, issueId, workspaceId, userId, now - 1, now - 86400)
+			.bind(await hashToken(expiredToken), issueId, workspaceId, userId, now - 1, now - 86400)
 			.run();
 
 		const res = await SELF.fetch(`http://localhost/api/share/${expiredToken}`);
 		expect(res.status).toBe(404);
+	});
+
+	it("stores the share token hashed, not in plaintext, in D1", async () => {
+		const createRes = await SELF.fetch(`http://localhost/api/issues/${issueId}/share`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		const { token: shareToken } = (await createRes.json()) as { token: string; url: string };
+
+		const { env } = await import("cloudflare:test");
+		const row = await env.DB.prepare("SELECT id FROM share_tokens WHERE issue_id = ?")
+			.bind(issueId)
+			.first<{ id: string }>();
+
+		expect(row?.id).not.toBe(shareToken);
+		expect(row?.id).toBe(await hashToken(shareToken));
 	});
 
 	it("GET /api/share/<unknown-token> returns 404", async () => {
