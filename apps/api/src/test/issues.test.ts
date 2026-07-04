@@ -369,8 +369,20 @@ describe("Issues API", () => {
 			headers: authHeaders(token, slug),
 		});
 		expect(getRes.status).toBe(200);
-		const issue = (await getRes.json()) as { title: string };
+		const issue = (await getRes.json()) as { title: string; project_key: string };
 		expect(issue.title).toBe("Ref issue");
+		expect(issue.project_key).toBe("PROJ");
+	});
+
+	it("GET /api/issues/:id includes project_key (PROJ-226 tab title regression)", async () => {
+		const created = await seedIssue(workspaceId, projectId, userId, { title: "By id" });
+
+		const getRes = await SELF.fetch(`http://localhost/api/issues/${created.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(getRes.status).toBe(200);
+		const issue = (await getRes.json()) as { project_key: string };
+		expect(issue.project_key).toBe("PROJ");
 	});
 
 	it("GET /api/issues/search finds issues by title keyword", async () => {
