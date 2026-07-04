@@ -1,6 +1,13 @@
 import { NotFoundError } from "./errors";
 import type { ServiceCtx } from "./types";
 
+async function hashToken(token: string): Promise<string> {
+	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+	return Array.from(new Uint8Array(buf))
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
+}
+
 export async function createShareToken(
 	ctx: ServiceCtx,
 	issueId: string
@@ -18,11 +25,13 @@ export async function createShareToken(
 	const token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 	const expiresAt = now + 3 * 86400;
 
+	// share_tokens.id stores sha256(token), never the raw token — see PROJ-239
+	const id = await hashToken(token);
 	await ctx.db
 		.prepare(
 			"INSERT INTO share_tokens (id, issue_id, workspace_id, created_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
 		)
-		.bind(token, issueId, ctx.workspaceId, ctx.userId, expiresAt, now)
+		.bind(id, issueId, ctx.workspaceId, ctx.userId, expiresAt, now)
 		.run();
 
 	return { token, url: `/share/${token}` };
@@ -33,10 +42,11 @@ export async function getShareToken(
 	token: string
 ): Promise<{ issue_id: string; workspace_id: string }> {
 	const now = Math.floor(Date.now() / 1000);
+	const id = await hashToken(token);
 
 	const row = await db
 		.prepare("SELECT issue_id, workspace_id, expires_at FROM share_tokens WHERE id = ?")
-		.bind(token)
+		.bind(id)
 		.first<{ issue_id: string; workspace_id: string; expires_at: number }>();
 
 	if (!row || row.expires_at <= now) throw new NotFoundError("Share link not found or expired");
@@ -66,6 +76,7 @@ export async function getSharedIssue(
 	}
 > {
 	const now = Math.floor(Date.now() / 1000);
+	const id = await hashToken(token);
 
 	const row = await db
 		.prepare(
@@ -82,14 +93,14 @@ export async function getSharedIssue(
       LEFT JOIN users u ON u.id = i.assignee_id
       WHERE st.id = ? AND st.expires_at > ?`
 		)
-		.bind(token, now)
+		.bind(id, now)
 		.first<SharedIssueRow>();
 
 	if (!row) throw new NotFoundError("Share link not found or expired");
 
 	const tokenMeta = await db
 		.prepare("SELECT issue_id FROM share_tokens WHERE id = ?")
-		.bind(token)
+		.bind(id)
 		.first<{ issue_id: string }>();
 
 	if (!tokenMeta) throw new NotFoundError("Share link not found or expired");

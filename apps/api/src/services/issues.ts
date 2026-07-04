@@ -301,6 +301,8 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 		created_at: schema.issues.createdAt,
 		updated_at: schema.issues.updatedAt,
 		completed_at: schema.issues.completedAt,
+		project_key: schema.projects.key,
+		project_name: schema.projects.name,
 		type_key: schema.taskTypes.key,
 		type_name: schema.taskTypes.name,
 		status_key: schema.taskStatuses.key,
@@ -314,6 +316,7 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 			(await orm
 				.select(issueColumns)
 				.from(schema.issues)
+				.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 				.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
 				.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
 				.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
