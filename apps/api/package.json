@@ -1,6 +1,6 @@
 {
   "name": "@projektor/api",
-  "version": "0.0.1",
+  "version": "0.0.0-workspace",
   "private": true,
   "scripts": {
     "dev": "pnpm db:migrate:local && wrangler dev",

@@ -19,6 +19,10 @@ import { wikiTools } from "../mcp/wiki";
 import { workspacesTools } from "../mcp/workspaces";
 import { pluginRegistry } from "../plugins/registry";
 
+// __PROJEKTOR_VERSION__ is injected by esbuild --define at release-build time
+// (scripts/build-release.sh); it's absent in local `wrangler dev` and tests.
+const SERVER_VERSION = typeof __PROJEKTOR_VERSION__ === "string" ? __PROJEKTOR_VERSION__ : "dev";
+
 // Surfaced to every MCP client at `initialize` (the MCP spec's optional
 // `instructions` field). Clients like Claude Code inject this into the model's
 // context, so any session with the Projektor MCP connected learns the fleet
@@ -77,7 +81,7 @@ router.post("/:workspaceId", async (c) => {
 				jsonRpcResult(body.id, {
 					protocolVersion: "2024-11-05",
 					capabilities: { tools: {} },
-					serverInfo: { name: "projektor", version: "0.1.0" },
+					serverInfo: { name: "projektor", version: SERVER_VERSION },
 					instructions: SERVER_INSTRUCTIONS,
 				})
 			);

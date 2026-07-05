@@ -51,11 +51,14 @@ describe("MCP endpoint", () => {
 	it("initialize returns server info", async () => {
 		const res = (await mcpCall(workspaceId, "initialize", {}, headers)) as JsonRpcResult<{
 			protocolVersion: string;
-			serverInfo: { name: string };
+			serverInfo: { name: string; version: string };
 			instructions: string;
 		}>;
 		expect(res.result.protocolVersion).toBe("2024-11-05");
 		expect(res.result.serverInfo.name).toBe("projektor");
+		// __PROJEKTOR_VERSION__ is only injected by the release build (scripts/build-release.sh);
+		// tests run without that define, so the fallback applies.
+		expect(res.result.serverInfo.version).toBe("dev");
 		// Coordination protocol is surfaced to every client (PROJ fleet injection).
 		expect(res.result.instructions).toContain("register_agent");
 		expect(res.result.instructions).toContain("claim_files");

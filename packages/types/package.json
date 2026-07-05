@@ -1,6 +1,6 @@
 {
 	"name": "@projektor/types",
-	"version": "0.0.1",
+	"version": "0.0.0-workspace",
 	"private": true,
 	"main": "./src/index.ts",
 	"types": "./src/index.ts",
