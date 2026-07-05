@@ -245,6 +245,55 @@ export async function seedCustomFieldValue(issueId: string, fieldId: string, val
 		.run();
 }
 
+/**
+ * Seed an agent (or human) session plus an active issue lease directly, bypassing the
+ * claim flow. `live: true` (default) means an active session heartbeating within the
+ * TTL (a live lease); `live: false` means an ended session with a stale heartbeat (the
+ * issue was agent-worked but no lease is currently live).
+ */
+export async function seedAgentLease(
+	workspaceId: string,
+	issueId: string,
+	opts?: { kind?: "agent" | "human"; live?: boolean; name?: string }
+): Promise<{ agentSessionId: string; leaseId: string }> {
+	const now = Math.floor(Date.now() / 1000);
+	const live = opts?.live ?? true;
+	const agentSessionId = crypto.randomUUID();
+	await env.DB.prepare(
+		`INSERT INTO agent_sessions
+       (id, workspace_id, issue_id, token_id, name, kind, status, started_at, last_heartbeat_at, ended_at)
+     VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`
+	)
+		.bind(
+			agentSessionId,
+			workspaceId,
+			issueId,
+			opts?.name ?? "seed-agent",
+			opts?.kind ?? "agent",
+			live ? "active" : "ended",
+			now,
+			live ? now : now - 1000,
+			live ? null : now
+		)
+		.run();
+	const leaseId = crypto.randomUUID();
+	await env.DB.prepare(
+		`INSERT INTO issue_leases (id, workspace_id, issue_id, agent_session_id, claimed_at, released_at, release_reason)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+	)
+		.bind(
+			leaseId,
+			workspaceId,
+			issueId,
+			agentSessionId,
+			now,
+			live ? null : now,
+			live ? null : "agent_ended"
+		)
+		.run();
+	return { agentSessionId, leaseId };
+}
+
 /** Seed a complete workspace + user + member + token in one call */
 export async function seedFixture(opts?: { slug?: string; email?: string; role?: string }) {
 	const workspace = await seedWorkspace(opts?.slug ?? `ws-${crypto.randomUUID().slice(0, 8)}`);

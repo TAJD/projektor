@@ -39,7 +39,8 @@ export interface Env {
 	// is absent (e.g. team.example.com -> slug "team"). Off by default: most deployments
 	// sit behind a single Cloudflare Workers hostname, where the leading label is a
 	// CDN/proxy artifact, not a real tenant signal. Set "true" only when workspace
-	// subdomains are actually provisioned in DNS. (PROJ-267)
+	// subdomains are actually provisioned in DNS. Honored truthy values (case-
+	// insensitive, whitespace-trimmed): "true", "1", "yes". (PROJ-267, PROJ-296)
 	WORKSPACE_SUBDOMAIN_ROUTING?: string;
 }
 

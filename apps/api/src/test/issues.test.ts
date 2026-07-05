@@ -1358,6 +1358,7 @@ describe("Issues role guards", () => {
 	});
 });
 
+// cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
 describe("get_prioritized_issues MCP tool", () => {
 	let token: string;
 	let slug: string;
@@ -1479,20 +1480,31 @@ describe("get_prioritized_issues MCP tool", () => {
 		const ready = await seedIssue(workspaceId, projectId, userId, { title: "Ready" });
 		await env.DB.prepare("UPDATE issues SET body = ? WHERE id = ?")
 			.bind(
-				["## Acceptance criteria", "- Does the thing", "", "## Verification", "`pnpm test`"].join(
-					"\n"
-				),
+				[
+					"## Acceptance criteria",
+					"- Does the thing",
+					"",
+					"## Scope",
+					"`src/thing.ts`",
+					"",
+					"## Verification",
+					"`pnpm test`",
+				].join("\n"),
 				ready.id
 			)
 			.run();
 		await seedIssue(workspaceId, projectId, userId, { title: "Not ready" });
 
 		const defaultBody = await callPrioritized();
-		const defaultTitles = (
-			JSON.parse(defaultBody.result!.content[0].text) as { issues: Array<{ title: string }> }
-		).issues.map((i) => i.title);
+		const defaultParsed = JSON.parse(defaultBody.result!.content[0].text) as {
+			issues: Array<{ title: string }>;
+			droppedNotReady: number;
+		};
+		const defaultTitles = defaultParsed.issues.map((i) => i.title);
 		expect(defaultTitles).toContain("Ready");
 		expect(defaultTitles).not.toContain("Not ready");
+		// PROJ-291: dropped not-ready issues are surfaced as a count, not silently gone.
+		expect(defaultParsed.droppedNotReady).toBeGreaterThanOrEqual(1);
 
 		const withNotReady = await callPrioritized({ includeNotReady: true });
 		const data = JSON.parse(withNotReady.result!.content[0].text) as {

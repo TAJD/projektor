@@ -29,7 +29,7 @@
     "onlyBuiltDependencies": ["esbuild", "workerd", "sharp", "@cofferdam/cofferdam"]
   },
   "engines": {
-    "node": ">=20",
+    "node": ">=22.12",
     "pnpm": ">=9"
   }
 }

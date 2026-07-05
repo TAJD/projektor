@@ -11,14 +11,18 @@
 # limit = 120
 # severity = "low"
 
-# Vitest integration tests legitimately run 60-100+ line linear
-# arrange-act-assert bodies (multi-step API setup, several assertions per
-# scenario) — that's normal test style, not a code smell the way a
-# 90-line production function is. There's no per-path override in
-# cofferdam yet, so this raises the ceiling project-wide instead.
+# Gating (medium) so long PRODUCTION functions fail CI again (PROJ-300).
+# cofferdam.toml has no per-path/per-glob override (only `limit`/`severity`
+# per check, applied project-wide). Vitest integration tests legitimately run
+# 60-100+ line linear arrange-act-assert bodies (multi-step API setup, several
+# assertions per scenario) — normal test style, not a code smell the way a
+# 90-line production function is. The few existing over-long test describe
+# blocks carry an inline `// cofferdam-ignore: Readability.MaxFunctionLength`
+# so the baseline stays empty; any new long function (test or source) still
+# surfaces as a finding and fails CI.
 [checks."Readability.MaxFunctionLength"]
 limit = 100
-severity = "low"
+severity = "medium"
 
 # [checks."Design.MaxParameters"]
 # limit = 5

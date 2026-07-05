@@ -55,4 +55,42 @@ describe("checkDefinitionOfReady (PROJ-253)", () => {
 			missing: ["acceptance criteria", "scope/files", "verification"],
 		});
 	});
+
+	it("rejects a lone non-path backtick as the scope signal (PROJ-291)", () => {
+		const body = [
+			"## Acceptance criteria",
+			"- Does the thing",
+			"",
+			"Set it to `true`.",
+			"",
+			"## Verification",
+			"runs `pnpm test`",
+		].join("\n");
+		const result = checkDefinitionOfReady(body);
+		expect(result.ready).toBe(false);
+		expect(result.missing).toContain("scope/files");
+	});
+
+	it("does not treat prose that merely mentions a section label as present (PROJ-291)", () => {
+		const body = [
+			"Acceptance criteria are unclear right now.",
+			"We should figure them out.",
+			"",
+			"## Scope",
+			"`src/x.ts`",
+			"",
+			"## Verification",
+			"`pnpm test x`",
+		].join("\n");
+		expect(checkDefinitionOfReady(body).missing).toContain("acceptance criteria");
+	});
+
+	it("recognises colon-prefixed labels (PROJ-291)", () => {
+		const body = [
+			"Acceptance criteria: does the thing",
+			"Scope: `src/x.ts`",
+			"Verification: `pnpm test`",
+		].join("\n");
+		expect(checkDefinitionOfReady(body)).toEqual({ ready: true, missing: [] });
+	});
 });
