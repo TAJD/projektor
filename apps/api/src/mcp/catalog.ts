@@ -4,6 +4,7 @@ import { agentsTools } from "./agents";
 import { commentsTools } from "./comments";
 import { customFieldsTools } from "./custom-fields";
 import { fileClaimsTools } from "./file-claims";
+import { flowMetricsTools } from "./flow-metrics";
 import { issueLeasesTools } from "./issue-leases";
 import { issueLinksTools } from "./issue-links";
 import { issuesTools } from "./issues";
@@ -77,6 +78,7 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 		tools: agentMessagesTools,
 	},
 	{ domain: "workflow", title: "Workflow spec", group: "Coordination", tools: workflowTools },
+	{ domain: "flow-metrics", title: "Flow metrics", group: "Project data", tools: flowMetricsTools },
 ];
 
 /** Total number of MCP tools across all domains. */

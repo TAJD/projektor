@@ -598,6 +598,9 @@ type ExistingIssue = {
 	parentId: string | null;
 	status: string;
 	statusCategory: string | null;
+	readyAt: number | null;
+	claimedAt: number | null;
+	doneAt: number | null;
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
@@ -642,6 +645,37 @@ function applyCompletedAtTransition(
 	else if (!isDone && wasDone) setValues.completedAt = null;
 }
 
+// PROJ-252 flow metrics: stamp ready_at/claimed_at/done_at the first time an issue
+// enters the corresponding state, using the same category-or-legacy-key detection as
+// applyCompletedAtTransition. Unlike completed_at these are write-once — never cleared
+// on re-entry — so lead/cycle time still reflects rework after a reopen. "Ready" isn't
+// its own status_category (backlog and todo share category 'todo'), so it's detected
+// from the legacy `status` key instead: any status other than 'backlog'.
+function applyFlowTimestampTransitions(
+	setValues: SetValues,
+	existing: ExistingIssue,
+	resolvedStatusKey: string,
+	newStatusCategory: string | undefined
+): void {
+	const wasReady = existing.status !== "backlog";
+	const isReady = resolvedStatusKey !== "backlog";
+	if (isReady && !wasReady && existing.readyAt == null) setValues.readyAt = now();
+
+	const wasClaimed =
+		existing.statusCategory === "in_progress" ||
+		existing.status === "in_progress" ||
+		existing.status === "in_review";
+	const isClaimed =
+		newStatusCategory === "in_progress" ||
+		resolvedStatusKey === "in_progress" ||
+		resolvedStatusKey === "in_review";
+	if (isClaimed && !wasClaimed && existing.claimedAt == null) setValues.claimedAt = now();
+
+	const wasDone = existing.statusCategory === "done" || existing.status === "done";
+	const isDone = newStatusCategory === "done" || resolvedStatusKey === "done";
+	if (isDone && !wasDone && existing.doneAt == null) setValues.doneAt = now();
+}
+
 async function applyStatusFields(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
@@ -662,6 +696,7 @@ async function applyStatusFields(
 
 	const newStatusCategory = await fetchStatusCategory(orm, resolvedStatusId);
 	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
+	applyFlowTimestampTransitions(setValues, existing, resolvedStatusKey, newStatusCategory);
 }
 
 function now(): number {
@@ -774,6 +809,9 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 			parentId: schema.issues.parentId,
 			status: schema.issues.status,
 			statusCategory: schema.issues.statusCategory,
+			readyAt: schema.issues.readyAt,
+			claimedAt: schema.issues.claimedAt,
+			doneAt: schema.issues.doneAt,
 		})
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))

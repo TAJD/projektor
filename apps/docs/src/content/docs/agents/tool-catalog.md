@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**68 tools across 16 domains.**
+**69 tools across 17 domains.**
 
 ## Coordination
 
@@ -164,5 +164,11 @@ running server.
 | `complete_sprint` | Mark an active sprint as completed |
 | `delete_sprint` | Delete a sprint (issues in the sprint will have their sprint_id cleared) |
 | `move_issues_to_sprint` | Bulk move issues into a sprint by setting their sprint_id |
+
+### Flow metrics
+
+| Tool | Description |
+|------|-------------|
+| `get_flow_metrics` | Lead time (ready→done), cycle time (claimed→done), WIP over time, and agent-vs-human cycle time for a project, computed from indexed transition timestamps. Measure flow before tuning WIP limits. |
 
 <!-- gen-mcp-catalog:end -->

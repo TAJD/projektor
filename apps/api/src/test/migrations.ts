@@ -23,6 +23,7 @@ import m0019 from "../../../../packages/db/migrations/0019_issue_file_claims.sql
 import m0020 from "../../../../packages/db/migrations/0020_agent_messages.sql?raw";
 import m0021 from "../../../../packages/db/migrations/0021_issue_leases.sql?raw";
 import m0022 from "../../../../packages/db/migrations/0022_issue_completed_at.sql?raw";
+import m0023 from "../../../../packages/db/migrations/0023_issue_flow_timestamps.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -48,4 +49,5 @@ export const MIGRATIONS = [
 	m0020,
 	m0021,
 	m0022,
+	m0023,
 ];

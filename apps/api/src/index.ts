@@ -13,6 +13,7 @@ import { commentsRouter } from "./routes/comments";
 import { customFieldsRouter } from "./routes/custom-fields";
 import { fileClaimsRouter } from "./routes/file-claims";
 import { filesRouter } from "./routes/files";
+import { flowMetricsRouter } from "./routes/flow-metrics";
 import { issueLinksRouter } from "./routes/issue-links";
 import { issuesRouter } from "./routes/issues";
 import { mcpRouter } from "./routes/mcp";
@@ -219,6 +220,7 @@ app.use("/api/workflow/*", authMiddleware);
 
 app.route("/api/workspaces", workspacesRouter);
 app.route("/api/projects", projectsRouter);
+app.route("/api/projects", flowMetricsRouter);
 app.route("/api/issues", issuesRouter);
 app.route("/api/issues", issueLinksRouter);
 app.route("/api/issues", commentsRouter);

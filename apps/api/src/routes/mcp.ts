@@ -7,6 +7,7 @@ import { commentsTools } from "../mcp/comments";
 import { customFieldsTools } from "../mcp/custom-fields";
 import { toMcpError } from "../mcp/error-adapter";
 import { fileClaimsTools } from "../mcp/file-claims";
+import { flowMetricsTools } from "../mcp/flow-metrics";
 import { issueLeasesTools } from "../mcp/issue-leases";
 import { issueLinksTools } from "../mcp/issue-links";
 import { issuesTools } from "../mcp/issues";
@@ -144,6 +145,7 @@ const coreMCPTools: MCPTool[] = [
 	...issueLeasesTools,
 	...agentMessagesTools,
 	...workflowTools,
+	...flowMetricsTools,
 ];
 
 function jsonRpcResult(id: unknown, result: unknown) {

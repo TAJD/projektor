@@ -1006,6 +1006,54 @@ describe("Issues API", () => {
 			"Edited just now",
 		]);
 	});
+
+	// ─── PROJ-252: flow timestamps (ready_at/claimed_at/done_at) ──────────────
+	async function flowTimestampsOf(
+		id: string
+	): Promise<{ ready_at: number | null; claimed_at: number | null; done_at: number | null }> {
+		const row = await env.DB.prepare("SELECT ready_at, claimed_at, done_at FROM issues WHERE id = ?")
+			.bind(id)
+			.first<{ ready_at: number | null; claimed_at: number | null; done_at: number | null }>();
+		return row ?? { ready_at: null, claimed_at: null, done_at: null };
+	}
+
+	it("stamps ready_at/claimed_at/done_at once, on first entry, and never clears them", async () => {
+		// 4 API requests (seed + 4 patches), under the rate-limit window.
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Flows through" });
+		const id = issue.id;
+		expect(await flowTimestampsOf(id)).toEqual({ ready_at: null, claimed_at: null, done_at: null });
+
+		await patch(id, { status: "todo" });
+		const afterReady = await flowTimestampsOf(id);
+		expect(typeof afterReady.ready_at).toBe("number");
+		expect(afterReady.claimed_at).toBeNull();
+		expect(afterReady.done_at).toBeNull();
+
+		await patch(id, { status: "in_progress" });
+		const afterClaimed = await flowTimestampsOf(id);
+		expect(afterClaimed.ready_at).toBe(afterReady.ready_at);
+		expect(typeof afterClaimed.claimed_at).toBe("number");
+		expect(afterClaimed.done_at).toBeNull();
+
+		await patch(id, { status: "done" });
+		const afterDone = await flowTimestampsOf(id);
+		expect(typeof afterDone.done_at).toBe("number");
+
+		// Reopening does not clear done_at (unlike completed_at) — it's write-once history.
+		await patch(id, { status: "in_progress" });
+		const afterReopen = await flowTimestampsOf(id);
+		expect(afterReopen.ready_at).toBe(afterReady.ready_at);
+		expect(afterReopen.claimed_at).toBe(afterClaimed.claimed_at);
+		expect(afterReopen.done_at).toBe(afterDone.done_at);
+	});
+
+	it("stamps ready_at even when an issue skips straight from backlog to in_progress", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Fast-tracked" });
+		await patch(issue.id, { status: "in_progress" });
+		const stamps = await flowTimestampsOf(issue.id);
+		expect(typeof stamps.ready_at).toBe("number");
+		expect(typeof stamps.claimed_at).toBe("number");
+	});
 });
 
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
@@ -1417,4 +1465,5 @@ describe("get_prioritized_issues MCP tool", () => {
 		const largeRow = data.issues.find((i) => i.title === "Large");
 		expect(smallRow!._score).toBeGreaterThan(largeRow!._score);
 	});
+
 });
