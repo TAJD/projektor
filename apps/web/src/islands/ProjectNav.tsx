@@ -9,6 +9,7 @@ interface Project {
 
 interface Props {
 	workspaceSlug?: string;
+	pageLabel?: string;
 }
 
 const TABS = [
@@ -35,7 +36,7 @@ function tabClass(active: boolean): string {
 	}`;
 }
 
-export default function ProjectNav({ workspaceSlug }: Props) {
+export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 	const [project, setProject] = useState<Project | null>(null);
 	const [activePath, setActivePath] = useState("");
 
@@ -49,6 +50,7 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 		const resolve = (p: Project) => {
 			setProject(p);
 			localStorage.setItem("projektor-last-project-id", p.id);
+			if (pageLabel) document.title = `${pageLabel} — ${p.name}`;
 		};
 
 		if (rawId) {

@@ -6,7 +6,7 @@ import ProjectLanding from '../../islands/ProjectLanding';
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
 <Base title="Project — Projektor">
-  <ProjectNav client:load workspaceSlug={workspaceSlug} />
+  <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Overview" />
   <div class="page-container">
     <ProjectLanding client:load workspaceSlug={workspaceSlug} />
   </div>

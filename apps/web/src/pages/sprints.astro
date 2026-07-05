@@ -6,7 +6,7 @@ import SprintManager from '../islands/SprintManager';
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
 <Base title="Sprints — Projektor">
-  <ProjectNav client:load workspaceSlug={workspaceSlug} />
+  <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Sprints" />
   <div class="page-container">
     <SprintManager client:load workspaceSlug={workspaceSlug} />
   </div>
