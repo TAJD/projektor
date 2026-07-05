@@ -109,7 +109,10 @@ export const issuesTools: MCPTool[] = [
 	},
 	{
 		name: "update_issue",
-		description: "Update an issue - status, priority, title, body, assignee, or labels",
+		description:
+			"Update an issue - status, priority, title, body, assignee, or labels. Review gating " +
+			"(PROJ-254): pass agentSessionId to identify yourself as an agent; entering in_review as an " +
+			"agent requires completionReport, and only a human can transition to done.",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
@@ -135,6 +138,20 @@ export const issuesTools: MCPTool[] = [
 					description: "Set or clear the parent issue (null to remove)",
 				},
 				typeId: { type: "string", nullable: true },
+				agentSessionId: {
+					type: "string",
+					description: "Your agent session id (from register_agent) — identifies this update as agent-initiated",
+				},
+				completionReport: {
+					type: "object",
+					description:
+						"Required when an agent moves an issue into in_review; also gates the done transition",
+					properties: {
+						summary: { type: "string" },
+						verification: { type: "string" },
+						prLink: { type: "string" },
+					},
+				},
 			},
 		},
 		handler(input, ctx) {

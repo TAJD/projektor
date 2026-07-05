@@ -372,7 +372,10 @@ describe("Task Statuses — issue integration", () => {
 		const res = await SELF.fetch(`http://localhost/api/issues/${issue.id}`, {
 			method: "PATCH",
 			headers: authHeaders(token, slug),
-			body: JSON.stringify({ statusId }),
+			body: JSON.stringify({
+				statusId,
+				completionReport: { summary: "Done", verification: "pnpm test" },
+			}),
 		});
 		expect(res.status).toBe(200);
 

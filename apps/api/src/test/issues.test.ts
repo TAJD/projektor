@@ -947,7 +947,10 @@ describe("Issues API", () => {
 		const id = issue.id;
 		expect(await completedAtOf(id)).toBeNull();
 
-		await patch(id, { status: "done" });
+		await patch(id, {
+			status: "done",
+			completionReport: { summary: "Done", verification: "pnpm test" },
+		});
 		const completed = await completedAtOf(id);
 		expect(typeof completed).toBe("number");
 
@@ -1035,7 +1038,10 @@ describe("Issues API", () => {
 		expect(typeof afterClaimed.claimed_at).toBe("number");
 		expect(afterClaimed.done_at).toBeNull();
 
-		await patch(id, { status: "done" });
+		await patch(id, {
+			status: "done",
+			completionReport: { summary: "Done", verification: "pnpm test" },
+		});
 		const afterDone = await flowTimestampsOf(id);
 		expect(typeof afterDone.done_at).toBe("number");
 

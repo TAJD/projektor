@@ -90,7 +90,7 @@ running server.
 | `list_issues` | List issues in the workspace, optionally filtered by status, priority, project, or assignee |
 | `get_issue` | Get a single issue by ID or project key + number (e.g. "PROJ-42") |
 | `create_issue` | Create a new issue in a project |
-| `update_issue` | Update an issue - status, priority, title, body, assignee, or labels |
+| `update_issue` | Update an issue - status, priority, title, body, assignee, or labels. Review gating (PROJ-254): pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport, and only a human can transition to done. |
 | `search_issues` | Search issues by keyword in title or body |
 | `delete_issue` | Delete an issue by ID |
 | `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded. |

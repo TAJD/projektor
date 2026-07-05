@@ -105,6 +105,8 @@ export const issues = sqliteTable(
 		readyAt: integer("ready_at"),
 		claimedAt: integer("claimed_at"),
 		doneAt: integer("done_at"),
+		// Review gating (PROJ-254): stamped when a completion report is submitted.
+		completionReportAt: integer("completion_report_at"),
 	},
 	(t) => ({
 		projectIdx: index("issues_project_idx").on(t.projectId),

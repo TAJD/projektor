@@ -24,6 +24,7 @@ import {
 } from "../schemas/issues";
 import { recordActivity } from "./activity";
 import * as cache from "./cache";
+import { addComment } from "./comments";
 import { checkDefinitionOfReady } from "./definition-of-ready";
 import {
 	batchLoadCustomFields,
@@ -602,6 +603,7 @@ type ExistingIssue = {
 	readyAt: number | null;
 	claimedAt: number | null;
 	doneAt: number | null;
+	completionReportAt: number | null;
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
@@ -677,6 +679,77 @@ function applyFlowTimestampTransitions(
 	if (isDone && !wasDone && existing.doneAt == null) setValues.doneAt = now();
 }
 
+// PROJ-254: an agentSessionId identifies the session doing this update. No id (a
+// human via the browser, or any call that omits it) means "human" for gating purposes.
+async function resolveAgentKind(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	agentSessionId: string | undefined
+): Promise<"agent" | "human" | null> {
+	if (!agentSessionId) return null;
+	const session = await orm
+		.select({ kind: schema.agentSessions.kind })
+		.from(schema.agentSessions)
+		.where(
+			and(
+				eq(schema.agentSessions.id, agentSessionId),
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId)
+			)
+		)
+		.get();
+	if (!session) throw new NotFoundError("Agent session not found");
+	return session.kind;
+}
+
+function assertCompletionReportPresent(data: UpdateIssueData): void {
+	if (!data.completionReport) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: {
+				completionReport: [
+					"summary and verification are required for an agent to enter review (PROJ-254)",
+				],
+			},
+		});
+	}
+}
+
+// PROJ-254: entering in_review as an agent requires a completion report in the same
+// call; entering done always requires a human, and requires a completion report to
+// already be on record (or supplied in this same call).
+async function assertReviewGate(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	data: UpdateIssueData,
+	existing: ExistingIssue,
+	resolvedStatusKey: string,
+	newStatusCategory: string | undefined
+): Promise<void> {
+	const agentKind = await resolveAgentKind(orm, ctx, data.agentSessionId);
+
+	const wasInReview = existing.status === "in_review";
+	const enteringInReview = resolvedStatusKey === "in_review" && !wasInReview;
+	if (enteringInReview && agentKind === "agent") {
+		assertCompletionReportPresent(data);
+	}
+
+	const wasDone = existing.statusCategory === "done" || existing.status === "done";
+	const enteringDone = (newStatusCategory === "done" || resolvedStatusKey === "done") && !wasDone;
+	if (enteringDone) {
+		if (agentKind === "agent") {
+			throw new ForbiddenError("An agent cannot mark an issue done — a human must approve (PROJ-254)");
+		}
+		if (existing.completionReportAt == null && !data.completionReport) {
+			throw new ValidationError({
+				formErrors: [
+					"A completion report is required before an issue can be marked done (PROJ-254)",
+				],
+				fieldErrors: {},
+			});
+		}
+	}
+}
+
 async function applyStatusFields(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
@@ -691,17 +764,36 @@ async function applyStatusFields(
 		"statusId" in data ? data.statusId : undefined,
 		data.status
 	);
+
+	const newStatusCategory = await fetchStatusCategory(orm, resolvedStatusId);
+	await assertReviewGate(orm, ctx, data, existing, resolvedStatusKey, newStatusCategory);
+
 	setValues.status = resolvedStatusKey;
 	setValues.statusId = resolvedStatusId;
 	setValues.statusCategory = sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${resolvedStatusId}), '')`;
 
-	const newStatusCategory = await fetchStatusCategory(orm, resolvedStatusId);
 	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
 	applyFlowTimestampTransitions(setValues, existing, resolvedStatusKey, newStatusCategory);
 }
 
 function now(): number {
 	return Math.floor(Date.now() / 1000);
+}
+
+function formatCompletionReportComment(report: {
+	summary: string;
+	verification: string;
+	prLink?: string;
+}): string {
+	const lines = [
+		"**Completion report**",
+		"",
+		`**Summary:** ${report.summary}`,
+		"",
+		`**Verification:** ${report.verification}`,
+	];
+	if (report.prLink) lines.push("", `**PR:** ${report.prLink}`);
+	return lines.join("\n");
 }
 
 async function buildUpdateSetValues(
@@ -715,6 +807,9 @@ async function buildUpdateSetValues(
 	await applyStatusFields(ctx, orm, setValues, data, existing);
 	if ("typeId" in data) {
 		setValues.typeId = await resolveTypeId(ctx, data.typeId);
+	}
+	if (data.completionReport) {
+		setValues.completionReportAt = now();
 	}
 	return setValues;
 }
@@ -813,6 +908,7 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 			readyAt: schema.issues.readyAt,
 			claimedAt: schema.issues.claimedAt,
 			doneAt: schema.issues.doneAt,
+			completionReportAt: schema.issues.completionReportAt,
 		})
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
@@ -825,6 +921,10 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 		.update(schema.issues)
 		.set(setValues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
+
+	if (data.completionReport) {
+		await addComment(ctx, { issueId: id, body: formatCompletionReportComment(data.completionReport) });
+	}
 
 	await reindexIssueFts(ctx, orm, id, data);
 	await applyCustomFieldUpdates(ctx, id, data);
