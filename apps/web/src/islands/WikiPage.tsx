@@ -1,3 +1,4 @@
+import type { RefObject } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
 import { apiFetch } from "../utils/api-client";
@@ -93,6 +94,12 @@ function getBreadcrumbs(pageId: string, map: Record<string, FlatEntry>): FlatEnt
 	return crumbs;
 }
 
+const TREE_ITEM_BASE_CLASS = [
+	"block w-full text-left py-[0.375rem] px-2 rounded border-none cursor-pointer text-sm",
+	"bg-transparent text-text-base hover:bg-border focus-visible:outline-2",
+	"focus-visible:outline-accent focus-visible:outline-offset-2",
+].join(" ");
+
 function TreeNodeItem({
 	node,
 	currentSlug,
@@ -109,7 +116,7 @@ function TreeNodeItem({
 		<li>
 			<button
 				type="button"
-				class={`block w-full text-left py-[0.375rem] px-2 rounded border-none cursor-pointer text-sm bg-transparent text-text-base hover:bg-border focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 ${isActive ? "!bg-accent !text-white font-semibold" : ""}`}
+				class={`${TREE_ITEM_BASE_CLASS} ${isActive ? "!bg-accent !text-white font-semibold" : ""}`}
 				style={{ paddingLeft: `${0.5 + depth * 1}rem` }}
 				onClick={() => onNavigate(node.slug)}
 			>
@@ -133,67 +140,771 @@ function TreeNodeItem({
 	);
 }
 
-export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Props) {
+const SEARCH_RESULT_BUTTON_CLASS = [
+	"block w-full text-left py-[0.375rem] px-2 rounded border-none cursor-pointer text-sm",
+	"bg-transparent text-text-base hover:bg-border focus-visible:outline-2",
+	"focus-visible:outline-accent focus-visible:outline-offset-2",
+].join(" ");
+
+function SearchResultsList({
+	loading,
+	results,
+	onSelect,
+}: {
+	loading: boolean;
+	results: SearchResult[];
+	onSelect: (slug: string) => void;
+}) {
+	if (loading) return <p class="text-[0.8rem] text-text-muted m-0">Searching…</p>;
+	if (results.length === 0) return <p class="text-[0.8rem] text-text-muted m-0">No results</p>;
+	return (
+		<ul class="list-none m-0 p-0">
+			{results.map((r) => (
+				<li key={r.id}>
+					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
+						<span class="font-medium">{r.title}</span>
+						{r.excerpt && (
+							<span class="block text-[0.75rem] text-text-muted truncate">{r.excerpt}</span>
+						)}
+					</button>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+function PageTreeList({
+	loading,
+	tree,
+	slug,
+	onNavigate,
+}: {
+	loading: boolean;
+	tree: TreeNode[];
+	slug: string;
+	onNavigate: (slug: string) => void;
+}) {
+	if (loading) return <p class="text-[0.8rem] text-text-muted m-0">Loading…</p>;
+	return (
+		<ul class="list-none m-0 p-0">
+			{tree.map((node) => (
+				<TreeNodeItem key={node.id} node={node} currentSlug={slug} depth={0} onNavigate={onNavigate} />
+			))}
+			{tree.length === 0 && <li class="text-[0.8rem] text-text-muted">No pages yet</li>}
+		</ul>
+	);
+}
+
+function WikiSidebar({
+	searchQuery,
+	onSearchQueryChange,
+	searchResults,
+	searchLoading,
+	treeLoading,
+	pageTree,
+	slug,
+	onNavigate,
+	onCreate,
+}: {
+	searchQuery: string;
+	onSearchQueryChange: (value: string) => void;
+	searchResults: SearchResult[];
+	searchLoading: boolean;
+	treeLoading: boolean;
+	pageTree: TreeNode[];
+	slug: string;
+	onNavigate: (slug: string) => void;
+	onCreate: () => void;
+}) {
+	const asideClass = [
+		"w-[240px] shrink-0 bg-surface border-r border-border p-4 overflow-y-auto",
+		"max-sm:w-full max-sm:border-r-0 max-sm:border-b",
+	].join(" ");
+	return (
+		<aside class={asideClass}>
+			<button type="button" onClick={onCreate} class="btn btn-primary w-full mb-4 max-sm:min-h-[44px]">
+				+ New page
+			</button>
+			<input
+				type="search"
+				value={searchQuery}
+				onInput={(e) => onSearchQueryChange((e.target as HTMLInputElement).value)}
+				placeholder="Search pages…"
+				class="w-full px-3 py-[0.375rem] mb-3 border border-border rounded text-sm bg-bg text-text-base box-border"
+				aria-label="Search wiki pages"
+			/>
+			{searchQuery.trim() ? (
+				<SearchResultsList
+					loading={searchLoading}
+					results={searchResults}
+					onSelect={(s) => {
+						onSearchQueryChange("");
+						onNavigate(s);
+					}}
+				/>
+			) : (
+				<PageTreeList loading={treeLoading} tree={pageTree} slug={slug} onNavigate={onNavigate} />
+			)}
+		</aside>
+	);
+}
+
+function CreatePageForm({
+	parentTitle,
+	title,
+	slug,
+	content,
+	error,
+	saving,
+	onTitleChange,
+	onSlugChange,
+	onContentChange,
+	onSubmit,
+	onCancel,
+}: {
+	parentTitle: string | null;
+	title: string;
+	slug: string;
+	content: string;
+	error: string | null;
+	saving: boolean;
+	onTitleChange: (value: string) => void;
+	onSlugChange: (value: string) => void;
+	onContentChange: (value: string) => void;
+	onSubmit: () => void;
+	onCancel: () => void;
+}) {
+	return (
+		<div>
+			<h2 class="mb-6 text-2xl font-bold text-text-base">
+				{parentTitle ? `New child page under "${parentTitle}"` : "New page"}
+			</h2>
+			{error && (
+				<p role="alert" class="text-[var(--danger-text)] mb-3">
+					{error}
+				</p>
+			)}
+			<div class="mb-4">
+				<label htmlFor="create-title" class="block font-medium text-sm text-text-base mb-1">
+					Title <span class="text-[var(--danger-text)]">*</span>
+				</label>
+				<input
+					id="create-title"
+					type="text"
+					value={title}
+					onInput={(e) => onTitleChange((e.target as HTMLInputElement).value)}
+					placeholder="Page title"
+					class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border text-base"
+				/>
+			</div>
+			<div class="mb-4">
+				<label htmlFor="create-slug" class="block font-medium text-sm text-text-base mb-1">
+					Slug
+				</label>
+				<input
+					id="create-slug"
+					type="text"
+					value={slug}
+					onInput={(e) => onSlugChange((e.target as HTMLInputElement).value)}
+					placeholder="auto-derived-from-title"
+					class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border font-mono"
+				/>
+			</div>
+			<div class="mb-5">
+				{/* biome-ignore lint/a11y/noLabelWithoutControl: caption for MarkdownEditor, which has no associable control */}
+				<label class="block font-medium text-sm text-text-base mb-1">Content (Markdown)</label>
+				<MarkdownEditor value={content} onChange={onContentChange} minHeight="280px" />
+			</div>
+			<div class="flex gap-2">
+				<button type="button" onClick={onSubmit} disabled={saving} class="btn btn-primary">
+					{saving ? "Creating…" : "Create page"}
+				</button>
+				<button type="button" onClick={onCancel} disabled={saving} class="btn btn-outline">
+					Cancel
+				</button>
+			</div>
+		</div>
+	);
+}
+
+const BREADCRUMB_BUTTON_CLASS = [
+	"bg-transparent border-none cursor-pointer text-text-muted text-[0.8rem] p-0",
+	"underline decoration-transparent hover:text-accent hover:decoration-accent",
+].join(" ");
+
+function PageBreadcrumbs({
+	breadcrumbs,
+	onNavigate,
+}: {
+	breadcrumbs: FlatEntry[];
+	onNavigate: (slug: string) => void;
+}) {
+	if (breadcrumbs.length <= 1) return null;
+	return (
+		<nav
+			class="wiki-breadcrumb text-[0.8rem] text-text-muted mb-3 flex flex-wrap gap-1 items-center"
+			aria-label="Breadcrumb"
+		>
+			<button type="button" class={BREADCRUMB_BUTTON_CLASS} onClick={() => onNavigate(breadcrumbs[0].slug)}>
+				Home
+			</button>
+			{breadcrumbs.slice(1, -1).map((crumb) => (
+				<>
+					<span>›</span>
+					<button
+						key={crumb.id}
+						type="button"
+						class={BREADCRUMB_BUTTON_CLASS}
+						onClick={() => onNavigate(crumb.slug)}
+					>
+						{crumb.title}
+					</button>
+				</>
+			))}
+			<span>›</span>
+			<span class="text-text-base">{breadcrumbs[breadcrumbs.length - 1].title}</span>
+		</nav>
+	);
+}
+
+const TOC_LINK_BASE_CLASS = "block py-[0.2rem] no-underline border-l-2 transition-[color,border-color] duration-150";
+const TOC_LINK_ACTIVE_CLASS = "text-accent border-accent font-medium";
+const TOC_LINK_INACTIVE_CLASS = "text-text-muted border-border hover:text-accent hover:border-accent";
+
+function TocList({
+	toc,
+	activeHeadingId,
+	onClick,
+}: {
+	toc: TocItem[];
+	activeHeadingId: string;
+	onClick?: () => void;
+}) {
+	return (
+		<>
+			{toc.map((item) => {
+				const isTocActive = activeHeadingId === item.id;
+				return (
+					<a
+						key={item.id}
+						href={`#${item.id}`}
+						class={`${TOC_LINK_BASE_CLASS} ${isTocActive ? TOC_LINK_ACTIVE_CLASS : TOC_LINK_INACTIVE_CLASS}`}
+						style={{ paddingLeft: `${(item.level - 1) * 0.75 + 0.5}rem` }}
+						onClick={onClick}
+					>
+						{item.text}
+					</a>
+				);
+			})}
+		</>
+	);
+}
+
+function PageHeader({
+	editing,
+	pageId,
+	title,
+	editTitle,
+	onEditTitleChange,
+	saving,
+	onSave,
+	onCancelEdit,
+	onStartEdit,
+	onStartCreateChild,
+	onDelete,
+}: {
+	editing: boolean;
+	pageId: string;
+	title: string;
+	editTitle: string;
+	onEditTitleChange: (value: string) => void;
+	saving: boolean;
+	onSave: () => void;
+	onCancelEdit: () => void;
+	onStartEdit: () => void;
+	onStartCreateChild: (pageId: string) => void;
+	onDelete: () => void;
+}) {
+	return (
+		<header class="flex items-start justify-between gap-4 mb-1">
+			{editing ? (
+				<input
+					id="wiki-title"
+					type="text"
+					value={editTitle}
+					onInput={(e) => onEditTitleChange((e.target as HTMLInputElement).value)}
+					aria-label="Page title"
+					class="flex-1 px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border text-2xl font-bold"
+				/>
+			) : (
+				<h1 class="m-0 text-[1.75rem] font-bold text-text-base">{title}</h1>
+			)}
+
+			<div class="flex gap-2 shrink-0">
+				{editing ? (
+					<>
+						<button type="button" onClick={onSave} disabled={saving} class="btn btn-primary">
+							{saving ? "Saving…" : "Save"}
+						</button>
+						<button type="button" onClick={onCancelEdit} disabled={saving} class="btn btn-outline">
+							Cancel
+						</button>
+					</>
+				) : (
+					<>
+						<button
+							type="button"
+							onClick={() => onStartCreateChild(pageId)}
+							class="btn btn-outline btn-sm"
+						>
+							+ Child page
+						</button>
+						<button type="button" onClick={onStartEdit} class="btn btn-outline">
+							Edit
+						</button>
+						<button type="button" onClick={onDelete} class="btn btn-danger">
+							Delete
+						</button>
+					</>
+				)}
+			</div>
+		</header>
+	);
+}
+
+function DraftRestoreBanner({
+	savedAt,
+	onRestore,
+	onDiscard,
+}: {
+	savedAt: number;
+	onRestore: () => void;
+	onDiscard: () => void;
+}) {
+	const bannerClass = [
+		"mb-3 px-3 py-2 border border-border rounded bg-surface text-sm flex items-center",
+		"justify-between gap-3 flex-wrap",
+	].join(" ");
+	return (
+		<div class={bannerClass}>
+			<span>Restore unsaved draft from {new Date(savedAt).toLocaleString()}?</span>
+			<div class="flex gap-2 shrink-0">
+				<button type="button" onClick={onRestore} class="btn btn-primary btn-sm">
+					Restore
+				</button>
+				<button type="button" onClick={onDiscard} class="btn btn-outline btn-sm">
+					Discard
+				</button>
+			</div>
+		</div>
+	);
+}
+
+function RevisionsHistory({
+	revisions,
+	showHistory,
+	onToggle,
+}: {
+	revisions: WikiRevision[];
+	showHistory: boolean;
+	onToggle: () => void;
+}) {
+	if (revisions.length === 0) return null;
+	return (
+		<div class="mt-8">
+			<button type="button" onClick={onToggle} class="btn btn-outline btn-sm text-text-muted">
+				{showHistory ? "▲ Hide history" : "▼ History"} ({revisions.length})
+			</button>
+			{showHistory && (
+				<ul class="mt-3 list-none p-0">
+					{revisions.map((r) => (
+						<li key={r.id} class="py-[0.375rem] border-b border-border text-[0.8rem] text-text-muted">
+							<strong class="text-text-base">{r.author_name ?? "Unknown"}</strong>
+							{" — "}
+							{new Date(r.created_at * 1000).toLocaleString()}
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+}
+
+function AttachmentEntry({
+	attachment,
+	workspaceSlug,
+	onDelete,
+}: {
+	attachment: Attachment;
+	workspaceSlug?: string;
+	onDelete: (attachmentId: string) => void;
+}) {
+	const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
+	return (
+		<div class="flex items-center gap-3 px-3 py-2 border border-border rounded-md bg-surface">
+			<a
+				href={`/api/files/${attachment.id}${qs}`}
+				target="_blank"
+				rel="noreferrer"
+				class="text-accent text-sm no-underline hover:underline flex-1 min-w-0 truncate"
+			>
+				{attachment.filename}
+			</a>
+			<span class="text-xs text-text-muted shrink-0">{formatBytes(attachment.size)}</span>
+			<button
+				type="button"
+				onClick={() => onDelete(attachment.id)}
+				aria-label={`Delete ${attachment.filename}`}
+				class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
+			>
+				×
+			</button>
+		</div>
+	);
+}
+
+function AttachmentUploadForm({
+	uploadFile,
+	uploading,
+	uploadError,
+	onFileChange,
+	onUpload,
+	onCancel,
+}: {
+	uploadFile: File | null;
+	uploading: boolean;
+	uploadError: string | null;
+	onFileChange: (file: File | null) => void;
+	onUpload: () => void;
+	onCancel: () => void;
+}) {
+	return (
+		<div class="flex flex-wrap gap-2 items-center">
+			<label class="relative cursor-pointer">
+				<input
+					type="file"
+					class="sr-only"
+					onChange={(e) => onFileChange((e.target as HTMLInputElement).files?.[0] ?? null)}
+				/>
+				<span class="btn btn-outline btn-sm">{uploadFile ? uploadFile.name : "Choose file"}</span>
+			</label>
+			<button type="button" onClick={onUpload} disabled={!uploadFile || uploading} class="btn btn-primary">
+				{uploading ? "Uploading…" : "Upload"}
+			</button>
+			<button type="button" onClick={onCancel} class="btn btn-outline">
+				Cancel
+			</button>
+			{uploadError && (
+				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
+					{uploadError}
+				</span>
+			)}
+		</div>
+	);
+}
+
+function AttachmentsPanel({
+	attachments,
+	workspaceSlug,
+	uploadFormOpen,
+	uploadFile,
+	uploading,
+	uploadError,
+	onToggleUploadForm,
+	onFileChange,
+	onUpload,
+	onCancelUpload,
+	onDeleteAttachment,
+}: {
+	attachments: Attachment[];
+	workspaceSlug?: string;
+	uploadFormOpen: boolean;
+	uploadFile: File | null;
+	uploading: boolean;
+	uploadError: string | null;
+	onToggleUploadForm: (open: boolean) => void;
+	onFileChange: (file: File | null) => void;
+	onUpload: () => void;
+	onCancelUpload: () => void;
+	onDeleteAttachment: (attachmentId: string) => void;
+}) {
+	return (
+		<div class="mt-8">
+			<h3 class="text-xs uppercase tracking-[0.05em] text-text-muted font-semibold mb-3 pb-2 border-b border-border">
+				{`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`}
+			</h3>
+
+			{attachments.length > 0 && (
+				<div class="mb-4 flex flex-col gap-2">
+					{attachments.map((a) => (
+						<AttachmentEntry key={a.id} attachment={a} workspaceSlug={workspaceSlug} onDelete={onDeleteAttachment} />
+					))}
+				</div>
+			)}
+
+			{uploadFormOpen ? (
+				<AttachmentUploadForm
+					uploadFile={uploadFile}
+					uploading={uploading}
+					uploadError={uploadError}
+					onFileChange={onFileChange}
+					onUpload={onUpload}
+					onCancel={onCancelUpload}
+				/>
+			) : (
+				<button
+					type="button"
+					onClick={() => onToggleUploadForm(true)}
+					class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1"
+				>
+					<span class="text-base leading-none">+</span>
+					<span>Attach file</span>
+				</button>
+			)}
+		</div>
+	);
+}
+
+interface PageArticleProps {
+	page: WikiPageData;
+	breadcrumbs: FlatEntry[];
+	onNavigate: (slug: string) => void;
+	showToc: boolean;
+	toc: TocItem[];
+	activeHeadingId: string;
+	contentRef: RefObject<HTMLDivElement>;
+	editing: boolean;
+	editTitle: string;
+	onEditTitleChange: (value: string) => void;
+	saving: boolean;
+	onSave: () => void;
+	onCancelEdit: () => void;
+	onStartEdit: () => void;
+	onStartCreateChild: (pageId: string) => void;
+	onDelete: () => void;
+	latestRevision: WikiRevision | null;
+	saveError: string | null;
+	draftBanner: { title: string; content: string; savedAt: number } | null;
+	onRestoreDraft: () => void;
+	onDiscardDraft: () => void;
+	editContent: string;
+	onEditContentChange: (value: string) => void;
+	wikiPages: FlatEntry[];
+	revisions: WikiRevision[];
+	showHistory: boolean;
+	onToggleHistory: () => void;
+	attachments: Attachment[];
+	workspaceSlug?: string;
+	uploadFormOpen: boolean;
+	uploadFile: File | null;
+	uploading: boolean;
+	uploadError: string | null;
+	onToggleUploadForm: (open: boolean) => void;
+	onFileChange: (file: File | null) => void;
+	onUpload: () => void;
+	onCancelUpload: () => void;
+	onDeleteAttachment: (attachmentId: string) => void;
+}
+
+function PageArticleMeta(
+	props: Pick<
+		PageArticleProps,
+		| "page"
+		| "breadcrumbs"
+		| "onNavigate"
+		| "showToc"
+		| "toc"
+		| "activeHeadingId"
+		| "editing"
+		| "editTitle"
+		| "onEditTitleChange"
+		| "saving"
+		| "onSave"
+		| "onCancelEdit"
+		| "onStartEdit"
+		| "onStartCreateChild"
+		| "onDelete"
+		| "latestRevision"
+		| "saveError"
+		| "draftBanner"
+		| "onRestoreDraft"
+		| "onDiscardDraft"
+	>
+) {
+	return (
+		<>
+			<PageBreadcrumbs breadcrumbs={props.breadcrumbs} onNavigate={props.onNavigate} />
+
+			{props.showToc && (
+				<details class="mb-4 max-[900px]:block min-[901px]:hidden">
+					<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">
+						Contents ({props.toc.length})
+					</summary>
+					<div class="pt-2">
+						<TocList toc={props.toc} activeHeadingId={props.activeHeadingId} />
+					</div>
+				</details>
+			)}
+
+			<PageHeader
+				editing={props.editing}
+				pageId={props.page.id}
+				title={props.page.title}
+				editTitle={props.editTitle}
+				onEditTitleChange={props.onEditTitleChange}
+				saving={props.saving}
+				onSave={props.onSave}
+				onCancelEdit={props.onCancelEdit}
+				onStartEdit={props.onStartEdit}
+				onStartCreateChild={props.onStartCreateChild}
+				onDelete={props.onDelete}
+			/>
+
+			{props.latestRevision && (
+				<p class="text-[0.8rem] text-text-muted mt-1 mb-5">
+					Last edited by{" "}
+					<strong class="text-text-base">{props.latestRevision.author_name ?? "Unknown"}</strong>{" "}
+					at {new Date(props.latestRevision.created_at * 1000).toLocaleString()}
+				</p>
+			)}
+
+			{props.saveError && (
+				<p role="alert" class="text-[var(--danger-text)] mb-3">
+					{props.saveError}
+				</p>
+			)}
+
+			{props.editing && props.draftBanner && (
+				<DraftRestoreBanner
+					savedAt={props.draftBanner.savedAt}
+					onRestore={props.onRestoreDraft}
+					onDiscard={props.onDiscardDraft}
+				/>
+			)}
+		</>
+	);
+}
+
+function PageArticle(props: PageArticleProps) {
+	const { page } = props;
+	return (
+		<div class="flex gap-8 items-start">
+			<article class="flex-1 min-w-0">
+				<PageArticleMeta {...props} />
+
+				{props.editing ? (
+					<div class="mb-3">
+						<MarkdownEditor value={props.editContent} onChange={props.onEditContentChange} minHeight="320px" />
+					</div>
+				) : (
+					<div
+						ref={props.contentRef}
+						class="prose prose-sm max-w-none"
+						dangerouslySetInnerHTML={{
+							__html: renderMdWithWikilinks(page.content, props.wikiPages),
+						}}
+					/>
+				)}
+
+				<RevisionsHistory
+					revisions={props.revisions}
+					showHistory={props.showHistory}
+					onToggle={props.onToggleHistory}
+				/>
+
+				<AttachmentsPanel
+					attachments={props.attachments}
+					workspaceSlug={props.workspaceSlug}
+					uploadFormOpen={props.uploadFormOpen}
+					uploadFile={props.uploadFile}
+					uploading={props.uploading}
+					uploadError={props.uploadError}
+					onToggleUploadForm={props.onToggleUploadForm}
+					onFileChange={props.onFileChange}
+					onUpload={props.onUpload}
+					onCancelUpload={props.onCancelUpload}
+					onDeleteAttachment={props.onDeleteAttachment}
+				/>
+
+				<footer class="mt-8 pt-4 border-t border-border text-xs text-text-muted">
+					Last updated: {new Date(page.updated_at * 1000).toLocaleString()}
+				</footer>
+			</article>
+
+			{props.showToc && (
+				<nav
+					class={[
+						"w-[190px] shrink-0 sticky top-6 self-start max-h-[calc(100vh-3rem)]",
+						"overflow-y-auto text-[0.8rem] max-[900px]:hidden",
+					].join(" ")}
+					aria-label="Table of contents"
+				>
+					<h3 class="m-0 mb-2 text-xs uppercase tracking-[0.05em] text-text-muted font-semibold">
+						Contents
+					</h3>
+					<TocList toc={props.toc} activeHeadingId={props.activeHeadingId} />
+				</nav>
+			)}
+		</div>
+	);
+}
+
+interface CreateFormProps {
+	parentTitle: string | null;
+	title: string;
+	slug: string;
+	content: string;
+	error: string | null;
+	saving: boolean;
+	onTitleChange: (value: string) => void;
+	onSlugChange: (value: string) => void;
+	onContentChange: (value: string) => void;
+	onSubmit: () => void;
+	onCancel: () => void;
+}
+
+function WikiMainContent(props: {
+	creating: boolean;
+	createProps: CreateFormProps;
+	slug: string;
+	loading: boolean;
+	error: string | null;
+	page: WikiPageData | null;
+	articleProps: Omit<PageArticleProps, "page">;
+}) {
+	if (props.creating) return <CreatePageForm {...props.createProps} />;
+	if (!props.slug) {
+		return <p class="text-text-muted">Select a page from the sidebar or create a new one.</p>;
+	}
+	if (props.loading) return <p aria-live="polite">Loading…</p>;
+	if (props.error) {
+		return (
+			<p role="alert" class="text-[var(--danger-text)]">
+				Failed to load page: {props.error}
+			</p>
+		);
+	}
+	if (!props.page) return null;
+	return <PageArticle {...props.articleProps} page={props.page} />;
+}
+
+function useWikiUrlState(projectIdProp: string | undefined) {
 	const [slug, setSlug] = useState("");
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
-	const [page, setPage] = useState<WikiPageData | null>(null);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	const [pageTree, setPageTree] = useState<TreeNode[]>([]);
-	const [pageMap, setPageMap] = useState<Record<string, FlatEntry>>({});
-	const [treeLoading, setTreeLoading] = useState(false);
-
-	const [editing, setEditing] = useState(false);
-	const [editTitle, setEditTitle] = useState("");
-	const [editContent, setEditContent] = useState("");
-	const [saving, setSaving] = useState(false);
-	const [saveError, setSaveError] = useState<string | null>(null);
-	const [draftBanner, setDraftBanner] = useState<{
-		title: string;
-		content: string;
-		savedAt: number;
-	} | null>(null);
-
-	const [creating, setCreating] = useState(false);
-	const [createTitle, setCreateTitle] = useState("");
-	const [createSlug, setCreateSlug] = useState("");
-	const [createContent, setCreateContent] = useState("");
-	const [createParentId, setCreateParentId] = useState<string | null>(null);
-	const [createError, setCreateError] = useState<string | null>(null);
-	const [createSaving, setCreateSaving] = useState(false);
-	const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
-
-	const [revisions, setRevisions] = useState<WikiRevision[]>([]);
-	const [showHistory, setShowHistory] = useState(false);
-
-	const [searchQuery, setSearchQuery] = useState("");
-	const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-	const [searchLoading, setSearchLoading] = useState(false);
-
-	// Attachments
-	const [attachments, setAttachments] = useState<Attachment[]>([]);
-	const [uploadFormOpen, setUploadFormOpen] = useState(false);
-	const [uploadFile, setUploadFile] = useState<File | null>(null);
-	const [uploading, setUploading] = useState(false);
-	const [uploadError, setUploadError] = useState<string | null>(null);
-
-	// PROJ-113: ToC state
-	const [toc, setToc] = useState<TocItem[]>([]);
-	const [activeHeadingId, setActiveHeadingId] = useState("");
-	const contentRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
 		setSlug(params.get("slug") ?? "");
 		if (!projectIdProp) setProjectId(params.get("projectId") ?? "");
-		const prefilledTitle = params.get("createTitle");
-		if (prefilledTitle) {
-			setCreating(true);
-			setCreateTitle(prefilledTitle);
-			setCreateSlug(slugify(prefilledTitle));
-		}
 	}, [projectIdProp]);
+
+	return { slug, setSlug, projectId };
+}
+
+function useWikiTree(workspaceSlug: string | undefined, projectId: string) {
+	const [pageTree, setPageTree] = useState<TreeNode[]>([]);
+	const [pageMap, setPageMap] = useState<Record<string, FlatEntry>>({});
+	const [treeLoading, setTreeLoading] = useState(false);
 
 	const fetchTree = useCallback(async () => {
 		setTreeLoading(true);
@@ -213,6 +924,14 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 	useEffect(() => {
 		fetchTree();
 	}, [fetchTree]);
+
+	return { pageTree, pageMap, treeLoading, fetchTree };
+}
+
+function useWikiSearch(workspaceSlug: string | undefined, projectId: string) {
+	const [searchQuery, setSearchQuery] = useState("");
+	const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+	const [searchLoading, setSearchLoading] = useState(false);
 
 	useEffect(() => {
 		if (!searchQuery.trim()) {
@@ -235,6 +954,17 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		return () => clearTimeout(timer);
 	}, [searchQuery, workspaceSlug, projectId]);
 
+	return { searchQuery, setSearchQuery, searchResults, searchLoading };
+}
+
+function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
+	const [page, setPage] = useState<WikiPageData | null>(null);
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [revisions, setRevisions] = useState<WikiRevision[]>([]);
+	const [showHistory, setShowHistory] = useState(false);
+	const contentRef = useRef<HTMLDivElement>(null);
+
 	const fetchPage = useCallback(
 		async (s: string) => {
 			if (!s) return;
@@ -242,12 +972,8 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 			setError(null);
 			setRevisions([]);
 			setShowHistory(false);
-			setToc([]);
-			setAttachments([]);
 			try {
-				setPage(
-					await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, { workspaceSlug })
-				);
+				setPage(await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, { workspaceSlug }));
 			} catch (e) {
 				setError(String(e));
 			} finally {
@@ -260,24 +986,10 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 	const fetchRevisions = useCallback(
 		async (s: string) => {
 			try {
-				const data = await apiFetch<WikiRevision[]>(
-					`/api/wiki/${encodeURIComponent(s)}/revisions`,
-					{ workspaceSlug }
-				);
+				const data = await apiFetch<WikiRevision[]>(`/api/wiki/${encodeURIComponent(s)}/revisions`, {
+					workspaceSlug,
+				});
 				setRevisions(Array.isArray(data) ? data : []);
-			} catch {
-				// non-fatal
-			}
-		},
-		[workspaceSlug]
-	);
-
-	const fetchAttachments = useCallback(
-		async (pageId: string) => {
-			try {
-				const qs = new URLSearchParams({ entityType: "wiki_page", entityId: pageId });
-				const data = await apiFetch<Attachment[]>(`/api/files?${qs}`, { workspaceSlug });
-				setAttachments(Array.isArray(data) ? data : []);
 			} catch {
 				// non-fatal
 			}
@@ -292,9 +1004,24 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		}
 	}, [slug, fetchPage, fetchRevisions]);
 
-	useEffect(() => {
-		if (page?.id) fetchAttachments(page.id);
-	}, [page?.id, fetchAttachments]);
+	return {
+		page,
+		setPage,
+		loading,
+		error,
+		setError,
+		revisions,
+		fetchRevisions,
+		showHistory,
+		setShowHistory,
+		contentRef,
+		fetchPage,
+	};
+}
+
+function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTMLDivElement>) {
+	const [toc, setToc] = useState<TocItem[]>([]);
+	const [activeHeadingId, setActiveHeadingId] = useState("");
 
 	// PROJ-113: build ToC after content renders
 	useEffect(() => {
@@ -353,6 +1080,99 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		return () => observer.disconnect();
 	}, [toc]);
 
+	return { toc, setToc, activeHeadingId };
+}
+
+function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageData | null) {
+	const [attachments, setAttachments] = useState<Attachment[]>([]);
+	const [uploadFormOpen, setUploadFormOpen] = useState(false);
+	const [uploadFile, setUploadFile] = useState<File | null>(null);
+	const [uploading, setUploading] = useState(false);
+	const [uploadError, setUploadError] = useState<string | null>(null);
+
+	const fetchAttachments = useCallback(
+		async (pageId: string) => {
+			try {
+				const qs = new URLSearchParams({ entityType: "wiki_page", entityId: pageId });
+				const data = await apiFetch<Attachment[]>(`/api/files?${qs}`, { workspaceSlug });
+				setAttachments(Array.isArray(data) ? data : []);
+			} catch {
+				// non-fatal
+			}
+		},
+		[workspaceSlug]
+	);
+
+	useEffect(() => {
+		if (page?.id) fetchAttachments(page.id);
+	}, [page?.id, fetchAttachments]);
+
+	async function uploadAttachment() {
+		if (!uploadFile || !page) return;
+		setUploading(true);
+		setUploadError(null);
+		try {
+			const form = new FormData();
+			form.append("file", uploadFile);
+			form.append("entityType", "wiki_page");
+			form.append("entityId", page.id);
+			await apiFetch("/api/files", { workspaceSlug, method: "POST", body: form });
+			setUploadFile(null);
+			setUploadFormOpen(false);
+			await fetchAttachments(page.id);
+		} catch (e) {
+			setUploadError(String(e));
+		} finally {
+			setUploading(false);
+		}
+	}
+
+	function cancelUpload() {
+		setUploadFormOpen(false);
+		setUploadFile(null);
+		setUploadError(null);
+	}
+
+	async function deleteAttachment(attachmentId: string) {
+		if (!page) return;
+		try {
+			await apiFetch(`/api/files/${attachmentId}`, { workspaceSlug, method: "DELETE" });
+			await fetchAttachments(page.id);
+		} catch {
+			// non-fatal
+		}
+	}
+
+	return {
+		attachments,
+		uploadFormOpen,
+		setUploadFormOpen,
+		uploadFile,
+		setUploadFile,
+		uploading,
+		uploadError,
+		uploadAttachment,
+		cancelUpload,
+		deleteAttachment,
+	};
+}
+
+function useDraftAutosave(
+	editing: boolean,
+	editTitle: string,
+	editContent: string,
+	page: WikiPageData | null,
+	draftBanner: { title: string; content: string; savedAt: number } | null
+) {
+	// Latest edit state for the flush-on-leave effect below, since its cleanup
+	// closure would otherwise only see the values from when `editing` last changed.
+	const latestDraftStateRef = useRef({ editTitle, editContent, page, draftBanner });
+	latestDraftStateRef.current = { editTitle, editContent, page, draftBanner };
+
+	// save() clears the draft itself right before leaving edit mode; set this to
+	// suppress the flush below so it doesn't resurrect the just-cleared draft.
+	const skipLeaveFlushRef = useRef(false);
+
 	// PROJ-227: debounced draft autosave to localStorage while editing
 	useEffect(() => {
 		if (!editing || !page || draftBanner) return;
@@ -368,15 +1188,6 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		}, 1000);
 		return () => clearTimeout(timer);
 	}, [editing, editTitle, editContent, page, draftBanner]);
-
-	// Latest edit state for the flush-on-leave effect below, since its cleanup
-	// closure would otherwise only see the values from when `editing` last changed.
-	const latestDraftStateRef = useRef({ editTitle, editContent, page, draftBanner });
-	latestDraftStateRef.current = { editTitle, editContent, page, draftBanner };
-
-	// save() clears the draft itself right before leaving edit mode; set this to
-	// suppress the flush below so it doesn't resurrect the just-cleared draft.
-	const skipLeaveFlushRef = useRef(false);
 
 	// Flush any not-yet-debounced edits to localStorage when leaving edit mode
 	// via navigation (not just Save/Cancel), so a quick click-away doesn't drop
@@ -397,25 +1208,34 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 			} = latestDraftStateRef.current;
 			if (!p || db) return;
 			try {
-				localStorage.setItem(
-					draftKey(p.id),
-					JSON.stringify({ title: t, content: c, savedAt: Date.now() })
-				);
+				localStorage.setItem(draftKey(p.id), JSON.stringify({ title: t, content: c, savedAt: Date.now() }));
 			} catch {
 				// non-fatal
 			}
 		};
 	}, [editing]);
 
-	function navigateTo(s: string) {
-		setCreating(false);
-		setEditing(false);
-		setPage(null);
-		setError(null);
-		setToc([]);
-		setSlug(s);
-		history.pushState(null, "", `?slug=${encodeURIComponent(s)}`);
-	}
+	return skipLeaveFlushRef;
+}
+
+function useWikiEditing(
+	workspaceSlug: string | undefined,
+	page: WikiPageData | null,
+	fetchPage: (s: string) => Promise<void>,
+	fetchRevisions: (s: string) => Promise<void>
+) {
+	const [editing, setEditing] = useState(false);
+	const [editTitle, setEditTitle] = useState("");
+	const [editContent, setEditContent] = useState("");
+	const [saving, setSaving] = useState(false);
+	const [saveError, setSaveError] = useState<string | null>(null);
+	const [draftBanner, setDraftBanner] = useState<{
+		title: string;
+		content: string;
+		savedAt: number;
+	} | null>(null);
+
+	const skipLeaveFlushRef = useDraftAutosave(editing, editTitle, editContent, page, draftBanner);
 
 	function startEdit() {
 		if (!page) return;
@@ -488,26 +1308,45 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		}
 	}
 
-	async function deletePage() {
-		if (!page) return;
-		if (!window.confirm(`Delete "${page.title}"? This cannot be undone.`)) return;
-		try {
-			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
-				method: "DELETE",
-				workspaceSlug,
-			});
-			setPage(null);
-			setSlug("");
-			history.pushState(null, "", window.location.pathname);
-			await fetchTree();
-		} catch (e) {
-			alert(`Delete failed: ${String(e)}`);
+	return {
+		editing,
+		setEditing,
+		editTitle,
+		setEditTitle,
+		editContent,
+		setEditContent,
+		saving,
+		saveError,
+		draftBanner,
+		startEdit,
+		restoreDraft,
+		discardDraft,
+		cancelEdit,
+		save,
+	};
+}
+
+function useCreatePageForm(workspaceSlug: string | undefined, projectId: string, fetchTree: () => Promise<void>) {
+	const [creating, setCreating] = useState(false);
+	const [createTitle, setCreateTitle] = useState("");
+	const [createSlug, setCreateSlug] = useState("");
+	const [createContent, setCreateContent] = useState("");
+	const [createParentId, setCreateParentId] = useState<string | null>(null);
+	const [createError, setCreateError] = useState<string | null>(null);
+	const [createSaving, setCreateSaving] = useState(false);
+	const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+
+	useEffect(() => {
+		const prefilledTitle = new URLSearchParams(window.location.search).get("createTitle");
+		if (prefilledTitle) {
+			setCreating(true);
+			setCreateTitle(prefilledTitle);
+			setCreateSlug(slugify(prefilledTitle));
 		}
-	}
+	}, []);
 
 	function startCreate(parentId: string | null = null) {
 		setCreating(true);
-		setEditing(false);
 		setCreateTitle("");
 		setCreateSlug("");
 		setCreateContent("");
@@ -521,7 +1360,17 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		setCreateError(null);
 	}
 
-	async function submitCreate() {
+	function onCreateTitleChange(v: string) {
+		setCreateTitle(v);
+		if (!slugManuallyEdited) setCreateSlug(slugify(v));
+	}
+
+	function onCreateSlugChange(v: string) {
+		setCreateSlug(v);
+		setSlugManuallyEdited(true);
+	}
+
+	async function submitCreate(): Promise<string | undefined> {
 		if (!createTitle.trim()) {
 			setCreateError("Title is required.");
 			return;
@@ -547,7 +1396,7 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 			});
 			setCreating(false);
 			await fetchTree();
-			navigateTo(created.slug);
+			return created.slug;
 		} catch (e) {
 			setCreateError(`Create failed: ${String(e)}`);
 		} finally {
@@ -555,507 +1404,356 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		}
 	}
 
-	async function uploadAttachment() {
-		if (!uploadFile || !page) return;
-		setUploading(true);
-		setUploadError(null);
-		try {
-			const form = new FormData();
-			form.append("file", uploadFile);
-			form.append("entityType", "wiki_page");
-			form.append("entityId", page.id);
-			await apiFetch("/api/files", { workspaceSlug, method: "POST", body: form });
-			setUploadFile(null);
-			setUploadFormOpen(false);
-			await fetchAttachments(page.id);
-		} catch (e) {
-			setUploadError(String(e));
-		} finally {
-			setUploading(false);
-		}
+	return {
+		creating,
+		setCreating,
+		createTitle,
+		createSlug,
+		createContent,
+		setCreateContent,
+		createParentId,
+		createError,
+		createSaving,
+		startCreate,
+		cancelCreate,
+		onCreateTitleChange,
+		onCreateSlugChange,
+		submitCreate,
+	};
+}
+
+function createWikiActions(args: {
+	workspaceSlug: string | undefined;
+	page: WikiPageData | null;
+	fetchTree: () => Promise<void>;
+	setSlug: (s: string) => void;
+	setCreating: (v: boolean) => void;
+	setEditing: (v: boolean) => void;
+	setPage: (p: WikiPageData | null) => void;
+	setError: (e: string | null) => void;
+	setToc: (t: TocItem[]) => void;
+	rawStartCreate: (parentId: string | null) => void;
+	rawSubmitCreate: () => Promise<string | undefined>;
+}) {
+	const { workspaceSlug, page, fetchTree, setSlug, setCreating, setEditing, setPage, setError, setToc } = args;
+
+	function navigateTo(s: string) {
+		setCreating(false);
+		setEditing(false);
+		setPage(null);
+		setError(null);
+		setToc([]);
+		setSlug(s);
+		history.pushState(null, "", `?slug=${encodeURIComponent(s)}`);
 	}
 
-	async function deleteAttachment(attachmentId: string) {
+	function startCreate(parentId: string | null = null) {
+		setEditing(false);
+		args.rawStartCreate(parentId);
+	}
+
+	async function submitCreate() {
+		const createdSlug = await args.rawSubmitCreate();
+		if (createdSlug) navigateTo(createdSlug);
+	}
+
+	async function deletePage() {
 		if (!page) return;
+		if (!window.confirm(`Delete "${page.title}"? This cannot be undone.`)) return;
 		try {
-			await apiFetch(`/api/files/${attachmentId}`, { workspaceSlug, method: "DELETE" });
-			await fetchAttachments(page.id);
-		} catch {
-			// non-fatal
+			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, { method: "DELETE", workspaceSlug });
+			setPage(null);
+			setSlug("");
+			history.pushState(null, "", window.location.pathname);
+			await fetchTree();
+		} catch (e) {
+			alert(`Delete failed: ${String(e)}`);
 		}
 	}
 
-	const latestRevision = revisions[0] ?? null;
+	return { navigateTo, startCreate, submitCreate, deletePage };
+}
 
-	// Breadcrumbs for current page (PROJ-114)
-	const breadcrumbs = page ? getBreadcrumbs(page.id, pageMap) : [];
-
-	// ToC sidebar (PROJ-113) — only when viewing page, ≥3 headings
-	const showToc = !editing && !creating && toc.length >= 3;
-
-	function TocList({ onClick }: { onClick?: () => void }) {
-		return (
-			<>
-				{toc.map((item) => {
-					const isTocActive = activeHeadingId === item.id;
-					return (
-						<a
-							key={item.id}
-							href={`#${item.id}`}
-							class={`block py-[0.2rem] no-underline border-l-2 transition-[color,border-color] duration-150 ${isTocActive ? "text-accent border-accent font-medium" : "text-text-muted border-border hover:text-accent hover:border-accent"}`}
-							style={{ paddingLeft: `${(item.level - 1) * 0.75 + 0.5}rem` }}
-							onClick={onClick}
-						>
-							{item.text}
-						</a>
-					);
-				})}
-			</>
-		);
+const WIKI_PAGE_STYLES = `
+	.wiki-link-broken {
+		color: var(--text-muted);
+		text-decoration: underline;
+		text-decoration-style: dashed;
+		text-underline-offset: 2px;
 	}
+	.wiki-link-broken a {
+		font-size: 0.8em;
+		margin-left: 0.2em;
+		color: var(--text-muted);
+		text-decoration: none;
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		padding: 0 3px;
+	}
+	.wiki-link-broken a:hover {
+		color: var(--accent);
+		border-color: var(--accent);
+	}
+	.prose pre.mermaid {
+		display: flex;
+		justify-content: center;
+		background: none;
+		padding: 0;
+	}
+	.prose pre.mermaid svg {
+		max-width: 100%;
+		width: auto;
+		height: auto;
+	}
+	@media (max-width: 640px) {
+		.wiki-breadcrumb button {
+			max-width: 8rem;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+	}
+`;
 
-	const createParentTitle = createParentId ? pageMap[createParentId]?.title : null;
-
-	const wikiPages = Object.values(pageMap);
-
+function WikiPageShell(props: {
+	searchQuery: string;
+	onSearchQueryChange: (v: string) => void;
+	searchResults: SearchResult[];
+	searchLoading: boolean;
+	treeLoading: boolean;
+	pageTree: TreeNode[];
+	slug: string;
+	onNavigate: (slug: string) => void;
+	onCreate: () => void;
+	mainContentProps: {
+		creating: boolean;
+		createProps: CreateFormProps;
+		slug: string;
+		loading: boolean;
+		error: string | null;
+		page: WikiPageData | null;
+		articleProps: Omit<PageArticleProps, "page">;
+	};
+}) {
 	return (
 		<div class="flex min-h-screen max-sm:flex-col">
-			<style>{`
-				.wiki-link-broken { color: var(--text-muted); text-decoration: underline; text-decoration-style: dashed; text-underline-offset: 2px; }
-				.wiki-link-broken a { font-size: 0.8em; margin-left: 0.2em; color: var(--text-muted); text-decoration: none; border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; }
-				.wiki-link-broken a:hover { color: var(--accent); border-color: var(--accent); }
-				.prose pre.mermaid { display: flex; justify-content: center; background: none; padding: 0; }
-				.prose pre.mermaid svg { max-width: 100%; width: auto; height: auto; }
-				@media (max-width: 640px) {
-					.wiki-breadcrumb button { max-width: 8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-				}
-			`}</style>
-			{/* Left sidebar: page tree */}
-			<aside class="w-[240px] shrink-0 bg-surface border-r border-border p-4 overflow-y-auto max-sm:w-full max-sm:border-r-0 max-sm:border-b">
-				<button
-					type="button"
-					onClick={() => startCreate(null)}
-					class="btn btn-primary w-full mb-4 max-sm:min-h-[44px]"
-				>
-					+ New page
-				</button>
-				<input
-					type="search"
-					value={searchQuery}
-					onInput={(e) => setSearchQuery((e.target as HTMLInputElement).value)}
-					placeholder="Search pages…"
-					class="w-full px-3 py-[0.375rem] mb-3 border border-border rounded text-sm bg-bg text-text-base box-border"
-					aria-label="Search wiki pages"
-				/>
-				{searchQuery.trim() ? (
-					searchLoading ? (
-						<p class="text-[0.8rem] text-text-muted m-0">Searching…</p>
-					) : searchResults.length === 0 ? (
-						<p class="text-[0.8rem] text-text-muted m-0">No results</p>
-					) : (
-						<ul class="list-none m-0 p-0">
-							{searchResults.map((r) => (
-								<li key={r.id}>
-									<button
-										type="button"
-										class="block w-full text-left py-[0.375rem] px-2 rounded border-none cursor-pointer text-sm bg-transparent text-text-base hover:bg-border focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-										onClick={() => {
-											setSearchQuery("");
-											navigateTo(r.slug);
-										}}
-									>
-										<span class="font-medium">{r.title}</span>
-										{r.excerpt && (
-											<span class="block text-[0.75rem] text-text-muted truncate">{r.excerpt}</span>
-										)}
-									</button>
-								</li>
-							))}
-						</ul>
-					)
-				) : treeLoading ? (
-					<p class="text-[0.8rem] text-text-muted m-0">Loading…</p>
-				) : (
-					<ul class="list-none m-0 p-0">
-						{pageTree.map((node) => (
-							<TreeNodeItem
-								key={node.id}
-								node={node}
-								currentSlug={slug}
-								depth={0}
-								onNavigate={navigateTo}
-							/>
-						))}
-						{pageTree.length === 0 && <li class="text-[0.8rem] text-text-muted">No pages yet</li>}
-					</ul>
-				)}
-			</aside>
+			<style>{WIKI_PAGE_STYLES}</style>
+			<WikiSidebar
+				searchQuery={props.searchQuery}
+				onSearchQueryChange={props.onSearchQueryChange}
+				searchResults={props.searchResults}
+				searchLoading={props.searchLoading}
+				treeLoading={props.treeLoading}
+				pageTree={props.pageTree}
+				slug={props.slug}
+				onNavigate={props.onNavigate}
+				onCreate={props.onCreate}
+			/>
 
-			{/* Main */}
 			<main class="flex-1 p-8 min-w-0">
-				{creating ? (
-					<div>
-						<h2 class="mb-6 text-2xl font-bold text-text-base">
-							{createParentTitle ? `New child page under "${createParentTitle}"` : "New page"}
-						</h2>
-						{createError && (
-							<p role="alert" class="text-[var(--danger-text)] mb-3">
-								{createError}
-							</p>
-						)}
-						<div class="mb-4">
-							<label htmlFor="create-title" class="block font-medium text-sm text-text-base mb-1">
-								Title <span class="text-[var(--danger-text)]">*</span>
-							</label>
-							<input
-								id="create-title"
-								type="text"
-								value={createTitle}
-								onInput={(e) => {
-									const v = (e.target as HTMLInputElement).value;
-									setCreateTitle(v);
-									if (!slugManuallyEdited) setCreateSlug(slugify(v));
-								}}
-								placeholder="Page title"
-								class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border text-base"
-							/>
-						</div>
-						<div class="mb-4">
-							<label htmlFor="create-slug" class="block font-medium text-sm text-text-base mb-1">
-								Slug
-							</label>
-							<input
-								id="create-slug"
-								type="text"
-								value={createSlug}
-								onInput={(e) => {
-									setCreateSlug((e.target as HTMLInputElement).value);
-									setSlugManuallyEdited(true);
-								}}
-								placeholder="auto-derived-from-title"
-								class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border font-mono"
-							/>
-						</div>
-						<div class="mb-5">
-							{/* biome-ignore lint/a11y/noLabelWithoutControl: caption for the MarkdownEditor rich-text component, which exposes no associable form control */}
-							<label class="block font-medium text-sm text-text-base mb-1">
-								Content (Markdown)
-							</label>
-							<MarkdownEditor value={createContent} onChange={setCreateContent} minHeight="280px" />
-						</div>
-						<div class="flex gap-2">
-							<button
-								type="button"
-								onClick={submitCreate}
-								disabled={createSaving}
-								class="btn btn-primary"
-							>
-								{createSaving ? "Creating…" : "Create page"}
-							</button>
-							<button
-								type="button"
-								onClick={cancelCreate}
-								disabled={createSaving}
-								class="btn btn-outline"
-							>
-								Cancel
-							</button>
-						</div>
-					</div>
-				) : !slug ? (
-					<p class="text-text-muted">Select a page from the sidebar or create a new one.</p>
-				) : loading ? (
-					<p aria-live="polite">Loading…</p>
-				) : error ? (
-					<p role="alert" class="text-[var(--danger-text)]">
-						Failed to load page: {error}
-					</p>
-				) : !page ? null : (
-					<div class="flex gap-8 items-start">
-						<article class="flex-1 min-w-0">
-							{/* Breadcrumbs (PROJ-114) */}
-							{breadcrumbs.length > 1 && (
-								<nav
-									class="wiki-breadcrumb text-[0.8rem] text-text-muted mb-3 flex flex-wrap gap-1 items-center"
-									aria-label="Breadcrumb"
-								>
-									<button
-										type="button"
-										class="bg-transparent border-none cursor-pointer text-text-muted text-[0.8rem] p-0 underline decoration-transparent hover:text-accent hover:decoration-accent"
-										onClick={() => navigateTo(breadcrumbs[0].slug)}
-									>
-										Home
-									</button>
-									{breadcrumbs.slice(1, -1).map((crumb) => (
-										<>
-											<span>›</span>
-											<button
-												key={crumb.id}
-												type="button"
-												class="bg-transparent border-none cursor-pointer text-text-muted text-[0.8rem] p-0 underline decoration-transparent hover:text-accent hover:decoration-accent"
-												onClick={() => navigateTo(crumb.slug)}
-											>
-												{crumb.title}
-											</button>
-										</>
-									))}
-									<span>›</span>
-									<span class="text-text-base">{breadcrumbs[breadcrumbs.length - 1].title}</span>
-								</nav>
-							)}
-
-							{/* Mobile ToC (PROJ-113) */}
-							{showToc && (
-								<details class="mb-4 max-[900px]:block min-[901px]:hidden">
-									<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">
-										Contents ({toc.length})
-									</summary>
-									<div class="pt-2">
-										<TocList />
-									</div>
-								</details>
-							)}
-
-							<header class="flex items-start justify-between gap-4 mb-1">
-								{editing ? (
-									<input
-										id="wiki-title"
-										type="text"
-										value={editTitle}
-										onInput={(e) => setEditTitle((e.target as HTMLInputElement).value)}
-										aria-label="Page title"
-										class="flex-1 px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border text-2xl font-bold"
-									/>
-								) : (
-									<h1 class="m-0 text-[1.75rem] font-bold text-text-base">{page.title}</h1>
-								)}
-
-								<div class="flex gap-2 shrink-0">
-									{editing ? (
-										<>
-											<button
-												type="button"
-												onClick={save}
-												disabled={saving}
-												class="btn btn-primary"
-											>
-												{saving ? "Saving…" : "Save"}
-											</button>
-											<button
-												type="button"
-												onClick={cancelEdit}
-												disabled={saving}
-												class="btn btn-outline"
-											>
-												Cancel
-											</button>
-										</>
-									) : (
-										<>
-											<button
-												type="button"
-												onClick={() => startCreate(page.id)}
-												class="btn btn-outline btn-sm"
-											>
-												+ Child page
-											</button>
-											<button type="button" onClick={startEdit} class="btn btn-outline">
-												Edit
-											</button>
-											<button type="button" onClick={deletePage} class="btn btn-danger">
-												Delete
-											</button>
-										</>
-									)}
-								</div>
-							</header>
-
-							{latestRevision && (
-								<p class="text-[0.8rem] text-text-muted mt-1 mb-5">
-									Last edited by{" "}
-									<strong class="text-text-base">{latestRevision.author_name ?? "Unknown"}</strong>{" "}
-									at {new Date(latestRevision.created_at * 1000).toLocaleString()}
-								</p>
-							)}
-
-							{saveError && (
-								<p role="alert" class="text-[var(--danger-text)] mb-3">
-									{saveError}
-								</p>
-							)}
-
-							{editing && draftBanner && (
-								<div class="mb-3 px-3 py-2 border border-border rounded bg-surface text-sm flex items-center justify-between gap-3 flex-wrap">
-									<span>
-										Restore unsaved draft from {new Date(draftBanner.savedAt).toLocaleString()}?
-									</span>
-									<div class="flex gap-2 shrink-0">
-										<button type="button" onClick={restoreDraft} class="btn btn-primary btn-sm">
-											Restore
-										</button>
-										<button type="button" onClick={discardDraft} class="btn btn-outline btn-sm">
-											Discard
-										</button>
-									</div>
-								</div>
-							)}
-
-							{editing ? (
-								<div class="mb-3">
-									<MarkdownEditor value={editContent} onChange={setEditContent} minHeight="320px" />
-								</div>
-							) : (
-								<div
-									ref={contentRef}
-									class="prose prose-sm max-w-none"
-									dangerouslySetInnerHTML={{
-										__html: renderMdWithWikilinks(page.content, wikiPages),
-									}}
-								/>
-							)}
-
-							{revisions.length > 0 && (
-								<div class="mt-8">
-									<button
-										type="button"
-										onClick={() => setShowHistory((h) => !h)}
-										class="btn btn-outline btn-sm text-text-muted"
-									>
-										{showHistory ? "▲ Hide history" : "▼ History"} ({revisions.length})
-									</button>
-									{showHistory && (
-										<ul class="mt-3 list-none p-0">
-											{revisions.map((r) => (
-												<li
-													key={r.id}
-													class="py-[0.375rem] border-b border-border text-[0.8rem] text-text-muted"
-												>
-													<strong class="text-text-base">{r.author_name ?? "Unknown"}</strong>
-													{" — "}
-													{new Date(r.created_at * 1000).toLocaleString()}
-												</li>
-											))}
-										</ul>
-									)}
-								</div>
-							)}
-
-							{/* Attachments */}
-							<div class="mt-8">
-								<h3 class="text-xs uppercase tracking-[0.05em] text-text-muted font-semibold mb-3 pb-2 border-b border-border">
-									{`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`}
-								</h3>
-
-								{attachments.length > 0 && (
-									<div class="mb-4 flex flex-col gap-2">
-										{attachments.map((a) => {
-											const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
-											return (
-												<div
-													key={a.id}
-													class="flex items-center gap-3 px-3 py-2 border border-border rounded-md bg-surface"
-												>
-													<a
-														href={`/api/files/${a.id}${qs}`}
-														target="_blank"
-														rel="noreferrer"
-														class="text-accent text-sm no-underline hover:underline flex-1 min-w-0 truncate"
-													>
-														{a.filename}
-													</a>
-													<span class="text-xs text-text-muted shrink-0">
-														{formatBytes(a.size)}
-													</span>
-													<button
-														type="button"
-														onClick={() => deleteAttachment(a.id)}
-														aria-label={`Delete ${a.filename}`}
-														class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
-													>
-														×
-													</button>
-												</div>
-											);
-										})}
-									</div>
-								)}
-
-								{uploadFormOpen ? (
-									<div class="flex flex-wrap gap-2 items-center">
-										<label class="relative cursor-pointer">
-											<input
-												type="file"
-												class="sr-only"
-												onChange={(e) => {
-													const f = (e.target as HTMLInputElement).files?.[0] ?? null;
-													setUploadFile(f);
-													setUploadError(null);
-												}}
-											/>
-											<span class="btn btn-outline btn-sm">
-												{uploadFile ? uploadFile.name : "Choose file"}
-											</span>
-										</label>
-										<button
-											type="button"
-											onClick={uploadAttachment}
-											disabled={!uploadFile || uploading}
-											class="btn btn-primary"
-										>
-											{uploading ? "Uploading…" : "Upload"}
-										</button>
-										<button
-											type="button"
-											onClick={() => {
-												setUploadFormOpen(false);
-												setUploadFile(null);
-												setUploadError(null);
-											}}
-											class="btn btn-outline"
-										>
-											Cancel
-										</button>
-										{uploadError && (
-											<span
-												role="alert"
-												class="text-[0.8rem] text-[var(--danger-text)] self-center"
-											>
-												{uploadError}
-											</span>
-										)}
-									</div>
-								) : (
-									<button
-										type="button"
-										onClick={() => setUploadFormOpen(true)}
-										class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1"
-									>
-										<span class="text-base leading-none">+</span>
-										<span>Attach file</span>
-									</button>
-								)}
-							</div>
-
-							<footer class="mt-8 pt-4 border-t border-border text-xs text-text-muted">
-								Last updated: {new Date(page.updated_at * 1000).toLocaleString()}
-							</footer>
-						</article>
-
-						{/* Sticky ToC sidebar — desktop only (PROJ-113) */}
-						{showToc && (
-							<nav
-								class="w-[190px] shrink-0 sticky top-6 self-start max-h-[calc(100vh-3rem)] overflow-y-auto text-[0.8rem] max-[900px]:hidden"
-								aria-label="Table of contents"
-							>
-								<h3 class="m-0 mb-2 text-xs uppercase tracking-[0.05em] text-text-muted font-semibold">
-									Contents
-								</h3>
-								<TocList />
-							</nav>
-						)}
-					</div>
-				)}
+				<WikiMainContent {...props.mainContentProps} />
 			</main>
 		</div>
+	);
+}
+
+function buildCreateFormProps(create: {
+	createParentTitle: string | null;
+	createTitle: string;
+	createSlug: string;
+	createContent: string;
+	createError: string | null;
+	createSaving: boolean;
+	onCreateTitleChange: (v: string) => void;
+	onCreateSlugChange: (v: string) => void;
+	setCreateContent: (v: string) => void;
+	submitCreate: () => void;
+	cancelCreate: () => void;
+}): CreateFormProps {
+	return {
+		parentTitle: create.createParentTitle,
+		title: create.createTitle,
+		slug: create.createSlug,
+		content: create.createContent,
+		error: create.createError,
+		saving: create.createSaving,
+		onTitleChange: create.onCreateTitleChange,
+		onSlugChange: create.onCreateSlugChange,
+		onContentChange: create.setCreateContent,
+		onSubmit: create.submitCreate,
+		onCancel: create.cancelCreate,
+	};
+}
+
+function buildArticleProps(article: {
+	breadcrumbs: FlatEntry[];
+	navigateTo: (slug: string) => void;
+	showToc: boolean;
+	toc: TocItem[];
+	activeHeadingId: string;
+	contentRef: RefObject<HTMLDivElement>;
+	editing: boolean;
+	editTitle: string;
+	setEditTitle: (v: string) => void;
+	saving: boolean;
+	save: () => void;
+	cancelEdit: () => void;
+	startEdit: () => void;
+	startCreate: (parentId: string | null) => void;
+	deletePage: () => void;
+	latestRevision: WikiRevision | null;
+	saveError: string | null;
+	draftBanner: { title: string; content: string; savedAt: number } | null;
+	restoreDraft: () => void;
+	discardDraft: () => void;
+	editContent: string;
+	setEditContent: (v: string) => void;
+	wikiPages: FlatEntry[];
+	revisions: WikiRevision[];
+	showHistory: boolean;
+	setShowHistory: (updater: (h: boolean) => boolean) => void;
+	attach: ReturnType<typeof useWikiAttachments>;
+	workspaceSlug: string | undefined;
+}): Omit<PageArticleProps, "page"> {
+	return {
+		breadcrumbs: article.breadcrumbs,
+		onNavigate: article.navigateTo,
+		showToc: article.showToc,
+		toc: article.toc,
+		activeHeadingId: article.activeHeadingId,
+		contentRef: article.contentRef,
+		editing: article.editing,
+		editTitle: article.editTitle,
+		onEditTitleChange: article.setEditTitle,
+		saving: article.saving,
+		onSave: article.save,
+		onCancelEdit: article.cancelEdit,
+		onStartEdit: article.startEdit,
+		onStartCreateChild: article.startCreate,
+		onDelete: article.deletePage,
+		latestRevision: article.latestRevision,
+		saveError: article.saveError,
+		draftBanner: article.draftBanner,
+		onRestoreDraft: article.restoreDraft,
+		onDiscardDraft: article.discardDraft,
+		editContent: article.editContent,
+		onEditContentChange: article.setEditContent,
+		wikiPages: article.wikiPages,
+		revisions: article.revisions,
+		showHistory: article.showHistory,
+		onToggleHistory: () => article.setShowHistory((h) => !h),
+		attachments: article.attach.attachments,
+		workspaceSlug: article.workspaceSlug,
+		uploadFormOpen: article.attach.uploadFormOpen,
+		uploadFile: article.attach.uploadFile,
+		uploading: article.attach.uploading,
+		uploadError: article.attach.uploadError,
+		onToggleUploadForm: article.attach.setUploadFormOpen,
+		onFileChange: article.attach.setUploadFile,
+		onUpload: article.attach.uploadAttachment,
+		onCancelUpload: article.attach.cancelUpload,
+		onDeleteAttachment: article.attach.deleteAttachment,
+	};
+}
+
+export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Props) {
+	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp);
+	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
+	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(workspaceSlug, projectId);
+
+	const pageData = useWikiPageData(workspaceSlug, slug);
+	const { toc, setToc, activeHeadingId } = useTableOfContents(pageData.page, pageData.contentRef);
+	const attach = useWikiAttachments(workspaceSlug, pageData.page);
+	const editState = useWikiEditing(workspaceSlug, pageData.page, pageData.fetchPage, pageData.fetchRevisions);
+	const createForm = useCreatePageForm(workspaceSlug, projectId, fetchTree);
+
+	const { navigateTo, startCreate, submitCreate, deletePage } = createWikiActions({
+		workspaceSlug,
+		page: pageData.page,
+		fetchTree,
+		setSlug,
+		setCreating: createForm.setCreating,
+		setEditing: editState.setEditing,
+		setPage: pageData.setPage,
+		setError: pageData.setError,
+		setToc,
+		rawStartCreate: createForm.startCreate,
+		rawSubmitCreate: createForm.submitCreate,
+	});
+
+	const latestRevision = pageData.revisions[0] ?? null;
+	// Breadcrumbs for current page (PROJ-114)
+	const breadcrumbs = pageData.page ? getBreadcrumbs(pageData.page.id, pageMap) : [];
+	// ToC sidebar (PROJ-113) — only when viewing page, ≥3 headings
+	const showToc = !editState.editing && !createForm.creating && toc.length >= 3;
+	const createParentTitle = createForm.createParentId ? (pageMap[createForm.createParentId]?.title ?? null) : null;
+	const wikiPages = Object.values(pageMap);
+
+	const createProps = buildCreateFormProps({
+		createParentTitle,
+		createTitle: createForm.createTitle,
+		createSlug: createForm.createSlug,
+		createContent: createForm.createContent,
+		createError: createForm.createError,
+		createSaving: createForm.createSaving,
+		onCreateTitleChange: createForm.onCreateTitleChange,
+		onCreateSlugChange: createForm.onCreateSlugChange,
+		setCreateContent: createForm.setCreateContent,
+		submitCreate,
+		cancelCreate: createForm.cancelCreate,
+	});
+
+	const articleProps = buildArticleProps({
+		breadcrumbs,
+		navigateTo,
+		showToc,
+		toc,
+		activeHeadingId,
+		contentRef: pageData.contentRef,
+		editing: editState.editing,
+		editTitle: editState.editTitle,
+		setEditTitle: editState.setEditTitle,
+		saving: editState.saving,
+		save: editState.save,
+		cancelEdit: editState.cancelEdit,
+		startEdit: editState.startEdit,
+		startCreate,
+		deletePage,
+		latestRevision,
+		saveError: editState.saveError,
+		draftBanner: editState.draftBanner,
+		restoreDraft: editState.restoreDraft,
+		discardDraft: editState.discardDraft,
+		editContent: editState.editContent,
+		setEditContent: editState.setEditContent,
+		wikiPages,
+		revisions: pageData.revisions,
+		showHistory: pageData.showHistory,
+		setShowHistory: pageData.setShowHistory,
+		attach,
+		workspaceSlug,
+	});
+
+	return (
+		<WikiPageShell
+			searchQuery={searchQuery}
+			onSearchQueryChange={setSearchQuery}
+			searchResults={searchResults}
+			searchLoading={searchLoading}
+			treeLoading={treeLoading}
+			pageTree={pageTree}
+			slug={slug}
+			onNavigate={navigateTo}
+			onCreate={() => startCreate(null)}
+			mainContentProps={{
+				creating: createForm.creating,
+				createProps,
+				slug,
+				loading: pageData.loading,
+				error: pageData.error,
+				page: pageData.page,
+				articleProps,
+			}}
+		/>
 	);
 }

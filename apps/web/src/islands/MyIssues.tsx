@@ -18,7 +18,10 @@ function getStoryPoints(issue: Issue): string | null {
 
 function spBadge(pts: string) {
 	return (
-		<span class="text-[0.68rem] text-text-muted bg-surface border border-border rounded-[3px] px-[0.3rem] font-semibold whitespace-nowrap leading-[1.6]">
+		<span
+			class="text-[0.68rem] text-text-muted bg-surface border border-border rounded-[3px]
+				px-[0.3rem] font-semibold whitespace-nowrap leading-[1.6]"
+		>
 			{pts} SP
 		</span>
 	);
@@ -38,6 +41,10 @@ function priorityBadge(issue: Issue) {
 	);
 }
 
+function isVisible(issue: Issue, includeDone: boolean): boolean {
+	return includeDone ? true : OPEN_CATEGORIES.has(issue.status_category ?? "");
+}
+
 function statusBadge(issue: Issue) {
 	return (
 		<span class="font-medium text-sm" style={{ color: categoryColor(issue.status_category) }}>
@@ -46,6 +53,108 @@ function statusBadge(issue: Issue) {
 	);
 }
 
+interface ProjectGroup {
+	name: string;
+	issues: Issue[];
+}
+
+function groupIssuesByProject(visible: Issue[]): { order: string[]; byProject: Map<string, ProjectGroup> } {
+	const order: string[] = [];
+	const byProject = new Map<string, ProjectGroup>();
+	for (const issue of visible) {
+		const key = issue.project_key ?? "__none__";
+		const name = issue.project_name ?? issue.project_key ?? "No project";
+		let group = byProject.get(key);
+		if (!group) {
+			group = { name, issues: [] };
+			byProject.set(key, group);
+			order.push(key);
+		}
+		group.issues.push(issue);
+	}
+	return { order, byProject };
+}
+
+function ProjectIssuesSection({ name, issues }: { name: string; issues: Issue[] }) {
+	return (
+		<section>
+			<h2 class="text-sm font-semibold text-text-muted uppercase tracking-[0.05em] mb-2 pb-1 border-b border-border">
+				{name}
+			</h2>
+
+			{/* Desktop table */}
+			<div class="overflow-x-auto max-sm:hidden">
+				<table class="w-full border-collapse text-[0.9rem]">
+					<thead>
+						<tr class="bg-surface">
+							<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
+								#
+							</th>
+							<th class="text-left px-3 py-2 border-b-2 border-border font-semibold w-full text-text-base">
+								Title
+							</th>
+							<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
+								Priority
+							</th>
+							<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
+								Status
+							</th>
+						</tr>
+					</thead>
+					<tbody>
+						{issues.map((issue) => {
+							const pts = getStoryPoints(issue);
+							return (
+								<tr key={issue.id} class="border-b border-border">
+									<td class="px-3 py-2 align-middle whitespace-nowrap">
+										<span class="text-text-muted font-mono text-[0.8rem]">
+											{formatIssueRef(issue.project_key, issue.number)}
+										</span>
+									</td>
+									<td class="px-3 py-2 align-middle text-text-base">
+										<a
+											href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
+											class="text-text-base no-underline hover:underline focus:underline"
+										>
+											{issue.title}
+										</a>
+									</td>
+									<td class="px-3 py-2 align-middle whitespace-nowrap">
+										<div class="flex items-center gap-[0.375rem]">
+											{priorityBadge(issue)}
+											{pts && spBadge(pts)}
+										</div>
+									</td>
+									<td class="px-3 py-2 align-middle whitespace-nowrap">{statusBadge(issue)}</td>
+								</tr>
+							);
+						})}
+					</tbody>
+				</table>
+			</div>
+
+			{/* Mobile cards */}
+			<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
+				{issues.map((issue) => (
+					<div key={issue.id} class="py-3 px-4 border border-border rounded-md bg-surface">
+						<div class="font-mono text-[0.8rem] text-text-muted mb-1">
+							{formatIssueRef(issue.project_key, issue.number)}
+						</div>
+						<a href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)} class="no-underline">
+							<div class="text-[0.9rem] text-text-base font-medium mb-2">{issue.title}</div>
+						</a>
+						<div class="flex gap-[0.375rem] flex-wrap items-center">
+							{priorityBadge(issue)}
+							{statusBadge(issue)}
+						</div>
+					</div>
+				))}
+			</div>
+		</section>
+	);
+}
+
+// cofferdam-ignore: Design.OrphanExport: imported by pages/my-issues.astro — cofferdam doesn't parse .astro imports
 export default function MyIssues({ workspaceSlug }: Props) {
 	const [issues, setIssues] = useState<Issue[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -81,25 +190,8 @@ export default function MyIssues({ workspaceSlug }: Props) {
 			</p>
 		);
 
-	const visible = issues.filter((i) =>
-		includeDone ? true : OPEN_CATEGORIES.has(i.status_category ?? "")
-	);
-
-	// Group by project
-	const projectOrder: string[] = [];
-	const byProject = new Map<string, { name: string; issues: Issue[] }>();
-	for (const issue of visible) {
-		const key = issue.project_key ?? "__none__";
-		const name = issue.project_name ?? issue.project_key ?? "No project";
-		let group = byProject.get(key);
-		if (!group) {
-			group = { name, issues: [] };
-			byProject.set(key, group);
-			projectOrder.push(key);
-		}
-		group.issues.push(issue);
-	}
-
+	const visible = issues.filter((i) => isVisible(i, includeDone));
+	const { order: projectOrder, byProject } = groupIssuesByProject(visible);
 	const hasAny = visible.length > 0;
 
 	return (
@@ -133,97 +225,7 @@ export default function MyIssues({ workspaceSlug }: Props) {
 					{projectOrder.map((key) => {
 						const group = byProject.get(key);
 						if (!group) return null;
-						return (
-							<section key={key}>
-								<h2 class="text-sm font-semibold text-text-muted uppercase tracking-[0.05em] mb-2 pb-1 border-b border-border">
-									{group.name}
-								</h2>
-
-								{/* Desktop table */}
-								<div class="overflow-x-auto max-sm:hidden">
-									<table class="w-full border-collapse text-[0.9rem]">
-										<thead>
-											<tr class="bg-surface">
-												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
-													#
-												</th>
-												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold w-full text-text-base">
-													Title
-												</th>
-												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
-													Priority
-												</th>
-												<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
-													Status
-												</th>
-											</tr>
-										</thead>
-										<tbody>
-											{group.issues.map((issue) => {
-												const pts = getStoryPoints(issue);
-												return (
-													<tr key={issue.id} class="border-b border-border">
-														<td class="px-3 py-2 align-middle whitespace-nowrap">
-															<span class="text-text-muted font-mono text-[0.8rem]">
-																{formatIssueRef(issue.project_key, issue.number)}
-															</span>
-														</td>
-														<td class="px-3 py-2 align-middle text-text-base">
-															<a
-																href={issueUrl(
-																	issue.project_key,
-																	issue.number,
-																	issue.title,
-																	issue.id
-																)}
-																class="text-text-base no-underline hover:underline focus:underline"
-															>
-																{issue.title}
-															</a>
-														</td>
-														<td class="px-3 py-2 align-middle whitespace-nowrap">
-															<div class="flex items-center gap-[0.375rem]">
-																{priorityBadge(issue)}
-																{pts && spBadge(pts)}
-															</div>
-														</td>
-														<td class="px-3 py-2 align-middle whitespace-nowrap">
-															{statusBadge(issue)}
-														</td>
-													</tr>
-												);
-											})}
-										</tbody>
-									</table>
-								</div>
-
-								{/* Mobile cards */}
-								<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
-									{group.issues.map((issue) => (
-										<div
-											key={issue.id}
-											class="py-3 px-4 border border-border rounded-md bg-surface"
-										>
-											<div class="font-mono text-[0.8rem] text-text-muted mb-1">
-												{formatIssueRef(issue.project_key, issue.number)}
-											</div>
-											<a
-												href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
-												class="no-underline"
-											>
-												<div class="text-[0.9rem] text-text-base font-medium mb-2">
-													{issue.title}
-												</div>
-											</a>
-											<div class="flex gap-[0.375rem] flex-wrap items-center">
-												{priorityBadge(issue)}
-												{statusBadge(issue)}
-											</div>
-										</div>
-									))}
-								</div>
-							</section>
-						);
+						return <ProjectIssuesSection key={key} name={group.name} issues={group.issues} />;
 					})}
 				</div>
 			)}

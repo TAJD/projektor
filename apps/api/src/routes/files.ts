@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 
 const router = new Hono<HonoEnv>();
@@ -47,7 +48,10 @@ router.get("/", async (c) => {
 	if (!entityId) return c.json({ error: "entityId is required" }, 400);
 
 	const rows = await c.env.DB.prepare(
-		"SELECT id, filename, content_type, size, created_at FROM attachments WHERE workspace_id = ? AND entity_type = ? AND entity_id = ? ORDER BY created_at ASC"
+		`SELECT id, filename, content_type, size, created_at
+     FROM attachments
+     WHERE workspace_id = ? AND entity_type = ? AND entity_id = ?
+     ORDER BY created_at ASC`
 	)
 		.bind(workspace.id, parsed.data, entityId)
 		.all<{
@@ -69,17 +73,15 @@ router.get("/", async (c) => {
 	);
 });
 
-router.post("/", async (c) => {
-	const workspace = c.get("workspace") as { id: string };
-	const user = c.get("user") as { id: string };
-
-	let formData: FormData;
+async function parseUploadFormData(c: Context<HonoEnv>) {
 	try {
-		formData = await c.req.formData();
+		return await c.req.formData();
 	} catch {
 		return c.json({ error: "Expected multipart/form-data" }, 400);
 	}
+}
 
+function extractUploadInput(c: Context<HonoEnv>, formData: FormData) {
 	const fileRaw = formData.get("file");
 	if (!fileRaw || typeof fileRaw === "string") return c.json({ error: "Missing file field" }, 400);
 	const file = fileRaw as File;
@@ -92,6 +94,10 @@ router.post("/", async (c) => {
 	if (!entityId || typeof entityId !== "string")
 		return c.json({ error: "entityId is required" }, 400);
 
+	return { file, entityType: parsed.data, entityId };
+}
+
+async function checkUploadConstraints(c: Context<HonoEnv>, workspaceId: string, file: File) {
 	if (file.size > MAX_SIZE) return c.json({ error: "File too large (max 50 MB)" }, 413);
 
 	if (!file.type || !ALLOWED_UPLOAD_TYPES.has(file.type)) {
@@ -101,7 +107,7 @@ router.post("/", async (c) => {
 	const quotaRow = await c.env.DB.prepare(
 		"SELECT COALESCE(SUM(size), 0) AS total FROM attachments WHERE workspace_id = ?"
 	)
-		.bind(workspace.id)
+		.bind(workspaceId)
 		.first<{ total: number }>();
 	const bytesUsed = quotaRow?.total ?? 0;
 	const quota = storageQuotaBytes(c.env);
@@ -110,41 +116,74 @@ router.post("/", async (c) => {
 		return c.json({ error: `Workspace storage quota exceeded (${quotaMb} MB)` }, 413);
 	}
 
-	const id = crypto.randomUUID();
-	const r2Key = `${workspace.id}/${id}`;
-	const now = Math.floor(Date.now() / 1000);
+	return null;
+}
 
-	await c.env.R2.put(r2Key, await file.arrayBuffer(), {
-		httpMetadata: { contentType: file.type || "application/octet-stream" },
+async function storeUpload(
+	c: Context<HonoEnv>,
+	params: {
+		workspaceId: string;
+		userId: string;
+		file: File;
+		entityType: z.infer<typeof EntityTypeEnum>;
+		entityId: string;
+	}
+) {
+	const id = crypto.randomUUID();
+	const r2Key = `${params.workspaceId}/${id}`;
+	const now = Math.floor(Date.now() / 1000);
+	// cofferdam-ignore: Refactor.PreferNullishCoalescing: file.type is "" for unknown types; `||` should catch that too
+	const contentType = params.file.type || "application/octet-stream";
+
+	await c.env.R2.put(r2Key, await params.file.arrayBuffer(), {
+		httpMetadata: { contentType },
 	});
 
 	await c.env.DB.prepare(
-		`INSERT INTO attachments (id, workspace_id, r2_key, filename, content_type, size, entity_type, entity_id, created_by_id, created_at)
+		`INSERT INTO attachments
+       (id, workspace_id, r2_key, filename, content_type, size, entity_type, entity_id, created_by_id, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	)
 		.bind(
 			id,
-			workspace.id,
+			params.workspaceId,
 			r2Key,
-			file.name,
-			file.type || "application/octet-stream",
-			file.size,
-			parsed.data,
-			entityId,
-			user.id,
+			params.file.name,
+			contentType,
+			params.file.size,
+			params.entityType,
+			params.entityId,
+			params.userId,
 			now
 		)
 		.run();
 
-	return c.json(
-		{
-			id,
-			filename: file.name,
-			contentType: file.type || "application/octet-stream",
-			size: file.size,
-		},
-		201
-	);
+	return { id, contentType };
+}
+
+router.post("/", async (c) => {
+	const workspace = c.get("workspace") as { id: string };
+	const user = c.get("user") as { id: string };
+
+	const formData = await parseUploadFormData(c);
+	if (formData instanceof Response) return formData;
+
+	const input = extractUploadInput(c, formData);
+	if (input instanceof Response) return input;
+	const { file, entityType, entityId } = input;
+
+	const constraintError = await checkUploadConstraints(c, workspace.id, file);
+	if (constraintError) return constraintError;
+
+	const { id, contentType } = await storeUpload(c, {
+		workspaceId: workspace.id,
+		userId: user.id,
+		file,
+		entityType,
+		entityId,
+	});
+
+	return c.json({ id, filename: file.name, contentType, size: file.size }, 201);
 });
 
 router.get("/:id", async (c) => {

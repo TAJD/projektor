@@ -13,6 +13,7 @@ import {
 	or,
 	sql,
 } from "drizzle-orm";
+import type { z } from "zod";
 import { IdSchema } from "../schemas/common";
 import {
 	CreateIssueSchema,
@@ -36,6 +37,9 @@ import { resolveStatus } from "./task-statuses";
 import type { ServiceCtx } from "./types";
 
 const ISSUE_TTL = 300;
+
+// biome-ignore lint/suspicious/noExplicitAny: Drizzle SQL condition array; typed condition union is unwieldy
+type Condition = any;
 
 // Validates a candidate parentId: checks workspace scope, cycle prevention, and depth cap (max 5).
 // Pass issueId=null on create (no cycle possible yet); pass the existing issue's id on update.
@@ -92,38 +96,10 @@ async function validateParent(
 	}
 }
 
-export async function listIssues(ctx: ServiceCtx, raw: unknown) {
-	const result = ListIssuesSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const {
-		status,
-		statusId,
-		statusIds,
-		category,
-		priority,
-		priorities,
-		projectId,
-		assignee,
-		parentId,
-		noParent,
-		typeId,
-		excludeTypeIds,
-		sprintId,
-		cfKey,
-		cfOp,
-		cfValue,
-		completedAfter,
-		completedBefore,
-		updatedAfter,
-		updatedBefore,
-		cursor,
-		limit,
-	} = result.data;
+type ListIssuesFilters = z.infer<typeof ListIssuesSchema>;
 
-	const orm = drizzle(ctx.db, { schema });
-
-	// biome-ignore lint/suspicious/noExplicitAny: Drizzle SQL condition array; typed condition union is unwieldy
-	const conditions: any[] = [eq(schema.issues.workspaceId, ctx.workspaceId)];
+function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): void {
+	const { status, statusId, statusIds, category, priority, priorities } = filters;
 
 	if (status)
 		conditions.push(
@@ -152,6 +128,11 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			.filter(Boolean) as ("urgent" | "high" | "medium" | "low" | "none")[];
 		if (vals.length) conditions.push(inArray(schema.issues.priority, vals));
 	}
+}
+
+function addAssociationFilters(conditions: Condition[], filters: ListIssuesFilters): void {
+	const { projectId, assignee, parentId, noParent, typeId, excludeTypeIds, sprintId } = filters;
+
 	if (projectId) conditions.push(eq(schema.issues.projectId, projectId));
 	if (assignee) conditions.push(eq(schema.issues.assigneeId, assignee));
 	if (parentId) conditions.push(eq(schema.issues.parentId, parentId));
@@ -169,44 +150,83 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			conditions.push(or(isNull(schema.issues.typeId), notInArray(schema.issues.typeId, ids)));
 	}
 	if (sprintId) conditions.push(eq(schema.issues.sprintId, sprintId));
+}
 
-	if (cfKey) {
-		const fieldDef = await orm
-			.select({ id: schema.customFieldDefinitions.id, type: schema.customFieldDefinitions.type })
-			.from(schema.customFieldDefinitions)
-			.where(
-				and(
-					eq(schema.customFieldDefinitions.workspaceId, ctx.workspaceId),
-					eq(schema.customFieldDefinitions.key, cfKey)
-				)
+async function addCustomFieldFilter(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	conditions: Condition[],
+	filters: ListIssuesFilters
+): Promise<void> {
+	const { cfKey, cfOp, cfValue } = filters;
+	if (!cfKey) return;
+
+	const fieldDef = await orm
+		.select({ id: schema.customFieldDefinitions.id, type: schema.customFieldDefinitions.type })
+		.from(schema.customFieldDefinitions)
+		.where(
+			and(
+				eq(schema.customFieldDefinitions.workspaceId, ctx.workspaceId),
+				eq(schema.customFieldDefinitions.key, cfKey)
 			)
-			.get();
-		if (!fieldDef)
-			throw new ValidationError({
-				formErrors: [`Unknown custom field key: ${cfKey}`],
-				fieldErrors: {},
-			});
+		)
+		.get();
+	if (!fieldDef)
+		throw new ValidationError({
+			formErrors: [`Unknown custom field key: ${cfKey}`],
+			fieldErrors: {},
+		});
 
-		const op = cfOp ?? "eq";
-		if (op === "eq") {
-			conditions.push(
-				sql`EXISTS (SELECT 1 FROM custom_field_values WHERE issue_id = ${schema.issues.id} AND field_id = ${fieldDef.id} AND value = ${cfValue ?? ""})`
-			);
-		} else {
-			const sqlOp = { gt: ">", gte: ">=", lt: "<", lte: "<=" }[op] ?? ">";
-			conditions.push(
-				sql`EXISTS (SELECT 1 FROM custom_field_values WHERE issue_id = ${schema.issues.id} AND field_id = ${fieldDef.id} AND CAST(value AS REAL) ${sql.raw(sqlOp)} ${parseFloat(cfValue ?? "0")})`
-			);
-		}
+	const op = cfOp ?? "eq";
+	if (op === "eq") {
+		conditions.push(
+			sql`EXISTS (SELECT 1 FROM custom_field_values
+				WHERE issue_id = ${schema.issues.id} AND field_id = ${fieldDef.id}
+				AND value = ${cfValue ?? ""})`
+		);
+	} else {
+		const sqlOp = { gt: ">", gte: ">=", lt: "<", lte: "<=" }[op] ?? ">";
+		conditions.push(
+			sql`EXISTS (SELECT 1 FROM custom_field_values
+				WHERE issue_id = ${schema.issues.id} AND field_id = ${fieldDef.id}
+				AND CAST(value AS REAL) ${sql.raw(sqlOp)} ${parseFloat(cfValue ?? "0")})`
+		);
 	}
+}
 
-	// Date-range filters (PROJ-212) — inclusive bounds, index-backed.
+// Date-range filters (PROJ-212) — inclusive bounds, index-backed.
+function addDateRangeFilters(conditions: Condition[], filters: ListIssuesFilters): void {
+	const { completedAfter, completedBefore, updatedAfter, updatedBefore, cursor } = filters;
+
 	if (completedAfter) conditions.push(gte(schema.issues.completedAt, completedAfter));
 	if (completedBefore) conditions.push(lte(schema.issues.completedAt, completedBefore));
 	if (updatedAfter) conditions.push(gte(schema.issues.updatedAt, updatedAfter));
 	if (updatedBefore) conditions.push(lte(schema.issues.updatedAt, updatedBefore));
-
 	if (cursor) conditions.push(sql`${schema.issues.createdAt} < ${cursor}`);
+}
+
+async function buildListIssuesConditions(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	filters: ListIssuesFilters
+): Promise<Condition[]> {
+	const conditions: Condition[] = [eq(schema.issues.workspaceId, ctx.workspaceId)];
+	addStatusFilters(conditions, filters);
+	addAssociationFilters(conditions, filters);
+	await addCustomFieldFilter(orm, ctx, conditions, filters);
+	addDateRangeFilters(conditions, filters);
+	return conditions;
+}
+
+export async function listIssues(ctx: ServiceCtx, raw: unknown) {
+	const result = ListIssuesSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const filters = result.data;
+	const { limit } = filters;
+
+	const orm = drizzle(ctx.db, { schema });
+
+	const conditions = await buildListIssuesConditions(orm, ctx, filters);
 
 	// Select with snake_case aliases to preserve the same response shape as the raw-SQL version.
 	// labels uses a raw SQL expression to return the stored JSON string (bypassing Drizzle's
@@ -264,6 +284,86 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	return { items: itemsWithFields, nextCursor };
 }
 
+// Snake-case aliases preserve the existing response contract. The labels raw expression
+// bypasses mode:'json' deserialization so callers receive the stored JSON string as before.
+const issueColumns = {
+	id: schema.issues.id,
+	workspace_id: schema.issues.workspaceId,
+	project_id: schema.issues.projectId,
+	number: schema.issues.number,
+	title: schema.issues.title,
+	body: schema.issues.body,
+	status: schema.issues.status,
+	priority: schema.issues.priority,
+	assignee_id: schema.issues.assigneeId,
+	labels: sql<string>`${schema.issues.labels}`,
+	parent_id: schema.issues.parentId,
+	type_id: schema.issues.typeId,
+	status_id: schema.issues.statusId,
+	status_category: schema.taskStatuses.category,
+	sprint_id: schema.issues.sprintId,
+	created_by_id: schema.issues.createdById,
+	created_at: schema.issues.createdAt,
+	updated_at: schema.issues.updatedAt,
+	completed_at: schema.issues.completedAt,
+	project_key: schema.projects.key,
+	project_name: schema.projects.name,
+	type_key: schema.taskTypes.key,
+	type_name: schema.taskTypes.name,
+	status_key: schema.taskStatuses.key,
+	status_name: schema.taskStatuses.name,
+} as const;
+
+async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, id: string) {
+	return (
+		(await orm
+			.select(issueColumns)
+			.from(schema.issues)
+			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
+			.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
+			.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+			.get()) ?? null
+	);
+}
+
+async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, ref: string) {
+	const m = ref.match(/^([A-Z]+)-(\d+)$/);
+	if (!m)
+		throw new ValidationError({
+			formErrors: ["ref must be in format KEY-NUMBER"],
+			fieldErrors: {},
+		});
+	return (
+		(await orm
+			.select(issueColumns)
+			.from(schema.issues)
+			.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
+			.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
+			.where(
+				and(
+					eq(schema.projects.key, m[1]),
+					eq(schema.issues.number, parseInt(m[2], 10)),
+					eq(schema.issues.workspaceId, ctx.workspaceId)
+				)
+			)
+			.get()) ?? null
+	);
+}
+
+function computeChildRollup(childRows: Array<{ status: string; count: number }>) {
+	const byStatus: Record<string, number> = {};
+	let total = 0;
+	for (const r of childRows) {
+		byStatus[r.status] = r.count;
+		total += r.count;
+	}
+	const done = (byStatus.done ?? 0) + (byStatus.cancelled ?? 0);
+	const remaining = total - done;
+	return { total, byStatus, done, remaining };
+}
+
 export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = GetIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -279,71 +379,11 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 
-	// Snake-case aliases preserve the existing response contract. The labels raw expression
-	// bypasses mode:'json' deserialization so callers receive the stored JSON string as before.
-	const issueColumns = {
-		id: schema.issues.id,
-		workspace_id: schema.issues.workspaceId,
-		project_id: schema.issues.projectId,
-		number: schema.issues.number,
-		title: schema.issues.title,
-		body: schema.issues.body,
-		status: schema.issues.status,
-		priority: schema.issues.priority,
-		assignee_id: schema.issues.assigneeId,
-		labels: sql<string>`${schema.issues.labels}`,
-		parent_id: schema.issues.parentId,
-		type_id: schema.issues.typeId,
-		status_id: schema.issues.statusId,
-		status_category: schema.taskStatuses.category,
-		sprint_id: schema.issues.sprintId,
-		created_by_id: schema.issues.createdById,
-		created_at: schema.issues.createdAt,
-		updated_at: schema.issues.updatedAt,
-		completed_at: schema.issues.completedAt,
-		project_key: schema.projects.key,
-		project_name: schema.projects.name,
-		type_key: schema.taskTypes.key,
-		type_name: schema.taskTypes.name,
-		status_key: schema.taskStatuses.key,
-		status_name: schema.taskStatuses.name,
-	} as const;
-
-	let issue: unknown = null;
-
-	if (id) {
-		issue =
-			(await orm
-				.select(issueColumns)
-				.from(schema.issues)
-				.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-				.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
-				.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
-				.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
-				.get()) ?? null;
-	} else if (ref) {
-		const m = ref.match(/^([A-Z]+)-(\d+)$/);
-		if (!m)
-			throw new ValidationError({
-				formErrors: ["ref must be in format KEY-NUMBER"],
-				fieldErrors: {},
-			});
-		issue =
-			(await orm
-				.select(issueColumns)
-				.from(schema.issues)
-				.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-				.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
-				.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
-				.where(
-					and(
-						eq(schema.projects.key, m[1]),
-						eq(schema.issues.number, parseInt(m[2], 10)),
-						eq(schema.issues.workspaceId, ctx.workspaceId)
-					)
-				)
-				.get()) ?? null;
-	}
+	const issue = id
+		? await fetchIssueById(orm, ctx, id)
+		: ref
+			? await fetchIssueByRef(orm, ctx, ref)
+			: null;
 
 	if (!issue) throw new NotFoundError("Issue not found");
 
@@ -351,17 +391,12 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 
 	type ChildCount = { status: string; count: number };
 	const childRows = (await orm.all(
-		sql`SELECT status, COUNT(*) as count FROM issues WHERE parent_id = ${issueId} AND workspace_id = ${ctx.workspaceId} GROUP BY status`
+		sql`SELECT status, COUNT(*) as count FROM issues
+			WHERE parent_id = ${issueId} AND workspace_id = ${ctx.workspaceId}
+			GROUP BY status`
 	)) as ChildCount[];
 
-	const byStatus: Record<string, number> = {};
-	let total = 0;
-	for (const r of childRows) {
-		byStatus[r.status] = r.count;
-		total += r.count;
-	}
-	const done = (byStatus.done ?? 0) + (byStatus.cancelled ?? 0);
-	const remaining = total - done;
+	const rollup = computeChildRollup(childRows);
 
 	const links = await listLinksForIssue(ctx, { issueId });
 
@@ -370,7 +405,7 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const fullIssue = {
 		...(issue as Record<string, unknown>),
-		rollup: { total, byStatus, done, remaining },
+		rollup,
 		links,
 		customFields,
 	};
@@ -411,45 +446,26 @@ async function resolveTypeId(
 	return def?.id ?? null;
 }
 
-export async function createIssue(ctx: ServiceCtx, raw: unknown) {
-	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
-	const result = CreateIssueSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const {
-		projectId,
-		title,
-		body,
-		status,
-		statusId: rawStatusId,
-		priority,
-		assigneeId,
-		labels,
-		parentId,
-		typeId: rawTypeId,
-		customFields,
-	} = result.data;
+type CreateIssueData = z.infer<typeof CreateIssueSchema>;
 
-	if (parentId) {
-		await validateParent(ctx, parentId, null);
+async function insertIssueRow(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	params: {
+		id: string;
+		projectId: string;
+		title: string;
+		resolvedBody: string;
+		resolvedStatusKey: string;
+		resolvedStatusId: string | null;
+		priority: CreateIssueData["priority"];
+		assigneeId: string | null;
+		labels: string[];
+		parentId: string | null;
+		resolvedTypeId: string | null;
+		now: number;
 	}
-
-	const resolvedTypeId = await resolveTypeId(ctx, rawTypeId);
-	const { id: resolvedStatusId, key: resolvedStatusKey } = await resolveStatus(
-		ctx,
-		rawStatusId,
-		status
-	);
-
-	const cfWrites = customFields
-		? await validateCustomFields(ctx.db, ctx.workspaceId, customFields)
-		: [];
-
-	const id = crypto.randomUUID();
-	const now = Math.floor(Date.now() / 1000);
-	const resolvedBody = body ?? "";
-
-	const orm = drizzle(ctx.db, { schema });
-
+): Promise<void> {
 	// Atomic number allocation: the subquery for MAX(number) and the INSERT run as
 	// a single SQLite statement, eliminating the read-then-write race that existed
 	// when they were two separate operations. The UNIQUE index on (project_id, number)
@@ -465,37 +481,63 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 			    ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
-			id,
+			params.id,
 			ctx.workspaceId,
-			projectId,
-			projectId,
-			title,
-			resolvedBody,
-			resolvedStatusKey,
-			resolvedStatusId ?? null,
-			priority ?? "none",
-			assigneeId ?? null,
-			JSON.stringify(labels ?? []),
-			parentId ?? null,
-			resolvedTypeId,
+			params.projectId,
+			params.projectId,
+			params.title,
+			params.resolvedBody,
+			params.resolvedStatusKey,
+			params.resolvedStatusId ?? null,
+			params.priority ?? "none",
+			params.assigneeId ?? null,
+			JSON.stringify(params.labels ?? []),
+			params.parentId ?? null,
+			params.resolvedTypeId,
 			ctx.userId,
-			now,
-			now
+			params.now,
+			params.now
 		)
 		.run();
 
 	await orm
 		.update(schema.issues)
 		.set({
-			statusCategory: sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${resolvedStatusId}), '')`,
+			statusCategory: sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${params.resolvedStatusId}), '')`,
 		})
-		.where(eq(schema.issues.id, id));
+		.where(eq(schema.issues.id, params.id));
 
 	await ctx.db
 		.prepare("INSERT INTO issues_fts (issue_id, workspace_id, title, body) VALUES (?, ?, ?, ?)")
-		.bind(id, ctx.workspaceId, title, resolvedBody)
+		.bind(params.id, ctx.workspaceId, params.title, params.resolvedBody)
 		.run();
+}
 
+async function resolveCreateIssueDeps(ctx: ServiceCtx, data: CreateIssueData) {
+	if (data.parentId) {
+		await validateParent(ctx, data.parentId, null);
+	}
+
+	const resolvedTypeId = await resolveTypeId(ctx, data.typeId);
+	const { id: resolvedStatusId, key: resolvedStatusKey } = await resolveStatus(
+		ctx,
+		data.statusId,
+		data.status
+	);
+	const cfWrites = data.customFields
+		? await validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
+		: [];
+
+	return { resolvedTypeId, resolvedStatusId, resolvedStatusKey, cfWrites };
+}
+
+async function finalizeCreateIssue(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	id: string,
+	parentId: string | null | undefined,
+	cfWrites: Awaited<ReturnType<typeof validateCustomFields>>
+) {
 	if (cfWrites.length > 0) {
 		await writeCustomFieldValues(ctx.db, id, cfWrites);
 	}
@@ -511,7 +553,207 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${parentId}`);
 	}
 
+	return row;
+}
+
+export async function createIssue(ctx: ServiceCtx, raw: unknown) {
+	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+	const result = CreateIssueSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const data = result.data;
+	const { projectId, title, body, priority, assigneeId, labels, parentId } = data;
+
+	const { resolvedTypeId, resolvedStatusId, resolvedStatusKey, cfWrites } =
+		await resolveCreateIssueDeps(ctx, data);
+
+	const id = crypto.randomUUID();
+	const nowTs = now();
+	const resolvedBody = body ?? "";
+
+	const orm = drizzle(ctx.db, { schema });
+
+	await insertIssueRow(ctx, orm, {
+		id,
+		projectId,
+		title,
+		resolvedBody,
+		resolvedStatusKey,
+		resolvedStatusId,
+		priority,
+		assigneeId: assigneeId ?? null,
+		labels: labels ?? [],
+		parentId: parentId ?? null,
+		resolvedTypeId,
+		now: nowTs,
+	});
+
+	const row = await finalizeCreateIssue(ctx, orm, id, parentId, cfWrites);
+
 	return { id, number: row?.number };
+}
+
+type UpdateIssueData = z.infer<typeof UpdateIssueSchema>;
+type ExistingIssue = {
+	id: string;
+	parentId: string | null;
+	status: string;
+	statusCategory: string | null;
+};
+
+// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
+type SetValues = Record<string, any>;
+
+function applySimpleFields(setValues: SetValues, data: UpdateIssueData): void {
+	if (data.title !== undefined) setValues.title = data.title;
+	if (data.body !== undefined) setValues.body = data.body;
+	if (data.priority !== undefined) setValues.priority = data.priority;
+	if ("assigneeId" in data) setValues.assigneeId = data.assigneeId ?? null;
+	if (data.labels !== undefined) setValues.labels = data.labels;
+	if ("parentId" in data) setValues.parentId = data.parentId ?? null;
+}
+
+async function fetchStatusCategory(
+	orm: ReturnType<typeof drizzle>,
+	resolvedStatusId: string | null
+): Promise<string | undefined> {
+	if (!resolvedStatusId) return undefined;
+	const row = await orm
+		.select({ category: schema.taskStatuses.category })
+		.from(schema.taskStatuses)
+		.where(eq(schema.taskStatuses.id, resolvedStatusId))
+		.get();
+	return row?.category;
+}
+
+// PROJ-212: stamp completed_at when an issue first enters a done-category
+// status, clear it when it leaves. We keep the original completion time if
+// the issue was already done and is merely re-saved. Done is detected from
+// either the configured status category or the legacy `status` enum, so it
+// works whether or not the workspace uses custom task statuses.
+function applyCompletedAtTransition(
+	setValues: SetValues,
+	existing: ExistingIssue,
+	resolvedStatusKey: string,
+	newStatusCategory: string | undefined
+): void {
+	const wasDone = existing.statusCategory === "done" || existing.status === "done";
+	const isDone = newStatusCategory === "done" || resolvedStatusKey === "done";
+	if (isDone && !wasDone) setValues.completedAt = now();
+	else if (!isDone && wasDone) setValues.completedAt = null;
+}
+
+async function applyStatusFields(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	setValues: SetValues,
+	data: UpdateIssueData,
+	existing: ExistingIssue
+): Promise<void> {
+	if (data.status === undefined && !("statusId" in data)) return;
+
+	const { id: resolvedStatusId, key: resolvedStatusKey } = await resolveStatus(
+		ctx,
+		"statusId" in data ? data.statusId : undefined,
+		data.status
+	);
+	setValues.status = resolvedStatusKey;
+	setValues.statusId = resolvedStatusId;
+	setValues.statusCategory = sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${resolvedStatusId}), '')`;
+
+	const newStatusCategory = await fetchStatusCategory(orm, resolvedStatusId);
+	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
+}
+
+function now(): number {
+	return Math.floor(Date.now() / 1000);
+}
+
+async function buildUpdateSetValues(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	data: UpdateIssueData,
+	existing: ExistingIssue
+): Promise<SetValues> {
+	const setValues: SetValues = { updatedAt: now() };
+	applySimpleFields(setValues, data);
+	await applyStatusFields(ctx, orm, setValues, data, existing);
+	if ("typeId" in data) {
+		setValues.typeId = await resolveTypeId(ctx, data.typeId);
+	}
+	return setValues;
+}
+
+async function reindexIssueFts(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	id: string,
+	data: UpdateIssueData
+): Promise<void> {
+	if (data.title === undefined && data.body === undefined) return;
+
+	const current = await orm
+		.select({ title: schema.issues.title, body: schema.issues.body })
+		.from(schema.issues)
+		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!current) return;
+
+	await ctx.db
+		.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
+		.bind(id, ctx.workspaceId)
+		.run();
+	await ctx.db
+		.prepare("INSERT INTO issues_fts (issue_id, workspace_id, title, body) VALUES (?, ?, ?, ?)")
+		.bind(id, ctx.workspaceId, current.title, current.body)
+		.run();
+}
+
+async function applyCustomFieldUpdates(
+	ctx: ServiceCtx,
+	id: string,
+	data: UpdateIssueData
+): Promise<void> {
+	if (!data.customFields || Object.keys(data.customFields).length === 0) return;
+	const cfWrites = await validateCustomFields(ctx.db, ctx.workspaceId, data.customFields);
+	await writeCustomFieldValues(ctx.db, id, cfWrites);
+}
+
+function buildUpdateDiffCore(data: UpdateIssueData): Record<string, unknown> {
+	const diff: Record<string, unknown> = {};
+	if (data.title !== undefined) diff.title = data.title;
+	if (data.body !== undefined) diff.body = data.body;
+	if (data.status !== undefined) diff.status = data.status;
+	if (data.priority !== undefined) diff.priority = data.priority;
+	if (data.labels !== undefined) diff.labels = data.labels;
+	return diff;
+}
+
+function buildUpdateDiffRefs(data: UpdateIssueData): Record<string, unknown> {
+	const diff: Record<string, unknown> = {};
+	if ("statusId" in data) diff.statusId = data.statusId ?? null;
+	if ("assigneeId" in data) diff.assigneeId = data.assigneeId ?? null;
+	if ("parentId" in data) diff.parentId = data.parentId ?? null;
+	if ("typeId" in data) diff.typeId = data.typeId ?? null;
+	if (data.customFields !== undefined) diff.customFields = data.customFields;
+	return diff;
+}
+
+async function invalidateUpdateCaches(
+	ctx: ServiceCtx,
+	id: string,
+	data: UpdateIssueData,
+	existing: ExistingIssue
+): Promise<void> {
+	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${id}`);
+
+	// Invalidate the old parent's rollup cache
+	if (existing.parentId) {
+		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.parentId}`);
+	}
+	// If parentId is being changed to a new parent, also invalidate that one
+	if ("parentId" in data && data.parentId && data.parentId !== existing.parentId) {
+		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${data.parentId}`);
+	}
 }
 
 export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
@@ -538,100 +780,20 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 		.get();
 	if (!existing) throw new NotFoundError("Issue not found");
 
-	const now = Math.floor(Date.now() / 1000);
-	// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
-	const setValues: Record<string, any> = { updatedAt: now };
-
-	if (data.title !== undefined) setValues.title = data.title;
-	if (data.body !== undefined) setValues.body = data.body;
-	if (data.priority !== undefined) setValues.priority = data.priority;
-	if ("assigneeId" in data) setValues.assigneeId = data.assigneeId ?? null;
-	if (data.labels !== undefined) setValues.labels = data.labels;
-	if ("parentId" in data) setValues.parentId = data.parentId ?? null;
-
-	if (data.status !== undefined || "statusId" in data) {
-		const { id: resolvedStatusId, key: resolvedStatusKey } = await resolveStatus(
-			ctx,
-			"statusId" in data ? data.statusId : undefined,
-			data.status
-		);
-		setValues.status = resolvedStatusKey;
-		setValues.statusId = resolvedStatusId;
-		setValues.statusCategory = sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${resolvedStatusId}), '')`;
-
-		// PROJ-212: stamp completed_at when an issue first enters a done-category
-		// status, clear it when it leaves. We keep the original completion time if
-		// the issue was already done and is merely re-saved. Done is detected from
-		// either the configured status category or the legacy `status` enum, so it
-		// works whether or not the workspace uses custom task statuses.
-		const newStatus = resolvedStatusId
-			? await orm
-					.select({ category: schema.taskStatuses.category })
-					.from(schema.taskStatuses)
-					.where(eq(schema.taskStatuses.id, resolvedStatusId))
-					.get()
-			: undefined;
-		const wasDone = existing.statusCategory === "done" || existing.status === "done";
-		const isDone = newStatus?.category === "done" || resolvedStatusKey === "done";
-		if (isDone && !wasDone) setValues.completedAt = now;
-		else if (!isDone && wasDone) setValues.completedAt = null;
-	}
-
-	if ("typeId" in data) {
-		setValues.typeId = await resolveTypeId(ctx, data.typeId);
-	}
+	const setValues = await buildUpdateSetValues(ctx, orm, data, existing);
 
 	await orm
 		.update(schema.issues)
 		.set(setValues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
 
-	if (data.title !== undefined || data.body !== undefined) {
-		const current = await orm
-			.select({ title: schema.issues.title, body: schema.issues.body })
-			.from(schema.issues)
-			.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
-			.get();
-		if (current) {
-			await ctx.db
-				.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
-				.bind(id, ctx.workspaceId)
-				.run();
-			await ctx.db
-				.prepare("INSERT INTO issues_fts (issue_id, workspace_id, title, body) VALUES (?, ?, ?, ?)")
-				.bind(id, ctx.workspaceId, current.title, current.body)
-				.run();
-		}
-	}
+	await reindexIssueFts(ctx, orm, id, data);
+	await applyCustomFieldUpdates(ctx, id, data);
 
-	if (data.customFields && Object.keys(data.customFields).length > 0) {
-		const cfWrites = await validateCustomFields(ctx.db, ctx.workspaceId, data.customFields);
-		await writeCustomFieldValues(ctx.db, id, cfWrites);
-	}
-
-	const diff: Record<string, unknown> = {};
-	if (data.title !== undefined) diff.title = data.title;
-	if (data.body !== undefined) diff.body = data.body;
-	if (data.status !== undefined) diff.status = data.status;
-	if ("statusId" in data) diff.statusId = data.statusId ?? null;
-	if (data.priority !== undefined) diff.priority = data.priority;
-	if ("assigneeId" in data) diff.assigneeId = data.assigneeId ?? null;
-	if (data.labels !== undefined) diff.labels = data.labels;
-	if ("parentId" in data) diff.parentId = data.parentId ?? null;
-	if ("typeId" in data) diff.typeId = data.typeId ?? null;
-	if (data.customFields !== undefined) diff.customFields = data.customFields;
+	const diff = { ...buildUpdateDiffCore(data), ...buildUpdateDiffRefs(data) };
 	await recordActivity(ctx, { entityType: "issue", entityId: id, action: "updated", diff });
 
-	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${id}`);
-
-	// Invalidate the old parent's rollup cache
-	if (existing.parentId) {
-		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.parentId}`);
-	}
-	// If parentId is being changed to a new parent, also invalidate that one
-	if ("parentId" in data && data.parentId && data.parentId !== existing.parentId) {
-		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${data.parentId}`);
-	}
+	await invalidateUpdateCaches(ctx, id, data, existing);
 
 	return { ok: true };
 }
@@ -669,7 +831,9 @@ export async function deleteIssue(ctx: ServiceCtx, id: string) {
 
 const PRIORITY_SCORE: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1, none: 0 };
 
-export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
+type PrioritizedFilters = { limit: number; includeBacklog: boolean; excludeClaimed: boolean };
+
+function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
 	const input = raw as { limit?: unknown; includeBacklog?: unknown; excludeClaimed?: unknown };
 	const limit =
 		typeof input.limit === "number" && input.limit > 0
@@ -677,10 +841,15 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 			: 10;
 	const includeBacklog = input.includeBacklog !== false;
 	const excludeClaimed = input.excludeClaimed === true;
+	return { limit, includeBacklog, excludeClaimed };
+}
 
-	const orm = drizzle(ctx.db, { schema });
-
-	const issues = await orm
+async function fetchOpenIssuesForPrioritization(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	includeBacklog: boolean
+) {
+	return orm
 		.select({
 			id: schema.issues.id,
 			title: schema.issues.title,
@@ -709,22 +878,15 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 				...(!includeBacklog ? [sql`${schema.issues.status} != 'backlog'`] : [])
 			)
 		);
+}
 
-	if (issues.length === 0) return { issues: [] };
+type OpenIssue = Awaited<ReturnType<typeof fetchOpenIssuesForPrioritization>>[number];
 
-	// excludeClaimed (PROJ-184): drop issues held by a live lease so "what should
-	// I work on next?" skips tickets another agent is already on.
-	const openIssues = excludeClaimed
-		? await (async () => {
-				const leased = await liveLeasedIssueIds(ctx);
-				return issues.filter((i) => !leased.has(i.id));
-			})()
-		: issues;
-
-	if (openIssues.length === 0) return { issues: [] };
-
-	const issueIds = openIssues.map((i) => i.id);
-
+async function computeInDegree(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	issueIds: string[]
+): Promise<Record<string, number>> {
 	// inChunks: issueIds is every open issue, so this would otherwise blow past D1's
 	// 100-bound-parameter cap on any reasonably busy workspace. See services/sql.ts.
 	const links = await inChunks(issueIds, (chunk) =>
@@ -743,7 +905,13 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 	for (const link of links) {
 		inDegree[link.target_issue_id] = (inDegree[link.target_issue_id] ?? 0) + 1;
 	}
+	return inDegree;
+}
 
+async function computeStoryPoints(
+	orm: ReturnType<typeof drizzle>,
+	issueIds: string[]
+): Promise<Record<string, number>> {
 	const cfValues = await inChunks(issueIds, (chunk) =>
 		orm
 			.select({
@@ -772,7 +940,15 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 	for (const cf of cfValues) {
 		if (cf.sp > 0) storyPoints[cf.issue_id] = cf.sp;
 	}
+	return storyPoints;
+}
 
+function scoreOpenIssues(
+	openIssues: OpenIssue[],
+	inDegree: Record<string, number>,
+	storyPoints: Record<string, number>
+) {
+	const issueIds = openIssues.map((i) => i.id);
 	const maxInDegree = Math.max(...issueIds.map((id) => inDegree[id] ?? 0), 1);
 
 	const scored = openIssues.map((issue) => {
@@ -788,6 +964,33 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 	});
 
 	scored.sort((a, b) => b._score - a._score);
+	return scored;
+}
+
+export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
+	const { limit, includeBacklog, excludeClaimed } = parsePrioritizedFilters(raw);
+
+	const orm = drizzle(ctx.db, { schema });
+
+	const issues = await fetchOpenIssuesForPrioritization(orm, ctx, includeBacklog);
+	if (issues.length === 0) return { issues: [] };
+
+	// excludeClaimed (PROJ-184): drop issues held by a live lease so "what should
+	// I work on next?" skips tickets another agent is already on.
+	const openIssues = excludeClaimed
+		? await (async () => {
+				const leased = await liveLeasedIssueIds(ctx);
+				return issues.filter((i) => !leased.has(i.id));
+			})()
+		: issues;
+
+	if (openIssues.length === 0) return { issues: [] };
+
+	const issueIds = openIssues.map((i) => i.id);
+	const inDegree = await computeInDegree(orm, ctx, issueIds);
+	const storyPoints = await computeStoryPoints(orm, issueIds);
+
+	const scored = scoreOpenIssues(openIssues, inDegree, storyPoints);
 
 	return { issues: scored.slice(0, limit) };
 }

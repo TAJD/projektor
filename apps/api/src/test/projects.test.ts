@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture } from "./helpers";
+import { authHeaders, seedFixture, seedWorkspaceRoles } from "./helpers";
 
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
 type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
@@ -28,6 +28,7 @@ function isMcpError(r: JsonRpcResult | JsonRpcError): r is JsonRpcError {
 	return "error" in r;
 }
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Projects REST", () => {
 	let ownerToken: string;
 	let memberToken: string;
@@ -39,22 +40,14 @@ describe("Projects REST", () => {
 	let viewerHeaders: Record<string, string>;
 
 	beforeEach(async () => {
-		const ownerFixture = await seedFixture({ role: "owner" });
-		ownerToken = ownerFixture.token;
-		slug = ownerFixture.workspace.slug;
-		workspaceId = ownerFixture.workspace.id;
+		const roles = await seedWorkspaceRoles();
+		slug = roles.workspace.slug;
+		workspaceId = roles.workspace.id;
+		ownerToken = roles.owner.token;
+		memberToken = roles.member.token;
+		viewerToken = roles.viewer.token;
 		ownerHeaders = authHeaders(ownerToken, slug);
-
-		// Additional users in the same workspace with different roles
-		const { seedUser, seedMember, seedToken } = await import("./helpers");
-		const memberUser = await seedUser(`member-${crypto.randomUUID().slice(0, 8)}@example.com`);
-		await seedMember(workspaceId, memberUser.id, "member");
-		memberToken = await seedToken(workspaceId, memberUser.id);
 		memberHeaders = authHeaders(memberToken, slug);
-
-		const viewerUser = await seedUser(`viewer-${crypto.randomUUID().slice(0, 8)}@example.com`);
-		await seedMember(workspaceId, viewerUser.id, "viewer");
-		viewerToken = await seedToken(workspaceId, viewerUser.id);
 		viewerHeaders = authHeaders(viewerToken, slug);
 	});
 
@@ -238,6 +231,7 @@ describe("Projects REST", () => {
 	});
 });
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Projects MCP", () => {
 	let ownerToken: string;
 	let slug: string;
@@ -247,22 +241,13 @@ describe("Projects MCP", () => {
 	let viewerHeaders: Record<string, string>;
 
 	beforeEach(async () => {
-		const ownerFixture = await seedFixture({ role: "owner" });
-		ownerToken = ownerFixture.token;
-		slug = ownerFixture.workspace.slug;
-		workspaceId = ownerFixture.workspace.id;
+		const roles = await seedWorkspaceRoles();
+		slug = roles.workspace.slug;
+		workspaceId = roles.workspace.id;
+		ownerToken = roles.owner.token;
 		ownerHeaders = authHeaders(ownerToken, slug);
-
-		const { seedUser, seedMember, seedToken } = await import("./helpers");
-		const memberUser = await seedUser(`member-${crypto.randomUUID().slice(0, 8)}@example.com`);
-		await seedMember(workspaceId, memberUser.id, "member");
-		const memberToken = await seedToken(workspaceId, memberUser.id);
-		memberHeaders = authHeaders(memberToken, slug);
-
-		const viewerUser = await seedUser(`viewer-${crypto.randomUUID().slice(0, 8)}@example.com`);
-		await seedMember(workspaceId, viewerUser.id, "viewer");
-		const viewerToken = await seedToken(workspaceId, viewerUser.id);
-		viewerHeaders = authHeaders(viewerToken, slug);
+		memberHeaders = authHeaders(roles.member.token, slug);
+		viewerHeaders = authHeaders(roles.viewer.token, slug);
 	});
 
 	it("list_projects returns empty list initially", async () => {

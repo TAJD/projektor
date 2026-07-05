@@ -1,7 +1,8 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedProject } from "./helpers";
+import { authHeaders, seedFixture, seedIssue, seedIssueFixture } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("File Claims API", () => {
 	let token: string;
 	let slug: string;
@@ -11,15 +12,7 @@ describe("File Claims API", () => {
 	let issueId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Test Issue" });
-		issueId = issue.id;
+		({ token, slug, workspaceId, userId, projectId, issueId } = await seedIssueFixture());
 	});
 
 	async function claimFiles(body: Record<string, unknown>, t = token, s = slug) {
@@ -104,31 +97,34 @@ describe("File Claims API", () => {
 
 	// B2: conflict on held path (force false) -> 409; batch does NOT partially claim
 	// 4 requests (claim, conflict-claim, list other, MCP conflict) — within limit
-	it("B2: second claim on held path (force=false) returns 409 naming holder; batch does not partially claim", async () => {
-		// Claim one path in issue A
-		await claimFiles({ issueId, paths: ["src/held.ts"] });
+	it(
+		"B2: second claim on held path (force=false) returns 409 naming holder; batch does not partially claim",
+		async () => {
+			// Claim one path in issue A
+			await claimFiles({ issueId, paths: ["src/held.ts"] });
 
-		// Second issue
-		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Issue 2" });
+			// Second issue
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Issue 2" });
 
-		// Try to claim [held, new] — should fail entirely
-		const res = await claimFiles({ issueId: issue2.id, paths: ["src/held.ts", "src/other.ts"] });
-		expect(res.status).toBe(409);
-		const body = (await res.json()) as { error: string };
-		expect(body.error).toContain(issueId);
+			// Try to claim [held, new] — should fail entirely
+			const res = await claimFiles({ issueId: issue2.id, paths: ["src/held.ts", "src/other.ts"] });
+			expect(res.status).toBe(409);
+			const body = (await res.json()) as { error: string };
+			expect(body.error).toContain(issueId);
 
-		// Assert "src/other.ts" was NOT claimed (batch all-or-nothing)
-		const listRes = await listFileClaims({ path: "src/other.ts" });
-		const listBody = (await listRes.json()) as { items: Array<{ path: string }> };
-		expect(listBody.items).toHaveLength(0);
+			// Assert "src/other.ts" was NOT claimed (batch all-or-nothing)
+			const listRes = await listFileClaims({ path: "src/other.ts" });
+			const listBody = (await listRes.json()) as { items: Array<{ path: string }> };
+			expect(listBody.items).toHaveLength(0);
 
-		// Verify via MCP — should also return -32000 with holder info
-		const mcpRes = await mcpCall("claim_files", { issueId: issue2.id, paths: ["src/held.ts"] });
-		expect(mcpRes.status).toBe(200);
-		const mcpBody = (await mcpRes.json()) as { error?: { code: number; message: string } };
-		expect(mcpBody.error?.code).toBe(-32000);
-		expect(mcpBody.error?.message).toContain(issueId);
-	});
+			// Verify via MCP — should also return -32000 with holder info
+			const mcpRes = await mcpCall("claim_files", { issueId: issue2.id, paths: ["src/held.ts"] });
+			expect(mcpRes.status).toBe(200);
+			const mcpBody = (await mcpRes.json()) as { error?: { code: number; message: string } };
+			expect(mcpBody.error?.code).toBe(-32000);
+			expect(mcpBody.error?.message).toContain(issueId);
+		}
+	);
 
 	// B3: force:true steals — prior released, new active, overridden list non-empty
 	// 3 requests (claim, force-claim, list) — within limit

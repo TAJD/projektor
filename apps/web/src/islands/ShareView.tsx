@@ -39,6 +39,128 @@ function formatDate(unixSeconds: number): string {
 	return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
 }
 
+function ErrorState({ error }: { error: string }) {
+	const isExpired = error === "not_found";
+	return (
+		<div style={{ padding: "2rem", textAlign: "center" }}>
+			<p style={{ fontSize: "3rem", marginBottom: "1rem" }}>{isExpired ? "🔗" : "⚠"}</p>
+			<h2 style={{ marginBottom: "0.5rem" }}>
+				{isExpired ? "Link not found or expired" : "Something went wrong"}
+			</h2>
+			<p style={{ color: "var(--text-muted)" }}>
+				{isExpired
+					? "This share link may have expired (links are valid for 3 days) or the URL is incorrect."
+					: "Unable to load the shared issue. Please try again later."}
+			</p>
+			<a
+				href="/"
+				style={{
+					color: "var(--accent)",
+					textDecoration: "none",
+					marginTop: "1.5rem",
+					display: "inline-block",
+				}}
+			>
+				← Go to Projektor
+			</a>
+		</div>
+	);
+}
+
+function IssueHeader({ issue }: { issue: SharedIssue }) {
+	const priorityStyle = PRIORITY_COLORS[issue.priority] ?? PRIORITY_COLORS.none;
+	return (
+		<header style={{ marginBottom: "1.5rem" }}>
+			<div
+				style={{
+					display: "flex",
+					alignItems: "center",
+					gap: "0.5rem",
+					marginBottom: "0.75rem",
+					flexWrap: "wrap",
+				}}
+			>
+				{/* Priority badge */}
+				<span class="badge" style={{ background: priorityStyle.bg, color: priorityStyle.text }}>
+					{PRIORITY_LABELS[issue.priority] ?? issue.priority}
+				</span>
+				{/* Status badge */}
+				{issue.status_name && (
+					<span
+						class="badge"
+						style={{
+							background: "var(--surface)",
+							color: "var(--text-muted)",
+							border: "1px solid var(--border)",
+						}}
+					>
+						{issue.status_name}
+					</span>
+				)}
+				{/* Project */}
+				{issue.project_name && (
+					<span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+						{issue.project_name}
+						{issue.project_key ? ` (${issue.project_key})` : ""}
+					</span>
+				)}
+			</div>
+			<h1 style={{ margin: 0, fontSize: "1.375rem", fontWeight: 700, lineHeight: 1.3 }}>
+				{issue.title}
+			</h1>
+			<div
+				style={{
+					marginTop: "0.5rem",
+					fontSize: "0.8rem",
+					color: "var(--text-muted)",
+					display: "flex",
+					gap: "1rem",
+					flexWrap: "wrap",
+				}}
+			>
+				{issue.assignee_name && <span>Assignee: {issue.assignee_name}</span>}
+				<span>Created {formatDate(issue.created_at)}</span>
+			</div>
+		</header>
+	);
+}
+
+function CustomFieldsSection({ fields }: { fields: SharedIssue["customFields"] }) {
+	if (fields.length === 0) return null;
+	return (
+		<div style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
+			<p
+				style={{
+					fontSize: "0.7rem",
+					fontWeight: 600,
+					textTransform: "uppercase",
+					letterSpacing: "0.06em",
+					color: "var(--text-muted)",
+					marginBottom: "0.75rem",
+				}}
+			>
+				Fields
+			</p>
+			<dl
+				style={{
+					display: "grid",
+					gridTemplateColumns: "max-content 1fr",
+					gap: "0.4rem 1rem",
+					fontSize: "0.8125rem",
+				}}
+			>
+				{fields.map((f) => (
+					<>
+						<dt style={{ color: "var(--text-muted)", fontWeight: 500 }}>{f.label}</dt>
+						<dd style={{ margin: 0 }}>{f.value}</dd>
+					</>
+				))}
+			</dl>
+		</div>
+	);
+}
+
+// cofferdam-ignore: Design.OrphanExport: imported by pages/share/view.astro — cofferdam doesn't parse .astro imports
 export default function ShareView() {
 	const [issue, setIssue] = useState<SharedIssue | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -72,37 +194,9 @@ export default function ShareView() {
 			</p>
 		);
 
-	if (error) {
-		const isExpired = error === "not_found";
-		return (
-			<div style={{ padding: "2rem", textAlign: "center" }}>
-				<p style={{ fontSize: "3rem", marginBottom: "1rem" }}>{isExpired ? "🔗" : "⚠"}</p>
-				<h2 style={{ marginBottom: "0.5rem" }}>
-					{isExpired ? "Link not found or expired" : "Something went wrong"}
-				</h2>
-				<p style={{ color: "var(--text-muted)" }}>
-					{isExpired
-						? "This share link may have expired (links are valid for 3 days) or the URL is incorrect."
-						: "Unable to load the shared issue. Please try again later."}
-				</p>
-				<a
-					href="/"
-					style={{
-						color: "var(--accent)",
-						textDecoration: "none",
-						marginTop: "1.5rem",
-						display: "inline-block",
-					}}
-				>
-					← Go to Projektor
-				</a>
-			</div>
-		);
-	}
+	if (error) return <ErrorState error={error} />;
 
 	if (!issue) return null;
-
-	const priorityStyle = PRIORITY_COLORS[issue.priority] ?? PRIORITY_COLORS.none;
 
 	return (
 		<div style={{ padding: "2rem" }}>
@@ -130,58 +224,7 @@ export default function ShareView() {
 			</div>
 
 			{/* Header */}
-			<header style={{ marginBottom: "1.5rem" }}>
-				<div
-					style={{
-						display: "flex",
-						alignItems: "center",
-						gap: "0.5rem",
-						marginBottom: "0.75rem",
-						flexWrap: "wrap",
-					}}
-				>
-					{/* Priority badge */}
-					<span class="badge" style={{ background: priorityStyle.bg, color: priorityStyle.text }}>
-						{PRIORITY_LABELS[issue.priority] ?? issue.priority}
-					</span>
-					{/* Status badge */}
-					{issue.status_name && (
-						<span
-							class="badge"
-							style={{
-								background: "var(--surface)",
-								color: "var(--text-muted)",
-								border: "1px solid var(--border)",
-							}}
-						>
-							{issue.status_name}
-						</span>
-					)}
-					{/* Project */}
-					{issue.project_name && (
-						<span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-							{issue.project_name}
-							{issue.project_key ? ` (${issue.project_key})` : ""}
-						</span>
-					)}
-				</div>
-				<h1 style={{ margin: 0, fontSize: "1.375rem", fontWeight: 700, lineHeight: 1.3 }}>
-					{issue.title}
-				</h1>
-				<div
-					style={{
-						marginTop: "0.5rem",
-						fontSize: "0.8rem",
-						color: "var(--text-muted)",
-						display: "flex",
-						gap: "1rem",
-						flexWrap: "wrap",
-					}}
-				>
-					{issue.assignee_name && <span>Assignee: {issue.assignee_name}</span>}
-					<span>Created {formatDate(issue.created_at)}</span>
-				</div>
-			</header>
+			<IssueHeader issue={issue} />
 
 			{/* Body */}
 			{issue.body ? (
@@ -197,37 +240,7 @@ export default function ShareView() {
 			)}
 
 			{/* Custom fields */}
-			{issue.customFields.length > 0 && (
-				<div style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
-					<p
-						style={{
-							fontSize: "0.7rem",
-							fontWeight: 600,
-							textTransform: "uppercase",
-							letterSpacing: "0.06em",
-							color: "var(--text-muted)",
-							marginBottom: "0.75rem",
-						}}
-					>
-						Fields
-					</p>
-					<dl
-						style={{
-							display: "grid",
-							gridTemplateColumns: "max-content 1fr",
-							gap: "0.4rem 1rem",
-							fontSize: "0.8125rem",
-						}}
-					>
-						{issue.customFields.map((f) => (
-							<>
-								<dt style={{ color: "var(--text-muted)", fontWeight: 500 }}>{f.label}</dt>
-								<dd style={{ margin: 0 }}>{f.value}</dd>
-							</>
-						))}
-					</dl>
-				</div>
-			)}
+			<CustomFieldsSection fields={issue.customFields} />
 		</div>
 	);
 }

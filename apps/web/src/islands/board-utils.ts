@@ -45,7 +45,7 @@ export type SortKey =
 	| "created_at"
 	| "title";
 
-export const PRIORITY_ORDER: Record<string, number> = {
+const PRIORITY_ORDER: Record<string, number> = {
 	urgent: 0,
 	high: 1,
 	medium: 2,
@@ -138,30 +138,27 @@ export function filterIssues(
 		.filter((i) => !filterType || i.type_key === filterType);
 }
 
+function statusSortOrder(issue: Issue): number {
+	// backlog issues: status_category=todo, status_key=backlog → order slot 4
+	if (issue.status_key === "backlog") return 4;
+	return STATUS_CATEGORY_ORDER[issue.status_category ?? ""] ?? 99;
+}
+
+const SORT_COMPARATORS: Record<SortKey, (a: Issue, b: Issue) => number> = {
+	number: (a, b) => a.number - b.number,
+	priority: (a, b) => (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99),
+	updated: (a, b) => a.updated_at - b.updated_at,
+	created_at: (a, b) => a.created_at - b.created_at,
+	title: (a, b) => a.title.localeCompare(b.title),
+	assignee: (a, b) => (a.assignee_name ?? "").localeCompare(b.assignee_name ?? ""),
+	status: (a, b) => statusSortOrder(a) - statusSortOrder(b),
+};
+
 /** Sorts a copy of an issue list by the given SortKey. */
 export function sortIssues(issues: Issue[], sortBy: SortKey, sortDir: "asc" | "desc"): Issue[] {
+	const compare = SORT_COMPARATORS[sortBy];
 	return [...issues].sort((a, b) => {
-		let diff = 0;
-		if (sortBy === "number") {
-			diff = a.number - b.number;
-		} else if (sortBy === "priority") {
-			diff = (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99);
-		} else if (sortBy === "updated") {
-			diff = a.updated_at - b.updated_at;
-		} else if (sortBy === "created_at") {
-			diff = a.created_at - b.created_at;
-		} else if (sortBy === "title") {
-			diff = a.title.localeCompare(b.title);
-		} else if (sortBy === "assignee") {
-			diff = (a.assignee_name ?? "").localeCompare(b.assignee_name ?? "");
-		} else if (sortBy === "status") {
-			// backlog issues: status_category=todo, status_key=backlog → order slot 4
-			const aOrder =
-				a.status_key === "backlog" ? 4 : (STATUS_CATEGORY_ORDER[a.status_category ?? ""] ?? 99);
-			const bOrder =
-				b.status_key === "backlog" ? 4 : (STATUS_CATEGORY_ORDER[b.status_category ?? ""] ?? 99);
-			diff = aOrder - bOrder;
-		}
+		const diff = compare ? compare(a, b) : 0;
 		return sortDir === "asc" ? diff : -diff;
 	});
 }

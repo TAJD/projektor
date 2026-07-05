@@ -6,6 +6,150 @@ export interface SelectOption {
 	label: string;
 }
 
+const OPEN_TRIGGER_KEYS = new Set(["ArrowDown", "Enter", " "]);
+
+// Close on outside click, and on scroll/resize (the fixed menu can't track its
+// anchor, so dismiss rather than let it drift).
+function useCloseOnOutside(open: boolean, close: () => void, rootRef: { current: HTMLDivElement | null }) {
+	useEffect(() => {
+		if (!open) return;
+		function onDocPointer(e: MouseEvent) {
+			if (!rootRef.current?.contains(e.target as Node)) close();
+		}
+		function onScroll(e: Event) {
+			if (rootRef.current?.contains(e.target as Node)) return;
+			close();
+		}
+		document.addEventListener("mousedown", onDocPointer);
+		window.addEventListener("scroll", onScroll, true);
+		window.addEventListener("resize", close);
+		return () => {
+			document.removeEventListener("mousedown", onDocPointer);
+			window.removeEventListener("scroll", onScroll, true);
+			window.removeEventListener("resize", close);
+		};
+	}, [open, close, rootRef]);
+}
+
+interface SelectKeyDownConfig {
+	disabled: boolean;
+	open: boolean;
+	openMenu: () => void;
+	optionCount: number;
+	highlight: number;
+	setHighlight: (fn: (h: number) => number) => void;
+	choose: (index: number) => void;
+	close: () => void;
+}
+
+function createSelectKeyDownHandler({
+	disabled,
+	open,
+	openMenu,
+	optionCount,
+	highlight,
+	setHighlight,
+	choose,
+	close,
+}: SelectKeyDownConfig) {
+	return function onKeyDown(e: KeyboardEvent) {
+		if (disabled) return;
+		if (!open) {
+			if (OPEN_TRIGGER_KEYS.has(e.key)) {
+				e.preventDefault();
+				openMenu();
+			}
+			return;
+		}
+		const handlers: Record<string, (e: KeyboardEvent) => void> = {
+			ArrowDown: (ev) => {
+				ev.preventDefault();
+				setHighlight((h) => Math.min(h + 1, optionCount - 1));
+			},
+			ArrowUp: (ev) => {
+				ev.preventDefault();
+				setHighlight((h) => Math.max(h - 1, 0));
+			},
+			Home: (ev) => {
+				ev.preventDefault();
+				setHighlight(() => 0);
+			},
+			End: (ev) => {
+				ev.preventDefault();
+				setHighlight(() => optionCount - 1);
+			},
+			Enter: (ev) => {
+				ev.preventDefault();
+				choose(highlight);
+			},
+			" ": (ev) => {
+				ev.preventDefault();
+				choose(highlight);
+			},
+			Escape: (ev) => {
+				ev.preventDefault();
+				close();
+			},
+			Tab: () => close(),
+		};
+		handlers[e.key]?.(e);
+	};
+}
+
+interface SelectMenuProps {
+	baseId: string;
+	options: SelectOption[];
+	value: string;
+	highlight: number;
+	menuPos: { top: number; left: number; width: number };
+	ariaLabel: string;
+	capitalize: boolean;
+	onHighlight: (i: number) => void;
+	onChoose: (i: number) => void;
+}
+
+function SelectMenu({
+	baseId,
+	options,
+	value,
+	highlight,
+	menuPos,
+	ariaLabel,
+	capitalize,
+	onHighlight,
+	onChoose,
+}: SelectMenuProps) {
+	return (
+		<ul
+			id={`${baseId}-menu`}
+			class="select-menu"
+			role="listbox"
+			aria-label={ariaLabel}
+			style={{
+				position: "fixed",
+				top: `${menuPos.top}px`,
+				left: `${menuPos.left}px`,
+				minWidth: `${menuPos.width}px`,
+			}}
+		>
+			{options.map((opt, i) => (
+				<li
+					key={opt.value}
+					id={`${baseId}-opt-${i}`}
+					role="option"
+					aria-selected={opt.value === value}
+					class={i === highlight ? "select-option highlighted" : "select-option"}
+					style={{ textTransform: capitalize ? "capitalize" : undefined }}
+					onMouseEnter={() => onHighlight(i)}
+					onClick={() => onChoose(i)}
+				>
+					{opt.label}
+				</li>
+			))}
+		</ul>
+	);
+}
+
 interface Props {
 	value: string;
 	options: SelectOption[];
@@ -69,67 +213,18 @@ export default function Select({
 		setOpen(false);
 	}
 
-	// Close on outside click, and on scroll/resize (the fixed menu can't track its
-	// anchor, so dismiss rather than let it drift).
-	useEffect(() => {
-		if (!open) return;
-		function onDocPointer(e: MouseEvent) {
-			if (!rootRef.current?.contains(e.target as Node)) close();
-		}
-		function onScroll(e: Event) {
-			if (rootRef.current?.contains(e.target as Node)) return;
-			close();
-		}
-		document.addEventListener("mousedown", onDocPointer);
-		window.addEventListener("scroll", onScroll, true);
-		window.addEventListener("resize", close);
-		return () => {
-			document.removeEventListener("mousedown", onDocPointer);
-			window.removeEventListener("scroll", onScroll, true);
-			window.removeEventListener("resize", close);
-		};
-	}, [open, close]);
+	useCloseOnOutside(open, close, rootRef);
 
-	function onKeyDown(e: KeyboardEvent) {
-		if (disabled) return;
-		if (!open) {
-			if (e.key === "ArrowDown" || e.key === "Enter" || e.key === " ") {
-				e.preventDefault();
-				openMenu();
-			}
-			return;
-		}
-		switch (e.key) {
-			case "ArrowDown":
-				e.preventDefault();
-				setHighlight((h) => Math.min(h + 1, options.length - 1));
-				break;
-			case "ArrowUp":
-				e.preventDefault();
-				setHighlight((h) => Math.max(h - 1, 0));
-				break;
-			case "Home":
-				e.preventDefault();
-				setHighlight(0);
-				break;
-			case "End":
-				e.preventDefault();
-				setHighlight(options.length - 1);
-				break;
-			case "Enter":
-			case " ":
-				e.preventDefault();
-				choose(highlight);
-				break;
-			case "Escape":
-				e.preventDefault();
-				close();
-				break;
-			case "Tab":
-				close();
-				break;
-		}
-	}
+	const onKeyDown = createSelectKeyDownHandler({
+		disabled,
+		open,
+		openMenu,
+		optionCount: options.length,
+		highlight,
+		setHighlight,
+		choose,
+		close,
+	});
 
 	const label = selected?.label ?? value;
 
@@ -156,33 +251,17 @@ export default function Select({
 				</span>
 			</button>
 			{open && (
-				<ul
-					id={`${baseId}-menu`}
-					class="select-menu"
-					role="listbox"
-					aria-label={ariaLabel}
-					style={{
-						position: "fixed",
-						top: `${menuPos.top}px`,
-						left: `${menuPos.left}px`,
-						minWidth: `${menuPos.width}px`,
-					}}
-				>
-					{options.map((opt, i) => (
-						<li
-							key={opt.value}
-							id={`${baseId}-opt-${i}`}
-							role="option"
-							aria-selected={opt.value === value}
-							class={i === highlight ? "select-option highlighted" : "select-option"}
-							style={{ textTransform: capitalize ? "capitalize" : undefined }}
-							onMouseEnter={() => setHighlight(i)}
-							onClick={() => choose(i)}
-						>
-							{opt.label}
-						</li>
-					))}
-				</ul>
+				<SelectMenu
+					baseId={baseId}
+					options={options}
+					value={value}
+					highlight={highlight}
+					menuPos={menuPos}
+					ariaLabel={ariaLabel}
+					capitalize={capitalize}
+					onHighlight={setHighlight}
+					onChoose={choose}
+				/>
 			)}
 		</div>
 	);

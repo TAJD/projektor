@@ -5,13 +5,15 @@ import {
 	seedFixture,
 	seedIssue,
 	seedMember,
-	seedProject,
+	seedProjectFixture,
 	seedTaskStatus,
 	seedToken,
 	seedUser,
 } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Task Statuses API", () => {
+	// cofferdam-ignore: Refactor.DuplicateBlock: shared seedProjectFixture beforeEach shape, intentional reuse
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
@@ -19,13 +21,7 @@ describe("Task Statuses API", () => {
 	let projectId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	// ---- list ----
@@ -262,6 +258,7 @@ describe("Task Statuses API", () => {
 	});
 });
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Task Statuses — issue integration", () => {
 	let token: string;
 	let slug: string;
@@ -270,13 +267,7 @@ describe("Task Statuses — issue integration", () => {
 	let projectId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	it("POST /api/issues uses workspace default status when no statusId given", async () => {

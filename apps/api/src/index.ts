@@ -116,11 +116,11 @@ app.get("/bootstrap", async (c) => {
 		.run();
 
 	// Seed default task types, statuses, and custom fields (idempotent)
-	// biome-ignore lint/style/noNonNullAssertion: ws was just upserted above; SELECT immediately after guarantees it exists
+	// biome-ignore lint/style/noNonNullAssertion: ws was just upserted above; SELECT after guarantees it exists
 	await seedDefaultTaskTypes(c.env.DB, ws!.id);
-	// biome-ignore lint/style/noNonNullAssertion: ws was just upserted above; SELECT immediately after guarantees it exists
+	// biome-ignore lint/style/noNonNullAssertion: ws was just upserted above; SELECT after guarantees it exists
 	await seedDefaultTaskStatuses(c.env.DB, ws!.id);
-	// biome-ignore lint/style/noNonNullAssertion: ws was just upserted above; SELECT immediately after guarantees it exists
+	// biome-ignore lint/style/noNonNullAssertion: ws was just upserted above; SELECT after guarantees it exists
 	await seedDefaultCustomFields(c.env.DB, ws!.id);
 
 	// Generate token
@@ -147,7 +147,9 @@ app.get("/bootstrap", async (c) => {
 		user,
 		token,
 		mcpUrl,
-		mcpAddCommand: `claude mcp add --transport http --header "Authorization: Bearer ${token}" --header "X-Workspace-Slug: ${ws?.slug}" projektor "${mcpUrl}"`,
+		mcpAddCommand:
+			`claude mcp add --transport http --header "Authorization: Bearer ${token}" ` +
+			`--header "X-Workspace-Slug: ${ws?.slug}" projektor "${mcpUrl}"`,
 	});
 });
 
@@ -251,4 +253,5 @@ async function sha256hex(s: string): Promise<string> {
 		.join("");
 }
 
+// cofferdam-ignore: Design.OrphanExport: Cloudflare Workers entry point — loaded by the runtime, not a JS import
 export default app;

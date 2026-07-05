@@ -13,3 +13,4 @@ dist/
 # local dev / test artifacts
 .playwright-mcp/
 dev-server.log
+.cofferdam/cache/

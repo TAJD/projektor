@@ -4,7 +4,6 @@ import {
 	ConflictError,
 	ForbiddenError,
 	NotFoundError,
-	ServiceError,
 	ValidationError,
 } from "../services/errors";
 
@@ -22,8 +21,4 @@ export function serviceErrToResponse(c: Context<HonoEnv>, err: unknown) {
 		return c.json({ error: err.message }, 409);
 	}
 	throw err;
-}
-
-export function isServiceError(err: unknown): err is ServiceError {
-	return err instanceof ServiceError;
 }

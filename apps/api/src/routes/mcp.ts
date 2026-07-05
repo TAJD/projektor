@@ -25,14 +25,19 @@ import { pluginRegistry } from "../plugins/registry";
 // coordination protocol without it being repeated in each spawn prompt. Framed
 // conditionally so it's a no-op for solo sessions. Keep in sync with the
 // "Fleet coordination protocol" in AGENTS.md.
-const SERVER_INSTRUCTIONS = `Projektor is an MCP-native issue tracker + wiki. Every project-management action a browser user can take is available here as a tool.
+const SERVER_INSTRUCTIONS = `Projektor is an MCP-native issue tracker + wiki. Every project-management action a \
+browser user can take is available here as a tool.
 
-Handy entry points: get_issue accepts a ref like "PROJ-42" (no UUID needed); get_prioritized_issues answers "what should I work on next?"; search_issues / search_wiki ground you in existing context before you act.
+Handy entry points: get_issue accepts a ref like "PROJ-42" (no UUID needed); get_prioritized_issues answers \
+"what should I work on next?"; search_issues / search_wiki ground you in existing context before you act.
 
-Fleet coordination — only when you are one of several agents working in parallel on a shared repo. Use these primitives so parallel agents don't collide:
+Fleet coordination — only when you are one of several agents working in parallel on a shared repo. Use these \
+primitives so parallel agents don't collide:
 1. register_agent at session start — link the issue you're implementing; save the returned id.
-2. claim_files before editing any file — check list_file_claims first and back off if another issue already holds it (don't force).
-3. post_message to scope "issue:<uuid>" when you start, hit a blocker, and finish; use scope "workspace" for fleet-wide notices (e.g. "rebasing mcp.ts, hold off").
+2. claim_files before editing any file — check list_file_claims first and back off if another issue already \
+holds it (don't force).
+3. post_message to scope "issue:<uuid>" when you start, hit a blocker, and finish; use scope "workspace" for \
+fleet-wide notices (e.g. "rebasing mcp.ts, hold off").
 4. heartbeat_agent every ~60s while working (sessions time out after 120s of silence).
 5. release_files then end_agent when done.
 

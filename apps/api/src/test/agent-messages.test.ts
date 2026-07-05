@@ -1,8 +1,10 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedProject, seedToken } from "./helpers";
+import { authHeaders, seedFixture, seedIssue, seedIssueFixture, seedProject, seedToken } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Agent Messages API", () => {
+	// cofferdam-ignore: Refactor.DuplicateBlock: shared seedIssueFixture beforeEach shape, intentional reuse
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
@@ -11,15 +13,7 @@ describe("Agent Messages API", () => {
 	let issueId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Test Issue" });
-		issueId = issue.id;
+		({ token, slug, workspaceId, userId, projectId, issueId } = await seedIssueFixture());
 	});
 
 	async function postMessage(body: Record<string, unknown>, t = token, s = slug) {
@@ -157,6 +151,7 @@ describe("Agent Messages API", () => {
 
 	// C3: CAPSTONE — spans agents + file-claims + agent-messages
 	// Uses multiple tokens to stay within rate limit (5 per token)
+	// cofferdam-ignore: Readability.MaxFunctionLength: capstone test spans multiple API surfaces by design
 	it("C3: capstone — two agents coordinate via messages; force-claim posts override notice", async () => {
 		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Agent Issue" });
 		const scope = `issue:${issue2.id}`;

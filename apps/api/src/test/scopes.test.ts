@@ -18,6 +18,19 @@ import {
 } from "../auth/scopes";
 import { authHeaders, seedProject, seedToken, seedUser, seedWorkspace } from "./helpers";
 
+/** Seed a workspace + owner + a project in it, for scope-enforcement tests. */
+async function seedScopeFixture() {
+	const ws = await seedWorkspace(`ws-${crypto.randomUUID().slice(0, 8)}`);
+	const user = await seedUser(`u-${crypto.randomUUID().slice(0, 8)}@example.com`);
+	await env.DB.prepare(
+		"INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)"
+	)
+		.bind(ws.id, user.id, Math.floor(Date.now() / 1000))
+		.run();
+	const project = await seedProject(ws.id);
+	return { slug: ws.slug, workspaceId: ws.id, userId: user.id, projectId: project.id };
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
@@ -91,18 +104,7 @@ describe("PROJ-17: REST scope enforcement", () => {
 	let workspaceId: string;
 
 	beforeEach(async () => {
-		const ws = await seedWorkspace(`ws-${crypto.randomUUID().slice(0, 8)}`);
-		slug = ws.slug;
-		workspaceId = ws.id;
-		const user = await seedUser(`u-${crypto.randomUUID().slice(0, 8)}@example.com`);
-		userId = user.id;
-		await env.DB.prepare(
-			"INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)"
-		)
-			.bind(workspaceId, userId, Math.floor(Date.now() / 1000))
-			.run();
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ slug, workspaceId, userId, projectId } = await seedScopeFixture());
 	});
 
 	it("read-only token can GET but not POST", async () => {
@@ -191,17 +193,7 @@ describe("PROJ-17: MCP scope enforcement", () => {
 	let workspaceId: string;
 
 	beforeEach(async () => {
-		const ws = await seedWorkspace(`ws-${crypto.randomUUID().slice(0, 8)}`);
-		slug = ws.slug;
-		workspaceId = ws.id;
-		const user = await seedUser(`u-${crypto.randomUUID().slice(0, 8)}@example.com`);
-		userId = user.id;
-		await env.DB.prepare(
-			"INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)"
-		)
-			.bind(workspaceId, userId, Math.floor(Date.now() / 1000))
-			.run();
-		projectId = (await seedProject(workspaceId)).id;
+		({ slug, workspaceId, userId, projectId } = await seedScopeFixture());
 	});
 
 	it("read token: read tool works, write tool is blocked", async () => {

@@ -24,6 +24,7 @@ function makeUploadRequest(
 	});
 }
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Files API", () => {
 	let token: string;
 	let slug: string;
@@ -203,6 +204,7 @@ describe("Files API", () => {
 	it("POST /api/files rejects disallowed content type (text/html) → 415", async () => {
 		const form = new FormData();
 		form.append("file", new File(["<html>evil</html>"], "evil.html", { type: "text/html" }));
+		// cofferdam-ignore: Refactor.DuplicateBlock: mirrors the empty-content-type case below, distinct types under test
 		form.append("entityType", "issue");
 		form.append("entityId", ENTITY_ID);
 		const res = await SELF.fetch("http://localhost/api/files", {
@@ -277,8 +279,9 @@ describe("Files API", () => {
 		const now = Math.floor(Date.now() / 1000);
 		// Insert a fake attachment that consumes all but 1 byte of the quota
 		await env.DB.prepare(
-			`INSERT INTO attachments (id, workspace_id, r2_key, filename, content_type, size, entity_type, entity_id, created_by_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			`INSERT INTO attachments (id, workspace_id, r2_key, filename, content_type, size, entity_type,
+       entity_id, created_by_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 			.bind(
 				crypto.randomUUID(),

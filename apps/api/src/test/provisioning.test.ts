@@ -20,6 +20,7 @@ async function memberRole(workspaceId: string, userId: string) {
 	return row?.role ?? null;
 }
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("login provisioning", () => {
 	it("first admin login creates the default workspace and makes them owner", async () => {
 		const slug = "prov-admin-create";
@@ -147,25 +148,28 @@ describe("login provisioning", () => {
 		expect(await memberRole(defaultWs.id, user.id)).toBeNull();
 	});
 
-	it("an admin in a mapped domain owns the default workspace AND the mapped one (ADMIN_EMAILS wins over domain confinement)", async () => {
-		const mappedWs = await seedWorkspace("prov-mapped-2");
-		const defaultWs = await seedWorkspace("prov-default-2");
-		const admin = await seedUser("tajd@example.com");
+	it(
+		"an admin in a mapped domain owns the default and mapped workspace (ADMIN_EMAILS wins over domain confinement)",
+		async () => {
+			const mappedWs = await seedWorkspace("prov-mapped-2");
+			const defaultWs = await seedWorkspace("prov-default-2");
+			const admin = await seedUser("tajd@example.com");
 
-		await provisionUserOnLogin(
-			envWith({
-				ADMIN_EMAILS: "tajd@example.com",
-				DEFAULT_WORKSPACE_SLUG: "prov-default-2",
-				AUTO_JOIN_ROLE: "viewer",
-				WORKSPACE_DOMAIN_MAP: '{"example.com":{"slug":"prov-mapped-2","role":"member"}}',
-			}),
-			admin
-		);
+			await provisionUserOnLogin(
+				envWith({
+					ADMIN_EMAILS: "tajd@example.com",
+					DEFAULT_WORKSPACE_SLUG: "prov-default-2",
+					AUTO_JOIN_ROLE: "viewer",
+					WORKSPACE_DOMAIN_MAP: '{"example.com":{"slug":"prov-mapped-2","role":"member"}}',
+				}),
+				admin
+			);
 
-		// The domain rule never confines an admin; admins own every workspace, mapped or not.
-		expect(await memberRole(defaultWs.id, admin.id)).toBe("owner");
-		expect(await memberRole(mappedWs.id, admin.id)).toBe("owner");
-	});
+			// The domain rule never confines an admin; admins own every workspace, mapped or not.
+			expect(await memberRole(defaultWs.id, admin.id)).toBe("owner");
+			expect(await memberRole(mappedWs.id, admin.id)).toBe("owner");
+		}
+	);
 
 	it("an admin is made owner of every existing workspace on login, not just the default", async () => {
 		const defaultWs = await seedWorkspace("prov-own-all-default");

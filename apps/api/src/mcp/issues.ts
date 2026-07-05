@@ -180,7 +180,8 @@ export const issuesTools: MCPTool[] = [
 	{
 		name: "get_prioritized_issues",
 		description:
-			"Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next.",
+			"Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + " +
+			"inverse story points. Useful for deciding what to work on next.",
 		inputSchema: {
 			type: "object",
 			properties: {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ScopeSchema } from "../auth/scopes";
+import { RoleEnum } from "./common";
 
 export const CreateWorkspaceSchema = z.object({
 	name: z.string().min(1).max(100),
@@ -16,11 +17,11 @@ export const UpdateWorkspaceSchema = z.object({
 
 export const InviteMemberSchema = z.object({
 	email: z.string().email(),
-	role: z.enum(["owner", "admin", "member", "viewer"]).default("member"),
+	role: RoleEnum.default("member"),
 });
 
 export const UpdateRoleSchema = z.object({
-	role: z.enum(["owner", "admin", "member", "viewer"]),
+	role: RoleEnum,
 });
 
 export const CreateTokenSchema = z.object({

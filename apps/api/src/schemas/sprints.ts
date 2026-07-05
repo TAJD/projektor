@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SprintStatusEnum = z.enum(["planned", "active", "completed"]);
+const SprintStatusEnum = z.enum(["planned", "active", "completed"]);
 
 export const ListSprintsSchema = z.object({
 	projectId: z.string().uuid(),

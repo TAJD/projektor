@@ -9,6 +9,7 @@ export abstract class ServiceError extends Error {
 
 export class ValidationError extends ServiceError {
 	readonly kind = "validation" as const;
+	// cofferdam-ignore: Refactor.UnusedVariable: public ctor param, read at error-adapter.ts (err.issues) — CD-44
 	constructor(public readonly issues: ZodFlattenOutput) {
 		super("Validation failed");
 	}

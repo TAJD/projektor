@@ -61,6 +61,7 @@ function isMcpError(r: JsonRpcResult | JsonRpcError): r is JsonRpcError {
 // PROJ-78a: Permission matrix – same-workspace viewer gets 403
 // ---------------------------------------------------------------------------
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full permission-matrix test suite in one describe block
 describe("PROJ-78: same-workspace viewer role → 403 on mutating routes", () => {
 	let slug: string;
 	let workspaceId: string;
@@ -376,7 +377,9 @@ describe("PROJ-78: MCP tools – viewer role → error", () => {
 // PROJ-78c: Workspace routes – owner-only operations
 // ---------------------------------------------------------------------------
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full permission-matrix test suite in one describe block
 describe("PROJ-78: Workspace routes – non-owner blocked, owner allowed", () => {
+	// cofferdam-ignore: Refactor.DuplicateBlock: declaration shape coincidentally matches project-activity/projects tests
 	let workspaceId: string;
 	let slug: string;
 	let ownerToken: string;
@@ -390,6 +393,7 @@ describe("PROJ-78: Workspace routes – non-owner blocked, owner allowed", () =>
 		const roles = await seedWorkspaceRoles();
 		workspaceId = roles.workspace.id;
 		slug = roles.workspace.slug;
+		// cofferdam-ignore: Refactor.DuplicateBlock: shared seedWorkspaceRoles destructure shape, mirrors projects.test.ts
 		ownerToken = roles.owner.token;
 		memberToken = roles.member.token;
 		viewerToken = roles.viewer.token;

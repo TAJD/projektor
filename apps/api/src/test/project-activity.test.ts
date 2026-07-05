@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedComment, seedFixture, seedIssue, seedProject } from "./helpers";
+import { authHeaders, seedComment, seedIssue, seedProject, seedProjectFixture } from "./helpers";
 
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
 type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
@@ -70,7 +70,8 @@ async function seedWikiPage(
 	const slug = opts.slug ?? (opts.title ?? "test-page").toLowerCase().replace(/\s+/g, "-");
 	const updatedAt = opts.updatedAt ?? now;
 	await env.DB.prepare(
-		`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, created_by_id, updated_by_id, created_at, updated_at)
+		`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, created_by_id, updated_by_id,
+       created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?)`
 	)
 		.bind(
@@ -88,6 +89,7 @@ async function seedWikiPage(
 	return { id, slug };
 }
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("list_project_activity MCP tool", () => {
 	let token: string;
 	let slug: string;
@@ -97,14 +99,8 @@ describe("list_project_activity MCP tool", () => {
 	let headers: Record<string, string>;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture());
 		headers = authHeaders(token, slug);
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
 	});
 
 	it("returns empty array when project has no activity", async () => {

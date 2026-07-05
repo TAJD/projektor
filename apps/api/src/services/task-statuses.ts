@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq } from "drizzle-orm";
+import type { z } from "zod";
 import { IdSchema } from "../schemas/common";
 import { CreateTaskStatusSchema, UpdateTaskStatusSchema } from "../schemas/task-statuses";
 import * as cache from "./cache";
@@ -9,6 +10,7 @@ import type { ServiceCtx } from "./types";
 const WS_META_TTL = 60;
 
 export async function listTaskStatuses(ctx: ServiceCtx) {
+	// cofferdam-ignore: Refactor.DuplicateBlock: mirrors task-types.ts's cache-read shape
 	const cacheKey = `ws-meta:${ctx.workspaceId}:task-statuses`;
 	const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
 	if (cached) return cached;
@@ -30,6 +32,7 @@ export async function listTaskStatuses(ctx: ServiceCtx) {
 }
 
 export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
+	// cofferdam-ignore: Refactor.DuplicateBlock: mirrors task-types.ts's create-guard shape
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 	const result = CreateTaskStatusSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -67,19 +70,26 @@ export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
 	return { id, key, name };
 }
 
-export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown) {
-	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
-	const result = UpdateTaskStatusSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const data = result.data;
+type TaskStatusUpdateData = z.infer<typeof UpdateTaskStatusSchema>;
 
+function buildTaskStatusSetObj(data: TaskStatusUpdateData) {
 	const setObj: Record<string, unknown> = {};
 	if (data.name !== undefined) setObj.name = data.name;
 	if (data.category !== undefined) setObj.category = data.category;
 	if ("color" in data) setObj.color = data.color ?? null;
 	if (data.position !== undefined) setObj.position = data.position;
 	if (data.isDefault !== undefined) setObj.isDefault = data.isDefault ? 1 : 0;
+	return setObj;
+}
 
+export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown) {
+	// cofferdam-ignore: Refactor.DuplicateBlock: mirrors task-types.ts's update-guard shape
+	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
+	const result = UpdateTaskStatusSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const data = result.data;
+
+	const setObj = buildTaskStatusSetObj(data);
 	const orm = drizzle(ctx.db, { schema });
 
 	if (data.isDefault) {

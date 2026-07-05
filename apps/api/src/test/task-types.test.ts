@@ -5,12 +5,13 @@ import {
 	seedFixture,
 	seedIssue,
 	seedMember,
-	seedProject,
+	seedProjectFixture,
 	seedTaskType,
 	seedToken,
 	seedUser,
 } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Task Types API", () => {
 	let token: string;
 	let slug: string;
@@ -20,13 +21,7 @@ describe("Task Types API", () => {
 
 	beforeEach(async () => {
 		// seedFixture uses seedWorkspace (raw insert, no seeding of task types)
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	// ---- list ----
@@ -221,6 +216,7 @@ describe("Task Types API", () => {
 	});
 });
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Task Types — issue integration", () => {
 	let token: string;
 	let slug: string;
@@ -229,13 +225,7 @@ describe("Task Types — issue integration", () => {
 	let projectId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	it("POST /api/issues uses workspace default type when no typeId given", async () => {

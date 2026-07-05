@@ -1,3 +1,4 @@
+import type { Dispatch, MutableRef, StateUpdater } from "preact/hooks";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
@@ -22,6 +23,9 @@ interface ProjectMeta {
 	name: string;
 }
 
+type EpicRollup = { done: number; remaining: number; total: number };
+type DerivedStatus = { id: string; name: string; category: string };
+
 const PRIORITY_LABEL: Record<string, string> = {
 	urgent: "Urgent",
 	high: "High",
@@ -30,51 +34,193 @@ const PRIORITY_LABEL: Record<string, string> = {
 	none: "None",
 };
 
-export default function EpicList({ workspaceSlug }: Props) {
-	const [projectId, setProjectId] = useState<string | null>(null);
-	const [projectIdReady, setProjectIdReady] = useState(false);
+const PILL_COLORS: Record<string, { bg: string; text: string }> = {
+	urgent: { bg: "#dc2626", text: "#fff" },
+	high: { bg: "#d97706", text: "#fff" },
+	medium: { bg: "#2563eb", text: "#fff" },
+	low: { bg: "#6b7280", text: "#fff" },
+};
 
-	const [epics, setEpics] = useState<Issue[]>([]);
-	const [epicRollups, setEpicRollups] = useState<
-		Record<string, { done: number; remaining: number; total: number }>
-	>({});
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+const TH_CLASS =
+	"text-left px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-[0.05em] border-b-2 border-border";
+const CELL_CLASS =
+	"px-3 py-[0.625rem] border-b border-border align-middle group-hover:bg-surface [tr:last-child_&]:border-b-0";
+const MODAL_CLASS =
+	"bg-bg border border-border rounded-lg p-6 w-full max-w-[480px] mx-4 " +
+	"max-sm:rounded-t-lg max-sm:rounded-b-none max-sm:mx-0";
 
-	const [epicTypeId, setEpicTypeId] = useState<string | null>(null);
-	const [projects, setProjects] = useState<ProjectMeta[]>([]);
+function parseUrlFilters(params: URLSearchParams): { statuses: string[]; priorities: string[] } {
+	const s = params.get("status");
+	const p = params.get("priority");
+	return {
+		statuses: s ? s.split(",").filter(Boolean) : [],
+		priorities: p ? p.split(",").filter(Boolean) : [],
+	};
+}
 
-	const [sortBy, setSortBy] = useState<SortKey>("created_at");
-	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+function persistResolvedProjectId(resolved: string) {
+	// safe-ls: resolved id is either the stored value (just confirmed to
+	// exist in the fetched project list) or the first project — never a
+	// stale reference, so it can't cause an API 4xx.
+	localStorage.setItem("projektor-last-project-id", resolved);
+	const p = new URLSearchParams(window.location.search);
+	p.set("projectId", resolved);
+	history.replaceState(null, "", `?${p.toString()}`);
+}
 
+function resolveProjectId(
+	prev: string | null,
+	stored: string | null,
+	projects: ProjectMeta[]
+): string | null {
+	if (prev) return prev;
+	const validated = stored && projects.some((p) => p.id === stored) ? stored : null;
+	return validated ?? projects[0]?.id ?? null;
+}
+
+async function fetchEpicRollups(
+	epicItems: Issue[],
+	workspaceSlug: string | undefined
+): Promise<Record<string, EpicRollup>> {
+	const results = await Promise.all(
+		epicItems.map((ep) =>
+			apiFetch<{ rollup?: EpicRollup }>(`/api/issues/${ep.id}`, { workspaceSlug })
+				.then((detail) => (detail.rollup ? { id: ep.id, rollup: detail.rollup } : null))
+				.catch(() => null)
+		)
+	);
+	const rollups: Record<string, EpicRollup> = {};
+	for (const r of results) {
+		if (r) rollups[r.id] = r.rollup;
+	}
+	return rollups;
+}
+
+function defaultCreateProjectId(projectId: string | null, projects: ProjectMeta[]): string {
+	if (projectId) return projects.find((p) => p.id === projectId)?.id ?? projects[0]?.id ?? "";
+	return projects[0]?.id ?? "";
+}
+
+function computeFilteredEpics(
+	epics: Issue[],
+	filterStatuses: string[],
+	filterPriorities: string[]
+): Issue[] {
+	return epics.filter((ep) => {
+		if (filterStatuses.length > 0 && (!ep.status_id || !filterStatuses.includes(ep.status_id)))
+			return false;
+		if (filterPriorities.length > 0 && !filterPriorities.includes(ep.priority)) return false;
+		return true;
+	});
+}
+
+function computeDerivedStatuses(epics: Issue[]): DerivedStatus[] {
+	const derived: DerivedStatus[] = [];
+	const seen = new Set<string>();
+	for (const ep of epics) {
+		if (ep.status_id && !seen.has(ep.status_id)) {
+			seen.add(ep.status_id);
+			derived.push({
+				id: ep.status_id,
+				name: ep.status_name ?? ep.status_key ?? ep.status_id,
+				category: ep.status_category ?? "",
+			});
+		}
+	}
+	return derived;
+}
+
+function sortIndicator(key: SortKey, sortBy: SortKey, sortDir: "asc" | "desc") {
+	if (sortBy !== key) return null;
+	return <span class="ml-1 opacity-60">{sortDir === "asc" ? "↑" : "↓"}</span>;
+}
+
+function EpicListHeader(props: FiltersPopoverProps & { epicTypeId: string | null; onOpenCreate: () => void }) {
+	return (
+		<div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
+			<FiltersPopover {...props} />
+			{props.epicTypeId && (
+				<button type="button" onClick={props.onOpenCreate} class="btn btn-primary btn-sm">
+					+ New Epic
+				</button>
+			)}
+		</div>
+	);
+}
+
+function useEpicFilters() {
 	const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
 	const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
 	const [showFiltersPopover, setShowFiltersPopover] = useState(false);
-
-	const storedProjectIdRef = useRef<string | null>(null);
 
 	const filtersContainerRef = useRef<HTMLDivElement>(null);
 	const filtersPopoverRef = useRef<HTMLDivElement>(null);
 	const filtersButtonRef = useRef<HTMLButtonElement>(null);
 	const filtersPopoverPos = useRef({ top: 0, left: 0 });
 
-	// Create modal state
-	const [showCreate, setShowCreate] = useState(false);
-	const [createTitle, setCreateTitle] = useState("");
-	const [createProjectId, setCreateProjectId] = useState("");
-	const [createPriority, setCreatePriority] = useState("medium");
-	const [submitting, setSubmitting] = useState(false);
-	const [createError, setCreateError] = useState<string | null>(null);
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const { statuses, priorities } = parseUrlFilters(params);
+		if (statuses.length > 0) setFilterStatuses(statuses);
+		if (priorities.length > 0) setFilterPriorities(priorities);
+	}, []);
+
+	// Sync filter state to URL without page reload
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		if (filterStatuses.length > 0) {
+			params.set("status", filterStatuses.join(","));
+		} else {
+			params.delete("status");
+		}
+		if (filterPriorities.length > 0) {
+			params.set("priority", filterPriorities.join(","));
+		} else {
+			params.delete("priority");
+		}
+		history.replaceState(null, "", `?${params.toString()}`);
+	}, [filterStatuses, filterPriorities]);
+
+	// Close filters popover on outside click
+	useEffect(() => {
+		if (!showFiltersPopover) return;
+		function onPointer(e: MouseEvent) {
+			const target = e.target as Node;
+			if (
+				!filtersContainerRef.current?.contains(target) &&
+				!filtersPopoverRef.current?.contains(target)
+			) {
+				setShowFiltersPopover(false);
+			}
+		}
+		document.addEventListener("mousedown", onPointer);
+		return () => document.removeEventListener("mousedown", onPointer);
+	}, [showFiltersPopover]);
+
+	return {
+		filterStatuses,
+		setFilterStatuses,
+		filterPriorities,
+		setFilterPriorities,
+		showFiltersPopover,
+		setShowFiltersPopover,
+		filtersContainerRef,
+		filtersPopoverRef,
+		filtersButtonRef,
+		filtersPopoverPos,
+		activeFilterCount: filterStatuses.length + filterPriorities.length,
+	};
+}
+
+function useProjectSelection(workspaceSlug: string | undefined) {
+	const [projectId, setProjectId] = useState<string | null>(null);
+	const [projectIdReady, setProjectIdReady] = useState(false);
+	const [epicTypeId, setEpicTypeId] = useState<string | null>(null);
+	const [projects, setProjects] = useState<ProjectMeta[]>([]);
+	const storedProjectIdRef = useRef<string | null>(null);
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
-
-		// Read filters from URL
-		const s = params.get("status");
-		const p = params.get("priority");
-		if (s) setFilterStatuses(s.split(",").filter(Boolean));
-		if (p) setFilterPriorities(p.split(",").filter(Boolean));
-
 		// Resolve projectId: URL param (trusted) → localStorage (validated against the
 		// fetched project list in the projects effect below) → defer to projects fetch.
 		const fromUrl = params.get("projectId");
@@ -118,19 +264,8 @@ export default function EpicList({ workspaceSlug }: Props) {
 				if (Array.isArray(data)) {
 					setProjects(data);
 					setProjectId((prev) => {
-						if (prev) return prev;
-						const stored = storedProjectIdRef.current;
-						const validated = stored && data.some((p) => p.id === stored) ? stored : null;
-						const resolved = validated ?? data[0]?.id ?? null;
-						if (resolved) {
-							// safe-ls: resolved id is either the stored value (just confirmed to
-							// exist in the fetched project list) or the first project — never a
-							// stale reference, so it can't cause an API 4xx.
-							localStorage.setItem("projektor-last-project-id", resolved);
-							const p = new URLSearchParams(window.location.search);
-							p.set("projectId", resolved);
-							history.replaceState(null, "", `?${p.toString()}`);
-						}
+						const resolved = resolveProjectId(prev, storedProjectIdRef.current, data);
+						if (resolved) persistResolvedProjectId(resolved);
 						return resolved;
 					});
 				}
@@ -141,6 +276,20 @@ export default function EpicList({ workspaceSlug }: Props) {
 			}
 		})();
 	}, [workspaceSlug]);
+
+	return { projectId, projectIdReady, epicTypeId, projects };
+}
+
+function useEpicsData(
+	projectId: string | null,
+	projectIdReady: boolean,
+	epicTypeId: string | null,
+	workspaceSlug: string | undefined
+) {
+	const [epics, setEpics] = useState<Issue[]>([]);
+	const [epicRollups, setEpicRollups] = useState<Record<string, EpicRollup>>({});
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
 
 	const fetchEpics = useCallback(async () => {
 		if (!projectId) {
@@ -159,24 +308,8 @@ export default function EpicList({ workspaceSlug }: Props) {
 			setEpics(epicItems);
 			setEpicRollups({});
 
-			// Fetch rollup for each epic in parallel
 			if (epicItems.length > 0) {
-				Promise.all(
-					epicItems.map((ep) =>
-						apiFetch<{ rollup?: { done: number; remaining: number; total: number } }>(
-							`/api/issues/${ep.id}`,
-							{ workspaceSlug }
-						)
-							.then((detail) => (detail.rollup ? { id: ep.id, rollup: detail.rollup } : null))
-							.catch(() => null)
-					)
-				).then((results) => {
-					const rollups: Record<string, { done: number; remaining: number; total: number }> = {};
-					for (const r of results) {
-						if (r) rollups[r.id] = r.rollup;
-					}
-					setEpicRollups(rollups);
-				});
+				fetchEpicRollups(epicItems, workspaceSlug).then(setEpicRollups);
 			}
 		} catch (e) {
 			setError(String(e));
@@ -189,43 +322,25 @@ export default function EpicList({ workspaceSlug }: Props) {
 		if (projectIdReady) fetchEpics();
 	}, [fetchEpics, projectIdReady]);
 
-	// Sync filter state to URL without page reload
-	useEffect(() => {
-		const params = new URLSearchParams(window.location.search);
-		if (filterStatuses.length > 0) {
-			params.set("status", filterStatuses.join(","));
-		} else {
-			params.delete("status");
-		}
-		if (filterPriorities.length > 0) {
-			params.set("priority", filterPriorities.join(","));
-		} else {
-			params.delete("priority");
-		}
-		history.replaceState(null, "", `?${params.toString()}`);
-	}, [filterStatuses, filterPriorities]);
+	return { epics, epicRollups, loading, error, fetchEpics };
+}
 
-	// Close filters popover on outside click
-	useEffect(() => {
-		if (!showFiltersPopover) return;
-		function onPointer(e: MouseEvent) {
-			const target = e.target as Node;
-			if (
-				!filtersContainerRef.current?.contains(target) &&
-				!filtersPopoverRef.current?.contains(target)
-			) {
-				setShowFiltersPopover(false);
-			}
-		}
-		document.addEventListener("mousedown", onPointer);
-		return () => document.removeEventListener("mousedown", onPointer);
-	}, [showFiltersPopover]);
+function useCreateEpicForm(
+	workspaceSlug: string | undefined,
+	projectId: string | null,
+	projects: ProjectMeta[],
+	epicTypeId: string | null,
+	fetchEpics: () => Promise<void>
+) {
+	const [showCreate, setShowCreate] = useState(false);
+	const [createTitle, setCreateTitle] = useState("");
+	const [createProjectId, setCreateProjectId] = useState("");
+	const [createPriority, setCreatePriority] = useState("medium");
+	const [submitting, setSubmitting] = useState(false);
+	const [createError, setCreateError] = useState<string | null>(null);
 
 	function openCreate() {
-		const defaultProjectId = projectId
-			? (projects.find((p) => p.id === projectId)?.id ?? projects[0]?.id ?? "")
-			: (projects[0]?.id ?? "");
-		setCreateProjectId(defaultProjectId);
+		setCreateProjectId(defaultCreateProjectId(projectId, projects));
 		setCreateTitle("");
 		setCreatePriority("medium");
 		setCreateError(null);
@@ -257,6 +372,64 @@ export default function EpicList({ workspaceSlug }: Props) {
 		}
 	}
 
+	return {
+		showCreate,
+		setShowCreate,
+		createTitle,
+		setCreateTitle,
+		createProjectId,
+		setCreateProjectId,
+		createPriority,
+		setCreatePriority,
+		submitting,
+		createError,
+		openCreate,
+		submitCreate,
+	};
+}
+
+export default function EpicList({ workspaceSlug }: Props) {
+	const {
+		filterStatuses,
+		setFilterStatuses,
+		filterPriorities,
+		setFilterPriorities,
+		showFiltersPopover,
+		setShowFiltersPopover,
+		filtersContainerRef,
+		filtersPopoverRef,
+		filtersButtonRef,
+		filtersPopoverPos,
+		activeFilterCount,
+	} = useEpicFilters();
+
+	const { projectId, projectIdReady, epicTypeId, projects } = useProjectSelection(workspaceSlug);
+
+	const [sortBy, setSortBy] = useState<SortKey>("created_at");
+	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+	const { epics, epicRollups, loading, error, fetchEpics } = useEpicsData(
+		projectId,
+		projectIdReady,
+		epicTypeId,
+		workspaceSlug
+	);
+
+	const {
+		showCreate,
+		setShowCreate,
+		createTitle,
+		setCreateTitle,
+		createProjectId,
+		setCreateProjectId,
+		createPriority,
+		setCreatePriority,
+		submitting,
+		createError,
+		openCreate,
+		submitCreate,
+	} = useCreateEpicForm(workspaceSlug, projectId, projects, epicTypeId, fetchEpics);
+
 	function toggleSort(key: SortKey) {
 		if (sortBy === key) {
 			setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -266,42 +439,8 @@ export default function EpicList({ workspaceSlug }: Props) {
 		}
 	}
 
-	function sortIndicator(key: SortKey) {
-		if (sortBy !== key) return null;
-		return <span class="ml-1 opacity-60">{sortDir === "asc" ? "↑" : "↓"}</span>;
-	}
-
-	const filteredEpics = epics.filter((ep) => {
-		if (filterStatuses.length > 0 && (!ep.status_id || !filterStatuses.includes(ep.status_id)))
-			return false;
-		if (filterPriorities.length > 0 && !filterPriorities.includes(ep.priority)) return false;
-		return true;
-	});
-
-	// Derive unique statuses from fetched epics for the filter popover
-	const derivedStatuses: { id: string; name: string; category: string }[] = [];
-	{
-		const seen = new Set<string>();
-		for (const ep of epics) {
-			if (ep.status_id && !seen.has(ep.status_id)) {
-				seen.add(ep.status_id);
-				derivedStatuses.push({
-					id: ep.status_id,
-					name: ep.status_name ?? ep.status_key ?? ep.status_id,
-					category: ep.status_category ?? "",
-				});
-			}
-		}
-	}
-
-	const activeFilterCount = filterStatuses.length + filterPriorities.length;
-
-	const PILL_COLORS: Record<string, { bg: string; text: string }> = {
-		urgent: { bg: "#dc2626", text: "#fff" },
-		high: { bg: "#d97706", text: "#fff" },
-		medium: { bg: "#2563eb", text: "#fff" },
-		low: { bg: "#6b7280", text: "#fff" },
-	};
+	const filteredEpics = computeFilteredEpics(epics, filterStatuses, filterPriorities);
+	const derivedStatuses = computeDerivedStatuses(epics);
 
 	if (!projectIdReady || loading) return <p aria-live="polite">Loading…</p>;
 	if (error)
@@ -313,313 +452,455 @@ export default function EpicList({ workspaceSlug }: Props) {
 
 	return (
 		<div>
-			<div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
-				{/* Filters button + popover */}
-				<div class="relative" ref={filtersContainerRef}>
+			<EpicListHeader
+				filtersContainerRef={filtersContainerRef}
+				filtersPopoverRef={filtersPopoverRef}
+				filtersButtonRef={filtersButtonRef}
+				filtersPopoverPos={filtersPopoverPos}
+				showFiltersPopover={showFiltersPopover}
+				setShowFiltersPopover={setShowFiltersPopover}
+				activeFilterCount={activeFilterCount}
+				derivedStatuses={derivedStatuses}
+				filterStatuses={filterStatuses}
+				setFilterStatuses={setFilterStatuses}
+				filterPriorities={filterPriorities}
+				setFilterPriorities={setFilterPriorities}
+				epicTypeId={epicTypeId}
+				onOpenCreate={openCreate}
+			/>
+
+			<EpicsTable
+				epics={epics}
+				filteredEpics={filteredEpics}
+				epicRollups={epicRollups}
+				sortBy={sortBy}
+				sortDir={sortDir}
+				toggleSort={toggleSort}
+			/>
+
+			<CreateEpicModal
+				showCreate={showCreate}
+				setShowCreate={setShowCreate}
+				createTitle={createTitle}
+				setCreateTitle={setCreateTitle}
+				createProjectId={createProjectId}
+				setCreateProjectId={setCreateProjectId}
+				createPriority={createPriority}
+				setCreatePriority={setCreatePriority}
+				submitting={submitting}
+				createError={createError}
+				projects={projects}
+				submitCreate={submitCreate}
+			/>
+		</div>
+	);
+}
+
+interface FiltersPopoverProps {
+	filtersContainerRef: MutableRef<HTMLDivElement | null>;
+	filtersPopoverRef: MutableRef<HTMLDivElement | null>;
+	filtersButtonRef: MutableRef<HTMLButtonElement | null>;
+	filtersPopoverPos: MutableRef<{ top: number; left: number }>;
+	showFiltersPopover: boolean;
+	setShowFiltersPopover: (v: boolean) => void;
+	activeFilterCount: number;
+	derivedStatuses: DerivedStatus[];
+	filterStatuses: string[];
+	setFilterStatuses: Dispatch<StateUpdater<string[]>>;
+	filterPriorities: string[];
+	setFilterPriorities: Dispatch<StateUpdater<string[]>>;
+}
+
+function StatusFilterPills({
+	derivedStatuses,
+	filterStatuses,
+	setFilterStatuses,
+}: {
+	derivedStatuses: DerivedStatus[];
+	filterStatuses: string[];
+	setFilterStatuses: Dispatch<StateUpdater<string[]>>;
+}) {
+	if (derivedStatuses.length === 0) {
+		return <span class="text-[0.78rem] text-text-muted">No epics loaded</span>;
+	}
+	return (
+		<>
+			{derivedStatuses.map((s) => {
+				const active = filterStatuses.includes(s.id);
+				return (
 					<button
-						ref={filtersButtonRef}
 						type="button"
-						onClick={() => {
-							if (showFiltersPopover) {
-								setShowFiltersPopover(false);
-							} else {
-								const rect = filtersButtonRef.current?.getBoundingClientRect();
-								if (rect) filtersPopoverPos.current = { top: rect.bottom + 4, left: rect.left };
-								setShowFiltersPopover(true);
-							}
-						}}
+						key={s.id}
+						aria-pressed={active}
+						onClick={() =>
+							setFilterStatuses((prev) => (active ? prev.filter((id) => id !== s.id) : [...prev, s.id]))
+						}
 						style={{
 							padding: "0.25rem 0.625rem",
 							borderRadius: "9999px",
-							border: activeFilterCount > 0 ? "none" : "1px solid var(--border)",
-							background: activeFilterCount > 0 ? "var(--accent)" : "var(--bg)",
-							color: activeFilterCount > 0 ? "#fff" : "var(--text)",
+							border: active ? "none" : "1px solid var(--border)",
+							background: active ? categoryColor(s.category) : "var(--bg)",
+							color: active ? "#fff" : "var(--text)",
 							cursor: "pointer",
 							fontSize: "0.8rem",
-							fontWeight: activeFilterCount > 0 ? 600 : 400,
+							fontWeight: active ? 600 : 400,
 						}}
 					>
-						{activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
+						{s.name}
 					</button>
-					{showFiltersPopover && (
-						<div
-							ref={filtersPopoverRef}
-							style={{
-								position: "fixed",
-								top: `${filtersPopoverPos.current.top}px`,
-								left: `${filtersPopoverPos.current.left}px`,
-								zIndex: 100,
-								background: "var(--surface)",
-								border: "1px solid var(--border)",
-								borderRadius: "0.5rem",
-								padding: "0.75rem",
-								boxShadow: "var(--shadow-sm)",
-								minWidth: "16rem",
-							}}
-						>
-							<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
-								Status
-							</div>
-							<div class="flex flex-wrap gap-1 mb-3">
-								{derivedStatuses.length === 0 ? (
-									<span class="text-[0.78rem] text-text-muted">No epics loaded</span>
-								) : (
-									derivedStatuses.map((s) => {
-										const active = filterStatuses.includes(s.id);
-										return (
-											<button
-												type="button"
-												key={s.id}
-												aria-pressed={active}
-												onClick={() =>
-													setFilterStatuses((prev) =>
-														active ? prev.filter((id) => id !== s.id) : [...prev, s.id]
-													)
-												}
-												style={{
-													padding: "0.25rem 0.625rem",
-													borderRadius: "9999px",
-													border: active ? "none" : "1px solid var(--border)",
-													background: active ? categoryColor(s.category) : "var(--bg)",
-													color: active ? "#fff" : "var(--text)",
-													cursor: "pointer",
-													fontSize: "0.8rem",
-													fontWeight: active ? 600 : 400,
-												}}
-											>
-												{s.name}
-											</button>
-										);
-									})
-								)}
-							</div>
-							<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
-								Priority
-							</div>
-							<div class="flex flex-wrap gap-1">
-								{(["urgent", "high", "medium", "low"] as const).map((pr) => {
-									const active = filterPriorities.includes(pr);
-									const col = PILL_COLORS[pr];
-									return (
-										<button
-											type="button"
-											key={pr}
-											aria-pressed={active}
-											onClick={() =>
-												setFilterPriorities((prev) =>
-													active ? prev.filter((k) => k !== pr) : [...prev, pr]
-												)
-											}
-											style={{
-												padding: "0.25rem 0.625rem",
-												borderRadius: "9999px",
-												border: active ? "none" : "1px solid var(--border)",
-												background: active ? col.bg : "var(--bg)",
-												color: active ? col.text : "var(--text)",
-												cursor: "pointer",
-												fontSize: "0.8rem",
-												fontWeight: active ? 600 : 400,
-												textTransform: "capitalize" as const,
-											}}
-										>
-											{pr}
-										</button>
-									);
-								})}
-							</div>
-							{activeFilterCount > 0 && (
-								<div class="border-t border-border pt-2 mt-3">
-									<button
-										type="button"
-										onClick={() => {
-											setFilterStatuses([]);
-											setFilterPriorities([]);
-										}}
-										class="bg-transparent border-none text-text-muted cursor-pointer text-[0.8rem] p-0"
-									>
-										✕ Clear all
-									</button>
-								</div>
-							)}
+				);
+			})}
+		</>
+	);
+}
+
+function PriorityFilterPills({
+	filterPriorities,
+	setFilterPriorities,
+}: {
+	filterPriorities: string[];
+	setFilterPriorities: Dispatch<StateUpdater<string[]>>;
+}) {
+	return (
+		<>
+			{(["urgent", "high", "medium", "low"] as const).map((pr) => {
+				const active = filterPriorities.includes(pr);
+				const col = PILL_COLORS[pr];
+				return (
+					<button
+						type="button"
+						key={pr}
+						aria-pressed={active}
+						onClick={() =>
+							setFilterPriorities((prev) => (active ? prev.filter((k) => k !== pr) : [...prev, pr]))
+						}
+						style={{
+							padding: "0.25rem 0.625rem",
+							borderRadius: "9999px",
+							border: active ? "none" : "1px solid var(--border)",
+							background: active ? col.bg : "var(--bg)",
+							color: active ? col.text : "var(--text)",
+							cursor: "pointer",
+							fontSize: "0.8rem",
+							fontWeight: active ? 600 : 400,
+							textTransform: "capitalize" as const,
+						}}
+					>
+						{pr}
+					</button>
+				);
+			})}
+		</>
+	);
+}
+
+function FiltersPopover({
+	filtersContainerRef,
+	filtersPopoverRef,
+	filtersButtonRef,
+	filtersPopoverPos,
+	showFiltersPopover,
+	setShowFiltersPopover,
+	activeFilterCount,
+	derivedStatuses,
+	filterStatuses,
+	setFilterStatuses,
+	filterPriorities,
+	setFilterPriorities,
+}: FiltersPopoverProps) {
+	return (
+		<div class="relative" ref={filtersContainerRef}>
+			<button
+				ref={filtersButtonRef}
+				type="button"
+				onClick={() => {
+					if (showFiltersPopover) {
+						setShowFiltersPopover(false);
+					} else {
+						const rect = filtersButtonRef.current?.getBoundingClientRect();
+						if (rect) filtersPopoverPos.current = { top: rect.bottom + 4, left: rect.left };
+						setShowFiltersPopover(true);
+					}
+				}}
+				style={{
+					padding: "0.25rem 0.625rem",
+					borderRadius: "9999px",
+					border: activeFilterCount > 0 ? "none" : "1px solid var(--border)",
+					background: activeFilterCount > 0 ? "var(--accent)" : "var(--bg)",
+					color: activeFilterCount > 0 ? "#fff" : "var(--text)",
+					cursor: "pointer",
+					fontSize: "0.8rem",
+					fontWeight: activeFilterCount > 0 ? 600 : 400,
+				}}
+			>
+				{activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
+			</button>
+			{showFiltersPopover && (
+				<div
+					ref={filtersPopoverRef}
+					style={{
+						position: "fixed",
+						top: `${filtersPopoverPos.current.top}px`,
+						left: `${filtersPopoverPos.current.left}px`,
+						zIndex: 100,
+						background: "var(--surface)",
+						border: "1px solid var(--border)",
+						borderRadius: "0.5rem",
+						padding: "0.75rem",
+						boxShadow: "var(--shadow-sm)",
+						minWidth: "16rem",
+					}}
+				>
+					<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
+						Status
+					</div>
+					<div class="flex flex-wrap gap-1 mb-3">
+						<StatusFilterPills
+							derivedStatuses={derivedStatuses}
+							filterStatuses={filterStatuses}
+							setFilterStatuses={setFilterStatuses}
+						/>
+					</div>
+					<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
+						Priority
+					</div>
+					<div class="flex flex-wrap gap-1">
+						<PriorityFilterPills
+							filterPriorities={filterPriorities}
+							setFilterPriorities={setFilterPriorities}
+						/>
+					</div>
+					{activeFilterCount > 0 && (
+						<div class="border-t border-border pt-2 mt-3">
+							<button
+								type="button"
+								onClick={() => {
+									setFilterStatuses([]);
+									setFilterPriorities([]);
+								}}
+								class="bg-transparent border-none text-text-muted cursor-pointer text-[0.8rem] p-0"
+							>
+								✕ Clear all
+							</button>
 						</div>
 					)}
 				</div>
-
-				{epicTypeId && (
-					<button type="button" onClick={openCreate} class="btn btn-primary btn-sm">
-						+ New Epic
-					</button>
-				)}
-			</div>
-
-			{epics.length === 0 ? (
-				<p class="text-text-muted text-sm">No epics found. Use the button above to create one.</p>
-			) : filteredEpics.length === 0 ? (
-				<p class="text-text-muted text-sm">No epics match the active filters.</p>
-			) : (
-				<div class="overflow-x-auto">
-					<table class="w-full border-collapse text-sm" aria-label="Epics">
-						<thead>
-							<tr>
-								<th class="text-left px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-[0.05em] border-b-2 border-border">
-									Title
-								</th>
-								<th class="text-left px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-[0.05em] border-b-2 border-border">
-									Status
-								</th>
-								<th
-									class="text-left px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-[0.05em] border-b-2 border-border cursor-pointer select-none hover:text-text-base"
-									onClick={() => toggleSort("priority")}
-								>
-									Priority{sortIndicator("priority")}
-								</th>
-								<th class="text-left px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-[0.05em] border-b-2 border-border">
-									Children
-								</th>
-							</tr>
-						</thead>
-						<tbody>
-							{sortIssues(filteredEpics, sortBy, sortDir).map((ep) => {
-								const statusColor =
-									CATEGORY_COLORS[ep.status_category ?? ""] ?? "var(--text-muted)";
-								return (
-									<tr key={ep.id} class="group">
-										<td class="px-3 py-[0.625rem] border-b border-border align-middle group-hover:bg-surface [tr:last-child_&]:border-b-0">
-											<a
-												href={issueUrl(ep.project_key, ep.number, ep.title, ep.id)}
-												class="text-text-base no-underline font-medium hover:underline"
-											>
-												{ep.title}
-											</a>
-										</td>
-										<td class="px-3 py-[0.625rem] border-b border-border align-middle group-hover:bg-surface [tr:last-child_&]:border-b-0">
-											<span class="font-medium text-[0.8rem]" style={{ color: statusColor }}>
-												{statusDisplayName(ep.status_name, ep.status_key)}
-											</span>
-										</td>
-										<td class="px-3 py-[0.625rem] border-b border-border align-middle group-hover:bg-surface [tr:last-child_&]:border-b-0">
-											<span class="inline-flex items-center px-[0.45rem] py-[0.1rem] rounded-[3px] text-xs font-medium">
-												{PRIORITY_LABEL[ep.priority] ?? ep.priority}
-											</span>
-										</td>
-										<td class="px-3 py-[0.625rem] border-b border-border align-middle group-hover:bg-surface [tr:last-child_&]:border-b-0">
-											{(() => {
-												const r = epicRollups[ep.id];
-												if (!r || r.total === 0)
-													return <span class="font-mono text-xs text-text-muted">—</span>;
-												return (
-													<span class="text-xs text-text-muted">
-														{r.done} done · {r.remaining} remaining
-													</span>
-												);
-											})()}
-										</td>
-									</tr>
-								);
-							})}
-						</tbody>
-					</table>
-				</div>
 			)}
+		</div>
+	);
+}
 
-			{/* Create Epic modal */}
-			{showCreate && (
-				// biome-ignore lint/a11y/noStaticElementInteractions: backdrop closes modal on click; keyboard users close via Escape on the dialog
-				// biome-ignore lint/a11y/useKeyWithClickEvents: backdrop closes modal on click; keyboard users close via Escape on the dialog
-				<div
-					class="fixed inset-0 z-50 flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
-					onClick={(e) => {
-						if (e.target === e.currentTarget) setShowCreate(false);
-					}}
+interface EpicsTableProps {
+	epics: Issue[];
+	filteredEpics: Issue[];
+	epicRollups: Record<string, EpicRollup>;
+	sortBy: SortKey;
+	sortDir: "asc" | "desc";
+	toggleSort: (key: SortKey) => void;
+}
+
+function EpicsTable({
+	epics,
+	filteredEpics,
+	epicRollups,
+	sortBy,
+	sortDir,
+	toggleSort,
+}: EpicsTableProps) {
+	if (epics.length === 0) {
+		return (
+			<p class="text-text-muted text-sm">No epics found. Use the button above to create one.</p>
+		);
+	}
+	if (filteredEpics.length === 0) {
+		return <p class="text-text-muted text-sm">No epics match the active filters.</p>;
+	}
+	return (
+		<div class="overflow-x-auto">
+			<table class="w-full border-collapse text-sm" aria-label="Epics">
+				<thead>
+					<tr>
+						<th class={TH_CLASS}>Title</th>
+						<th class={TH_CLASS}>Status</th>
+						<th
+							class={`${TH_CLASS} cursor-pointer select-none hover:text-text-base`}
+							onClick={() => toggleSort("priority")}
+						>
+							Priority{sortIndicator("priority", sortBy, sortDir)}
+						</th>
+						<th class={TH_CLASS}>Children</th>
+					</tr>
+				</thead>
+				<tbody>
+					{sortIssues(filteredEpics, sortBy, sortDir).map((ep) => (
+						<EpicRow key={ep.id} ep={ep} rollup={epicRollups[ep.id]} />
+					))}
+				</tbody>
+			</table>
+		</div>
+	);
+}
+
+interface EpicRowProps {
+	ep: Issue;
+	rollup: EpicRollup | undefined;
+}
+
+function EpicRow({ ep, rollup }: EpicRowProps) {
+	const statusColor = CATEGORY_COLORS[ep.status_category ?? ""] ?? "var(--text-muted)";
+	return (
+		<tr class="group">
+			<td class={CELL_CLASS}>
+				<a
+					href={issueUrl(ep.project_key, ep.number, ep.title, ep.id)}
+					class="text-text-base no-underline font-medium hover:underline"
 				>
-					<div
-						class="bg-bg border border-border rounded-lg p-6 w-full max-w-[480px] mx-4 max-sm:rounded-t-lg max-sm:rounded-b-none max-sm:mx-0"
-						role="dialog"
-						aria-modal="true"
-						aria-label="Create new epic"
-					>
-						<h2 class="mb-5 text-lg font-bold text-text-base">New Epic</h2>
+					{ep.title}
+				</a>
+			</td>
+			<td class={CELL_CLASS}>
+				<span class="font-medium text-[0.8rem]" style={{ color: statusColor }}>
+					{statusDisplayName(ep.status_name, ep.status_key)}
+				</span>
+			</td>
+			<td class={CELL_CLASS}>
+				<span class="inline-flex items-center px-[0.45rem] py-[0.1rem] rounded-[3px] text-xs font-medium">
+					{PRIORITY_LABEL[ep.priority] ?? ep.priority}
+				</span>
+			</td>
+			<td class={CELL_CLASS}>
+				{!rollup || rollup.total === 0 ? (
+					<span class="font-mono text-xs text-text-muted">—</span>
+				) : (
+					<span class="text-xs text-text-muted">
+						{rollup.done} done · {rollup.remaining} remaining
+					</span>
+				)}
+			</td>
+		</tr>
+	);
+}
 
-						{createError && (
-							<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
-								{createError}
-							</p>
-						)}
+interface CreateEpicModalProps {
+	showCreate: boolean;
+	setShowCreate: (v: boolean) => void;
+	createTitle: string;
+	setCreateTitle: (v: string) => void;
+	createProjectId: string;
+	setCreateProjectId: (v: string) => void;
+	createPriority: string;
+	setCreatePriority: (v: string) => void;
+	submitting: boolean;
+	createError: string | null;
+	projects: ProjectMeta[];
+	submitCreate: (e: Event) => void;
+}
 
-						<form onSubmit={submitCreate}>
-							<div class="mb-[0.875rem]">
-								<label
-									htmlFor="create-epic-title"
-									class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
-								>
-									Title *
+function CreateEpicModal({
+	showCreate,
+	setShowCreate,
+	createTitle,
+	setCreateTitle,
+	createProjectId,
+	setCreateProjectId,
+	createPriority,
+	setCreatePriority,
+	submitting,
+	createError,
+	projects,
+	submitCreate,
+}: CreateEpicModalProps) {
+	if (!showCreate) return null;
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: backdrop closes on click; Escape on the dialog covers keyboard
+		// biome-ignore lint/a11y/useKeyWithClickEvents: backdrop closes on click; Escape on the dialog covers keyboard
+		<div
+			class="fixed inset-0 z-50 flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
+			onClick={(e) => {
+				if (e.target === e.currentTarget) setShowCreate(false);
+			}}
+		>
+			<div class={MODAL_CLASS} role="dialog" aria-modal="true" aria-label="Create new epic">
+				<h2 class="mb-5 text-lg font-bold text-text-base">New Epic</h2>
+
+				{createError && (
+					<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
+						{createError}
+					</p>
+				)}
+
+				<form onSubmit={submitCreate}>
+					<div class="mb-[0.875rem]">
+						<label
+							htmlFor="create-epic-title"
+							class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
+						>
+							Title *
+						</label>
+						<input
+							id="create-epic-title"
+							type="text"
+							value={createTitle}
+							onInput={(e) => setCreateTitle((e.target as HTMLInputElement).value)}
+							placeholder="Epic title"
+							required
+							// biome-ignore lint/a11y/noAutofocus: intentional — modal opens on user action
+							autoFocus
+							class="w-full px-3 py-2 border border-border rounded bg-bg text-text-base box-border text-[0.9rem]"
+						/>
+					</div>
+
+					<div class="flex gap-3 mb-5 flex-wrap items-end">
+						{projects.length > 1 && (
+							<div>
+								{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+								<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
+									Project
 								</label>
-								<input
-									id="create-epic-title"
-									type="text"
-									value={createTitle}
-									onInput={(e) => setCreateTitle((e.target as HTMLInputElement).value)}
-									placeholder="Epic title"
-									required
-									// biome-ignore lint/a11y/noAutofocus: intentional — modal opens on user action
-									autoFocus
-									class="w-full px-3 py-2 border border-border rounded bg-bg text-text-base box-border text-[0.9rem]"
+								<Select
+									ariaLabel="Select project"
+									value={createProjectId}
+									onChange={setCreateProjectId}
+									options={projects.map((p) => ({ value: p.id, label: p.name }))}
 								/>
 							</div>
+						)}
 
-							<div class="flex gap-3 mb-5 flex-wrap items-end">
-								{projects.length > 1 && (
-									<div>
-										{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
-										<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-											Project
-										</label>
-										<Select
-											ariaLabel="Select project"
-											value={createProjectId}
-											onChange={setCreateProjectId}
-											options={projects.map((p) => ({ value: p.id, label: p.name }))}
-										/>
-									</div>
-								)}
-
-								<div>
-									{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
-									<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-										Priority
-									</label>
-									<Select
-										ariaLabel="Select priority"
-										value={createPriority}
-										onChange={setCreatePriority}
-										capitalize
-										options={PRIORITY_OPTIONS}
-										buttonStyle={{
-											background: `var(--priority-${createPriority}-bg, var(--priority-low-bg))`,
-											color: `var(--priority-${createPriority}-text, var(--text-muted))`,
-											fontWeight: 500,
-											borderColor: "transparent",
-										}}
-									/>
-								</div>
-							</div>
-
-							<div class="flex gap-2">
-								<button
-									type="submit"
-									disabled={submitting || !createTitle.trim() || !createProjectId}
-									class="btn btn-primary"
-								>
-									{submitting ? "Creating…" : "Create Epic"}
-								</button>
-								<button type="button" onClick={() => setShowCreate(false)} class="btn btn-outline">
-									Cancel
-								</button>
-							</div>
-						</form>
+						<div>
+							{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+							<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
+								Priority
+							</label>
+							<Select
+								ariaLabel="Select priority"
+								value={createPriority}
+								onChange={setCreatePriority}
+								capitalize
+								options={PRIORITY_OPTIONS}
+								buttonStyle={{
+									background: `var(--priority-${createPriority}-bg, var(--priority-low-bg))`,
+									color: `var(--priority-${createPriority}-text, var(--text-muted))`,
+									fontWeight: 500,
+									borderColor: "transparent",
+								}}
+							/>
+						</div>
 					</div>
-				</div>
-			)}
+
+					<div class="flex gap-2">
+						<button
+							type="submit"
+							disabled={submitting || !createTitle.trim() || !createProjectId}
+							class="btn btn-primary"
+						>
+							{submitting ? "Creating…" : "Create Epic"}
+						</button>
+						<button type="button" onClick={() => setShowCreate(false)} class="btn btn-outline">
+							Cancel
+						</button>
+					</div>
+				</form>
+			</div>
 		</div>
 	);
 }

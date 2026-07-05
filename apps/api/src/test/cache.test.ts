@@ -1,15 +1,10 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	authHeaders,
-	seedFixture,
-	seedIssue,
-	seedProject,
-	seedTaskStatus,
-	seedTaskType,
-} from "./helpers";
+import { authHeaders, seedIssue, seedProjectFixture, seedTaskStatus, seedTaskType } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("KV caching", () => {
+	// cofferdam-ignore: Refactor.DuplicateBlock: shared seedProjectFixture beforeEach shape, intentional reuse
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
@@ -17,13 +12,7 @@ describe("KV caching", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	describe("single-issue cache (TTL 300s, write-through invalidation)", () => {

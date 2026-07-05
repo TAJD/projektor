@@ -1,5 +1,6 @@
 import { definePlugin, defineMCPTool } from '@projektor/plugin-sdk'
 
+// cofferdam-ignore: Design.OrphanExport: plugin manifest, not yet wired into pluginRegistry (PROJ-260)
 export default definePlugin({
   id: 'github',
   name: 'GitHub',

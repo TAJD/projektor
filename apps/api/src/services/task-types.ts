@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq } from "drizzle-orm";
+import type { z } from "zod";
 import { IdSchema } from "../schemas/common";
 import { CreateTaskTypeSchema, UpdateTaskTypeSchema } from "../schemas/task-types";
 import * as cache from "./cache";
@@ -7,6 +8,16 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
+
+function buildTaskTypeUpdateSet(data: z.infer<typeof UpdateTaskTypeSchema>): Record<string, unknown> {
+	const setObj: Record<string, unknown> = {};
+	if (data.name !== undefined) setObj.name = data.name;
+	if ("color" in data) setObj.color = data.color ?? null;
+	if ("icon" in data) setObj.icon = data.icon ?? null;
+	if (data.position !== undefined) setObj.position = data.position;
+	if (data.isDefault !== undefined) setObj.isDefault = data.isDefault ? 1 : 0;
+	return setObj;
+}
 
 export async function listTaskTypes(ctx: ServiceCtx) {
 	const cacheKey = `ws-meta:${ctx.workspaceId}:task-types`;
@@ -70,13 +81,7 @@ export async function updateTaskType(ctx: ServiceCtx, id: string, raw: unknown) 
 	const result = UpdateTaskTypeSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const data = result.data;
-
-	const setObj: Record<string, unknown> = {};
-	if (data.name !== undefined) setObj.name = data.name;
-	if ("color" in data) setObj.color = data.color ?? null;
-	if ("icon" in data) setObj.icon = data.icon ?? null;
-	if (data.position !== undefined) setObj.position = data.position;
-	if (data.isDefault !== undefined) setObj.isDefault = data.isDefault ? 1 : 0;
+	const setObj = buildTaskTypeUpdateSet(data);
 
 	const orm = drizzle(ctx.db, { schema });
 

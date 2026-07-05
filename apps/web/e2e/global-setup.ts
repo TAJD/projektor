@@ -55,6 +55,7 @@ async function wsPost(url: string, slug: string, body: unknown): Promise<unknown
 	return res.json();
 }
 
+// cofferdam-ignore: Design.OrphanExport: Playwright globalSetup convention, referenced by file path
 export default async function globalSetup(): Promise<void> {
 	const base = process.env.E2E_BASE_URL;
 	if (!base) {
@@ -67,6 +68,7 @@ export default async function globalSetup(): Promise<void> {
 
 	// Use a timestamp slug so each CI run gets its own isolated workspace.
 	const slug = `e2e-${Date.now()}`;
+	// cofferdam-ignore: Warning.NoConsoleLog: CI-visible e2e setup progress, not a debug leftover
 	console.log(`[e2e setup] Creating isolated workspace: ${slug}`);
 
 	// 1. Create workspace (auth: dev bypass on the server)
@@ -115,5 +117,6 @@ export default async function globalSetup(): Promise<void> {
 	};
 
 	fs.writeFileSync(CTX_FILE, JSON.stringify(ctx, null, 2));
+	// cofferdam-ignore: Warning.NoConsoleLog: CI-visible e2e setup progress, not a debug leftover
 	console.log(`[e2e setup] Context written to ${CTX_FILE}`);
 }

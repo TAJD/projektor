@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedComment, seedFixture, seedProject } from "./helpers";
+import { authHeaders, seedComment, seedFixture, seedProject, seedProjectFixture } from "./helpers";
 
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
 type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
@@ -19,6 +19,7 @@ async function mcpCall<T>(
 	return res.json();
 }
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Comments REST API", () => {
 	let token: string;
 	let slug: string;
@@ -27,17 +28,13 @@ describe("Comments REST API", () => {
 	let issueId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
+		const fixture = await seedProjectFixture();
+		({ token, slug, workspaceId, userId } = fixture);
 
 		const res = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
 			headers: authHeaders(token, slug),
-			body: JSON.stringify({ projectId: project.id, title: "Issue with comments" }),
+			body: JSON.stringify({ projectId: fixture.projectId, title: "Issue with comments" }),
 		});
 		const body = (await res.json()) as { id: string };
 		issueId = body.id;

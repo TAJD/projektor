@@ -1,7 +1,8 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, hashToken, seedFixture, seedIssue, seedProject } from "./helpers";
+import { authHeaders, hashToken, seedFixture, seedIssueFixture } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Share tokens", () => {
 	let token: string;
 	let slug: string;
@@ -10,14 +11,9 @@ describe("Share tokens", () => {
 	let issueId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		const issue = await seedIssue(workspaceId, project.id, userId, { title: "Shareable issue" });
-		issueId = issue.id;
+		({ token, slug, workspaceId, userId, issueId } = await seedIssueFixture({
+			issueTitle: "Shareable issue",
+		}));
 	});
 
 	it("POST /api/issues/:id/share creates a token and returns { token, url }", async () => {

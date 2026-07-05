@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const CustomFieldTypeEnum = z.enum(["text", "number", "select", "date", "user"]);
+const CustomFieldTypeEnum = z.enum(["text", "number", "select", "date", "user"]);
 
 export const CreateCustomFieldDefSchema = z.object({
 	key: z

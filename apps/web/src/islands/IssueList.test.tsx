@@ -506,7 +506,7 @@ describe("workspace-slug header contract (PROJ-98)", () => {
 		}
 	});
 
-	it("does NOT read workspace slug from localStorage — stale localStorage value never appears in fetch headers", async () => {
+	it("does NOT read workspace slug from localStorage — stale value never appears in fetch headers", async () => {
 		// Simulate a stale localStorage entry from the old WorkspaceSwitcher pattern (removed in PR #59)
 		localStorage.setItem("workspace-slug", "stale-slug");
 
@@ -722,17 +722,24 @@ function lastIssuesUrl(mock: ReturnType<typeof vi.fn>): string {
 	return urls[urls.length - 1] ?? "";
 }
 
+/** Renders IssueList, opens the filters popover, and sets a "Completed" From-date filter. */
+async function setupCompletedFromDateFilter() {
+	const mock = setupDateFetch();
+	render(<IssueList />);
+	await waitForLoaded();
+	openFiltersPopover();
+
+	fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {
+		target: { value: "completed" },
+	});
+	fireEvent.input(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
+
+	return mock;
+}
+
 describe("date-range filter (server-side, PROJ-212)", () => {
 	it("sends completedAfter when field=Completed and a From date is set", async () => {
-		const mock = setupDateFetch();
-		render(<IssueList />);
-		await waitForLoaded();
-		openFiltersPopover();
-
-		fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {
-			target: { value: "completed" },
-		});
-		fireEvent.input(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
+		const mock = await setupCompletedFromDateFilter();
 
 		await waitFor(() => expect(lastIssuesUrl(mock)).toMatch(/completedAfter=\d+/));
 		expect(lastIssuesUrl(mock)).not.toContain("updatedAfter=");
@@ -754,16 +761,8 @@ describe("date-range filter (server-side, PROJ-212)", () => {
 	});
 
 	it("sends no date params while the field is 'No date filter' even with dates entered", async () => {
-		const mock = setupDateFetch();
-		render(<IssueList />);
-		await waitForLoaded();
-		openFiltersPopover();
-
 		// Pick a field, set a date, then switch the field back off.
-		fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {
-			target: { value: "completed" },
-		});
-		fireEvent.input(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
+		const mock = await setupCompletedFromDateFilter();
 		await waitFor(() => expect(lastIssuesUrl(mock)).toContain("completedAfter="));
 
 		fireEvent.change(screen.getByRole("combobox", { name: "Date filter field" }), {

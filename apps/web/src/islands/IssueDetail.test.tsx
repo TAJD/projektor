@@ -253,18 +253,7 @@ describe("URL path parsing (pretty-URL fallback)", () => {
 	it("does NOT parse the URL path when an issueId prop is already provided", async () => {
 		history.replaceState(null, "", "/projects/OTHER/issues/99/ignore-this");
 
-		const mockFetch = vi.fn().mockImplementation((url: string) => {
-			const u = String(url);
-			if (u.includes("/comments"))
-				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("/links"))
-				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("task-statuses"))
-				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			if (u.includes("?parentId="))
-				return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
-			return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
-		});
+		const mockFetch = makeFetchForDetail(PLAIN_ISSUE_DATA);
 		vi.stubGlobal("fetch", mockFetch);
 
 		// issueId prop supplied directly — path must be ignored
@@ -338,7 +327,7 @@ describe("workspace-slug header contract (PROJ-98)", () => {
 		}
 	});
 
-	it("does NOT read workspace slug from localStorage — stale localStorage value never appears in fetch headers", async () => {
+	it("does NOT read workspace slug from localStorage — stale value never appears in fetch headers", async () => {
 		localStorage.setItem("workspace-slug", "stale-slug");
 
 		const mockFetch = makeFetchForDetail(PLAIN_ISSUE_DATA);

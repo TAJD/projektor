@@ -173,7 +173,8 @@ export async function seedIssue(
 	const id = crypto.randomUUID();
 	const now = opts?.createdAt ?? Math.floor(Date.now() / 1000);
 	await env.DB.prepare(
-		`INSERT INTO issues (id, workspace_id, project_id, number, title, body, status, status_id, priority, assignee_id, labels, parent_id, type_id, created_by_id, created_at, updated_at)
+		`INSERT INTO issues (id, workspace_id, project_id, number, title, body, status, status_id, priority,
+       assignee_id, labels, parent_id, type_id, created_by_id, created_at, updated_at)
      SELECT ?, ?, ?, COALESCE(MAX(number), 0) + 1, ?, '', ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?
      FROM issues WHERE project_id = ?`
 	)
@@ -251,6 +252,28 @@ export async function seedFixture(opts?: { slug?: string; email?: string; role?:
 	await seedMember(workspace.id, user.id, opts?.role ?? "member");
 	const token = await seedToken(workspace.id, user.id);
 	return { workspace, user, token };
+}
+
+/** Seed a workspace fixture plus a project in it — the common `beforeEach` shape across API tests. */
+export async function seedProjectFixture(opts?: { role?: string }) {
+	const fixture = await seedFixture({ role: opts?.role });
+	const project = await seedProject(fixture.workspace.id);
+	return {
+		token: fixture.token,
+		slug: fixture.workspace.slug,
+		workspaceId: fixture.workspace.id,
+		userId: fixture.user.id,
+		projectId: project.id,
+	};
+}
+
+/** Seed a project fixture plus an issue in it. */
+export async function seedIssueFixture(opts?: { role?: string; issueTitle?: string }) {
+	const base = await seedProjectFixture({ role: opts?.role });
+	const issue = await seedIssue(base.workspaceId, base.projectId, base.userId, {
+		title: opts?.issueTitle ?? "Test Issue",
+	});
+	return { ...base, issueId: issue.id };
 }
 
 /**

@@ -15,29 +15,26 @@ const SESSION_TTL_SECONDS = 120;
 
 const liveCutoff = () => Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 
-/**
- * Claim an issue for an agent session. Atomic: the partial UNIQUE index on
- * (workspace_id, issue_id) WHERE released_at IS NULL guarantees at most one
- * active lease per issue, so two concurrent claims can't both succeed — the
- * loser hits the constraint and is reported as a conflict. A lease whose owning
- * session has gone stale (stopped heartbeating) is reclaimed transparently.
- */
-export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
-	const result = ClaimIssueSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, agentId } = result.data;
-
-	const orm = drizzle(ctx.db, { schema });
-	const cutoff = liveCutoff();
-
+async function assertIssueExists(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	issueId: string
+): Promise<void> {
 	const issue = await orm
 		.select({ id: schema.issues.id })
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!issue) throw new NotFoundError("Issue not found");
+}
 
-	// The claiming session must itself be live — a dead agent can't hold a lease.
+// The claiming session must itself be live — a dead agent can't hold a lease.
+async function assertAgentSessionLive(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	agentId: string,
+	cutoff: number
+): Promise<void> {
 	const session = await orm
 		.select({
 			status: schema.agentSessions.status,
@@ -58,9 +55,17 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 			fieldErrors: {},
 		});
 	}
+}
 
-	// Is there already an active lease on this issue? Join the session to decide
-	// whether it's a live conflict or a stale lease we can reclaim.
+// Is there already an active lease on this issue? Join the session to decide
+// whether it's a live conflict or a stale lease we can reclaim.
+async function reclaimStaleLeaseOrThrow(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	issueId: string,
+	cutoff: number,
+	now: number
+): Promise<void> {
 	const existing = await orm
 		.select({
 			id: schema.issueLeases.id,
@@ -78,22 +83,39 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 			)
 		)
 		.get();
+	if (!existing) return;
+
+	const live = existing.sessionStatus === "active" && existing.sessionHeartbeat > cutoff;
+	if (live) {
+		throw new ConflictError(`Issue is already leased by agent session ${existing.agentSessionId}`);
+	}
+	// Stale lease: the holder stopped heartbeating. Reclaim it.
+	await orm
+		.update(schema.issueLeases)
+		.set({ releasedAt: now, releaseReason: "expired" })
+		.where(eq(schema.issueLeases.id, existing.id));
+}
+
+/**
+ * Claim an issue for an agent session. Atomic: the partial UNIQUE index on
+ * (workspace_id, issue_id) WHERE released_at IS NULL guarantees at most one
+ * active lease per issue, so two concurrent claims can't both succeed — the
+ * loser hits the constraint and is reported as a conflict. A lease whose owning
+ * session has gone stale (stopped heartbeating) is reclaimed transparently.
+ */
+export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
+	const result = ClaimIssueSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { issueId, agentId } = result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+	const cutoff = liveCutoff();
+
+	await assertIssueExists(orm, ctx, issueId);
+	await assertAgentSessionLive(orm, ctx, agentId, cutoff);
 
 	const now = Math.floor(Date.now() / 1000);
-
-	if (existing) {
-		const live = existing.sessionStatus === "active" && existing.sessionHeartbeat > cutoff;
-		if (live) {
-			throw new ConflictError(
-				`Issue is already leased by agent session ${existing.agentSessionId}`
-			);
-		}
-		// Stale lease: the holder stopped heartbeating. Reclaim it.
-		await orm
-			.update(schema.issueLeases)
-			.set({ releasedAt: now, releaseReason: "expired" })
-			.where(eq(schema.issueLeases.id, existing.id));
-	}
+	await reclaimStaleLeaseOrThrow(orm, ctx, issueId, cutoff, now);
 
 	const id = crypto.randomUUID();
 	try {
