@@ -25,12 +25,12 @@ import {
 import { recordActivity } from "./activity";
 import * as cache from "./cache";
 import { addComment } from "./comments";
-import { checkDefinitionOfReady } from "./definition-of-ready";
 import {
 	batchLoadCustomFields,
 	validateCustomFields,
 	writeCustomFieldValues,
 } from "./custom-fields";
+import { checkDefinitionOfReady } from "./definition-of-ready";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { liveLeasedIssueIds } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
@@ -737,7 +737,9 @@ async function assertReviewGate(
 	const enteringDone = (newStatusCategory === "done" || resolvedStatusKey === "done") && !wasDone;
 	if (enteringDone) {
 		if (agentKind === "agent") {
-			throw new ForbiddenError("An agent cannot mark an issue done — a human must approve (PROJ-254)");
+			throw new ForbiddenError(
+				"An agent cannot mark an issue done — a human must approve (PROJ-254)"
+			);
 		}
 		if (existing.completionReportAt == null && !data.completionReport) {
 			throw new ValidationError({
@@ -923,7 +925,10 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
 
 	if (data.completionReport) {
-		await addComment(ctx, { issueId: id, body: formatCompletionReportComment(data.completionReport) });
+		await addComment(ctx, {
+			issueId: id,
+			body: formatCompletionReportComment(data.completionReport),
+		});
 	}
 
 	await reindexIssueFts(ctx, orm, id, data);

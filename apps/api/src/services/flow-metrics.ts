@@ -15,7 +15,8 @@ function summarize(durations: number[]): Distribution {
 	if (durations.length === 0) return { count: 0, avg: null, p50: null, p90: null };
 	const sorted = [...durations].sort((a, b) => a - b);
 	const avg = sorted.reduce((sum, d) => sum + d, 0) / sorted.length;
-	const percentile = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+	const percentile = (p: number) =>
+		sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 	return { count: sorted.length, avg, p50: percentile(0.5), p90: percentile(0.9) };
 }
 
@@ -36,7 +37,11 @@ type FlowIssueRow = {
 	doneAt: number | null;
 };
 
-function buildWipOverTime(issues: FlowIssueRow[], since: number, until: number): Array<{ date: string; count: number }> {
+function buildWipOverTime(
+	issues: FlowIssueRow[],
+	since: number,
+	until: number
+): Array<{ date: string; count: number }> {
 	const DAY = 86400;
 	const buckets: Array<{ date: string; count: number }> = [];
 	for (let t = since - (since % DAY); t <= until; t += DAY) {
@@ -67,7 +72,9 @@ async function computeAgentVsHuman(
 		.where(eq(schema.issueLeases.workspaceId, ctx.workspaceId));
 
 	const agentIssueIds = new Set(
-		leaseRows.filter((r) => r.kind === "agent" && issueIds.includes(r.issueId)).map((r) => r.issueId)
+		leaseRows
+			.filter((r) => r.kind === "agent" && issueIds.includes(r.issueId))
+			.map((r) => r.issueId)
 	);
 
 	const agentDurations: number[] = [];

@@ -140,7 +140,8 @@ export const issuesTools: MCPTool[] = [
 				typeId: { type: "string", nullable: true },
 				agentSessionId: {
 					type: "string",
-					description: "Your agent session id (from register_agent) — identifies this update as agent-initiated",
+					description:
+						"Your agent session id (from register_agent) — identifies this update as agent-initiated",
 				},
 				completionReport: {
 					type: "object",

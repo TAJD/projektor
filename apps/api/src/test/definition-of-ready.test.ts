@@ -30,9 +30,13 @@ describe("checkDefinitionOfReady (PROJ-253)", () => {
 	});
 
 	it("flags a heading with no content as missing", () => {
-		const body = ["## Acceptance criteria", "", "## Scope", "`src/widget.ts`", "## Verification"].join(
-			"\n"
-		);
+		const body = [
+			"## Acceptance criteria",
+			"",
+			"## Scope",
+			"`src/widget.ts`",
+			"## Verification",
+		].join("\n");
 		const result = checkDefinitionOfReady(body);
 		expect(result.ready).toBe(false);
 		expect(result.missing).toEqual(["acceptance criteria", "verification"]);

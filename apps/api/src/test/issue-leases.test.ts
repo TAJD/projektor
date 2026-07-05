@@ -201,7 +201,11 @@ describe("get_prioritized_issues excludeClaimed (PROJ-184)", () => {
 		const withoutFlag = await callPrioritized({ limit: 50, includeNotReady: true });
 		expect(withoutFlag.issues.map((i) => i.id).sort()).toEqual([a.id, b.id].sort());
 
-		const withFlag = await callPrioritized({ limit: 50, excludeClaimed: true, includeNotReady: true });
+		const withFlag = await callPrioritized({
+			limit: 50,
+			excludeClaimed: true,
+			includeNotReady: true,
+		});
 		const ids = withFlag.issues.map((i) => i.id);
 		expect(ids).toContain(b.id);
 		expect(ids).not.toContain(a.id);

@@ -33,9 +33,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		id: string,
 		{ readyAt, claimedAt, doneAt }: { readyAt?: number; claimedAt?: number; doneAt?: number }
 	) {
-		await env.DB.prepare(
-			"UPDATE issues SET ready_at = ?, claimed_at = ?, done_at = ? WHERE id = ?"
-		)
+		await env.DB.prepare("UPDATE issues SET ready_at = ?, claimed_at = ?, done_at = ? WHERE id = ?")
 			.bind(readyAt ?? null, claimedAt ?? null, doneAt ?? null, id)
 			.run();
 	}

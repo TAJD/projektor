@@ -1014,7 +1014,9 @@ describe("Issues API", () => {
 	async function flowTimestampsOf(
 		id: string
 	): Promise<{ ready_at: number | null; claimed_at: number | null; done_at: number | null }> {
-		const row = await env.DB.prepare("SELECT ready_at, claimed_at, done_at FROM issues WHERE id = ?")
+		const row = await env.DB.prepare(
+			"SELECT ready_at, claimed_at, done_at FROM issues WHERE id = ?"
+		)
 			.bind(id)
 			.first<{ ready_at: number | null; claimed_at: number | null; done_at: number | null }>();
 		return row ?? { ready_at: null, claimed_at: null, done_at: null };

@@ -11,7 +11,8 @@
 // bundler-specific module-loader behavior to keep in sync across three toolchains.
 export const WORKFLOW_SPEC = {
 	title: "Workflow spec",
-	description: "The canonical agent workflow rules: definition of ready, state machine, human gates, WIP limits.",
+	description:
+		"The canonical agent workflow rules: definition of ready, state machine, human gates, WIP limits.",
 	sidebarOrder: 4,
 	body: `This page is the **single home** for projektor's agentic workflow rules. Every other
 surface — the MCP server's \`initialize\` instructions, \`AGENTS.md\`, spawn prompts, skills —
