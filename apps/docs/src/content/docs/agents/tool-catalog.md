@@ -93,7 +93,7 @@ running server.
 | `update_issue` | Update an issue - status, priority, title, body, assignee, or labels |
 | `search_issues` | Search issues by keyword in title or body |
 | `delete_issue` | Delete an issue by ID |
-| `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. |
+| `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded. |
 
 ### Issue links
 

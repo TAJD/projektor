@@ -1379,7 +1379,7 @@ describe("get_prioritized_issues MCP tool", () => {
 	}
 
 	it("returns [] (not 500) when no open issues exist", async () => {
-		const body = await callPrioritized();
+		const body = await callPrioritized({ includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as { issues: unknown[] };
 		expect(Array.isArray(data.issues)).toBe(true);
@@ -1390,7 +1390,7 @@ describe("get_prioritized_issues MCP tool", () => {
 		await seedIssue(workspaceId, projectId, userId, { title: "High prio", priority: "high" });
 		await seedIssue(workspaceId, projectId, userId, { title: "Low prio", priority: "low" });
 
-		const body = await callPrioritized();
+		const body = await callPrioritized({ includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as {
 			issues: Array<{
@@ -1419,7 +1419,7 @@ describe("get_prioritized_issues MCP tool", () => {
 			await seedIssue(workspaceId, projectId, userId, { title: `Open ${i}`, priority: "medium" });
 		}
 
-		const body = await callPrioritized({ limit: 100 });
+		const body = await callPrioritized({ limit: 100, includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as { issues: Array<{ title: string }> };
 		expect(data.issues).toHaveLength(100);
@@ -1430,7 +1430,7 @@ describe("get_prioritized_issues MCP tool", () => {
 		await seedIssue(workspaceId, projectId, userId, { title: "Done", status: "done" });
 		await seedIssue(workspaceId, projectId, userId, { title: "Cancelled", status: "cancelled" });
 
-		const body = await callPrioritized();
+		const body = await callPrioritized({ includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as { issues: Array<{ title: string }> };
 		const titles = data.issues.map((i) => i.title);
@@ -1456,7 +1456,7 @@ describe("get_prioritized_issues MCP tool", () => {
 		await seedCustomFieldValue(small.id, field.id, "1");
 		await seedCustomFieldValue(large.id, field.id, "8");
 
-		const body = await callPrioritized();
+		const body = await callPrioritized({ includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as {
 			issues: Array<{ title: string; _score: number }>;
@@ -1466,4 +1466,36 @@ describe("get_prioritized_issues MCP tool", () => {
 		expect(smallRow!._score).toBeGreaterThan(largeRow!._score);
 	});
 
+	// ─── PROJ-253: definition-of-ready filtering ──────────────────────────────
+	it("drops not-ready issues by default, and surfaces them with includeNotReady", async () => {
+		const ready = await seedIssue(workspaceId, projectId, userId, { title: "Ready" });
+		await env.DB.prepare("UPDATE issues SET body = ? WHERE id = ?")
+			.bind(
+				["## Acceptance criteria", "- Does the thing", "", "## Verification", "`pnpm test`"].join(
+					"\n"
+				),
+				ready.id
+			)
+			.run();
+		await seedIssue(workspaceId, projectId, userId, { title: "Not ready" });
+
+		const defaultBody = await callPrioritized();
+		const defaultTitles = (
+			JSON.parse(defaultBody.result!.content[0].text) as { issues: Array<{ title: string }> }
+		).issues.map((i) => i.title);
+		expect(defaultTitles).toContain("Ready");
+		expect(defaultTitles).not.toContain("Not ready");
+
+		const withNotReady = await callPrioritized({ includeNotReady: true });
+		const data = JSON.parse(withNotReady.result!.content[0].text) as {
+			issues: Array<{ title: string; needsGrooming?: boolean; missingCriteria?: string[] }>;
+		};
+		const notReadyRow = data.issues.find((i) => i.title === "Not ready");
+		expect(notReadyRow?.needsGrooming).toBe(true);
+		expect(notReadyRow?.missingCriteria).toEqual(
+			expect.arrayContaining(["acceptance criteria", "scope/files", "verification"])
+		);
+		const readyRow = data.issues.find((i) => i.title === "Ready");
+		expect(readyRow?.needsGrooming).toBeUndefined();
+	});
 });

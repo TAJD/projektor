@@ -24,6 +24,7 @@ import {
 } from "../schemas/issues";
 import { recordActivity } from "./activity";
 import * as cache from "./cache";
+import { checkDefinitionOfReady } from "./definition-of-ready";
 import {
 	batchLoadCustomFields,
 	validateCustomFields,
@@ -869,17 +870,28 @@ export async function deleteIssue(ctx: ServiceCtx, id: string) {
 
 const PRIORITY_SCORE: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1, none: 0 };
 
-type PrioritizedFilters = { limit: number; includeBacklog: boolean; excludeClaimed: boolean };
+type PrioritizedFilters = {
+	limit: number;
+	includeBacklog: boolean;
+	excludeClaimed: boolean;
+	includeNotReady: boolean;
+};
 
 function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
-	const input = raw as { limit?: unknown; includeBacklog?: unknown; excludeClaimed?: unknown };
+	const input = raw as {
+		limit?: unknown;
+		includeBacklog?: unknown;
+		excludeClaimed?: unknown;
+		includeNotReady?: unknown;
+	};
 	const limit =
 		typeof input.limit === "number" && input.limit > 0
 			? Math.min(Math.floor(input.limit), 100)
 			: 10;
 	const includeBacklog = input.includeBacklog !== false;
 	const excludeClaimed = input.excludeClaimed === true;
-	return { limit, includeBacklog, excludeClaimed };
+	const includeNotReady = input.includeNotReady === true;
+	return { limit, includeBacklog, excludeClaimed, includeNotReady };
 }
 
 async function fetchOpenIssuesForPrioritization(
@@ -897,6 +909,7 @@ async function fetchOpenIssuesForPrioritization(
 			number: schema.issues.number,
 			status_id: schema.issues.statusId,
 			status_category: schema.taskStatuses.category,
+			body: schema.issues.body,
 		})
 		.from(schema.issues)
 		.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
@@ -1006,7 +1019,7 @@ function scoreOpenIssues(
 }
 
 export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
-	const { limit, includeBacklog, excludeClaimed } = parsePrioritizedFilters(raw);
+	const { limit, includeBacklog, excludeClaimed, includeNotReady } = parsePrioritizedFilters(raw);
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -1030,7 +1043,17 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 
 	const scored = scoreOpenIssues(openIssues, inDegree, storyPoints);
 
-	return { issues: scored.slice(0, limit) };
+	// PROJ-253: definition-of-ready gate. By default, issues missing acceptance
+	// criteria/scope/verification are dropped from "what should I work on next?" — an
+	// agent that claims one is set up to guess. includeNotReady surfaces them anyway,
+	// annotated with what's missing, for grooming.
+	const annotated = scored.map(({ body, ...issue }) => {
+		const { ready, missing } = checkDefinitionOfReady(body ?? "");
+		return ready ? issue : { ...issue, needsGrooming: true, missingCriteria: missing };
+	});
+	const ready = includeNotReady ? annotated : annotated.filter((i) => !("needsGrooming" in i));
+
+	return { issues: ready.slice(0, limit) };
 }
 
 function sanitizeFtsQuery(q: string): string {

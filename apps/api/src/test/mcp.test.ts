@@ -481,7 +481,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as { issues: unknown[] };
@@ -497,7 +497,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as {
@@ -524,7 +524,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as {
@@ -551,7 +551,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as { issues: Array<{ title: string }> };
@@ -570,7 +570,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: { limit: 2 } },
+			{ name: "get_prioritized_issues", arguments: { limit: 2, includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as { issues: unknown[] };
@@ -598,7 +598,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as {
@@ -631,7 +631,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as {

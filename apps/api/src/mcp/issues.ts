@@ -181,7 +181,8 @@ export const issuesTools: MCPTool[] = [
 		name: "get_prioritized_issues",
 		description:
 			"Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + " +
-			"inverse story points. Useful for deciding what to work on next.",
+			"inverse story points. Useful for deciding what to work on next. By default, issues that fail the " +
+			"definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -199,6 +200,13 @@ export const issuesTools: MCPTool[] = [
 					type: "boolean",
 					default: false,
 					description: "Skip issues currently held by a live lease (default false)",
+				},
+				includeNotReady: {
+					type: "boolean",
+					default: false,
+					description:
+						"Include issues that fail the definition-of-ready check, annotated with " +
+						"needsGrooming and missingCriteria (default false)",
 				},
 			},
 		},

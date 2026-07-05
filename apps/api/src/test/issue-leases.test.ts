@@ -198,12 +198,79 @@ describe("get_prioritized_issues excludeClaimed (PROJ-184)", () => {
 			body: JSON.stringify({ agentId: agent.id }),
 		});
 
-		const withoutFlag = await callPrioritized({ limit: 50 });
+		const withoutFlag = await callPrioritized({ limit: 50, includeNotReady: true });
 		expect(withoutFlag.issues.map((i) => i.id).sort()).toEqual([a.id, b.id].sort());
 
-		const withFlag = await callPrioritized({ limit: 50, excludeClaimed: true });
+		const withFlag = await callPrioritized({ limit: 50, excludeClaimed: true, includeNotReady: true });
 		const ids = withFlag.issues.map((i) => i.id);
 		expect(ids).toContain(b.id);
 		expect(ids).not.toContain(a.id);
+	});
+});
+
+describe("claim_issue agent WIP limit (PROJ-253)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+	let userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
+	});
+
+	async function registerAgent(name: string): Promise<string> {
+		const res = await SELF.fetch("http://localhost/api/agents", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ name }),
+		});
+		const session = (await res.json()) as { id: string };
+		return session.id;
+	}
+
+	function claim(issueId: string, agentId: string) {
+		return SELF.fetch(`http://localhost/api/issues/${issueId}/claim`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ agentId }),
+		});
+	}
+
+	it("blocks the 4th concurrent agent-held lease at the default cap of 3", async () => {
+		const agent = await registerAgent("worker");
+		const issues = await Promise.all(
+			Array.from({ length: 4 }, (_, i) =>
+				seedIssue(workspaceId, projectId, userId, { title: `Issue ${i}` })
+			)
+		);
+
+		for (const issue of issues.slice(0, 3)) {
+			expect((await claim(issue.id, agent)).status).toBe(201);
+		}
+
+		const res = await claim(issues[3].id, agent);
+		expect(res.status).toBe(409);
+		const body = (await res.json()) as { error?: string };
+		expect(JSON.stringify(body)).toMatch(/WIP limit/i);
+	});
+
+	it("respects a project's own agent_wip_limit override", async () => {
+		const patchRes = await SELF.fetch(`http://localhost/api/projects/${projectId}`, {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ agentWipLimit: 1 }),
+		});
+		expect(patchRes.status).toBe(200);
+
+		const agent = await registerAgent("worker");
+		const [first, second] = await Promise.all([
+			seedIssue(workspaceId, projectId, userId, { title: "First" }),
+			seedIssue(workspaceId, projectId, userId, { title: "Second" }),
+		]);
+
+		expect((await claim(first.id, agent)).status).toBe(201);
+		const res = await claim(second.id, agent);
+		expect(res.status).toBe(409);
 	});
 });

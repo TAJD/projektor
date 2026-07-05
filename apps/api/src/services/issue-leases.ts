@@ -15,17 +15,59 @@ const SESSION_TTL_SECONDS = 120;
 
 const liveCutoff = () => Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 
+// PROJ-253: per-project agent WIP cap, used when a project doesn't set its own
+// projects.agent_wip_limit.
+const DEFAULT_AGENT_WIP_LIMIT = 3;
+
 async function assertIssueExists(
 	orm: ReturnType<typeof drizzle>,
 	ctx: ServiceCtx,
 	issueId: string
-): Promise<void> {
+): Promise<{ projectId: string }> {
 	const issue = await orm
-		.select({ id: schema.issues.id })
+		.select({ id: schema.issues.id, projectId: schema.issues.projectId })
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!issue) throw new NotFoundError("Issue not found");
+	return { projectId: issue.projectId };
+}
+
+// Live (session-active, non-released) leases on issues in this project, capped by
+// the project's agent_wip_limit (falling back to DEFAULT_AGENT_WIP_LIMIT).
+async function assertWipCapacity(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	projectId: string,
+	cutoff: number
+): Promise<void> {
+	const project = await orm
+		.select({ agentWipLimit: schema.projects.agentWipLimit })
+		.from(schema.projects)
+		.where(and(eq(schema.projects.id, projectId), eq(schema.projects.workspaceId, ctx.workspaceId)))
+		.get();
+	const cap = project?.agentWipLimit ?? DEFAULT_AGENT_WIP_LIMIT;
+
+	const live = await orm
+		.select({ issueId: schema.issueLeases.issueId })
+		.from(schema.issueLeases)
+		.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
+		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
+		.where(
+			and(
+				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+				isNull(schema.issueLeases.releasedAt),
+				eq(schema.issues.projectId, projectId),
+				eq(schema.agentSessions.status, "active"),
+				gt(schema.agentSessions.lastHeartbeatAt, cutoff)
+			)
+		);
+
+	if (live.length >= cap) {
+		throw new ConflictError(
+			`Project agent WIP limit reached (${cap}); currently held: ${live.map((l) => l.issueId).join(", ")}`
+		);
+	}
 }
 
 // The claiming session must itself be live — a dead agent can't hold a lease.
@@ -111,8 +153,9 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = liveCutoff();
 
-	await assertIssueExists(orm, ctx, issueId);
+	const { projectId } = await assertIssueExists(orm, ctx, issueId);
 	await assertAgentSessionLive(orm, ctx, agentId, cutoff);
+	await assertWipCapacity(orm, ctx, projectId, cutoff);
 
 	const now = Math.floor(Date.now() / 1000);
 	await reclaimStaleLeaseOrThrow(orm, ctx, issueId, cutoff, now);

@@ -13,6 +13,8 @@ export const projects = sqliteTable(
 		description: text("description"),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
+		// Per-project agent WIP cap (PROJ-253). NULL = use the workspace default.
+		agentWipLimit: integer("agent_wip_limit"),
 	},
 	(t) => ({
 		wsIdx: index("projects_workspace_idx").on(t.workspaceId),
