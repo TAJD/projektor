@@ -6,7 +6,8 @@ export const projectActivityTools: MCPTool[] = [
 	{
 		name: "list_project_activity",
 		description:
-			"List recent activity events for a project across issues, comments, wiki pages, and sprints. Returns events ordered most-recent first.",
+			"List recent activity events for a project across issues, comments, wiki pages, and sprints. " +
+			"Returns events ordered most-recent first.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],

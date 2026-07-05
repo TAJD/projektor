@@ -11,6 +11,19 @@ interface Props {
 	minHeight?: string;
 }
 
+const TOOLBAR_BUTTON_CLASS =
+	"px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base " +
+	"cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border";
+
+function mobileToggleClass(active: boolean): string {
+	const base =
+		"px-[10px] py-[2px] border rounded-[3px] text-[0.8rem] font-[inherit] cursor-pointer";
+	const state = active
+		? " bg-accent text-white border-accent"
+		: " border-border bg-transparent text-text-base";
+	return base + state;
+}
+
 function wrapSelection(view: EditorView, before: string, after: string): boolean {
 	const tr = view.state.changeByRange((range) => {
 		const selected = view.state.sliceDoc(range.from, range.to);
@@ -50,18 +63,123 @@ function prefixLines(view: EditorView, prefix: string): boolean {
 	return true;
 }
 
-export default function MarkdownEditor({ value, onChange, minHeight = "240px" }: Props) {
+interface EditorToolbarProps {
+	onBold: () => void;
+	onItalic: () => void;
+	onHeading: (n: 1 | 2 | 3) => void;
+	onLink: () => void;
+	onCodeBlock: () => void;
+	onBulletList: () => void;
+	onNumberedList: () => void;
+}
+
+function EditorToolbar({
+	onBold,
+	onItalic,
+	onHeading,
+	onLink,
+	onCodeBlock,
+	onBulletList,
+	onNumberedList,
+}: EditorToolbarProps) {
+	return (
+		<div class="flex gap-[2px] px-[6px] py-1 bg-surface border-b border-border flex-wrap items-center">
+			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onBold} title="Bold (Ctrl+B)">
+				<strong>B</strong>
+			</button>
+			<button
+				type="button"
+				class={`${TOOLBAR_BUTTON_CLASS} italic`}
+				onClick={onItalic}
+				title="Italic (Ctrl+I)"
+			>
+				I
+			</button>
+			<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={() => onHeading(1)}
+				title="Heading 1"
+			>
+				H1
+			</button>
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={() => onHeading(2)}
+				title="Heading 2"
+			>
+				H2
+			</button>
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={() => onHeading(3)}
+				title="Heading 3"
+			>
+				H3
+			</button>
+			<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
+			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onLink} title="Link">
+				Link
+			</button>
+			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onCodeBlock} title="Code block">
+				Code
+			</button>
+			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onBulletList} title="Bullet list">
+				• List
+			</button>
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={onNumberedList}
+				title="Numbered list"
+			>
+				1. List
+			</button>
+		</div>
+	);
+}
+
+function PreviewPane({ preview, mobilePreview }: { preview: string; mobilePreview: boolean }) {
+	return (
+		<div
+			class={
+				mobilePreview
+					? "flex-1 flex flex-col min-w-0"
+					: "flex-1 flex flex-col border-l border-border min-w-0 max-sm:hidden"
+			}
+		>
+			<div
+				class={
+					"px-2 py-[2px] text-[0.7rem] text-text-muted bg-surface border-b border-border " +
+					"shrink-0 uppercase tracking-[0.06em]"
+				}
+			>
+				Preview
+			</div>
+			{preview ? (
+				<div
+					class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-base prose prose-sm max-w-none"
+					dangerouslySetInnerHTML={{ __html: preview }}
+				/>
+			) : (
+				<div class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-muted italic">
+					Nothing to preview.
+				</div>
+			)}
+		</div>
+	);
+}
+
+function useMarkdownEditorView(
+	value: string,
+	onChange: (value: string) => void,
+	minHeight: string
+) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const viewRef = useRef<EditorView | null>(null);
-	const [mobilePreview, setMobilePreview] = useState(false);
-	const [preview, setPreview] = useState("");
-
-	useEffect(() => {
-		const timer = setTimeout(() => {
-			setPreview(renderMarkdown(value));
-		}, 200);
-		return () => clearTimeout(timer);
-	}, [value]);
 
 	useEffect(() => {
 		if (!containerRef.current) return;
@@ -120,6 +238,10 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 		});
 	}, [value]);
 
+	return { containerRef, viewRef };
+}
+
+function useMarkdownCommands(viewRef: { current: EditorView | null }) {
 	function bold() {
 		if (viewRef.current) wrapSelection(viewRef.current, "**", "**");
 	}
@@ -156,97 +278,48 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 		if (viewRef.current) prefixLines(viewRef.current, "1. ");
 	}
 
+	return { bold, italic, heading, link, codeBlock, bulletList, numberedList };
+}
+
+export default function MarkdownEditor({ value, onChange, minHeight = "240px" }: Props) {
+	const [mobilePreview, setMobilePreview] = useState(false);
+	const [preview, setPreview] = useState("");
+
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setPreview(renderMarkdown(value));
+		}, 200);
+		return () => clearTimeout(timer);
+	}, [value]);
+
+	const { containerRef, viewRef } = useMarkdownEditorView(value, onChange, minHeight);
+	const { bold, italic, heading, link, codeBlock, bulletList, numberedList } =
+		useMarkdownCommands(viewRef);
+
 	return (
 		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case">
-			<div class="flex gap-[2px] px-[6px] py-1 bg-surface border-b border-border flex-wrap items-center">
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
-					onClick={bold}
-					title="Bold (Ctrl+B)"
-				>
-					<strong>B</strong>
-				</button>
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] italic hover:bg-border"
-					onClick={italic}
-					title="Italic (Ctrl+I)"
-				>
-					I
-				</button>
-				<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
-					onClick={() => heading(1)}
-					title="Heading 1"
-				>
-					H1
-				</button>
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
-					onClick={() => heading(2)}
-					title="Heading 2"
-				>
-					H2
-				</button>
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
-					onClick={() => heading(3)}
-					title="Heading 3"
-				>
-					H3
-				</button>
-				<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
-					onClick={link}
-					title="Link"
-				>
-					Link
-				</button>
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
-					onClick={codeBlock}
-					title="Code block"
-				>
-					Code
-				</button>
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
-					onClick={bulletList}
-					title="Bullet list"
-				>
-					• List
-				</button>
-				<button
-					type="button"
-					class="px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border"
-					onClick={numberedList}
-					title="Numbered list"
-				>
-					1. List
-				</button>
-			</div>
+			<EditorToolbar
+				onBold={bold}
+				onItalic={italic}
+				onHeading={heading}
+				onLink={link}
+				onCodeBlock={codeBlock}
+				onBulletList={bulletList}
+				onNumberedList={numberedList}
+			/>
 
 			{/* Mobile pane toggle — hidden on ≥640px */}
 			<div class="hidden max-sm:flex gap-1 px-[6px] py-1 border-b border-border bg-surface">
 				<button
 					type="button"
-					class={`px-[10px] py-[2px] border rounded-[3px] text-[0.8rem] font-[inherit] cursor-pointer${!mobilePreview ? " bg-accent text-white border-accent" : " border-border bg-transparent text-text-base"}`}
+					class={mobileToggleClass(!mobilePreview)}
 					onClick={() => setMobilePreview(false)}
 				>
 					Edit
 				</button>
 				<button
 					type="button"
-					class={`px-[10px] py-[2px] border rounded-[3px] text-[0.8rem] font-[inherit] cursor-pointer${mobilePreview ? " bg-accent text-white border-accent" : " border-border bg-transparent text-text-base"}`}
+					class={mobileToggleClass(mobilePreview)}
 					onClick={() => setMobilePreview(true)}
 				>
 					Preview
@@ -258,27 +331,7 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 					class={`flex-1 min-w-0 overflow-auto flex flex-col${mobilePreview ? " max-sm:hidden" : ""}`}
 					ref={containerRef}
 				/>
-				<div
-					class={
-						mobilePreview
-							? "flex-1 flex flex-col min-w-0"
-							: "flex-1 flex flex-col border-l border-border min-w-0 max-sm:hidden"
-					}
-				>
-					<div class="px-2 py-[2px] text-[0.7rem] text-text-muted bg-surface border-b border-border shrink-0 uppercase tracking-[0.06em]">
-						Preview
-					</div>
-					{preview ? (
-						<div
-							class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-base prose prose-sm max-w-none"
-							dangerouslySetInnerHTML={{ __html: preview }}
-						/>
-					) : (
-						<div class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-muted italic">
-							Nothing to preview.
-						</div>
-					)}
-				</div>
+				<PreviewPane preview={preview} mobilePreview={mobilePreview} />
 			</div>
 		</div>
 	);

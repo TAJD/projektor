@@ -37,23 +37,6 @@ export async function createShareToken(
 	return { token, url: `/share/${token}` };
 }
 
-export async function getShareToken(
-	db: D1Database,
-	token: string
-): Promise<{ issue_id: string; workspace_id: string }> {
-	const now = Math.floor(Date.now() / 1000);
-	const id = await hashToken(token);
-
-	const row = await db
-		.prepare("SELECT issue_id, workspace_id, expires_at FROM share_tokens WHERE id = ?")
-		.bind(id)
-		.first<{ issue_id: string; workspace_id: string; expires_at: number }>();
-
-	if (!row || row.expires_at <= now) throw new NotFoundError("Share link not found or expired");
-
-	return { issue_id: row.issue_id, workspace_id: row.workspace_id };
-}
-
 interface SharedIssueRow {
 	title: string;
 	body: string | null;

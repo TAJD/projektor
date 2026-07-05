@@ -9,12 +9,14 @@ import {
 	seedIssue,
 	seedMember,
 	seedProject,
+	seedProjectFixture,
 	seedToken,
 	seedUser,
 } from "./helpers";
 
 // ─── Definition CRUD ──────────────────────────────────────────────────────────
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Custom Field Definitions API", () => {
 	let token: string;
 	let slug: string;
@@ -202,13 +204,7 @@ describe("Custom Field Values — validation", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	it("rejects unknown custom field key on create", async () => {
@@ -301,13 +297,7 @@ describe("Custom Fields — resolved on read", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	it("GET /api/issues/:id returns customFields array", async () => {
@@ -403,13 +393,7 @@ describe("Custom Fields — list_issues filter", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	it("GET /api/issues?cfKey=sp&cfOp=eq&cfValue=5 returns matching issues", async () => {

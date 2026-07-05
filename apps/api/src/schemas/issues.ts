@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PriorityEnum, StatusEnum, TaxonomyIdSchema } from "./common";
+import { CustomFieldFilterSchema } from "./custom-fields";
 
 export const CreateIssueSchema = z.object({
 	projectId: z.string().uuid(),
@@ -44,9 +45,7 @@ export const ListIssuesSchema = z.object({
 	typeId: TaxonomyIdSchema.optional(),
 	excludeTypeIds: z.string().optional(),
 	sprintId: z.string().uuid().optional(),
-	cfKey: z.string().optional(),
-	cfOp: z.enum(["eq", "gt", "gte", "lt", "lte"]).optional(),
-	cfValue: z.string().optional(),
+	...CustomFieldFilterSchema.shape,
 	// Date-range filters (PROJ-212), epoch seconds; inclusive bounds.
 	completedAfter: z.coerce.number().optional(),
 	completedBefore: z.coerce.number().optional(),

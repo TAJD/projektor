@@ -6,69 +6,82 @@ import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
-export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
-	const result = ClaimFilesSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, agentId, paths, force } = result.data;
-
-	const orm = drizzle(ctx.db, { schema });
-
-	// Verify issue belongs to workspace
+async function assertIssueInWorkspace(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	issueId: string
+) {
 	const issue = await orm
 		.select({ id: schema.issues.id })
 		.from(schema.issues)
-		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
+		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, workspaceId)))
 		.get();
 	if (!issue) throw new NotFoundError("Issue not found");
+}
 
-	// Verify agent session belongs to workspace (if provided)
-	if (agentId) {
-		const agent = await orm
-			.select({ id: schema.agentSessions.id })
-			.from(schema.agentSessions)
-			.where(
-				and(
-					eq(schema.agentSessions.id, agentId),
-					eq(schema.agentSessions.workspaceId, ctx.workspaceId)
-				)
-			)
-			.get();
-		if (!agent) throw new NotFoundError("Agent session not found");
-	}
+async function assertAgentInWorkspace(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	agentId: string
+) {
+	const agent = await orm
+		.select({ id: schema.agentSessions.id })
+		.from(schema.agentSessions)
+		.where(
+			and(eq(schema.agentSessions.id, agentId), eq(schema.agentSessions.workspaceId, workspaceId))
+		)
+		.get();
+	if (!agent) throw new NotFoundError("Agent session not found");
+}
 
-	// Pre-check all paths for active claims — all-or-nothing on conflict.
-	// inChunks keeps each query under D1's 100-bound-parameter cap. See services/sql.ts.
+// inChunks keeps each query under D1's 100-bound-parameter cap. See services/sql.ts.
+async function loadActiveClaimsByPath(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	paths: string[]
+) {
 	const activeClaims = await inChunks(paths, (chunk) =>
 		orm
 			.select()
 			.from(schema.issueFileClaims)
 			.where(
 				and(
-					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+					eq(schema.issueFileClaims.workspaceId, workspaceId),
 					inArray(schema.issueFileClaims.path, chunk),
 					isNull(schema.issueFileClaims.releasedAt)
 				)
 			)
 	);
+	return new Map(activeClaims.map((c) => [c.path, c]));
+}
 
-	const claimsByPath = new Map(activeClaims.map((c) => [c.path, c]));
-
-	// Fail fast if any conflict and force is false
-	if (!force) {
-		for (const path of paths) {
-			const existing = claimsByPath.get(path);
-			if (existing) {
-				throw new ConflictError(
-					`Path "${path}" is held by issue ${existing.issueId}${existing.agentId ? ` (agent ${existing.agentId})` : ""}`
-				);
-			}
+function assertNoConflicts(
+	paths: string[],
+	claimsByPath: Map<string, { issueId: string; agentId: string | null }>
+) {
+	for (const path of paths) {
+		const existing = claimsByPath.get(path);
+		if (existing) {
+			throw new ConflictError(
+				`Path "${path}" is held by issue ${existing.issueId}${existing.agentId ? ` (agent ${existing.agentId})` : ""}`
+			);
 		}
 	}
+}
 
-	const now = Math.floor(Date.now() / 1000);
-	const overridden: typeof activeClaims = [];
-
-	// Release conflicting claims when force is true, then insert new ones
+async function overrideConflictingClaims(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	params: {
+		issueId: string;
+		agentId: string | undefined;
+		paths: string[];
+		claimsByPath: Map<string, typeof schema.issueFileClaims.$inferSelect>;
+		now: number;
+	}
+) {
+	const { issueId, agentId, paths, claimsByPath, now } = params;
+	const overridden: (typeof schema.issueFileClaims.$inferSelect)[] = [];
 	for (const path of paths) {
 		const existing = claimsByPath.get(path);
 		if (existing) {
@@ -84,14 +97,26 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 			overridden.push({ ...existing, releasedAt: now });
 		}
 	}
+	return overridden;
+}
 
-	// Insert new claims
+async function insertClaims(
+	orm: ReturnType<typeof drizzle>,
+	params: {
+		workspaceId: string;
+		issueId: string;
+		agentId: string | undefined;
+		paths: string[];
+		now: number;
+	}
+) {
+	const { workspaceId, issueId, agentId, paths, now } = params;
 	const created: (typeof schema.issueFileClaims.$inferSelect)[] = [];
 	for (const path of paths) {
 		const id = crypto.randomUUID();
 		await orm.insert(schema.issueFileClaims).values({
 			id,
-			workspaceId: ctx.workspaceId,
+			workspaceId,
 			issueId,
 			agentId: agentId ?? null,
 			path,
@@ -106,6 +131,46 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		// biome-ignore lint/style/noNonNullAssertion: row was just inserted; SELECT immediately after guarantees it exists
 		created.push(row!);
 	}
+	return created;
+}
+
+export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
+	const result = ClaimFilesSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { issueId, agentId, paths, force } = result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+
+	await assertIssueInWorkspace(orm, ctx.workspaceId, issueId);
+	if (agentId) {
+		await assertAgentInWorkspace(orm, ctx.workspaceId, agentId);
+	}
+
+	// Pre-check all paths for active claims — all-or-nothing on conflict.
+	const claimsByPath = await loadActiveClaimsByPath(orm, ctx.workspaceId, paths);
+
+	if (!force) {
+		assertNoConflicts(paths, claimsByPath);
+	}
+
+	const now = Math.floor(Date.now() / 1000);
+
+	// Release conflicting claims when force is true, then insert new ones
+	const overridden = await overrideConflictingClaims(ctx, orm, {
+		issueId,
+		agentId: agentId ?? undefined,
+		paths,
+		claimsByPath,
+		now,
+	});
+
+	const created = await insertClaims(orm, {
+		workspaceId: ctx.workspaceId,
+		issueId,
+		agentId: agentId ?? undefined,
+		paths,
+		now,
+	});
 
 	return { created, overridden };
 }

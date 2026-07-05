@@ -96,146 +96,141 @@ describe("WikiPage", () => {
 		render(<WikiPage />);
 		expect(await screen.findByText(/Failed to load page/i)).toBeTruthy();
 	});
+});
 
-	describe("draft autosave (PROJ-227)", () => {
-		beforeEach(() => {
-			localStorage.clear();
-			vi.useFakeTimers();
-		});
+async function startEditingWithTitleInput(): Promise<HTMLInputElement> {
+	history.replaceState(null, "", "?slug=my-page");
+	mockFetchWiki(PAGE);
+	render(<WikiPage />);
+	await screen.findByText("My Page");
+	fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+	return screen.getByLabelText("Page title") as HTMLInputElement;
+}
 
-		afterEach(() => {
-			vi.useRealTimers();
-			localStorage.clear();
-		});
+async function renderWithDraftAndOpenEdit(draft: {
+	title: string;
+	content: string;
+	savedAt: number;
+}) {
+	history.replaceState(null, "", "?slug=my-page");
+	localStorage.setItem("wiki-draft:w1", JSON.stringify(draft));
+	mockFetchWiki(PAGE);
+	render(<WikiPage />);
+	await screen.findByText("My Page");
+	fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+}
 
-		it("writes a draft to localStorage after debounce while editing", async () => {
-			history.replaceState(null, "", "?slug=my-page");
-			mockFetchWiki(PAGE);
-			render(<WikiPage />);
-			await screen.findByText("My Page");
+describe("draft autosave (PROJ-227)", () => {
+	beforeEach(() => {
+		localStorage.clear();
+		vi.useFakeTimers();
+	});
 
-			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-			const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
-			fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
+	afterEach(() => {
+		vi.useRealTimers();
+		localStorage.clear();
+	});
 
-			expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
+	it("writes a draft to localStorage after debounce while editing", async () => {
+		const titleInput = await startEditingWithTitleInput();
+		fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
 
-			await vi.advanceTimersByTimeAsync(1000);
+		expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
 
-			const raw = localStorage.getItem("wiki-draft:w1");
-			expect(raw).toBeTruthy();
-			const draft = JSON.parse(raw as string);
-			expect(draft.title).toBe("My Page Edited");
-			expect(draft.content).toBe(PAGE.content);
-		});
+		await vi.advanceTimersByTimeAsync(1000);
 
-		it("shows a restore banner when a newer draft exists on startEdit", async () => {
-			history.replaceState(null, "", "?slug=my-page");
-			localStorage.setItem(
-				"wiki-draft:w1",
-				JSON.stringify({ title: "Draft Title", content: "Draft content", savedAt: 2_000_000 })
-			);
-			mockFetchWiki(PAGE);
-			render(<WikiPage />);
-			await screen.findByText("My Page");
+		const raw = localStorage.getItem("wiki-draft:w1");
+		expect(raw).toBeTruthy();
+		const draft = JSON.parse(raw as string);
+		expect(draft.title).toBe("My Page Edited");
+		expect(draft.content).toBe(PAGE.content);
+	});
 
-			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-			expect(await screen.findByText(/Restore unsaved draft from/i)).toBeTruthy();
-		});
+	it("clears the draft from localStorage after a successful save", async () => {
+		const titleInput = await startEditingWithTitleInput();
+		fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(localStorage.getItem("wiki-draft:w1")).toBeTruthy();
 
-		it("restore populates the fields from the draft and dismisses the banner", async () => {
-			history.replaceState(null, "", "?slug=my-page");
-			localStorage.setItem(
-				"wiki-draft:w1",
-				JSON.stringify({ title: "Draft Title", content: "Draft content", savedAt: 2_000_000 })
-			);
-			mockFetchWiki(PAGE);
-			render(<WikiPage />);
-			await screen.findByText("My Page");
-
-			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-			await screen.findByText(/Restore unsaved draft from/i);
-			fireEvent.click(screen.getByRole("button", { name: "Restore" }));
-
-			const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
-			expect(titleInput.value).toBe("Draft Title");
-			expect(screen.queryByText(/Restore unsaved draft from/i)).toBeNull();
-		});
-
-		it("discard removes the draft and falls through to loading from the page", async () => {
-			history.replaceState(null, "", "?slug=my-page");
-			localStorage.setItem(
-				"wiki-draft:w1",
-				JSON.stringify({ title: "Draft Title", content: "Draft content", savedAt: 2_000_000 })
-			);
-			mockFetchWiki(PAGE);
-			render(<WikiPage />);
-			await screen.findByText("My Page");
-
-			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-			await screen.findByText(/Restore unsaved draft from/i);
-			fireEvent.click(screen.getByRole("button", { name: "Discard" }));
-
-			const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
-			expect(titleInput.value).toBe(PAGE.title);
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		await vi.advanceTimersByTimeAsync(0);
+		await waitFor(() => {
 			expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
 		});
+	});
 
-		it("clears the draft from localStorage after a successful save", async () => {
-			history.replaceState(null, "", "?slug=my-page");
-			mockFetchWiki(PAGE);
-			render(<WikiPage />);
-			await screen.findByText("My Page");
+	it("keeps the draft in localStorage when editing is cancelled", async () => {
+		const titleInput = await startEditingWithTitleInput();
+		fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(localStorage.getItem("wiki-draft:w1")).toBeTruthy();
 
-			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-			const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
-			fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
-			await vi.advanceTimersByTimeAsync(1000);
-			expect(localStorage.getItem("wiki-draft:w1")).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-			fireEvent.click(screen.getByRole("button", { name: "Save" }));
-			await vi.advanceTimersByTimeAsync(0);
-			await waitFor(() => {
-				expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
-			});
+		const raw = localStorage.getItem("wiki-draft:w1");
+		expect(raw).toBeTruthy();
+		expect(JSON.parse(raw as string).title).toBe("My Page Edited");
+	});
+
+	it("flushes unflushed edits to the draft when leaving edit mode via navigation", async () => {
+		const titleInput = await startEditingWithTitleInput();
+		fireEvent.input(titleInput, { target: { value: "Typed just before navigating away" } });
+
+		// Navigate away (e.g. clicking a sidebar link) before the 1s debounce fires.
+		expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "+ New page" }));
+
+		const raw = localStorage.getItem("wiki-draft:w1");
+		expect(raw).toBeTruthy();
+		expect(JSON.parse(raw as string).title).toBe("Typed just before navigating away");
+	});
+});
+
+describe("draft autosave (PROJ-227) — restore banner", () => {
+	beforeEach(() => {
+		localStorage.clear();
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		localStorage.clear();
+	});
+
+	it("shows a restore banner when a newer draft exists on startEdit", async () => {
+		await renderWithDraftAndOpenEdit({
+			title: "Draft Title",
+			content: "Draft content",
+			savedAt: 2_000_000,
 		});
+		expect(await screen.findByText(/Restore unsaved draft from/i)).toBeTruthy();
+	});
 
-		it("keeps the draft in localStorage when editing is cancelled", async () => {
-			history.replaceState(null, "", "?slug=my-page");
-			mockFetchWiki(PAGE);
-			render(<WikiPage />);
-			await screen.findByText("My Page");
-
-			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-			const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
-			fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
-			await vi.advanceTimersByTimeAsync(1000);
-			expect(localStorage.getItem("wiki-draft:w1")).toBeTruthy();
-
-			fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-			const raw = localStorage.getItem("wiki-draft:w1");
-			expect(raw).toBeTruthy();
-			expect(JSON.parse(raw as string).title).toBe("My Page Edited");
+	it("restore populates the fields from the draft and dismisses the banner", async () => {
+		await renderWithDraftAndOpenEdit({
+			title: "Draft Title",
+			content: "Draft content",
+			savedAt: 2_000_000,
 		});
+		await screen.findByText(/Restore unsaved draft from/i);
+		fireEvent.click(screen.getByRole("button", { name: "Restore" }));
 
-		it("flushes unflushed edits to the draft when leaving edit mode via navigation", async () => {
-			history.replaceState(null, "", "?slug=my-page");
-			mockFetchWiki(PAGE);
-			render(<WikiPage />);
-			await screen.findByText("My Page");
+		const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
+		expect(titleInput.value).toBe("Draft Title");
+		expect(screen.queryByText(/Restore unsaved draft from/i)).toBeNull();
+	});
 
-			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-			const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
-			fireEvent.input(titleInput, { target: { value: "Typed just before navigating away" } });
-
-			// Navigate away (e.g. clicking a sidebar link) before the 1s debounce fires.
-			expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
-			fireEvent.click(screen.getByRole("button", { name: "+ New page" }));
-
-			const raw = localStorage.getItem("wiki-draft:w1");
-			expect(raw).toBeTruthy();
-			expect(JSON.parse(raw as string).title).toBe("Typed just before navigating away");
+	it("discard removes the draft and falls through to loading from the page", async () => {
+		await renderWithDraftAndOpenEdit({
+			title: "Draft Title",
+			content: "Draft content",
+			savedAt: 2_000_000,
 		});
+		await screen.findByText(/Restore unsaved draft from/i);
+		fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+
+		const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
+		expect(titleInput.value).toBe(PAGE.title);
+		expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
 	});
 });

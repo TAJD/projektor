@@ -80,7 +80,8 @@ export async function listMessages(ctx: ServiceCtx, raw: unknown) {
 			eq(schema.agentMessages.scope, scope),
 			// Next page: rows strictly after (cursorTime, cursorId) in ASC order
 			// (createdAt > cursorTime) OR (createdAt = cursorTime AND id > cursorId)
-			sql`(${schema.agentMessages.createdAt} > ${cursorTime} OR (${schema.agentMessages.createdAt} = ${cursorTime} AND ${schema.agentMessages.id} > ${cursorId}))`
+			sql`(${schema.agentMessages.createdAt} > ${cursorTime} OR
+				(${schema.agentMessages.createdAt} = ${cursorTime} AND ${schema.agentMessages.id} > ${cursorId}))`
 		);
 	}
 

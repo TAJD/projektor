@@ -207,9 +207,9 @@ describe("EpicList", () => {
 		render(<EpicList />);
 		expect(await screen.findByRole("alert")).toBeTruthy();
 	});
+});
 
-	// ─── Priority sort ──────────────────────────────────────────────────────────
-
+describe("EpicList — priority sort", () => {
 	it("sorts epics by priority ascending (urgent first) when the Priority header is clicked", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		// API returns in created_at desc order: URGENT(3000) → MEDIUM(2000) → LOW(1000)

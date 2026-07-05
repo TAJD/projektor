@@ -1,7 +1,8 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedProject } from "./helpers";
+import { authHeaders, seedFixture, seedIssue, seedProjectFixture } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issue leases API (PROJ-184)", () => {
 	let token: string;
 	let slug: string;
@@ -10,13 +11,7 @@ describe("Issue leases API (PROJ-184)", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture());
 	});
 
 	async function registerAgent(name: string): Promise<string> {
@@ -166,13 +161,7 @@ describe("get_prioritized_issues excludeClaimed (PROJ-184)", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture());
 	});
 
 	async function callPrioritized(args: Record<string, unknown>) {

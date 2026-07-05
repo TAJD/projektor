@@ -20,6 +20,7 @@ async function memberRole(workspaceId: string, userId: string) {
 	return row?.role ?? null;
 }
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("login provisioning", () => {
 	it("first admin login creates the default workspace and makes them owner", async () => {
 		const slug = "prov-admin-create";
@@ -147,7 +148,7 @@ describe("login provisioning", () => {
 		expect(await memberRole(defaultWs.id, user.id)).toBeNull();
 	});
 
-	it("an admin in a mapped domain owns the default workspace AND the mapped one (ADMIN_EMAILS wins over domain confinement)", async () => {
+	it("an admin in a mapped domain owns default + mapped workspace (ADMIN_EMAILS beats confinement)", async () => {
 		const mappedWs = await seedWorkspace("prov-mapped-2");
 		const defaultWs = await seedWorkspace("prov-default-2");
 		const admin = await seedUser("tajd@example.com");

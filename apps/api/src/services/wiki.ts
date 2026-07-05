@@ -82,6 +82,82 @@ async function validateParentDepth(
 	}
 }
 
+async function validateNewPageParent(
+	db: D1Database,
+	parentId: string,
+	workspaceId: string,
+	projectId: string | null | undefined
+): Promise<void> {
+	const orm = drizzle(db, { schema });
+	const parentPage = await orm
+		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
+		.from(schema.wikiPages)
+		.where(and(eq(schema.wikiPages.id, parentId), eq(schema.wikiPages.workspaceId, workspaceId)))
+		.get();
+	if (!parentPage) {
+		throw new ValidationError({
+			formErrors: ["Parent page not found in this workspace"],
+			fieldErrors: {},
+		});
+	}
+	if ((projectId ?? null) !== (parentPage.projectId ?? null)) {
+		throw new ValidationError({
+			formErrors: ["Parent page must belong to the same project"],
+			fieldErrors: {},
+		});
+	}
+	await validateParentDepth(db, parentId, workspaceId);
+}
+
+async function validateUpdatedPageParent(
+	db: D1Database,
+	parentId: string,
+	workspaceId: string,
+	page: { id: string; projectId: string | null }
+): Promise<void> {
+	const orm = drizzle(db, { schema });
+	const parentPage = await orm
+		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
+		.from(schema.wikiPages)
+		.where(and(eq(schema.wikiPages.id, parentId), eq(schema.wikiPages.workspaceId, workspaceId)))
+		.get();
+	if (!parentPage) {
+		throw new ValidationError({
+			formErrors: ["Parent page not found in this workspace"],
+			fieldErrors: {},
+		});
+	}
+	if ((page.projectId ?? null) !== (parentPage.projectId ?? null)) {
+		throw new ValidationError({
+			formErrors: ["Parent page must belong to the same project"],
+			fieldErrors: {},
+		});
+	}
+	await validateParentDepth(db, parentId, workspaceId, page.id);
+}
+
+function buildWikiPageUpdateSet(
+	now: number,
+	updatedById: string,
+	fields: { title?: string; content?: string; parentId?: string | null }
+): Record<string, unknown> {
+	const setData: Record<string, unknown> = { updatedAt: now, updatedById };
+	if (fields.title !== undefined) setData.title = fields.title;
+	if (fields.content !== undefined) setData.content = fields.content;
+	if (fields.parentId !== undefined) setData.parentId = fields.parentId;
+	return setData;
+}
+
+function buildWikiPageUpdateDiff(fields: {
+	title?: string;
+	content?: string;
+}): Record<string, unknown> {
+	const diff: Record<string, unknown> = {};
+	if (fields.title !== undefined) diff.title = fields.title;
+	if (fields.content !== undefined) diff.content = fields.content;
+	return diff;
+}
+
 export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 	const parsed = ListPagesInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -174,30 +250,11 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { title, content, parentId, projectId, slug: customSlug } = parsed.data;
 
-	const orm = drizzle(ctx.db, { schema });
 	if (parentId) {
-		const parentPage = await orm
-			.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
-			.from(schema.wikiPages)
-			.where(
-				and(eq(schema.wikiPages.id, parentId), eq(schema.wikiPages.workspaceId, ctx.workspaceId))
-			)
-			.get();
-		if (!parentPage) {
-			throw new ValidationError({
-				formErrors: ["Parent page not found in this workspace"],
-				fieldErrors: {},
-			});
-		}
-		if ((projectId ?? null) !== (parentPage.projectId ?? null)) {
-			throw new ValidationError({
-				formErrors: ["Parent page must belong to the same project"],
-				fieldErrors: {},
-			});
-		}
-		await validateParentDepth(ctx.db, parentId, ctx.workspaceId);
+		await validateNewPageParent(ctx.db, parentId, ctx.workspaceId, projectId);
 	}
 
+	const orm = drizzle(ctx.db, { schema });
 	const slug = customSlug ?? slugify(title);
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -229,26 +286,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	const orm = drizzle(ctx.db, { schema });
 
 	if (parentId !== undefined && parentId !== null) {
-		const parentPage = await orm
-			.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
-			.from(schema.wikiPages)
-			.where(
-				and(eq(schema.wikiPages.id, parentId), eq(schema.wikiPages.workspaceId, ctx.workspaceId))
-			)
-			.get();
-		if (!parentPage) {
-			throw new ValidationError({
-				formErrors: ["Parent page not found in this workspace"],
-				fieldErrors: {},
-			});
-		}
-		if ((page.projectId ?? null) !== (parentPage.projectId ?? null)) {
-			throw new ValidationError({
-				formErrors: ["Parent page must belong to the same project"],
-				fieldErrors: {},
-			});
-		}
-		await validateParentDepth(ctx.db, parentId, ctx.workspaceId, page.id);
+		await validateUpdatedPageParent(ctx.db, parentId, ctx.workspaceId, page);
 	}
 
 	if (content !== undefined) {
@@ -261,25 +299,18 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		});
 	}
 
-	const setData: Record<string, unknown> = { updatedAt: now, updatedById: ctx.userId };
-	if (title !== undefined) setData.title = title;
-	if (content !== undefined) setData.content = content;
-	if (parentId !== undefined) setData.parentId = parentId;
-
+	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId });
 	await orm
 		.update(schema.wikiPages)
 		// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
 		.set(setData as any)
 		.where(eq(schema.wikiPages.id, page.id));
 
-	const diff: Record<string, unknown> = {};
-	if (title !== undefined) diff.title = title;
-	if (content !== undefined) diff.content = content;
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
 		entityId: page.id,
 		action: "updated",
-		diff,
+		diff: buildWikiPageUpdateDiff({ title, content }),
 	});
 
 	return { ok: true };

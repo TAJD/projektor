@@ -41,9 +41,7 @@ export function viewsStorageKey(project: string): string {
  * a view saved before a new filter existed (e.g. hideEpics) still applies
  * cleanly instead of writing `undefined` into filter state.
  */
-export function normalizeFilters(
-	raw: Partial<SavedViewFilters> | null | undefined
-): SavedViewFilters {
+function normalizeFilters(raw: Partial<SavedViewFilters> | null | undefined): SavedViewFilters {
 	const r = (raw ?? {}) as Partial<SavedViewFilters>;
 	const strings = (v: unknown): string[] =>
 		Array.isArray(v) ? v.filter((s): s is string => typeof s === "string") : [];

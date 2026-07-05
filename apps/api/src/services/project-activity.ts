@@ -18,20 +18,12 @@ export interface ActivityEvent {
 	created_at: number;
 }
 
-export async function listProjectActivity(
+async function fetchActivityRows(
 	ctx: ServiceCtx,
-	input: unknown
+	projectId: string,
+	since: number | undefined,
+	limit: number
 ): Promise<ActivityEvent[]> {
-	const parsed = ListProjectActivitySchema.safeParse(input);
-	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { projectId, since, limit } = parsed.data;
-
-	const project = await ctx.db
-		.prepare("SELECT id FROM projects WHERE id = ? AND workspace_id = ?")
-		.bind(projectId, ctx.workspaceId)
-		.first<{ id: string }>();
-	if (!project) throw new NotFoundError("Project not found");
-
 	// D1 limits compound SELECT to a small number of terms, so we run separate
 	// queries per event category and merge/sort in JS.
 	const sinceFilter = (col: string) => (since !== undefined ? `AND ${col} >= ?` : "");
@@ -132,14 +124,30 @@ export async function listProjectActivity(
 			.all<ActivityEvent>(),
 	]);
 
-	const all = [
+	return [
 		...issues.results,
 		...comments.results,
 		...statusChanges.results,
 		...wikiPages.results,
 		...sprints.results,
 	];
+}
 
+export async function listProjectActivity(
+	ctx: ServiceCtx,
+	input: unknown
+): Promise<ActivityEvent[]> {
+	const parsed = ListProjectActivitySchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, since, limit } = parsed.data;
+
+	const project = await ctx.db
+		.prepare("SELECT id FROM projects WHERE id = ? AND workspace_id = ?")
+		.bind(projectId, ctx.workspaceId)
+		.first<{ id: string }>();
+	if (!project) throw new NotFoundError("Project not found");
+
+	const all = await fetchActivityRows(ctx, projectId, since, limit);
 	all.sort((a, b) => b.created_at - a.created_at);
 	return all.slice(0, limit);
 }

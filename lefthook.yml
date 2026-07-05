@@ -9,6 +9,8 @@ pre-commit:
 
 pre-push:
   commands:
+    lint:
+      run: pnpm biome check .
     test:
       run: pnpm --filter @projektor/api test
     test-web:

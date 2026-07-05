@@ -30,6 +30,7 @@ async function mcpCall<T>(
 
 type IssuePage = { items: Array<Record<string, unknown>>; nextCursor: number | null };
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("MCP endpoint", () => {
 	let token: string;
 	let slug: string;

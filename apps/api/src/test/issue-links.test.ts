@@ -2,6 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedFixture, seedIssue, seedProject, seedWorkspaceRoles } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issue Links API", () => {
 	let token: string;
 	let slug: string;
@@ -165,7 +166,8 @@ describe("Issue Links API", () => {
 		// (won't happen via API due to workspace isolation, but checks the service layer)
 		const now = Math.floor(Date.now() / 1000);
 		await env.DB.prepare(
-			"INSERT INTO issue_links (id, workspace_id, source_issue_id, target_issue_id, type, created_by_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+			`INSERT INTO issue_links (id, workspace_id, source_issue_id, target_issue_id, type, created_by_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
 		)
 			.bind(
 				crypto.randomUUID(),

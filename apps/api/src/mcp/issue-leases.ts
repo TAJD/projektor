@@ -5,7 +5,8 @@ export const issueLeasesTools: MCPTool[] = [
 	{
 		name: "claim_issue",
 		description:
-			"Atomically lease an issue to an agent session so the parallel fleet doesn't double-work it. Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating.",
+			"Atomically lease an issue to an agent session so the parallel fleet doesn't double-work it. " +
+			"Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating.",
 		inputSchema: {
 			type: "object",
 			required: ["issueId", "agentId"],
@@ -43,7 +44,8 @@ export const issueLeasesTools: MCPTool[] = [
 	{
 		name: "list_issue_leases",
 		description:
-			"List active issue leases in the workspace, optionally filtered by issue or agent. Each entry's `live` flag is false when the holder stopped heartbeating (lease is reclaimable).",
+			"List active issue leases in the workspace, optionally filtered by issue or agent. Each entry's " +
+			"`live` flag is false when the holder stopped heartbeating (lease is reclaimable).",
 		inputSchema: {
 			type: "object",
 			properties: {

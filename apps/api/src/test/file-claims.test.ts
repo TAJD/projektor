@@ -1,7 +1,8 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedProject } from "./helpers";
+import { authHeaders, seedFixture, seedIssue, seedIssueFixture } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("File Claims API", () => {
 	let token: string;
 	let slug: string;
@@ -11,15 +12,7 @@ describe("File Claims API", () => {
 	let issueId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Test Issue" });
-		issueId = issue.id;
+		({ token, slug, workspaceId, userId, projectId, issueId } = await seedIssueFixture());
 	});
 
 	async function claimFiles(body: Record<string, unknown>, t = token, s = slug) {
@@ -104,7 +97,7 @@ describe("File Claims API", () => {
 
 	// B2: conflict on held path (force false) -> 409; batch does NOT partially claim
 	// 4 requests (claim, conflict-claim, list other, MCP conflict) — within limit
-	it("B2: second claim on held path (force=false) returns 409 naming holder; batch does not partially claim", async () => {
+	it("B2: second claim on held path (force=false) returns 409 naming holder; batch stays atomic", async () => {
 		// Claim one path in issue A
 		await claimFiles({ issueId, paths: ["src/held.ts"] });
 

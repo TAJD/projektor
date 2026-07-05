@@ -1,0 +1,43 @@
+# cofferdam.toml — code-quality analyzer config.
+# Each [checks."X.Y"] block overrides the built-in defaults for one
+# check. Uncomment and edit the values you actually want to change;
+# missing checks use their built-in defaults.
+#
+# Severity gating (medium and above fails CI by default — change with
+# `cofferdam check --fail-on=<level>`):
+#   info | low | medium | high | critical
+
+# [checks."Readability.MaxLineLength"]
+# limit = 120
+# severity = "low"
+
+# Vitest integration tests legitimately run 60-100+ line linear
+# arrange-act-assert bodies (multi-step API setup, several assertions per
+# scenario) — that's normal test style, not a code smell the way a
+# 90-line production function is. There's no per-path override in
+# cofferdam yet, so this raises the ceiling project-wide instead.
+[checks."Readability.MaxFunctionLength"]
+limit = 100
+severity = "low"
+
+# [checks."Design.MaxParameters"]
+# limit = 5
+# severity = "medium"
+
+# [checks."Design.DuplicateExportName"]
+# severity = "medium"
+
+# [checks."Refactor.CyclomaticComplexity"]
+# severity = "medium"
+
+# [checks."Refactor.CognitiveComplexity"]
+# severity = "medium"
+
+# [checks."Refactor.DuplicateBlock"]
+# severity = "medium"
+
+# [checks."Warning.TripleEquals"]
+# severity = "high"
+
+# [checks."Consistency.QuoteStyle"]
+# severity = "low"

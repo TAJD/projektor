@@ -44,7 +44,8 @@ export const workspacesTools: MCPTool[] = [
 	{
 		name: "delete_workspace",
 		description:
-			"Permanently delete a workspace. Owner-only. The default workspace cannot be deleted. All projects must be removed first.",
+			"Permanently delete a workspace. Owner-only. The default workspace cannot be deleted. " +
+			"All projects must be removed first.",
 		inputSchema: {
 			type: "object",
 			required: ["workspaceSlug"],

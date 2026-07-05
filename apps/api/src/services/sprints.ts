@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq, inArray } from "drizzle-orm";
+import type { z } from "zod";
 import { IdSchema } from "../schemas/common";
 import {
 	CreateSprintSchema,
@@ -73,6 +74,27 @@ export async function createSprint(ctx: ServiceCtx, raw: unknown) {
 	return { id };
 }
 
+type SprintUpdateData = z.infer<typeof UpdateSprintSchema>;
+
+function buildSprintSetData(data: SprintUpdateData, now: number) {
+	const setData: {
+		updatedAt: number;
+		name?: string;
+		goal?: string | null;
+		status?: "planned" | "active" | "completed";
+		startDate?: number | null;
+		endDate?: number | null;
+	} = { updatedAt: now };
+
+	if (data.name !== undefined) setData.name = data.name;
+	if ("goal" in data) setData.goal = data.goal ?? null;
+	if (data.status !== undefined) setData.status = data.status;
+	if ("startDate" in data) setData.startDate = data.startDate ?? null;
+	if ("endDate" in data) setData.endDate = data.endDate ?? null;
+
+	return setData;
+}
+
 export async function updateSprint(ctx: ServiceCtx, id: string, raw: unknown) {
 	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 	const result = UpdateSprintSchema.safeParse(raw);
@@ -88,20 +110,7 @@ export async function updateSprint(ctx: ServiceCtx, id: string, raw: unknown) {
 	if (!existing) throw new NotFoundError("Sprint not found");
 
 	const now = Math.floor(Date.now() / 1000);
-	const setData: {
-		updatedAt: number;
-		name?: string;
-		goal?: string | null;
-		status?: "planned" | "active" | "completed";
-		startDate?: number | null;
-		endDate?: number | null;
-	} = { updatedAt: now };
-
-	if (data.name !== undefined) setData.name = data.name;
-	if ("goal" in data) setData.goal = data.goal ?? null;
-	if (data.status !== undefined) setData.status = data.status;
-	if ("startDate" in data) setData.startDate = data.startDate ?? null;
-	if ("endDate" in data) setData.endDate = data.endDate ?? null;
+	const setData = buildSprintSetData(data, now);
 
 	await orm
 		.update(schema.sprints)

@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedProject } from "./helpers";
+import { authHeaders, seedFixture, seedProjectFixture } from "./helpers";
 
 describe("Activity audit log", () => {
 	let token: string;
@@ -9,12 +9,7 @@ describe("Activity audit log", () => {
 	let projectId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, projectId } = await seedProjectFixture());
 	});
 
 	async function activityForEntity(entityId: string) {

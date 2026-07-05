@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const CategoryEnum = z.enum(["todo", "in_progress", "done", "cancelled"]);
+const CategoryEnum = z.enum(["todo", "in_progress", "done", "cancelled"]);
 
 export const CreateTaskStatusSchema = z.object({
 	key: z

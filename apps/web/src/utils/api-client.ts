@@ -1,4 +1,4 @@
-export function buildHeaders(
+function buildHeaders(
 	workspaceSlug: string | undefined,
 	extra: Record<string, string> = {}
 ): Record<string, string> {

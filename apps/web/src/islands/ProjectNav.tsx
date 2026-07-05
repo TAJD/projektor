@@ -19,6 +19,22 @@ const TABS = [
 	{ label: "Epics", path: "/epics" },
 ];
 
+const KEY_BADGE_CLASS =
+	"font-mono text-[0.72rem] font-medium px-[0.4rem] py-[0.1rem] rounded-[3px] bg-surface border border-border" +
+	" text-text-muted";
+
+const TAB_BASE_CLASS =
+	"inline-flex items-center px-3 py-2 rounded-t-md text-sm font-medium no-underline border border-b-0 -mb-px" +
+	" transition-[color,background] duration-100";
+
+function tabClass(active: boolean): string {
+	return `${TAB_BASE_CLASS} ${
+		active
+			? "text-accent bg-bg border-border font-semibold"
+			: "text-text-muted border-transparent hover:text-text-base hover:bg-surface"
+	}`;
+}
+
 export default function ProjectNav({ workspaceSlug }: Props) {
 	const [project, setProject] = useState<Project | null>(null);
 	const [activePath, setActivePath] = useState("");
@@ -95,9 +111,7 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 				<a href={`/projects/view?id=${encodeURIComponent(project.id)}`} class="no-underline">
 					<h2 class="m-0 text-[0.9375rem] font-semibold text-text-base">{project.name}</h2>
 				</a>
-				<span class="font-mono text-[0.72rem] font-medium px-[0.4rem] py-[0.1rem] rounded-[3px] bg-surface border border-border text-text-muted">
-					{project.key}
-				</span>
+				<span class={KEY_BADGE_CLASS}>{project.key}</span>
 			</div>
 			<nav class="flex gap-0.5 px-5" aria-label="Project sections">
 				{tabs.map((tab) => {
@@ -106,11 +120,7 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 						<a
 							key={tab.path}
 							href={tab.href}
-							class={`inline-flex items-center px-3 py-2 rounded-t-md text-sm font-medium no-underline border border-b-0 -mb-px transition-[color,background] duration-100 ${
-								active
-									? "text-accent bg-bg border-border font-semibold"
-									: "text-text-muted border-transparent hover:text-text-base hover:bg-surface"
-							}`}
+							class={tabClass(active)}
 							aria-current={active ? "page" : undefined}
 						>
 							{tab.label}

@@ -1,8 +1,11 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq, inArray, or } from "drizzle-orm";
+import type { z } from "zod";
 import {
 	CreateIssueLinkSchema,
 	DeleteIssueLinkSchema,
+	type LinkTypeInputEnum,
+	type LinkTypeStoredEnum,
 	ListIssueLinksSchema,
 } from "../schemas/issues";
 import * as cache from "./cache";
@@ -10,8 +13,8 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
-type StoredLinkType = "blocks" | "relates_to" | "duplicates";
-type EffectiveLinkType = StoredLinkType | "blocked_by";
+type StoredLinkType = z.infer<typeof LinkTypeStoredEnum>;
+type EffectiveLinkType = z.infer<typeof LinkTypeInputEnum>;
 
 interface LinkRow {
 	id: string;

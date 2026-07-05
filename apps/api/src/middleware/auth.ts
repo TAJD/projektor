@@ -23,92 +23,122 @@ export interface AuthUser {
 	name: string;
 }
 
-export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
-	// 1. Cloudflare Access JWT (header or cookie)
+type AuthOutcome = { kind: "skip" } | { kind: "deny"; response: Response } | { kind: "allow" };
+
+// 1. Cloudflare Access JWT (header or cookie)
+async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	const cfJwt =
 		c.req.header("Cf-Access-Jwt-Assertion") ??
 		parseCookie(c.req.header("cookie") ?? "", "CF_Authorization");
+	if (!cfJwt) return { kind: "skip" };
 
-	if (cfJwt) {
-		const user = await validateCfAccessJwt(cfJwt, c.env);
-		if (!user) return c.json({ error: "Invalid Access token" }, 401);
-		await provisionUserOnLogin(c.env, user);
-		c.set("user", user);
-		return next();
+	const user = await validateCfAccessJwt(cfJwt, c.env);
+	if (!user) return { kind: "deny", response: c.json({ error: "Invalid Access token" }, 401) };
+
+	await provisionUserOnLogin(c.env, user);
+	c.set("user", user);
+	return { kind: "allow" };
+}
+
+async function tooManyAuthFailuresResponse(
+	c: Context<HonoEnv>,
+	message: string
+): Promise<Response> {
+	return (await tooManyAuthFailures(c))
+		? c.json({ error: "Too Many Requests" }, 429)
+		: c.json({ error: message }, 401);
+}
+
+// PROJ-17: enforce the token's scope. REST is gated here by HTTP method
+// (the single chokepoint where a token is authenticated). MCP is gated
+// per-tool in routes/mcp.ts, since one POST /mcp can carry a read OR a
+// write tool call, so method-based classification doesn't apply there.
+function checkTokenScope(
+	c: Context<HonoEnv>,
+	scopes: ReturnType<typeof parseScopes>
+): Response | null {
+	if (c.req.path.startsWith("/mcp/")) return null;
+	const required = capabilityForMethod(c.req.method);
+	if (!tokenAllows(scopes, required)) {
+		return c.json({ error: `Token lacks '${required}' scope` }, 403);
 	}
+	return null;
+}
 
-	// 2. API token (Authorization: Bearer <token>)
-	const authHeader = c.req.header("Authorization");
-	if (authHeader?.startsWith("Bearer ")) {
-		const token = authHeader.slice(7);
-
-		const sessionJson = await c.env.KV.get(`session:${token}`);
-		if (sessionJson) {
-			c.set("user", JSON.parse(sessionJson) as AuthUser);
-			return next();
-		}
-
-		const hash = await hashToken(token);
-		const row = await c.env.DB.prepare(
-			`SELECT at.workspace_id, at.expires_at, at.scopes,
+async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise<AuthOutcome> {
+	const hash = await hashToken(token);
+	const row = await c.env.DB.prepare(
+		`SELECT at.workspace_id, at.expires_at, at.scopes,
               u.id as user_id, u.email, u.name
        FROM api_tokens at
        LEFT JOIN users u ON u.id = at.user_id
        WHERE at.token_hash = ?`
-		)
-			.bind(hash)
-			.first<{
-				user_id: string;
-				email: string;
-				name: string;
-				workspace_id: string | null;
-				expires_at: number | null;
-				scopes: string | null;
-			}>();
+	)
+		.bind(hash)
+		.first<{
+			user_id: string;
+			email: string;
+			name: string;
+			workspace_id: string | null;
+			expires_at: number | null;
+			scopes: string | null;
+		}>();
 
-		if (!row) {
-			return (await tooManyAuthFailures(c))
-				? c.json({ error: "Too Many Requests" }, 429)
-				: c.json({ error: "Unauthorized" }, 401);
-		}
-		if (row.expires_at && row.expires_at < Date.now() / 1000) {
-			return (await tooManyAuthFailures(c))
-				? c.json({ error: "Too Many Requests" }, 429)
-				: c.json({ error: "Token expired" }, 401);
-		}
-
-		// PROJ-17: enforce the token's scope. REST is gated here by HTTP method
-		// (the single chokepoint where a token is authenticated). MCP is gated
-		// per-tool in routes/mcp.ts, since one POST /mcp can carry a read OR a
-		// write tool call, so method-based classification doesn't apply there.
-		const scopes = parseScopes(row.scopes);
-		if (!c.req.path.startsWith("/mcp/")) {
-			const required = capabilityForMethod(c.req.method);
-			if (!tokenAllows(scopes, required)) {
-				return c.json({ error: `Token lacks '${required}' scope` }, 403);
-			}
-		}
-
-		c.set("user", { id: row.user_id, email: row.email, name: row.name } satisfies AuthUser);
-		c.set("tokenWorkspaceId", row.workspace_id);
-		c.set("tokenScopes", scopes);
-
-		c.executionCtx.waitUntil(
-			c.env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?")
-				.bind(Math.floor(Date.now() / 1000), hash)
-				.run()
-		);
-
-		return next();
+	if (!row) {
+		return { kind: "deny", response: await tooManyAuthFailuresResponse(c, "Unauthorized") };
+	}
+	if (row.expires_at && row.expires_at < Date.now() / 1000) {
+		return { kind: "deny", response: await tooManyAuthFailuresResponse(c, "Token expired") };
 	}
 
-	// 3. Local dev bypass
-	if (c.env.ENVIRONMENT === "development" && c.env.DEV_USER_EMAIL) {
-		const email = c.env.DEV_USER_EMAIL;
-		const user = await upsertUserByEmail(email, c.env.DB);
-		await provisionUserOnLogin(c.env, user);
-		c.set("user", user);
-		return next();
+	const scopes = parseScopes(row.scopes);
+	const scopeError = checkTokenScope(c, scopes);
+	if (scopeError) return { kind: "deny", response: scopeError };
+
+	c.set("user", { id: row.user_id, email: row.email, name: row.name } satisfies AuthUser);
+	c.set("tokenWorkspaceId", row.workspace_id);
+	c.set("tokenScopes", scopes);
+
+	c.executionCtx.waitUntil(
+		c.env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?")
+			.bind(Math.floor(Date.now() / 1000), hash)
+			.run()
+	);
+
+	return { kind: "allow" };
+}
+
+// 2. API token (Authorization: Bearer <token>)
+async function tryBearerTokenAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
+	const authHeader = c.req.header("Authorization");
+	if (!authHeader?.startsWith("Bearer ")) return { kind: "skip" };
+
+	const token = authHeader.slice(7);
+
+	const sessionJson = await c.env.KV.get(`session:${token}`);
+	if (sessionJson) {
+		c.set("user", JSON.parse(sessionJson) as AuthUser);
+		return { kind: "allow" };
+	}
+
+	return authenticateApiToken(c, token);
+}
+
+// 3. Local dev bypass
+async function tryDevBypassAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
+	if (c.env.ENVIRONMENT !== "development" || !c.env.DEV_USER_EMAIL) return { kind: "skip" };
+
+	const user = await upsertUserByEmail(c.env.DEV_USER_EMAIL, c.env.DB);
+	await provisionUserOnLogin(c.env, user);
+	c.set("user", user);
+	return { kind: "allow" };
+}
+
+export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
+	for (const attempt of [tryCfAccessAuth, tryBearerTokenAuth, tryDevBypassAuth]) {
+		const outcome = await attempt(c);
+		if (outcome.kind === "deny") return outcome.response;
+		if (outcome.kind === "allow") return next();
 	}
 
 	return c.json({ error: "Unauthorized" }, 401);
@@ -120,34 +150,37 @@ export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
  * the validation logic without hitting CF's JWKS endpoint or KV.
  * The live path (validateCfAccessJwt) calls this after fetching/caching keys.
  */
-export async function verifyJwtPayload(
-	jwt: string,
-	keys: JsonWebKey[],
-	audience: string,
-	issuer: string
-): Promise<{ email: string } | null> {
-	const parts = jwt.split(".");
-	if (parts.length !== 3) return null;
+type JwtHeader = { alg: string; kid?: string };
+type JwtPayload = { exp: number; aud?: string | string[]; iss?: string; email: string };
 
-	let header: { alg: string; kid?: string };
-	let payload: { exp: number; aud?: string | string[]; iss?: string; email: string };
+function decodeJwtFields(parts: string[]): { header: JwtHeader; payload: JwtPayload } | null {
 	try {
-		header = JSON.parse(base64urlDecode(parts[0]));
-		payload = JSON.parse(base64urlDecode(parts[1]));
+		const header = JSON.parse(base64urlDecode(parts[0]));
+		const payload = JSON.parse(base64urlDecode(parts[1]));
+		return { header, payload };
 	} catch {
 		return null;
 	}
+}
 
-	if (header.alg !== "RS256") return null;
+function jwtClaimsValid(
+	header: JwtHeader,
+	payload: JwtPayload,
+	audience: string,
+	issuer: string
+): boolean {
+	if (header.alg !== "RS256") return false;
 
 	const now = Math.floor(Date.now() / 1000);
-	if (payload.exp < now) return null;
+	if (payload.exp < now) return false;
 
 	const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
-	if (!aud.includes(audience)) return null;
+	if (!aud.includes(audience)) return false;
 
-	if (payload.iss !== issuer) return null;
+	return payload.iss === issuer;
+}
 
+async function verifySignatureAgainstKeys(parts: string[], keys: JsonWebKey[]): Promise<boolean> {
 	const signingInput = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
 	const sig = base64urlToUint8Array(parts[2]);
 
@@ -160,12 +193,29 @@ export async function verifyJwtPayload(
 				false,
 				["verify"]
 			);
-			const valid = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sig, signingInput);
-			if (valid) return { email: payload.email };
+			if (await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, sig, signingInput)) return true;
 		} catch {}
 	}
 
-	return null;
+	return false;
+}
+
+export async function verifyJwtPayload(
+	jwt: string,
+	keys: JsonWebKey[],
+	audience: string,
+	issuer: string
+): Promise<{ email: string } | null> {
+	const parts = jwt.split(".");
+	if (parts.length !== 3) return null;
+
+	const decoded = decodeJwtFields(parts);
+	if (!decoded) return null;
+
+	if (!jwtClaimsValid(decoded.header, decoded.payload, audience, issuer)) return null;
+
+	const valid = await verifySignatureAgainstKeys(parts, keys);
+	return valid ? { email: decoded.payload.email } : null;
 }
 
 async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | null> {

@@ -51,20 +51,21 @@ export async function listCustomFieldDefs(ctx: ServiceCtx, projectId?: string | 
 	}));
 }
 
-export async function createCustomFieldDef(ctx: ServiceCtx, raw: unknown) {
-	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
-	const result = CreateCustomFieldDefSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { key, label, type, options, projectId } = result.data;
-
+function assertOptionsAllowedForType(type: string, options: string[] | undefined) {
 	if (type !== "select" && options && options.length > 0) {
 		throw new ValidationError({
 			formErrors: ["options can only be set for select fields"],
 			fieldErrors: {},
 		});
 	}
+}
 
-	const orm = drizzle(ctx.db, { schema });
+async function assertCustomFieldKeyAvailable(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	projectId: string | null | undefined,
+	key: string
+) {
 	const projCondition = projectId
 		? eq(schema.customFieldDefinitions.projectId, projectId)
 		: isNull(schema.customFieldDefinitions.projectId);
@@ -74,18 +75,23 @@ export async function createCustomFieldDef(ctx: ServiceCtx, raw: unknown) {
 		.from(schema.customFieldDefinitions)
 		.where(
 			and(
-				eq(schema.customFieldDefinitions.workspaceId, ctx.workspaceId),
+				eq(schema.customFieldDefinitions.workspaceId, workspaceId),
 				projCondition,
 				eq(schema.customFieldDefinitions.key, key)
 			)
 		)
 		.get();
 	if (existing) throw new ConflictError(`Custom field key '${key}' already exists`);
+}
 
+async function assertCustomFieldDefLimitNotReached(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string
+) {
 	const countRow = await orm
 		.select({ n: sql<number>`count(*)` })
 		.from(schema.customFieldDefinitions)
-		.where(eq(schema.customFieldDefinitions.workspaceId, ctx.workspaceId))
+		.where(eq(schema.customFieldDefinitions.workspaceId, workspaceId))
 		.get();
 	if ((countRow?.n ?? 0) >= 50) {
 		throw new ValidationError({
@@ -93,6 +99,19 @@ export async function createCustomFieldDef(ctx: ServiceCtx, raw: unknown) {
 			fieldErrors: {},
 		});
 	}
+}
+
+export async function createCustomFieldDef(ctx: ServiceCtx, raw: unknown) {
+	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
+	const result = CreateCustomFieldDefSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { key, label, type, options, projectId } = result.data;
+
+	assertOptionsAllowedForType(type, options);
+
+	const orm = drizzle(ctx.db, { schema });
+	await assertCustomFieldKeyAvailable(orm, ctx.workspaceId, projectId, key);
+	await assertCustomFieldDefLimitNotReached(orm, ctx.workspaceId);
 
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -110,26 +129,30 @@ export async function createCustomFieldDef(ctx: ServiceCtx, raw: unknown) {
 	return { id, key, label, type };
 }
 
-export async function updateCustomFieldDef(ctx: ServiceCtx, id: string, raw: unknown) {
-	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
-	const result = UpdateCustomFieldDefSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const data = result.data;
-
-	const orm = drizzle(ctx.db, { schema });
+async function getCustomFieldDefForUpdate(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	id: string
+) {
 	const existing = await orm
 		.select({ id: schema.customFieldDefinitions.id, type: schema.customFieldDefinitions.type })
 		.from(schema.customFieldDefinitions)
 		.where(
 			and(
 				eq(schema.customFieldDefinitions.id, id),
-				eq(schema.customFieldDefinitions.workspaceId, ctx.workspaceId)
+				eq(schema.customFieldDefinitions.workspaceId, workspaceId)
 			)
 		)
 		.get();
 	if (!existing) throw new NotFoundError("Custom field not found");
+	return existing;
+}
 
-	if ("options" in data && data.options !== undefined && existing.type !== "select") {
+function buildCustomFieldUpdateSet(
+	data: ReturnType<typeof UpdateCustomFieldDefSchema.parse>,
+	existingType: string
+) {
+	if ("options" in data && data.options !== undefined && existingType !== "select") {
 		throw new ValidationError({
 			formErrors: ["options can only be set for select fields"],
 			fieldErrors: {},
@@ -144,6 +167,19 @@ export async function updateCustomFieldDef(ctx: ServiceCtx, id: string, raw: unk
 
 	if (Object.keys(setObj).length === 0)
 		throw new ValidationError({ formErrors: ["Nothing to update"], fieldErrors: {} });
+
+	return setObj;
+}
+
+export async function updateCustomFieldDef(ctx: ServiceCtx, id: string, raw: unknown) {
+	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
+	const result = UpdateCustomFieldDefSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const data = result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+	const existing = await getCustomFieldDefForUpdate(orm, ctx.workspaceId, id);
+	const setObj = buildCustomFieldUpdateSet(data, existing.type);
 
 	await orm
 		.update(schema.customFieldDefinitions)
@@ -228,6 +264,37 @@ export async function seedDefaultCustomFields(db: D1Database, workspaceId: strin
 		.onConflictDoNothing();
 }
 
+function assertValidCustomFieldValue(
+	key: string,
+	value: string,
+	def: typeof schema.customFieldDefinitions.$inferSelect
+) {
+	if (def.type === "number") {
+		if (Number.isNaN(parseFloat(value)) || !Number.isFinite(parseFloat(value))) {
+			throw new ValidationError({
+				formErrors: [],
+				fieldErrors: { [key]: [`Custom field '${key}' expects a number`] },
+			});
+		}
+	} else if (def.type === "select") {
+		const options: string[] = def.options ? (JSON.parse(def.options) as string[]) : [];
+		if (!options.includes(value)) {
+			throw new ValidationError({
+				formErrors: [],
+				fieldErrors: { [key]: [`Value '${value}' is not a valid option for field '${key}'`] },
+			});
+		}
+	} else if (def.type === "date") {
+		const d = new Date(value);
+		if (Number.isNaN(d.getTime())) {
+			throw new ValidationError({
+				formErrors: [],
+				fieldErrors: { [key]: [`Custom field '${key}' expects a valid date`] },
+			});
+		}
+	}
+}
+
 export async function validateCustomFields(
 	db: D1Database,
 	workspaceId: string,
@@ -258,31 +325,7 @@ export async function validateCustomFields(
 		}
 
 		const value = String(rawValue);
-
-		if (def.type === "number") {
-			if (Number.isNaN(parseFloat(value)) || !Number.isFinite(parseFloat(value))) {
-				throw new ValidationError({
-					formErrors: [],
-					fieldErrors: { [key]: [`Custom field '${key}' expects a number`] },
-				});
-			}
-		} else if (def.type === "select") {
-			const options: string[] = def.options ? (JSON.parse(def.options) as string[]) : [];
-			if (!options.includes(value)) {
-				throw new ValidationError({
-					formErrors: [],
-					fieldErrors: { [key]: [`Value '${value}' is not a valid option for field '${key}'`] },
-				});
-			}
-		} else if (def.type === "date") {
-			const d = new Date(value);
-			if (Number.isNaN(d.getTime())) {
-				throw new ValidationError({
-					formErrors: [],
-					fieldErrors: { [key]: [`Custom field '${key}' expects a valid date`] },
-				});
-			}
-		}
+		assertValidCustomFieldValue(key, value, def);
 
 		writes.push({ fieldId: def.id, value });
 	}

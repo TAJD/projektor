@@ -34,29 +34,36 @@ function resolveAutoJoinRole(raw?: string): Role | null {
  * Invalid entries are skipped; a malformed value yields an empty map (so the
  * default-workspace behaviour applies, never a crash).
  */
+function parseDomainMapValue(v: unknown): { slug: string; role: Role } | null {
+	if (!v || typeof v !== "object") return null;
+	const slug =
+		typeof (v as { slug?: unknown }).slug === "string" ? (v as { slug: string }).slug.trim() : "";
+	const roleRaw =
+		typeof (v as { role?: unknown }).role === "string"
+			? (v as { role: string }).role.trim().toLowerCase()
+			: "member";
+	const role = (VALID_ROLES as readonly string[]).includes(roleRaw) ? (roleRaw as Role) : "member";
+	if (!slug) return null;
+	return { slug, role };
+}
+
+function parseDomainMapJson(raw: string): unknown {
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return null;
+	}
+}
+
 function parseDomainMap(raw?: string): Map<string, { slug: string; role: Role }> {
 	const map = new Map<string, { slug: string; role: Role }>();
 	if (!raw) return map;
-	let obj: unknown;
-	try {
-		obj = JSON.parse(raw);
-	} catch {
-		return map;
-	}
+	const obj = parseDomainMapJson(raw);
 	if (!obj || typeof obj !== "object") return map;
 	for (const [domain, v] of Object.entries(obj as Record<string, unknown>)) {
-		if (!v || typeof v !== "object") continue;
-		const slug =
-			typeof (v as { slug?: unknown }).slug === "string" ? (v as { slug: string }).slug.trim() : "";
-		const roleRaw =
-			typeof (v as { role?: unknown }).role === "string"
-				? (v as { role: string }).role.trim().toLowerCase()
-				: "member";
-		const role = (VALID_ROLES as readonly string[]).includes(roleRaw)
-			? (roleRaw as Role)
-			: "member";
+		const entry = parseDomainMapValue(v);
 		const d = domain.trim().toLowerCase();
-		if (slug && d) map.set(d, { slug, role });
+		if (entry && d) map.set(d, entry);
 	}
 	return map;
 }

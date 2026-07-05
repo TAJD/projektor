@@ -7,12 +7,12 @@
 //
 // RULE: never bind a row- or user-scaled array straight into a query. Split it with
 // `inChunks` so each underlying query stays under the cap.
-export const D1_BOUND_PARAM_LIMIT = 100;
+const D1_BOUND_PARAM_LIMIT = 100;
 
 // Conservative chunk size: leaves ~10 parameters of headroom for the other predicates in
 // the same query (a workspaceId filter, status filters, etc.). Every current caller binds
 // fewer than 10 extra params, so 90 is safe; shrink it if a query ever needs more.
-const CHUNK_SIZE = 90;
+const CHUNK_SIZE = D1_BOUND_PARAM_LIMIT - 10;
 
 /**
  * Run `op` over `items` in chunks small enough that each resulting query stays under D1's

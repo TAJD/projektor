@@ -8,12 +8,14 @@ import {
 	seedIssue,
 	seedMember,
 	seedProject,
+	seedProjectFixture,
 	seedTaskStatus,
 	seedTaskType,
 	seedUser,
 	seedWorkspaceRoles,
 } from "./helpers";
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issues API", () => {
 	let token: string;
 	let slug: string;
@@ -22,13 +24,7 @@ describe("Issues API", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	type IssuesPage = { items: Array<Record<string, unknown>>; nextCursor: number | null };
@@ -1012,6 +1008,7 @@ describe("Issues API", () => {
 	});
 });
 
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issues MCP — typeId", () => {
 	let token: string;
 	let slug: string;
@@ -1147,16 +1144,10 @@ describe("Issues MCP — typeId", () => {
 describe("Issues KV cache", () => {
 	let token: string;
 	let slug: string;
-	let workspaceId: string;
 	let projectId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, projectId } = await seedProjectFixture());
 	});
 
 	it("getIssue returns cached value on a second call (KV hit, D1 not re-read)", async () => {
@@ -1319,13 +1310,7 @@ describe("get_prioritized_issues MCP tool", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		userId = fixture.user.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
 	async function callPrioritized(args: Record<string, unknown> = {}) {
