@@ -18,6 +18,7 @@ interface FlowMetrics {
 	agentVsHuman: { agent: Distribution; human: Distribution };
 }
 
+// cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
 describe("Flow metrics (PROJ-252)", () => {
 	let token: string;
 	let slug: string;
@@ -121,5 +122,54 @@ describe("Flow metrics (PROJ-252)", () => {
 			headers: authHeaders(token, slug),
 		});
 		expect(res.status).toBe(404);
+	});
+
+	it("includes an issue created before the window but claimed+done inside it (PROJ-294)", async () => {
+		const DAY = 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const since = now - 3 * DAY;
+		const until = now;
+
+		const oldIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Created before window",
+			createdAt: now - 10 * DAY,
+		});
+		await stampFlowTimestamps(oldIssue.id, {
+			readyAt: now - 10 * DAY,
+			claimedAt: now - 2 * DAY,
+			doneAt: now - 1 * DAY,
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.cycleTime.count).toBe(1);
+		expect(metrics.cycleTime.avg).toBeCloseTo(DAY, 0);
+		expect(metrics.wipOverTime.some((b) => b.count >= 1)).toBe(true);
+	});
+
+	it("returns non-empty lead/cycle metrics for issues with backfilled done_at (PROJ-288)", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Pre-migration done" });
+		// Simulates the 0026 backfill outcome: done_at populated from completed_at
+		// for an issue that finished before flow-timestamp stamping existed.
+		await stampFlowTimestamps(issue.id, {
+			readyAt: now - 300,
+			claimedAt: now - 200,
+			doneAt: now - 50,
+		});
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.leadTime.count).toBe(1);
+		expect(metrics.cycleTime.count).toBe(1);
 	});
 });

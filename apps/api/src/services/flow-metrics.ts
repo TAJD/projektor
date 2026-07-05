@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { GetFlowMetricsSchema } from "../schemas/flow-metrics";
 import { NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
@@ -97,13 +97,9 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 
-	const conditions = [
-		eq(schema.issues.workspaceId, ctx.workspaceId),
-		eq(schema.issues.projectId, projectId),
-	];
-	if (since !== undefined) conditions.push(gte(schema.issues.createdAt, since));
-	if (until !== undefined) conditions.push(lte(schema.issues.createdAt, until));
-
+	// Scope by project only, not created_at: since/until describe an activity window
+	// (claimed/done), and an issue created before the window but active inside it must
+	// still count (e.g. WIP). Row count stays bounded by project size.
 	const issues = await orm
 		.select({
 			id: schema.issues.id,
@@ -112,14 +108,19 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 			doneAt: schema.issues.doneAt,
 		})
 		.from(schema.issues)
-		.where(and(...conditions));
+		.where(
+			and(eq(schema.issues.workspaceId, ctx.workspaceId), eq(schema.issues.projectId, projectId))
+		);
+
+	const inWindow = (t: number) =>
+		(since === undefined || t >= since) && (until === undefined || t <= until);
 
 	const leadTimes = issues
-		.filter((i) => i.readyAt !== null && i.doneAt !== null)
+		.filter((i) => i.readyAt !== null && i.doneAt !== null && inWindow(i.doneAt))
 		// biome-ignore lint/style/noNonNullAssertion: filtered above
 		.map((i) => i.doneAt! - i.readyAt!);
 	const cycleTimes = issues
-		.filter((i) => i.claimedAt !== null && i.doneAt !== null)
+		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
 		// biome-ignore lint/style/noNonNullAssertion: filtered above
 		.map((i) => i.doneAt! - i.claimedAt!);
 
@@ -128,7 +129,8 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const wipUntil = until ?? now;
 	const wipOverTime = buildWipOverTime(issues, wipSince, wipUntil);
 
-	const agentVsHuman = await computeAgentVsHuman(ctx, orm, issues);
+	const cycleWindowIssues = issues.filter((i) => i.doneAt === null || inWindow(i.doneAt));
+	const agentVsHuman = await computeAgentVsHuman(ctx, orm, cycleWindowIssues);
 
 	return {
 		leadTime: summarize(leadTimes),

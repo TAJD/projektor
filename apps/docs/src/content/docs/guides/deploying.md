@@ -168,6 +168,12 @@ wrangler deploy                                       # upload worker + assets
 Your `wrangler.toml` points `main`, `[assets].directory`, and `migrations_dir` at
 `./vendor/...`, which the extract step populates. `vendor/` is gitignored.
 
+## Upgrade notes
+
+**Subdomain-based workspace routing is now opt-in.** Set `WORKSPACE_SUBDOMAIN_ROUTING=true`
+if you rely on subdomain-based tenant routing; otherwise clients must send the
+`X-Workspace-Slug` header.
+
 ## Cutting a release (maintainers)
 
 Releases are tag-driven. From the `projektor` repo:

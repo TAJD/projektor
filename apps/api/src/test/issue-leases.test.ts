@@ -259,6 +259,29 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		expect(JSON.stringify(body)).toMatch(/WIP limit/i);
 	});
 
+	it("TOCTOU: N concurrent claims never push a project over the cap (PROJ-290)", async () => {
+		const agent = await registerAgent("worker");
+		const issues = await Promise.all(
+			Array.from({ length: 8 }, (_, i) =>
+				seedIssue(workspaceId, projectId, userId, { title: `C${i}` })
+			)
+		);
+
+		// Fire all claims at once: the read-then-insert bug let several each see cap-1
+		// and all proceed. The guarded INSERT must let at most `cap` (default 3) win.
+		const results = await Promise.all(issues.map((iss) => claim(iss.id, agent)));
+		const granted = results.filter((r) => r.status === 201).length;
+		expect(granted).toBeLessThanOrEqual(3);
+
+		const row = await env.DB.prepare(
+			`SELECT COUNT(*) AS n FROM issue_leases il JOIN issues i ON i.id = il.issue_id
+			 WHERE il.released_at IS NULL AND i.project_id = ?`
+		)
+			.bind(projectId)
+			.first<{ n: number }>();
+		expect(row!.n).toBeLessThanOrEqual(3);
+	});
+
 	it("respects a project's own agent_wip_limit override", async () => {
 		const patchRes = await SELF.fetch(`http://localhost/api/projects/${projectId}`, {
 			method: "PATCH",

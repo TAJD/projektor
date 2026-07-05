@@ -15,7 +15,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'   # apps/docs' astro 7 requires Node >= 22.12
+          node-version: '22.12.0'   # pinned; apps/docs' astro 7 requires Node >= 22.12
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - name: Generated docs are fresh

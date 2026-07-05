@@ -315,6 +315,39 @@ describe("PROJ-274: read-scoped token is denied write on every request", () => {
 		const body = (await res.json()) as { error: string };
 		expect(body.error).toMatch(/scope/i);
 	});
+
+	it("read-only token gets a JSON-RPC scope error calling a write MCP tool, never a cached bypass", async () => {
+		const fixture = await seedFixture();
+		const readOnlyToken = await seedToken(fixture.workspace.id, fixture.user.id, {
+			scopes: ["read"],
+		});
+
+		const res = await SELF.fetch(`http://localhost/mcp/${fixture.workspace.id}`, {
+			method: "POST",
+			headers: authHeaders(readOnlyToken, fixture.workspace.slug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "create_project", arguments: { name: "Blocked", key: "BLK" } },
+			}),
+		});
+		const body = (await res.json()) as { error?: { code: number; message: string } };
+		expect(body.error).toBeDefined();
+		expect(body.error?.code).toBe(-32003);
+		expect(body.error?.message).toMatch(/scope/i);
+	});
+
+	it("workspace-scoped token used against a different member workspace returns 403 (PROJ-16 confinement)", async () => {
+		const fixture = await seedFixture();
+		const otherWs = await seedWorkspace(`ws2-${crypto.randomUUID().slice(0, 8)}`);
+		await seedMember(otherWs.id, fixture.user.id, "member");
+
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			headers: authHeaders(fixture.token, otherWs.slug),
+		});
+		expect(res.status).toBe(403);
+	});
 });
 
 // ---------------------------------------------------------------------------

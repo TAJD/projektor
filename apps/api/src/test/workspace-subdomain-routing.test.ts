@@ -1,6 +1,17 @@
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { subdomainRoutingEnabled } from "../middleware/workspace";
 import { seedFixture } from "./helpers";
+
+describe("subdomainRoutingEnabled", () => {
+	it.each(["true", "1", "yes", "TRUE", "Yes", " true ", "1 "])("accepts %j", (v) => {
+		expect(subdomainRoutingEnabled(v)).toBe(true);
+	});
+
+	it.each([undefined, "", "false", "0", "no", "on"])("rejects %j", (v) => {
+		expect(subdomainRoutingEnabled(v)).toBe(false);
+	});
+});
 
 // PROJ-267 (epic PROJ-261, C2): Host-header subdomain routing is opt-in via
 // WORKSPACE_SUBDOMAIN_ROUTING and off by default.
@@ -52,5 +63,38 @@ describe("workspace subdomain routing (WORKSPACE_SUBDOMAIN_ROUTING)", () => {
 			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
 		});
 		expect(res.status).toBe(200);
+	});
+
+	it('flag "1" (truthy, non-"true") + no header + matching Host subdomain resolves', async () => {
+		const fixture = await seedFixture();
+		env.WORKSPACE_SUBDOMAIN_ROUTING = "1";
+		const res = await SELF.fetch(`http://localhost/mcp/${fixture.workspace.id}`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${fixture.token}`,
+				Host: `${fixture.workspace.slug}.example.com`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("flag off + no header + a resolvable subdomain warns before the 400", async () => {
+		const fixture = await seedFixture();
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const res = await SELF.fetch(`http://localhost/mcp/${fixture.workspace.id}`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${fixture.token}`,
+				Host: `${fixture.workspace.slug}.example.com`,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+		});
+		expect(res.status).toBe(400);
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(fixture.workspace.slug));
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("WORKSPACE_SUBDOMAIN_ROUTING"));
+		warnSpy.mockRestore();
 	});
 });

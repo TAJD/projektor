@@ -32,7 +32,7 @@ import {
 } from "./custom-fields";
 import { checkDefinitionOfReady } from "./definition-of-ready";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
-import { liveLeasedIssueIds } from "./issue-leases";
+import { issueEverHadAgentLease, issueHasLiveAgentLease, liveLeasedIssueIds } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
 import { inChunks } from "./sql";
 import { resolveStatus } from "./task-statuses";
@@ -654,6 +654,17 @@ function applyCompletedAtTransition(
 // on re-entry — so lead/cycle time still reflects rework after a reopen. "Ready" isn't
 // its own status_category (backlog and todo share category 'todo'), so it's detected
 // from the legacy `status` key instead: any status other than 'backlog'.
+function isClaimedState(
+	category: string | null | undefined,
+	key: string | null | undefined
+): boolean {
+	return category === "in_progress" || key === "in_progress" || key === "in_review";
+}
+
+function isDoneState(category: string | null | undefined, key: string | null | undefined): boolean {
+	return category === "done" || key === "done";
+}
+
 function applyFlowTimestampTransitions(
 	setValues: SetValues,
 	existing: ExistingIssue,
@@ -661,44 +672,17 @@ function applyFlowTimestampTransitions(
 	newStatusCategory: string | undefined
 ): void {
 	const wasReady = existing.status !== "backlog";
-	const isReady = resolvedStatusKey !== "backlog";
-	if (isReady && !wasReady && existing.readyAt == null) setValues.readyAt = now();
+	if (resolvedStatusKey !== "backlog" && !wasReady && existing.readyAt == null) {
+		setValues.readyAt = now();
+	}
 
-	const wasClaimed =
-		existing.statusCategory === "in_progress" ||
-		existing.status === "in_progress" ||
-		existing.status === "in_review";
-	const isClaimed =
-		newStatusCategory === "in_progress" ||
-		resolvedStatusKey === "in_progress" ||
-		resolvedStatusKey === "in_review";
+	const wasClaimed = isClaimedState(existing.statusCategory, existing.status);
+	const isClaimed = isClaimedState(newStatusCategory, resolvedStatusKey);
 	if (isClaimed && !wasClaimed && existing.claimedAt == null) setValues.claimedAt = now();
 
-	const wasDone = existing.statusCategory === "done" || existing.status === "done";
-	const isDone = newStatusCategory === "done" || resolvedStatusKey === "done";
+	const wasDone = isDoneState(existing.statusCategory, existing.status);
+	const isDone = isDoneState(newStatusCategory, resolvedStatusKey);
 	if (isDone && !wasDone && existing.doneAt == null) setValues.doneAt = now();
-}
-
-// PROJ-254: an agentSessionId identifies the session doing this update. No id (a
-// human via the browser, or any call that omits it) means "human" for gating purposes.
-async function resolveAgentKind(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	agentSessionId: string | undefined
-): Promise<"agent" | "human" | null> {
-	if (!agentSessionId) return null;
-	const session = await orm
-		.select({ kind: schema.agentSessions.kind })
-		.from(schema.agentSessions)
-		.where(
-			and(
-				eq(schema.agentSessions.id, agentSessionId),
-				eq(schema.agentSessions.workspaceId, ctx.workspaceId)
-			)
-		)
-		.get();
-	if (!session) throw new NotFoundError("Agent session not found");
-	return session.kind;
 }
 
 function assertCompletionReportPresent(data: UpdateIssueData): void {
@@ -714,37 +698,62 @@ function assertCompletionReportPresent(data: UpdateIssueData): void {
 	}
 }
 
-// PROJ-254: entering in_review as an agent requires a completion report in the same
-// call; entering done always requires a human, and requires a completion report to
-// already be on record (or supplied in this same call).
-async function assertReviewGate(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	data: UpdateIssueData,
+// PROJ-292: a review step is identified by its status key naming a review, NOT by a
+// dedicated category — there is no 'in_review' category (the default review status is
+// category 'in_progress'), and keying on the single literal "in_review" let a
+// workspace's custom review status (e.g. "code-review", "peer_review") slip the gate.
+function isReviewStatusKey(key: string | undefined): boolean {
+	return key != null && /review/i.test(key);
+}
+
+// Pure classification of what this status change is entering, shared by the gate
+// (what to enforce) and the completion-report stamp (PROJ-293 — stamp/post only on a
+// real transition, not on any update that happens to carry a completionReport).
+function classifyStatusTransition(
 	existing: ExistingIssue,
 	resolvedStatusKey: string,
 	newStatusCategory: string | undefined
-): Promise<void> {
-	const agentKind = await resolveAgentKind(orm, ctx, data.agentSessionId);
-
-	const wasInReview = existing.status === "in_review";
-	const enteringInReview = resolvedStatusKey === "in_review" && !wasInReview;
-	if (enteringInReview && agentKind === "agent") {
-		assertCompletionReportPresent(data);
-	}
+): { enteringInReview: boolean; enteringDone: boolean } {
+	const wasInReview = isReviewStatusKey(existing.status);
+	const enteringInReview = isReviewStatusKey(resolvedStatusKey) && !wasInReview;
 
 	const wasDone = existing.statusCategory === "done" || existing.status === "done";
 	const enteringDone = (newStatusCategory === "done" || resolvedStatusKey === "done") && !wasDone;
+	return { enteringInReview, enteringDone };
+}
+
+// PROJ-254/287/289/292: the gate is bound to the issue's LIVE AGENT LEASE — the one
+// signal an agent can't spoof by omitting agentSessionId or self-declaring
+// kind:"human". Entering review while an agent holds a live lease requires a
+// completion report; an agent (live lease) can never mark done; and the done-report
+// requirement applies only to issues an agent has actually worked, so ordinary human
+// closes (duplicates, won't-fix, chores) aren't blocked.
+async function assertReviewGate(
+	ctx: ServiceCtx,
+	data: UpdateIssueData,
+	existing: ExistingIssue,
+	transition: { enteringInReview: boolean; enteringDone: boolean }
+): Promise<void> {
+	const { enteringInReview, enteringDone } = transition;
+	if (!enteringInReview && !enteringDone) return;
+
+	const hasLiveAgentLease = await issueHasLiveAgentLease(ctx, existing.id);
+
+	if (enteringInReview && hasLiveAgentLease) {
+		assertCompletionReportPresent(data);
+	}
+
 	if (enteringDone) {
-		if (agentKind === "agent") {
+		if (hasLiveAgentLease) {
 			throw new ForbiddenError(
 				"An agent cannot mark an issue done — a human must approve (PROJ-254)"
 			);
 		}
-		if (existing.completionReportAt == null && !data.completionReport) {
+		const everAgentWorked = await issueEverHadAgentLease(ctx, existing.id);
+		if (everAgentWorked && existing.completionReportAt == null && !data.completionReport) {
 			throw new ValidationError({
 				formErrors: [
-					"A completion report is required before an issue can be marked done (PROJ-254)",
+					"A completion report is required before an agent-worked issue can be marked done (PROJ-254)",
 				],
 				fieldErrors: {},
 			});
@@ -758,8 +767,8 @@ async function applyStatusFields(
 	setValues: SetValues,
 	data: UpdateIssueData,
 	existing: ExistingIssue
-): Promise<void> {
-	if (data.status === undefined && !("statusId" in data)) return;
+): Promise<boolean> {
+	if (data.status === undefined && !("statusId" in data)) return false;
 
 	const { id: resolvedStatusId, key: resolvedStatusKey } = await resolveStatus(
 		ctx,
@@ -768,7 +777,8 @@ async function applyStatusFields(
 	);
 
 	const newStatusCategory = await fetchStatusCategory(orm, resolvedStatusId);
-	await assertReviewGate(orm, ctx, data, existing, resolvedStatusKey, newStatusCategory);
+	const transition = classifyStatusTransition(existing, resolvedStatusKey, newStatusCategory);
+	await assertReviewGate(ctx, data, existing, transition);
 
 	setValues.status = resolvedStatusKey;
 	setValues.statusId = resolvedStatusId;
@@ -776,6 +786,8 @@ async function applyStatusFields(
 
 	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
 	applyFlowTimestampTransitions(setValues, existing, resolvedStatusKey, newStatusCategory);
+
+	return transition.enteringInReview || transition.enteringDone;
 }
 
 function now(): number {
@@ -803,17 +815,21 @@ async function buildUpdateSetValues(
 	orm: ReturnType<typeof drizzle>,
 	data: UpdateIssueData,
 	existing: ExistingIssue
-): Promise<SetValues> {
+): Promise<{ setValues: SetValues; recordCompletionReport: boolean }> {
 	const setValues: SetValues = { updatedAt: now() };
 	applySimpleFields(setValues, data);
-	await applyStatusFields(ctx, orm, setValues, data, existing);
+	const reviewOrDoneTransition = await applyStatusFields(ctx, orm, setValues, data, existing);
 	if ("typeId" in data) {
 		setValues.typeId = await resolveTypeId(ctx, data.typeId);
 	}
-	if (data.completionReport) {
+	// PROJ-293: only stamp/post the report when the issue actually transitions into
+	// review or done — a title-only update carrying a completionReport must not
+	// pre-stamp completion_report_at (which would later satisfy the human-done gate).
+	const recordCompletionReport = Boolean(data.completionReport) && reviewOrDoneTransition;
+	if (recordCompletionReport) {
 		setValues.completionReportAt = now();
 	}
-	return setValues;
+	return { setValues, recordCompletionReport };
 }
 
 async function reindexIssueFts(
@@ -917,14 +933,19 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 		.get();
 	if (!existing) throw new NotFoundError("Issue not found");
 
-	const setValues = await buildUpdateSetValues(ctx, orm, data, existing);
+	const { setValues, recordCompletionReport } = await buildUpdateSetValues(
+		ctx,
+		orm,
+		data,
+		existing
+	);
 
 	await orm
 		.update(schema.issues)
 		.set(setValues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
 
-	if (data.completionReport) {
+	if (recordCompletionReport && data.completionReport) {
 		await addComment(ctx, {
 			issueId: id,
 			body: formatCompletionReportComment(data.completionReport),
@@ -1156,9 +1177,13 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 		const { ready, missing } = checkDefinitionOfReady(body ?? "");
 		return ready ? issue : { ...issue, needsGrooming: true, missingCriteria: missing };
 	});
+	// PROJ-291: don't SILENTLY drop not-ready issues — a caller seeing an empty list
+	// otherwise concludes "no work" when a differently-worded backlog exists. Surface
+	// the count so the caller knows to groom (or re-query with includeNotReady).
+	const droppedNotReady = annotated.filter((i) => "needsGrooming" in i).length;
 	const ready = includeNotReady ? annotated : annotated.filter((i) => !("needsGrooming" in i));
 
-	return { issues: ready.slice(0, limit) };
+	return { issues: ready.slice(0, limit), droppedNotReady: includeNotReady ? 0 : droppedNotReady };
 }
 
 function sanitizeFtsQuery(q: string): string {

@@ -57,6 +57,9 @@ AUTO_JOIN_ROLE = "viewer"
 # Set to "true" only if you've provisioned real workspace subdomains in DNS
 # (team.example.com -> slug "team") - otherwise the Host header's leading label
 # is just a CDN/proxy artifact, not a real tenant signal.
+# Upgrade note: this used to be effectively always-on for hosts with a
+# subdomain; if you relied on that, set this explicitly or switch clients to
+# send X-Workspace-Slug.
 # WORKSPACE_SUBDOMAIN_ROUTING = "true"
 
 # ─── Secrets (set ONCE; they persist on the Worker across every deploy) ────────

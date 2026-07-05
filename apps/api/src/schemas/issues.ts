@@ -18,7 +18,7 @@ export const CreateIssueSchema = z.object({
 
 // PROJ-254: completion report an agent (or human) submits when entering review /
 // before an issue can be marked done.
-export const CompletionReportSchema = z.object({
+const CompletionReportSchema = z.object({
 	summary: z.string().min(1),
 	verification: z.string().min(1),
 	prLink: z.string().url().optional(),

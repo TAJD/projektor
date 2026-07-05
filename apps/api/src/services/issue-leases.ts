@@ -33,21 +33,28 @@ async function assertIssueExists(
 	return { projectId: issue.projectId };
 }
 
-// Live (session-active, non-released) leases on issues in this project, capped by
-// the project's agent_wip_limit (falling back to DEFAULT_AGENT_WIP_LIMIT).
-async function assertWipCapacity(
+// The project's agent WIP cap (its own agent_wip_limit, else the default).
+async function fetchAgentWipCap(
 	orm: ReturnType<typeof drizzle>,
 	ctx: ServiceCtx,
-	projectId: string,
-	cutoff: number
-): Promise<void> {
+	projectId: string
+): Promise<number> {
 	const project = await orm
 		.select({ agentWipLimit: schema.projects.agentWipLimit })
 		.from(schema.projects)
 		.where(and(eq(schema.projects.id, projectId), eq(schema.projects.workspaceId, ctx.workspaceId)))
 		.get();
-	const cap = project?.agentWipLimit ?? DEFAULT_AGENT_WIP_LIMIT;
+	return project?.agentWipLimit ?? DEFAULT_AGENT_WIP_LIMIT;
+}
 
+// The issue ids currently held by a live lease in this project — only used to build
+// a helpful error when a claim is rejected for hitting the cap.
+async function liveLeaseHoldersForProject(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	projectId: string,
+	cutoff: number
+): Promise<string[]> {
 	const live = await orm
 		.select({ issueId: schema.issueLeases.issueId })
 		.from(schema.issueLeases)
@@ -62,12 +69,7 @@ async function assertWipCapacity(
 				gt(schema.agentSessions.lastHeartbeatAt, cutoff)
 			)
 		);
-
-	if (live.length >= cap) {
-		throw new ConflictError(
-			`Project agent WIP limit reached (${cap}); currently held: ${live.map((l) => l.issueId).join(", ")}`
-		);
-	}
+	return live.map((l) => l.issueId);
 }
 
 // The claiming session must itself be live — a dead agent can't hold a lease.
@@ -139,11 +141,17 @@ async function reclaimStaleLeaseOrThrow(
 }
 
 /**
- * Claim an issue for an agent session. Atomic: the partial UNIQUE index on
- * (workspace_id, issue_id) WHERE released_at IS NULL guarantees at most one
- * active lease per issue, so two concurrent claims can't both succeed — the
- * loser hits the constraint and is reported as a conflict. A lease whose owning
- * session has gone stale (stopped heartbeating) is reclaimed transparently.
+ * Claim an issue for an agent session. Two independent atomicity guards, both
+ * enforced inside a single INSERT so concurrent claims can't race (PROJ-290 —
+ * D1 has no interactive transactions, and a read-then-insert let two claims each
+ * see cap-1 and both proceed):
+ *   1. Per-issue: the partial UNIQUE index on (workspace_id, issue_id) WHERE
+ *      released_at IS NULL — at most one active lease per issue.
+ *   2. Per-project WIP cap: the INSERT ... SELECT ... WHERE (live-lease count) <
+ *      cap subquery is evaluated as part of the write statement (SQLite holds the
+ *      db write lock), so a concurrent claim sees the other's just-inserted row
+ *      and the count can't be undercounted.
+ * A lease whose owning session has gone stale is reclaimed transparently first.
  */
 export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = ClaimIssueSchema.safeParse(raw);
@@ -155,29 +163,43 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const { projectId } = await assertIssueExists(orm, ctx, issueId);
 	await assertAgentSessionLive(orm, ctx, agentId, cutoff);
-	await assertWipCapacity(orm, ctx, projectId, cutoff);
+	const cap = await fetchAgentWipCap(orm, ctx, projectId);
 
 	const now = Math.floor(Date.now() / 1000);
 	await reclaimStaleLeaseOrThrow(orm, ctx, issueId, cutoff, now);
 
 	const id = crypto.randomUUID();
+	let res: D1Result;
 	try {
-		await orm.insert(schema.issueLeases).values({
-			id,
-			workspaceId: ctx.workspaceId,
-			issueId,
-			agentSessionId: agentId,
-			claimedAt: now,
-			releasedAt: null,
-			releaseReason: null,
-		});
+		res = await ctx.db
+			.prepare(
+				`INSERT INTO issue_leases (id, workspace_id, issue_id, agent_session_id, claimed_at, released_at, release_reason)
+				 SELECT ?, ?, ?, ?, ?, NULL, NULL
+				 WHERE (
+				   SELECT COUNT(*) FROM issue_leases il
+				   JOIN issues i ON i.id = il.issue_id
+				   JOIN agent_sessions s ON s.id = il.agent_session_id
+				   WHERE il.workspace_id = ? AND il.released_at IS NULL
+				     AND i.project_id = ? AND s.status = 'active' AND s.last_heartbeat_at > ?
+				 ) < ?`
+			)
+			.bind(id, ctx.workspaceId, issueId, agentId, now, ctx.workspaceId, projectId, cutoff, cap)
+			.run();
 	} catch (e) {
-		// Lost a genuine race: another claim inserted the active lease first and
-		// the partial UNIQUE index rejected ours.
+		// Lost a genuine race: another claim inserted the active lease for THIS
+		// issue first and the partial UNIQUE index rejected ours.
 		if (e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
 			throw new ConflictError("Issue was just leased by another agent");
 		}
 		throw e;
+	}
+
+	// No row inserted and no UNIQUE violation ⇒ the WIP-cap guard subquery held.
+	if (res.meta.changes === 0) {
+		const held = await liveLeaseHoldersForProject(orm, ctx, projectId, cutoff);
+		throw new ConflictError(
+			`Project agent WIP limit reached (${cap}); currently held: ${held.join(", ")}`
+		);
 	}
 
 	const row = await orm
@@ -256,6 +278,56 @@ export async function liveLeasedIssueIds(ctx: ServiceCtx): Promise<Set<string>> 
 			)
 		);
 	return new Set(rows.map((r) => r.issueId));
+}
+
+/**
+ * Is there a LIVE lease held by an AGENT-kind session on this issue? This is the
+ * authoritative "an agent is actively working this issue" signal used by the
+ * review/done gate (PROJ-287), replacing the spoofable caller-supplied
+ * agentSessionId/kind — a caller cannot omit a field or self-declare kind:"human"
+ * to escape it while genuinely holding an agent lease.
+ */
+export async function issueHasLiveAgentLease(ctx: ServiceCtx, issueId: string): Promise<boolean> {
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ id: schema.issueLeases.id })
+		.from(schema.issueLeases)
+		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
+		.where(
+			and(
+				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+				eq(schema.issueLeases.issueId, issueId),
+				isNull(schema.issueLeases.releasedAt),
+				eq(schema.agentSessions.kind, "agent"),
+				eq(schema.agentSessions.status, "active"),
+				gt(schema.agentSessions.lastHeartbeatAt, liveCutoff())
+			)
+		)
+		.get();
+	return row != null;
+}
+
+/**
+ * Has this issue EVER been leased by an agent-kind session (live, released, or
+ * stale)? Scopes the human-done completion-report requirement to agent-worked
+ * issues (PROJ-289) so closing ordinary human/duplicate/won't-fix issues isn't
+ * blocked for a report no agent was ever going to write.
+ */
+export async function issueEverHadAgentLease(ctx: ServiceCtx, issueId: string): Promise<boolean> {
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ id: schema.issueLeases.id })
+		.from(schema.issueLeases)
+		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
+		.where(
+			and(
+				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+				eq(schema.issueLeases.issueId, issueId),
+				eq(schema.agentSessions.kind, "agent")
+			)
+		)
+		.get();
+	return row != null;
 }
 
 /**
