@@ -46,4 +46,21 @@ describe("ProjectNav", () => {
 		const wikiTab = screen.getByRole("link", { name: "Wiki" });
 		expect(wikiTab.getAttribute("aria-current")).toBeNull();
 	});
+
+	it("sets the document title to '<pageLabel> — <project name>' once resolved", async () => {
+		window.history.pushState({}, "", "/epics?id=p1");
+		mockFetchProject(PROJECT);
+		render(<ProjectNav pageLabel="Epics" />);
+		await screen.findByText("Projektor");
+		expect(document.title).toBe("Epics — Projektor");
+	});
+
+	it("leaves the document title untouched when no pageLabel is given", async () => {
+		document.title = "unchanged";
+		window.history.pushState({}, "", "/issues?id=p1");
+		mockFetchProject(PROJECT);
+		render(<ProjectNav />);
+		await screen.findByText("Projektor");
+		expect(document.title).toBe("unchanged");
+	});
 });

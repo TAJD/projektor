@@ -6,7 +6,7 @@ import IssueList from '../islands/IssueList';
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
 <Base title="Issues — Projektor">
-  <ProjectNav client:load workspaceSlug={workspaceSlug} />
+  <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Issues" />
   <div class="page-container">
     <IssueList client:load workspaceSlug={workspaceSlug} />
   </div>

@@ -6,6 +6,6 @@ import WikiPage from '../islands/WikiPage';
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
 <Base title="Wiki — Projektor">
-  <ProjectNav client:load workspaceSlug={workspaceSlug} />
+  <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Wiki" />
   <WikiPage client:load workspaceSlug={workspaceSlug} />
 </Base>
