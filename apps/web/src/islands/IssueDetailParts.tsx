@@ -53,13 +53,7 @@ function SectionDivider({ title }: { title: string }) {
 	);
 }
 
-function SidebarField({
-	label,
-	children,
-}: {
-	label: string;
-	children: preact.ComponentChildren;
-}) {
+function SidebarField({ label, children }: { label: string; children: preact.ComponentChildren }) {
 	return (
 		<div class="flex items-start gap-2 py-2">
 			<span class="text-[0.7rem] font-medium uppercase tracking-wider text-text-muted w-[4.5rem] shrink-0 pt-[0.2rem]">
@@ -294,7 +288,12 @@ export function TitleSection({
 						py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
 				/>
 				<div class="flex gap-2">
-					<button type="button" onClick={saveTitle} disabled={savingTitle} class="btn btn-primary btn-sm">
+					<button
+						type="button"
+						onClick={saveTitle}
+						disabled={savingTitle}
+						class="btn btn-primary btn-sm"
+					>
 						{savingTitle ? "Saving…" : "Save"}
 					</button>
 					<button
@@ -791,7 +790,12 @@ function AttachmentUploadForm({
 				/>
 				<span class="btn btn-outline btn-sm">{uploadFile ? uploadFile.name : "Choose file"}</span>
 			</label>
-			<button type="button" onClick={onUpload} disabled={!uploadFile || uploading} class="btn btn-primary">
+			<button
+				type="button"
+				onClick={onUpload}
+				disabled={!uploadFile || uploading}
+				class="btn btn-primary"
+			>
 				{uploading ? "Uploading…" : "Upload"}
 			</button>
 			<button type="button" onClick={onCancel} class="btn btn-outline">
@@ -853,7 +857,9 @@ export function AttachmentsSection({
 
 	return (
 		<section class="mb-8">
-			<SectionDivider title={`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`} />
+			<SectionDivider
+				title={`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`}
+			/>
 
 			{attachments.length > 0 && (
 				<div class="mb-4 flex flex-col gap-2">
@@ -1101,11 +1107,8 @@ export function CommentsSection({
 		doDeleteComment,
 	} = useCommentEditing(issueId, workspaceSlug, fetchComments);
 
-	const { newComment, setNewComment, postingComment, commentError, submitComment } = useNewCommentForm(
-		issueId,
-		workspaceSlug,
-		fetchComments
-	);
+	const { newComment, setNewComment, postingComment, commentError, submitComment } =
+		useNewCommentForm(issueId, workspaceSlug, fetchComments);
 
 	return (
 		<section>

@@ -40,7 +40,10 @@ async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	return { kind: "allow" };
 }
 
-async function tooManyAuthFailuresResponse(c: Context<HonoEnv>, message: string): Promise<Response> {
+async function tooManyAuthFailuresResponse(
+	c: Context<HonoEnv>,
+	message: string
+): Promise<Response> {
 	return (await tooManyAuthFailures(c))
 		? c.json({ error: "Too Many Requests" }, 429)
 		: c.json({ error: message }, 401);
@@ -50,7 +53,10 @@ async function tooManyAuthFailuresResponse(c: Context<HonoEnv>, message: string)
 // (the single chokepoint where a token is authenticated). MCP is gated
 // per-tool in routes/mcp.ts, since one POST /mcp can carry a read OR a
 // write tool call, so method-based classification doesn't apply there.
-function checkTokenScope(c: Context<HonoEnv>, scopes: ReturnType<typeof parseScopes>): Response | null {
+function checkTokenScope(
+	c: Context<HonoEnv>,
+	scopes: ReturnType<typeof parseScopes>
+): Response | null {
 	if (c.req.path.startsWith("/mcp/")) return null;
 	const required = capabilityForMethod(c.req.method);
 	if (!tokenAllows(scopes, required)) {
@@ -157,7 +163,12 @@ function decodeJwtFields(parts: string[]): { header: JwtHeader; payload: JwtPayl
 	}
 }
 
-function jwtClaimsValid(header: JwtHeader, payload: JwtPayload, audience: string, issuer: string): boolean {
+function jwtClaimsValid(
+	header: JwtHeader,
+	payload: JwtPayload,
+	audience: string,
+	issuer: string
+): boolean {
 	if (header.alg !== "RS256") return false;
 
 	const now = Math.floor(Date.now() / 1000);

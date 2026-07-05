@@ -51,7 +51,10 @@ function FilterSelects({
 						setFilterProject(v);
 						setFilterSprintId("");
 					}}
-					options={[{ value: "", label: "All projects" }, ...uniqueProjects.map((p) => ({ value: p.key, label: p.name }))]}
+					options={[
+						{ value: "", label: "All projects" },
+						...uniqueProjects.map((p) => ({ value: p.key, label: p.name })),
+					]}
 				/>
 			)}
 
@@ -62,7 +65,10 @@ function FilterSelects({
 					onChange={setFilterSprintId}
 					options={[
 						{ value: "", label: "All sprints" },
-						...sprints.map((s) => ({ value: s.id, label: `${s.status === "active" ? "● " : ""}${s.name}` })),
+						...sprints.map((s) => ({
+							value: s.id,
+							label: `${s.status === "active" ? "● " : ""}${s.name}`,
+						})),
 					]}
 				/>
 			)}
@@ -72,7 +78,10 @@ function FilterSelects({
 					ariaLabel="Filter by type"
 					value={filterType}
 					onChange={setFilterType}
-					options={[{ value: "", label: "All types" }, ...uniqueTypes.map(([key, name]) => ({ value: key, label: name }))]}
+					options={[
+						{ value: "", label: "All types" },
+						...uniqueTypes.map(([key, name]) => ({ value: key, label: name })),
+					]}
 				/>
 			)}
 
@@ -229,7 +238,12 @@ export default function Toolbar(props: ToolbarProps) {
 
 			<SavedViewsControl saved={saved} />
 
-			<SortControls sortBy={sortBy} setSortBy={setSortBy} sortDir={sortDir} setSortDir={setSortDir} />
+			<SortControls
+				sortBy={sortBy}
+				setSortBy={setSortBy}
+				sortDir={sortDir}
+				setSortDir={setSortDir}
+			/>
 		</div>
 	);
 }

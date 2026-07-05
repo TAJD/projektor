@@ -23,13 +23,12 @@ async function mcpCall<T>(
 describe("Comments REST API", () => {
 	let token: string;
 	let slug: string;
-	let workspaceId: string;
 	let userId: string;
 	let issueId: string;
 
 	beforeEach(async () => {
 		const fixture = await seedProjectFixture();
-		({ token, slug, workspaceId, userId } = fixture);
+		({ token, slug, userId } = fixture);
 
 		const res = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",

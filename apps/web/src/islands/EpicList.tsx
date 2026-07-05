@@ -135,7 +135,9 @@ function sortIndicator(key: SortKey, sortBy: SortKey, sortDir: "asc" | "desc") {
 	return <span class="ml-1 opacity-60">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-function EpicListHeader(props: FiltersPopoverProps & { epicTypeId: string | null; onOpenCreate: () => void }) {
+function EpicListHeader(
+	props: FiltersPopoverProps & { epicTypeId: string | null; onOpenCreate: () => void }
+) {
 	return (
 		<div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
 			<FiltersPopover {...props} />
@@ -533,7 +535,9 @@ function StatusFilterPills({
 						key={s.id}
 						aria-pressed={active}
 						onClick={() =>
-							setFilterStatuses((prev) => (active ? prev.filter((id) => id !== s.id) : [...prev, s.id]))
+							setFilterStatuses((prev) =>
+								active ? prev.filter((id) => id !== s.id) : [...prev, s.id]
+							)
 						}
 						style={{
 							padding: "0.25rem 0.625rem",

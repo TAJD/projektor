@@ -9,7 +9,9 @@ import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
 
-function buildTaskTypeUpdateSet(data: z.infer<typeof UpdateTaskTypeSchema>): Record<string, unknown> {
+function buildTaskTypeUpdateSet(
+	data: z.infer<typeof UpdateTaskTypeSchema>
+): Record<string, unknown> {
 	const setObj: Record<string, unknown> = {};
 	if (data.name !== undefined) setObj.name = data.name;
 	if ("color" in data) setObj.color = data.color ?? null;

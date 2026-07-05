@@ -68,9 +68,12 @@ export function useIssueFetching(
 		try {
 			const qs = buildFilterParams();
 			qs.set("limit", String(pageSize));
-			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(`/api/issues?${qs.toString()}`, {
-				workspaceSlug,
-			});
+			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(
+				`/api/issues?${qs.toString()}`,
+				{
+					workspaceSlug,
+				}
+			);
 			if (seq !== fetchSeq.current) return; // superseded by a newer request
 			setIssues(data.items);
 			setNextCursor(data.nextCursor ?? null);
@@ -91,9 +94,12 @@ export function useIssueFetching(
 			const qs = buildFilterParams();
 			qs.set("limit", String(pageSize));
 			qs.set("cursor", String(nextCursor));
-			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(`/api/issues?${qs.toString()}`, {
-				workspaceSlug,
-			});
+			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(
+				`/api/issues?${qs.toString()}`,
+				{
+					workspaceSlug,
+				}
+			);
 			setIssues((prev) => [...prev, ...data.items]);
 			setNextCursor(data.nextCursor ?? null);
 		} catch (e) {
@@ -107,5 +113,15 @@ export function useIssueFetching(
 		fetchIssues();
 	}, [fetchIssues]);
 
-	return { issues, setIssues, loading, hasLoadedOnce, error, nextCursor, loadingMore, fetchIssues, loadMore };
+	return {
+		issues,
+		setIssues,
+		loading,
+		hasLoadedOnce,
+		error,
+		nextCursor,
+		loadingMore,
+		fetchIssues,
+		loadMore,
+	};
 }

@@ -4,7 +4,8 @@ import type { SearchResult } from "./useIssueSearch";
 
 function countLabel(view: ViewMode, filtered: Issue[], totalIssues: number): string {
 	const listCount = view === "backlog" ? getBacklogIssues(filtered).length : filtered.length;
-	const suffix = view !== "backlog" && totalIssues !== filtered.length ? ` (of ${totalIssues})` : "";
+	const suffix =
+		view !== "backlog" && totalIssues !== filtered.length ? ` (of ${totalIssues})` : "";
 	return `${listCount} issue${listCount !== 1 ? "s" : ""}${suffix}`;
 }
 
@@ -52,7 +53,10 @@ export default function HeaderRow({
 				)}
 
 				{!isSearchActive && (
-					<fieldset aria-label="View mode" class="flex border border-border rounded-md overflow-hidden m-0 p-0">
+					<fieldset
+						aria-label="View mode"
+						class="flex border border-border rounded-md overflow-hidden m-0 p-0"
+					>
 						<legend class="hidden">View mode</legend>
 						{(["list", "board", "backlog"] as const).map((v) => (
 							<button

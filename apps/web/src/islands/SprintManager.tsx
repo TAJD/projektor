@@ -79,7 +79,10 @@ function formatDate(d: string | null): string {
 	return new Date(d).toLocaleDateString();
 }
 
-async function fetchSprintIssues(sprintId: string, workspaceSlug: string | undefined): Promise<Issue[]> {
+async function fetchSprintIssues(
+	sprintId: string,
+	workspaceSlug: string | undefined
+): Promise<Issue[]> {
 	const data = await apiFetch<{ items: Issue[] }>(
 		`/api/issues?sprintId=${encodeURIComponent(sprintId)}&limit=100`,
 		{ workspaceSlug }
@@ -337,7 +340,9 @@ function useSprintVelocity(sprints: Sprint[], workspaceSlug: string | undefined)
 
 		Promise.all(
 			completed.map((sprint) =>
-				fetchSprintIssues(sprint.id, workspaceSlug).then((issues) => computeVelocity(sprint, issues))
+				fetchSprintIssues(sprint.id, workspaceSlug).then((issues) =>
+					computeVelocity(sprint, issues)
+				)
 			)
 		)
 			.then((results) => {
@@ -485,7 +490,13 @@ interface SprintManagerContentProps {
 	velocity: ReturnType<typeof useSprintVelocity>;
 }
 
-function SprintManagerContent({ project, sprints, createForm, complete, velocity }: SprintManagerContentProps) {
+function SprintManagerContent({
+	project,
+	sprints,
+	createForm,
+	complete,
+	velocity,
+}: SprintManagerContentProps) {
 	const activeCount = activeCountOf(sprints);
 	const completedSprints = completedSprintsOf(sprints);
 	const showActiveNotice = shouldShowActiveNotice(activeCount, createForm.showCreate);
@@ -557,13 +568,16 @@ function SprintManagerContent({ project, sprints, createForm, complete, velocity
 			/>
 
 			{/* Velocity chart */}
-			{showVelocity && <VelocityChart data={velocity.velocityData} loading={velocity.velocityLoading} />}
+			{showVelocity && (
+				<VelocityChart data={velocity.velocityData} loading={velocity.velocityLoading} />
+			)}
 		</div>
 	);
 }
 
 export default function SprintManager({ workspaceSlug }: Props) {
-	const { projectId, project, sprints, loading, error, fetchSprints } = useSprintData(workspaceSlug);
+	const { projectId, project, sprints, loading, error, fetchSprints } =
+		useSprintData(workspaceSlug);
 	const velocity = useSprintVelocity(sprints, workspaceSlug);
 	const createForm = useSprintCreateForm(projectId, workspaceSlug, fetchSprints);
 	const complete = useSprintComplete(projectId, sprints, workspaceSlug, fetchSprints);
@@ -648,7 +662,12 @@ interface SprintDateFieldsProps {
 	onEndChange: (v: string) => void;
 }
 
-function SprintDateFields({ createStart, createEnd, onStartChange, onEndChange }: SprintDateFieldsProps) {
+function SprintDateFields({
+	createStart,
+	createEnd,
+	onStartChange,
+	onEndChange,
+}: SprintDateFieldsProps) {
 	return (
 		<div class="flex flex-col sm:flex-row gap-4 mb-4">
 			<div class="flex-1">
@@ -864,7 +883,10 @@ function SprintRow({
 				</span>
 			</div>
 			<div class="flex gap-2 items-center flex-wrap">
-				<a href={`/issues?sprintId=${encodeURIComponent(sprint.id)}`} class="btn btn-outline btn-sm">
+				<a
+					href={`/issues?sprintId=${encodeURIComponent(sprint.id)}`}
+					class="btn btn-outline btn-sm"
+				>
 					View issues →
 				</a>
 

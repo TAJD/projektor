@@ -6,7 +6,11 @@ import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
-async function assertIssueInWorkspace(orm: ReturnType<typeof drizzle>, workspaceId: string, issueId: string) {
+async function assertIssueInWorkspace(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	issueId: string
+) {
 	const issue = await orm
 		.select({ id: schema.issues.id })
 		.from(schema.issues)
@@ -15,17 +19,27 @@ async function assertIssueInWorkspace(orm: ReturnType<typeof drizzle>, workspace
 	if (!issue) throw new NotFoundError("Issue not found");
 }
 
-async function assertAgentInWorkspace(orm: ReturnType<typeof drizzle>, workspaceId: string, agentId: string) {
+async function assertAgentInWorkspace(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	agentId: string
+) {
 	const agent = await orm
 		.select({ id: schema.agentSessions.id })
 		.from(schema.agentSessions)
-		.where(and(eq(schema.agentSessions.id, agentId), eq(schema.agentSessions.workspaceId, workspaceId)))
+		.where(
+			and(eq(schema.agentSessions.id, agentId), eq(schema.agentSessions.workspaceId, workspaceId))
+		)
 		.get();
 	if (!agent) throw new NotFoundError("Agent session not found");
 }
 
 // inChunks keeps each query under D1's 100-bound-parameter cap. See services/sql.ts.
-async function loadActiveClaimsByPath(orm: ReturnType<typeof drizzle>, workspaceId: string, paths: string[]) {
+async function loadActiveClaimsByPath(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	paths: string[]
+) {
 	const activeClaims = await inChunks(paths, (chunk) =>
 		orm
 			.select()
@@ -41,7 +55,10 @@ async function loadActiveClaimsByPath(orm: ReturnType<typeof drizzle>, workspace
 	return new Map(activeClaims.map((c) => [c.path, c]));
 }
 
-function assertNoConflicts(paths: string[], claimsByPath: Map<string, { issueId: string; agentId: string | null }>) {
+function assertNoConflicts(
+	paths: string[],
+	claimsByPath: Map<string, { issueId: string; agentId: string | null }>
+) {
 	for (const path of paths) {
 		const existing = claimsByPath.get(path);
 		if (existing) {
@@ -85,7 +102,13 @@ async function overrideConflictingClaims(
 
 async function insertClaims(
 	orm: ReturnType<typeof drizzle>,
-	params: { workspaceId: string; issueId: string; agentId: string | undefined; paths: string[]; now: number }
+	params: {
+		workspaceId: string;
+		issueId: string;
+		agentId: string | undefined;
+		paths: string[];
+		now: number;
+	}
 ) {
 	const { workspaceId, issueId, agentId, paths, now } = params;
 	const created: (typeof schema.issueFileClaims.$inferSelect)[] = [];

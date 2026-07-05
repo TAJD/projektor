@@ -207,7 +207,6 @@ describe("EpicList", () => {
 		render(<EpicList />);
 		expect(await screen.findByRole("alert")).toBeTruthy();
 	});
-
 });
 
 describe("EpicList — priority sort", () => {

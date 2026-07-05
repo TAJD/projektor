@@ -27,10 +27,18 @@ function sprintStatusStyle(status: SprintDetail["status"]): {
 	borderColor: string;
 } {
 	if (status === "active") {
-		return { background: "rgba(37,99,235,0.12)", color: "var(--status-in-progress)", borderColor: "rgba(37,99,235,0.3)" };
+		return {
+			background: "rgba(37,99,235,0.12)",
+			color: "var(--status-in-progress)",
+			borderColor: "rgba(37,99,235,0.3)",
+		};
 	}
 	if (status === "completed") {
-		return { background: "rgba(22,163,74,0.12)", color: "var(--status-done)", borderColor: "rgba(22,163,74,0.3)" };
+		return {
+			background: "rgba(22,163,74,0.12)",
+			color: "var(--status-done)",
+			borderColor: "rgba(22,163,74,0.3)",
+		};
 	}
 	return { background: "var(--surface)", color: "var(--text-muted)", borderColor: "var(--border)" };
 }
@@ -126,7 +134,9 @@ function SprintEditFields({
 					<select
 						value={sprintEditStatus}
 						onChange={(e) =>
-							setSprintEditStatus((e.target as HTMLSelectElement).value as "planned" | "active" | "completed")
+							setSprintEditStatus(
+								(e.target as HTMLSelectElement).value as "planned" | "active" | "completed"
+							)
 						}
 						class={`cursor-pointer ${SPRINT_EDIT_INPUT_CLASS}`}
 					>
@@ -177,7 +187,10 @@ function SprintEditForm({
 	sprintEditError,
 	saveSprintEdit,
 	setSprintEditing,
-}: Omit<SprintBannerProps, "sprintDetail" | "openSprintEdit" | "setFilterSprintId" | "issues" | "sprintEditing">) {
+}: Omit<
+	SprintBannerProps,
+	"sprintDetail" | "openSprintEdit" | "setFilterSprintId" | "issues" | "sprintEditing"
+>) {
 	return (
 		<form onSubmit={saveSprintEdit}>
 			{sprintEditError && (
@@ -217,7 +230,11 @@ function SprintEditForm({
 					>
 						{sprintEditSaving ? "Saving…" : "Save"}
 					</button>
-					<button type="button" onClick={() => setSprintEditing(false)} class="btn btn-outline btn-sm">
+					<button
+						type="button"
+						onClick={() => setSprintEditing(false)}
+						class="btn btn-outline btn-sm"
+					>
 						Cancel
 					</button>
 				</div>
@@ -246,7 +263,9 @@ function SprintBannerView({
 					<span class="text-sm text-text-muted">
 						{new Date(sprintDetail.startDate * 1000).toLocaleDateString()}
 						{" – "}
-						{sprintDetail.endDate ? new Date(sprintDetail.endDate * 1000).toLocaleDateString() : "ongoing"}
+						{sprintDetail.endDate
+							? new Date(sprintDetail.endDate * 1000).toLocaleDateString()
+							: "ongoing"}
 					</span>
 				)}
 				<button
@@ -304,7 +323,9 @@ export default function SprintBannerSection({
 	const [sprintEditing, setSprintEditing] = useState(false);
 	const [sprintEditName, setSprintEditName] = useState("");
 	const [sprintEditGoal, setSprintEditGoal] = useState("");
-	const [sprintEditStatus, setSprintEditStatus] = useState<"planned" | "active" | "completed">("planned");
+	const [sprintEditStatus, setSprintEditStatus] = useState<"planned" | "active" | "completed">(
+		"planned"
+	);
 	const [sprintEditStart, setSprintEditStart] = useState("");
 	const [sprintEditEnd, setSprintEditEnd] = useState("");
 	const [sprintEditSaving, setSprintEditSaving] = useState(false);
@@ -330,7 +351,9 @@ export default function SprintBannerSection({
 			const body: Record<string, unknown> = { name: sprintEditName.trim() };
 			body.goal = sprintEditGoal.trim() || null;
 			body.status = sprintEditStatus;
-			body.startDate = sprintEditStart ? Math.floor(new Date(sprintEditStart).getTime() / 1000) : null;
+			body.startDate = sprintEditStart
+				? Math.floor(new Date(sprintEditStart).getTime() / 1000)
+				: null;
 			body.endDate = sprintEditEnd ? Math.floor(new Date(sprintEditEnd).getTime() / 1000) : null;
 			await apiFetch(`/api/sprints/${sprintDetail.id}`, { method: "PATCH", workspaceSlug, body });
 			const updated: SprintDetail = {
@@ -343,7 +366,9 @@ export default function SprintBannerSection({
 			};
 			setSprintDetail(updated);
 			setSprints((prev) =>
-				prev.map((s) => (s.id === updated.id ? { ...s, name: updated.name, status: updated.status } : s))
+				prev.map((s) =>
+					s.id === updated.id ? { ...s, name: updated.name, status: updated.status } : s
+				)
 			);
 			setSprintEditing(false);
 		} catch (err) {

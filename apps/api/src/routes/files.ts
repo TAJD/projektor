@@ -1,6 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
-import { Hono } from "hono";
 import type { Context } from "hono";
+import { Hono } from "hono";
 import { z } from "zod";
 
 const router = new Hono<HonoEnv>();

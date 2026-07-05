@@ -24,7 +24,11 @@ export function useSavedViews(
 	const viewsContainerRef = useRef<HTMLDivElement>(null);
 	const viewsMenuRef = useRef<HTMLUListElement>(null);
 	const viewsButtonRef = useRef<HTMLButtonElement>(null);
-	const viewsMenuPos = useRef<{ top: number; left: number; width: number }>({ top: 0, left: 0, width: 0 });
+	const viewsMenuPos = useRef<{ top: number; left: number; width: number }>({
+		top: 0,
+		left: 0,
+		width: 0,
+	});
 
 	// Load saved views from localStorage when the project context changes (PROJ-141)
 	useEffect(() => {

@@ -16,7 +16,8 @@ const TOOLBAR_BUTTON_CLASS =
 	"cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border";
 
 function mobileToggleClass(active: boolean): string {
-	const base = "px-[10px] py-[2px] border rounded-[3px] text-[0.8rem] font-[inherit] cursor-pointer";
+	const base =
+		"px-[10px] py-[2px] border rounded-[3px] text-[0.8rem] font-[inherit] cursor-pointer";
 	const state = active
 		? " bg-accent text-white border-accent"
 		: " border-border bg-transparent text-text-base";
@@ -86,17 +87,37 @@ function EditorToolbar({
 			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onBold} title="Bold (Ctrl+B)">
 				<strong>B</strong>
 			</button>
-			<button type="button" class={`${TOOLBAR_BUTTON_CLASS} italic`} onClick={onItalic} title="Italic (Ctrl+I)">
+			<button
+				type="button"
+				class={`${TOOLBAR_BUTTON_CLASS} italic`}
+				onClick={onItalic}
+				title="Italic (Ctrl+I)"
+			>
 				I
 			</button>
 			<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
-			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={() => onHeading(1)} title="Heading 1">
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={() => onHeading(1)}
+				title="Heading 1"
+			>
 				H1
 			</button>
-			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={() => onHeading(2)} title="Heading 2">
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={() => onHeading(2)}
+				title="Heading 2"
+			>
 				H2
 			</button>
-			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={() => onHeading(3)} title="Heading 3">
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={() => onHeading(3)}
+				title="Heading 3"
+			>
 				H3
 			</button>
 			<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
@@ -109,7 +130,12 @@ function EditorToolbar({
 			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onBulletList} title="Bullet list">
 				• List
 			</button>
-			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onNumberedList} title="Numbered list">
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={onNumberedList}
+				title="Numbered list"
+			>
 				1. List
 			</button>
 		</div>
@@ -147,7 +173,11 @@ function PreviewPane({ preview, mobilePreview }: { preview: string; mobilePrevie
 	);
 }
 
-function useMarkdownEditorView(value: string, onChange: (value: string) => void, minHeight: string) {
+function useMarkdownEditorView(
+	value: string,
+	onChange: (value: string) => void,
+	minHeight: string
+) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const viewRef = useRef<EditorView | null>(null);
 
@@ -263,7 +293,8 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 	}, [value]);
 
 	const { containerRef, viewRef } = useMarkdownEditorView(value, onChange, minHeight);
-	const { bold, italic, heading, link, codeBlock, bulletList, numberedList } = useMarkdownCommands(viewRef);
+	const { bold, italic, heading, link, codeBlock, bulletList, numberedList } =
+		useMarkdownCommands(viewRef);
 
 	return (
 		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case">

@@ -11,7 +11,9 @@ function SearchResultsTable({ results }: { results: SearchResult[] }) {
 						<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
 							#
 						</th>
-						<th class="text-left px-3 py-2 border-b-2 border-border font-semibold w-full text-text-base">Title</th>
+						<th class="text-left px-3 py-2 border-b-2 border-border font-semibold w-full text-text-base">
+							Title
+						</th>
 						<th class="text-left px-3 py-2 border-b-2 border-border font-semibold whitespace-nowrap text-text-base">
 							Priority
 						</th>
@@ -24,7 +26,9 @@ function SearchResultsTable({ results }: { results: SearchResult[] }) {
 					{results.map((r) => (
 						<tr key={r.id} class="border-b border-border">
 							<td class="px-3 py-2 align-middle whitespace-nowrap">
-								<span class="text-text-muted font-mono text-[0.8rem]">{formatIssueRef(r.project_key, r.number)}</span>
+								<span class="text-text-muted font-mono text-[0.8rem]">
+									{formatIssueRef(r.project_key, r.number)}
+								</span>
 							</td>
 							<td class="px-3 py-2 align-middle text-text-base">
 								<a
@@ -46,7 +50,9 @@ function SearchResultsTable({ results }: { results: SearchResult[] }) {
 								</span>
 							</td>
 							<td class="px-3 py-2 align-middle whitespace-nowrap">
-								<span class="font-medium text-sm text-text-muted">{r.status.replace(/_/g, " ")}</span>
+								<span class="font-medium text-sm text-text-muted">
+									{r.status.replace(/_/g, " ")}
+								</span>
 							</td>
 						</tr>
 					))}

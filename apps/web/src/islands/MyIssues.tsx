@@ -58,7 +58,10 @@ interface ProjectGroup {
 	issues: Issue[];
 }
 
-function groupIssuesByProject(visible: Issue[]): { order: string[]; byProject: Map<string, ProjectGroup> } {
+function groupIssuesByProject(visible: Issue[]): {
+	order: string[];
+	byProject: Map<string, ProjectGroup>;
+} {
 	const order: string[] = [];
 	const byProject = new Map<string, ProjectGroup>();
 	for (const issue of visible) {
@@ -140,7 +143,10 @@ function ProjectIssuesSection({ name, issues }: { name: string; issues: Issue[] 
 						<div class="font-mono text-[0.8rem] text-text-muted mb-1">
 							{formatIssueRef(issue.project_key, issue.number)}
 						</div>
-						<a href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)} class="no-underline">
+						<a
+							href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
+							class="no-underline"
+						>
 							<div class="text-[0.9rem] text-text-base font-medium mb-2">{issue.title}</div>
 						</a>
 						<div class="flex gap-[0.375rem] flex-wrap items-center">

@@ -96,7 +96,6 @@ describe("WikiPage", () => {
 		render(<WikiPage />);
 		expect(await screen.findByText(/Failed to load page/i)).toBeTruthy();
 	});
-
 });
 
 async function startEditingWithTitleInput(): Promise<HTMLInputElement> {
@@ -108,7 +107,11 @@ async function startEditingWithTitleInput(): Promise<HTMLInputElement> {
 	return screen.getByLabelText("Page title") as HTMLInputElement;
 }
 
-async function renderWithDraftAndOpenEdit(draft: { title: string; content: string; savedAt: number }) {
+async function renderWithDraftAndOpenEdit(draft: {
+	title: string;
+	content: string;
+	savedAt: number;
+}) {
 	history.replaceState(null, "", "?slug=my-page");
 	localStorage.setItem("wiki-draft:w1", JSON.stringify(draft));
 	mockFetchWiki(PAGE);

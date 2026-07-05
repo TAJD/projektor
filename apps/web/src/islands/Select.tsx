@@ -10,7 +10,11 @@ const OPEN_TRIGGER_KEYS = new Set(["ArrowDown", "Enter", " "]);
 
 // Close on outside click, and on scroll/resize (the fixed menu can't track its
 // anchor, so dismiss rather than let it drift).
-function useCloseOnOutside(open: boolean, close: () => void, rootRef: { current: HTMLDivElement | null }) {
+function useCloseOnOutside(
+	open: boolean,
+	close: () => void,
+	rootRef: { current: HTMLDivElement | null }
+) {
 	useEffect(() => {
 		if (!open) return;
 		function onDocPointer(e: MouseEvent) {

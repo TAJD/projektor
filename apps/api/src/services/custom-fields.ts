@@ -138,14 +138,20 @@ async function getCustomFieldDefForUpdate(
 		.select({ id: schema.customFieldDefinitions.id, type: schema.customFieldDefinitions.type })
 		.from(schema.customFieldDefinitions)
 		.where(
-			and(eq(schema.customFieldDefinitions.id, id), eq(schema.customFieldDefinitions.workspaceId, workspaceId))
+			and(
+				eq(schema.customFieldDefinitions.id, id),
+				eq(schema.customFieldDefinitions.workspaceId, workspaceId)
+			)
 		)
 		.get();
 	if (!existing) throw new NotFoundError("Custom field not found");
 	return existing;
 }
 
-function buildCustomFieldUpdateSet(data: ReturnType<typeof UpdateCustomFieldDefSchema.parse>, existingType: string) {
+function buildCustomFieldUpdateSet(
+	data: ReturnType<typeof UpdateCustomFieldDefSchema.parse>,
+	existingType: string
+) {
 	if ("options" in data && data.options !== undefined && existingType !== "select") {
 		throw new ValidationError({
 			formErrors: ["options can only be set for select fields"],

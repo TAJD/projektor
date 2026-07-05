@@ -136,7 +136,12 @@ export default function BoardView({
 								<p class="text-[0.8rem] text-text-muted text-center py-4 m-0">No issues</p>
 							) : (
 								colIssues.map((issue) => (
-									<BoardCard key={issue.id} issue={issue} dragIssueId={dragIssueId} setDragIssueId={setDragIssueId} />
+									<BoardCard
+										key={issue.id}
+										issue={issue}
+										dragIssueId={dragIssueId}
+										setDragIssueId={setDragIssueId}
+									/>
 								))
 							)}
 						</div>

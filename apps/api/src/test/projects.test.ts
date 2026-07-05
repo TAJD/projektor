@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedWorkspaceRoles } from "./helpers";
+import { authHeaders, seedWorkspaceRoles } from "./helpers";
 
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
 type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
@@ -34,7 +34,7 @@ describe("Projects REST", () => {
 	let memberToken: string;
 	let viewerToken: string;
 	let slug: string;
-	let workspaceId: string;
+	let _workspaceId: string;
 	let ownerHeaders: Record<string, string>;
 	let memberHeaders: Record<string, string>;
 	let viewerHeaders: Record<string, string>;
@@ -42,7 +42,7 @@ describe("Projects REST", () => {
 	beforeEach(async () => {
 		const roles = await seedWorkspaceRoles();
 		slug = roles.workspace.slug;
-		workspaceId = roles.workspace.id;
+		_workspaceId = roles.workspace.id;
 		ownerToken = roles.owner.token;
 		memberToken = roles.member.token;
 		viewerToken = roles.viewer.token;

@@ -62,7 +62,14 @@ export function useCreateIssueModal({
 		if (!createTitle.trim() || !createProjectId) return;
 		setSubmittingCreate(true);
 		setCreateError(null);
-		const createInput = { createProjectId, createTitle, createBody, createPriority, createStatusId, createTypeId };
+		const createInput = {
+			createProjectId,
+			createTitle,
+			createBody,
+			createPriority,
+			createStatusId,
+			createTypeId,
+		};
 		try {
 			const created = await apiFetch<{ id: string; number: number }>("/api/issues", {
 				method: "POST",
@@ -70,7 +77,11 @@ export function useCreateIssueModal({
 				body: buildCreateIssuePayload(createInput),
 			});
 
-			const newIssue = buildOptimisticIssue(created, createInput, { projects, statuses, taskTypes });
+			const newIssue = buildOptimisticIssue(created, createInput, {
+				projects,
+				statuses,
+				taskTypes,
+			});
 			setIssues((prev) => [newIssue, ...prev]);
 			setShowCreateModal(false);
 		} catch (err) {

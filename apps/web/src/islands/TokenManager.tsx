@@ -37,7 +37,8 @@ const MCP_COMMAND_CLASS =
 	"whitespace-pre-wrap leading-[1.6]";
 const TD_BASE = "px-3 py-2 border-b border-border align-middle [tr:last-child_&]:border-b-0";
 const TD_MUTED = `${TD_BASE} font-mono text-[0.8rem] text-text-muted`;
-const TH_CLASS = "text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap";
+const TH_CLASS =
+	"text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap";
 
 function parseScopes(raw: string): string[] {
 	try {
@@ -93,15 +94,20 @@ async function loadWorkspaceMeta(
 	setMcpCommandTemplate: (tpl: string) => void
 ) {
 	try {
-		const data = await apiFetch<{ id: string }>(`/api/workspaces/${workspaceSlug}`, { workspaceSlug });
+		const data = await apiFetch<{ id: string }>(`/api/workspaces/${workspaceSlug}`, {
+			workspaceSlug,
+		});
 		setWorkspaceId(data.id);
 	} catch {
 		// non-fatal
 	}
 	try {
-		const data = await apiFetch<{ mcpAddCommandTemplate: string }>(`/api/workspaces/${workspaceSlug}/mcp-info`, {
-			workspaceSlug,
-		});
+		const data = await apiFetch<{ mcpAddCommandTemplate: string }>(
+			`/api/workspaces/${workspaceSlug}/mcp-info`,
+			{
+				workspaceSlug,
+			}
+		);
 		setMcpCommandTemplate(data.mcpAddCommandTemplate);
 	} catch {
 		// non-fatal
@@ -120,7 +126,9 @@ async function fetchTokensRequest(workspaceSlug: string, setters: FetchTokensSet
 	setters.setError(null);
 	setters.setForbidden(false);
 	try {
-		const data = await apiFetch<ApiToken[]>(`/api/workspaces/${workspaceSlug}/tokens`, { workspaceSlug });
+		const data = await apiFetch<ApiToken[]>(`/api/workspaces/${workspaceSlug}/tokens`, {
+			workspaceSlug,
+		});
 		setters.setTokens(Array.isArray(data) ? data : []);
 	} catch (e) {
 		if (String(e).includes(": 403")) {
@@ -133,7 +141,11 @@ async function fetchTokensRequest(workspaceSlug: string, setters: FetchTokensSet
 	}
 }
 
-function buildCreateTokenBody(name: string, scope: TokenScope, expiryDays: string): Record<string, unknown> {
+function buildCreateTokenBody(
+	name: string,
+	scope: TokenScope,
+	expiryDays: string
+): Record<string, unknown> {
 	const scopes = scope === "read" ? SCOPE_READ : SCOPE_READWRITE;
 	const body: Record<string, unknown> = { name: name.trim(), scopes };
 	const days = parseInt(expiryDays, 10);
@@ -216,13 +228,18 @@ interface NewTokenPanelProps {
 	onDone: () => void;
 }
 
-function NewTokenPanel({ newToken, mcpCommandTemplate, mcpUrl, workspaceSlug, onDone }: NewTokenPanelProps) {
+function NewTokenPanel({
+	newToken,
+	mcpCommandTemplate,
+	mcpUrl,
+	workspaceSlug,
+	onDone,
+}: NewTokenPanelProps) {
 	const command = buildMcpCommand(mcpCommandTemplate, mcpUrl, workspaceSlug, newToken.token);
 	return (
 		<div class="bg-surface border border-border rounded-md p-4 mt-4">
 			<p class="m-0 mb-2 font-semibold text-[0.9rem] text-text-base">
-				Token created:{" "}
-				<span class="font-mono text-[0.8rem] text-text-muted">{newToken.name}</span>
+				Token created: <span class="font-mono text-[0.8rem] text-text-muted">{newToken.name}</span>
 			</p>
 			<p class="text-[var(--danger-text)] text-[0.8rem] my-1">
 				⚠ Copy this token now — you won't be able to see it again.
@@ -240,9 +257,15 @@ function NewTokenPanel({ newToken, mcpCommandTemplate, mcpUrl, workspaceSlug, on
 
 			{(mcpCommandTemplate || mcpUrl) && (
 				<div class="mt-4">
-					<p class="m-0 mb-[0.375rem] text-[0.8rem] font-semibold text-text-muted">Connect to Claude:</p>
+					<p class="m-0 mb-[0.375rem] text-[0.8rem] font-semibold text-text-muted">
+						Connect to Claude:
+					</p>
 					<div class={MCP_COMMAND_CLASS}>{command}</div>
-					<button type="button" class="btn btn-outline btn-sm mt-2" onClick={() => copyToClipboard(command)}>
+					<button
+						type="button"
+						class="btn btn-outline btn-sm mt-2"
+						onClick={() => copyToClipboard(command)}
+					>
 						Copy command
 					</button>
 					<p class="m-0 mt-[0.375rem] text-xs text-text-muted">
@@ -355,7 +378,11 @@ function CreateTokenForm({
 			)}
 
 			<div class="flex gap-2">
-				<button type="submit" class="btn btn-primary btn-sm" disabled={creating || !createName.trim()}>
+				<button
+					type="submit"
+					class="btn btn-primary btn-sm"
+					disabled={creating || !createName.trim()}
+				>
 					{creating ? "Creating…" : "Create token"}
 				</button>
 				<button type="button" class="btn btn-outline btn-sm" onClick={onCancel} disabled={creating}>
@@ -435,14 +462,18 @@ function TokenTableRow({
 	onConfirmRevoke,
 }: TokenTableRowProps) {
 	const expiresClass = `${TD_BASE} font-mono text-[0.8rem] ${
-		tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-[var(--danger-text)]" : "text-text-muted"
+		tok.expiresAt && tok.expiresAt < Date.now() / 1000
+			? "text-[var(--danger-text)]"
+			: "text-text-muted"
 	}`;
 	return (
 		<tr>
 			<td class={`${TD_BASE} text-text-base font-medium`}>{tok.name}</td>
 			<td class={TD_MUTED}>{formatScopes(tok.scopes)}</td>
 			<td class={TD_MUTED}>{formatDate(tok.createdAt)}</td>
-			<td class={expiresClass}>{tok.expiresAt === null ? "No expiry" : formatDate(tok.expiresAt)}</td>
+			<td class={expiresClass}>
+				{tok.expiresAt === null ? "No expiry" : formatDate(tok.expiresAt)}
+			</td>
 			<td class={TD_MUTED}>{formatDate(tok.lastUsedAt)}</td>
 			<td class={`${TD_BASE} whitespace-nowrap`}>
 				{revokeId === tok.id ? (
@@ -456,7 +487,12 @@ function TokenTableRow({
 						>
 							{revoking ? "…" : "Yes"}
 						</button>
-						<button type="button" class="btn btn-outline btn-sm" disabled={revoking} onClick={onCancelRevoke}>
+						<button
+							type="button"
+							class="btn btn-outline btn-sm"
+							disabled={revoking}
+							onClick={onCancelRevoke}
+						>
 							No
 						</button>
 						{revokeError && <span class="text-[var(--danger-text)] text-xs">{revokeError}</span>}

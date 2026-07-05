@@ -30,7 +30,9 @@ function StatusPills({
 						key={s.id}
 						aria-pressed={active}
 						onClick={() =>
-							setFilterStatuses((prev) => (active ? prev.filter((id) => id !== s.id) : [...prev, s.id]))
+							setFilterStatuses((prev) =>
+								active ? prev.filter((id) => id !== s.id) : [...prev, s.id]
+							)
 						}
 						style={{
 							padding: "0.25rem 0.625rem",
@@ -176,10 +178,18 @@ function FiltersToggleButton({
 	activeFilterCount: number;
 	onToggle: () => void;
 }) {
-	const activeStyle = activeFilterCount > 0
-		? { border: "none", background: "var(--accent)", color: "#fff", fontWeight: 600 }
-		: { border: "1px solid var(--border)", background: "var(--bg)", color: "var(--text)", fontWeight: 400 };
-	const searchState = isSearchActive ? { cursor: "default", opacity: 0.4 } : { cursor: "pointer", opacity: 1 };
+	const activeStyle =
+		activeFilterCount > 0
+			? { border: "none", background: "var(--accent)", color: "#fff", fontWeight: 600 }
+			: {
+					border: "1px solid var(--border)",
+					background: "var(--bg)",
+					color: "var(--text)",
+					fontWeight: 400,
+				};
+	const searchState = isSearchActive
+		? { cursor: "default", opacity: 0.4 }
+		: { cursor: "pointer", opacity: 1 };
 
 	return (
 		<button
@@ -227,14 +237,21 @@ function FiltersPopoverContent(
 	} = props;
 	return (
 		<>
-			<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">Status</div>
+			<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
+				Status
+			</div>
 			<StatusPills
 				derivedStatuses={derivedStatuses}
 				filterStatuses={filterStatuses}
 				setFilterStatuses={setFilterStatuses}
 			/>
-			<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">Priority</div>
-			<PriorityPills filterPriorities={filterPriorities} setFilterPriorities={setFilterPriorities} />
+			<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
+				Priority
+			</div>
+			<PriorityPills
+				filterPriorities={filterPriorities}
+				setFilterPriorities={setFilterPriorities}
+			/>
 			<DateRangeFilter
 				filterDateField={props.filterDateField}
 				setFilterDateField={props.setFilterDateField}
@@ -297,7 +314,8 @@ export default function FiltersPopover({
 	}, [showFiltersPopover]);
 
 	const dateFilterActive = !!(filterDateField && (filterDateFrom || filterDateTo));
-	const activeFilterCount = filterStatuses.length + filterPriorities.length + (dateFilterActive ? 1 : 0);
+	const activeFilterCount =
+		filterStatuses.length + filterPriorities.length + (dateFilterActive ? 1 : 0);
 
 	return (
 		<div class="relative" ref={containerRef}>

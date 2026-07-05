@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "preact/hooks";
 import { formatIssueRef } from "../lib/issue-ref";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
-import type { Attachment, Comment, IssueData, IssueLink, Member, TaskStatus } from "./issue-detail-helpers";
 import {
 	AttachmentsSection,
 	BodySection,
@@ -15,6 +14,14 @@ import {
 	SidebarPanel,
 	TitleSection,
 } from "./IssueDetailParts";
+import type {
+	Attachment,
+	Comment,
+	IssueData,
+	IssueLink,
+	Member,
+	TaskStatus,
+} from "./issue-detail-helpers";
 
 interface Props {
 	issueId?: string;
@@ -228,7 +235,18 @@ function useIssueCore(
 		]).finally(() => setLoading(false));
 	}, [fetchIssue, fetchComments, fetchLinks, fetchAttachments, workspaceSlug]);
 
-	return { issue, setIssue, comments, statuses, loading, error, members, currentUserId, fetchIssue, fetchComments };
+	return {
+		issue,
+		setIssue,
+		comments,
+		statuses,
+		loading,
+		error,
+		members,
+		currentUserId,
+		fetchIssue,
+		fetchComments,
+	};
 }
 
 function useIssueMutations(args: {
@@ -323,16 +341,17 @@ function useIssueMutations(args: {
 		}
 	}
 
-	return { updatingStatus, updatingPriority, updatingAssignee, changeStatus, changePriority, changeAssignee };
+	return {
+		updatingStatus,
+		updatingPriority,
+		updatingAssignee,
+		changeStatus,
+		changePriority,
+		changeAssignee,
+	};
 }
 
-function IssueBreadcrumb({
-	issue,
-	backHref,
-}: {
-	issue: IssueData;
-	backHref: string | null;
-}) {
+function IssueBreadcrumb({ issue, backHref }: { issue: IssueData; backHref: string | null }) {
 	return (
 		<nav class="text-sm text-text-muted mb-5">
 			{issue.type_key === "epic" ? (
@@ -393,7 +412,8 @@ function IssueDetailView(props: {
 				>
 					<span>⚠</span>
 					<span>
-						Blocked by {props.blockedByLinks.length} issue{props.blockedByLinks.length > 1 ? "s" : ""}
+						Blocked by {props.blockedByLinks.length} issue
+						{props.blockedByLinks.length > 1 ? "s" : ""}
 					</span>
 				</div>
 			)}
@@ -485,19 +505,40 @@ export default function IssueDetail({
 	projectSlug,
 	workspaceSlug,
 }: Props) {
-	const { issueId, resolveError } = useResolvedIssueId(issueIdProp, issueNumber, projectSlug, workspaceSlug);
+	const { issueId, resolveError } = useResolvedIssueId(
+		issueIdProp,
+		issueNumber,
+		projectSlug,
+		workspaceSlug
+	);
 	const backHref = useBackHref();
 
 	const { links, fetchingLinks, fetchLinks } = useIssueLinks(issueId, workspaceSlug);
 	const { attachments, fetchAttachments } = useIssueAttachments(issueId, workspaceSlug);
 
-	const { issue, setIssue, comments, statuses, loading, error, members, currentUserId, fetchIssue, fetchComments } =
-		useIssueCore(issueId, workspaceSlug, fetchLinks, fetchAttachments);
+	const {
+		issue,
+		setIssue,
+		comments,
+		statuses,
+		loading,
+		error,
+		members,
+		currentUserId,
+		fetchIssue,
+		fetchComments,
+	} = useIssueCore(issueId, workspaceSlug, fetchLinks, fetchAttachments);
 
 	const { parentEpic, childIssues } = useEpicRelations(issue, workspaceSlug);
 
-	const { updatingStatus, updatingPriority, updatingAssignee, changeStatus, changePriority, changeAssignee } =
-		useIssueMutations({ issue, setIssue, issueId, workspaceSlug, statuses, members, fetchIssue });
+	const {
+		updatingStatus,
+		updatingPriority,
+		updatingAssignee,
+		changeStatus,
+		changePriority,
+		changeAssignee,
+	} = useIssueMutations({ issue, setIssue, issueId, workspaceSlug, statuses, members, fetchIssue });
 
 	if (!issueId)
 		return (

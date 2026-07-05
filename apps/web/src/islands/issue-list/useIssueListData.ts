@@ -21,10 +21,25 @@ interface FilterInputs {
  * lookup lists (statuses/projects/task types/epics/sprints), the active
  * sprint's detail, and the mutation helpers (changeStatus/changePriority).
  */
-export function useIssueListData(workspaceSlug: string | undefined, view: ViewMode, filters: FilterInputs) {
+export function useIssueListData(
+	workspaceSlug: string | undefined,
+	view: ViewMode,
+	filters: FilterInputs
+) {
 	const lookups = useIssueLookups(workspaceSlug, filters.filterProject, filters.filterSprintId);
-	const fetching = useIssueFetching(workspaceSlug, view, filters, lookups.projects, lookups.taskTypes);
-	const mutations = useIssueMutations(workspaceSlug, lookups.statuses, fetching.setIssues, fetching.fetchIssues);
+	const fetching = useIssueFetching(
+		workspaceSlug,
+		view,
+		filters,
+		lookups.projects,
+		lookups.taskTypes
+	);
+	const mutations = useIssueMutations(
+		workspaceSlug,
+		lookups.statuses,
+		fetching.setIssues,
+		fetching.fetchIssues
+	);
 
 	return { ...lookups, ...fetching, ...mutations };
 }

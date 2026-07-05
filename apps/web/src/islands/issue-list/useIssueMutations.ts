@@ -23,19 +23,23 @@ export function useIssueMutations(
 			prev.map((i) =>
 				i.id === issueId
 					? {
-						...i,
-						status_id: status.id,
-						status_key: status.key,
-						status_name: status.name,
-						status_category: status.category,
-					}
+							...i,
+							status_id: status.id,
+							status_key: status.key,
+							status_name: status.name,
+							status_category: status.category,
+						}
 					: i
 			)
 		);
 
 		setUpdatingId(issueId);
 		try {
-			await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", workspaceSlug, body: { statusId } });
+			await apiFetch(`/api/issues/${issueId}`, {
+				method: "PATCH",
+				workspaceSlug,
+				body: { statusId },
+			});
 		} catch (e) {
 			setUpdateError(`Status update failed: ${String(e)}`);
 			// Revert by refetching authoritative data
@@ -51,7 +55,11 @@ export function useIssueMutations(
 
 		setUpdatingPriorityId(issueId);
 		try {
-			await apiFetch(`/api/issues/${issueId}`, { method: "PATCH", workspaceSlug, body: { priority } });
+			await apiFetch(`/api/issues/${issueId}`, {
+				method: "PATCH",
+				workspaceSlug,
+				body: { priority },
+			});
 		} catch (e) {
 			setUpdateError(`Priority update failed: ${String(e)}`);
 			await fetchIssues();

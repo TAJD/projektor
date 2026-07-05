@@ -30,7 +30,9 @@ export function useIssueSearch(workspaceSlug: string | undefined) {
 		const timer = setTimeout(async () => {
 			try {
 				const params = new URLSearchParams({ q });
-				const data = await apiFetch<SearchResult[]>(`/api/issues/search?${params}`, { workspaceSlug });
+				const data = await apiFetch<SearchResult[]>(`/api/issues/search?${params}`, {
+					workspaceSlug,
+				});
 				setSearchResults(Array.isArray(data) ? data : []);
 			} catch {
 				setSearchResults([]);
@@ -43,5 +45,12 @@ export function useIssueSearch(workspaceSlug: string | undefined) {
 
 	const isSearchActive = searchQuery.trim().length > 0;
 
-	return { searchQuery, setSearchQuery, searchResults, searchLoading, searchInputRef, isSearchActive };
+	return {
+		searchQuery,
+		setSearchQuery,
+		searchResults,
+		searchLoading,
+		searchInputRef,
+		isSearchActive,
+	};
 }

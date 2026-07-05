@@ -122,7 +122,14 @@ function IssueListTop({
 }
 
 /** Main content area (search/board/backlog/list) + the create-issue modal. */
-function IssueListMain({ view, filtered, search, data, filters, createModal }: IssueListLayoutProps) {
+function IssueListMain({
+	view,
+	filtered,
+	search,
+	data,
+	filters,
+	createModal,
+}: IssueListLayoutProps) {
 	return (
 		<>
 			<MainContent

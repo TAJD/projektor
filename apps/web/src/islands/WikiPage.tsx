@@ -188,7 +188,13 @@ function PageTreeList({
 	return (
 		<ul class="list-none m-0 p-0">
 			{tree.map((node) => (
-				<TreeNodeItem key={node.id} node={node} currentSlug={slug} depth={0} onNavigate={onNavigate} />
+				<TreeNodeItem
+					key={node.id}
+					node={node}
+					currentSlug={slug}
+					depth={0}
+					onNavigate={onNavigate}
+				/>
 			))}
 			{tree.length === 0 && <li class="text-[0.8rem] text-text-muted">No pages yet</li>}
 		</ul>
@@ -222,7 +228,11 @@ function WikiSidebar({
 	].join(" ");
 	return (
 		<aside class={asideClass}>
-			<button type="button" onClick={onCreate} class="btn btn-primary w-full mb-4 max-sm:min-h-[44px]">
+			<button
+				type="button"
+				onClick={onCreate}
+				class="btn btn-primary w-full mb-4 max-sm:min-h-[44px]"
+			>
 				+ New page
 			</button>
 			<input
@@ -345,7 +355,11 @@ function PageBreadcrumbs({
 			class="wiki-breadcrumb text-[0.8rem] text-text-muted mb-3 flex flex-wrap gap-1 items-center"
 			aria-label="Breadcrumb"
 		>
-			<button type="button" class={BREADCRUMB_BUTTON_CLASS} onClick={() => onNavigate(breadcrumbs[0].slug)}>
+			<button
+				type="button"
+				class={BREADCRUMB_BUTTON_CLASS}
+				onClick={() => onNavigate(breadcrumbs[0].slug)}
+			>
 				Home
 			</button>
 			{breadcrumbs.slice(1, -1).map((crumb) => (
@@ -367,9 +381,11 @@ function PageBreadcrumbs({
 	);
 }
 
-const TOC_LINK_BASE_CLASS = "block py-[0.2rem] no-underline border-l-2 transition-[color,border-color] duration-150";
+const TOC_LINK_BASE_CLASS =
+	"block py-[0.2rem] no-underline border-l-2 transition-[color,border-color] duration-150";
 const TOC_LINK_ACTIVE_CLASS = "text-accent border-accent font-medium";
-const TOC_LINK_INACTIVE_CLASS = "text-text-muted border-border hover:text-accent hover:border-accent";
+const TOC_LINK_INACTIVE_CLASS =
+	"text-text-muted border-border hover:text-accent hover:border-accent";
 
 function TocList({
 	toc,
@@ -518,7 +534,10 @@ function RevisionsHistory({
 			{showHistory && (
 				<ul class="mt-3 list-none p-0">
 					{revisions.map((r) => (
-						<li key={r.id} class="py-[0.375rem] border-b border-border text-[0.8rem] text-text-muted">
+						<li
+							key={r.id}
+							class="py-[0.375rem] border-b border-border text-[0.8rem] text-text-muted"
+						>
 							<strong class="text-text-base">{r.author_name ?? "Unknown"}</strong>
 							{" — "}
 							{new Date(r.created_at * 1000).toLocaleString()}
@@ -588,7 +607,12 @@ function AttachmentUploadForm({
 				/>
 				<span class="btn btn-outline btn-sm">{uploadFile ? uploadFile.name : "Choose file"}</span>
 			</label>
-			<button type="button" onClick={onUpload} disabled={!uploadFile || uploading} class="btn btn-primary">
+			<button
+				type="button"
+				onClick={onUpload}
+				disabled={!uploadFile || uploading}
+				class="btn btn-primary"
+			>
 				{uploading ? "Uploading…" : "Upload"}
 			</button>
 			<button type="button" onClick={onCancel} class="btn btn-outline">
@@ -637,7 +661,12 @@ function AttachmentsPanel({
 			{attachments.length > 0 && (
 				<div class="mb-4 flex flex-col gap-2">
 					{attachments.map((a) => (
-						<AttachmentEntry key={a.id} attachment={a} workspaceSlug={workspaceSlug} onDelete={onDeleteAttachment} />
+						<AttachmentEntry
+							key={a.id}
+							attachment={a}
+							workspaceSlug={workspaceSlug}
+							onDelete={onDeleteAttachment}
+						/>
 					))}
 				</div>
 			)}
@@ -763,8 +792,8 @@ function PageArticleMeta(
 			{props.latestRevision && (
 				<p class="text-[0.8rem] text-text-muted mt-1 mb-5">
 					Last edited by{" "}
-					<strong class="text-text-base">{props.latestRevision.author_name ?? "Unknown"}</strong>{" "}
-					at {new Date(props.latestRevision.created_at * 1000).toLocaleString()}
+					<strong class="text-text-base">{props.latestRevision.author_name ?? "Unknown"}</strong> at{" "}
+					{new Date(props.latestRevision.created_at * 1000).toLocaleString()}
 				</p>
 			)}
 
@@ -794,7 +823,11 @@ function PageArticle(props: PageArticleProps) {
 
 				{props.editing ? (
 					<div class="mb-3">
-						<MarkdownEditor value={props.editContent} onChange={props.onEditContentChange} minHeight="320px" />
+						<MarkdownEditor
+							value={props.editContent}
+							onChange={props.onEditContentChange}
+							minHeight="320px"
+						/>
 					</div>
 				) : (
 					<div
@@ -973,7 +1006,9 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 			setRevisions([]);
 			setShowHistory(false);
 			try {
-				setPage(await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, { workspaceSlug }));
+				setPage(
+					await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, { workspaceSlug })
+				);
 			} catch (e) {
 				setError(String(e));
 			} finally {
@@ -986,9 +1021,12 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 	const fetchRevisions = useCallback(
 		async (s: string) => {
 			try {
-				const data = await apiFetch<WikiRevision[]>(`/api/wiki/${encodeURIComponent(s)}/revisions`, {
-					workspaceSlug,
-				});
+				const data = await apiFetch<WikiRevision[]>(
+					`/api/wiki/${encodeURIComponent(s)}/revisions`,
+					{
+						workspaceSlug,
+					}
+				);
 				setRevisions(Array.isArray(data) ? data : []);
 			} catch {
 				// non-fatal
@@ -1208,7 +1246,10 @@ function useDraftAutosave(
 			} = latestDraftStateRef.current;
 			if (!p || db) return;
 			try {
-				localStorage.setItem(draftKey(p.id), JSON.stringify({ title: t, content: c, savedAt: Date.now() }));
+				localStorage.setItem(
+					draftKey(p.id),
+					JSON.stringify({ title: t, content: c, savedAt: Date.now() })
+				);
 			} catch {
 				// non-fatal
 			}
@@ -1326,7 +1367,11 @@ function useWikiEditing(
 	};
 }
 
-function useCreatePageForm(workspaceSlug: string | undefined, projectId: string, fetchTree: () => Promise<void>) {
+function useCreatePageForm(
+	workspaceSlug: string | undefined,
+	projectId: string,
+	fetchTree: () => Promise<void>
+) {
 	const [creating, setCreating] = useState(false);
 	const [createTitle, setCreateTitle] = useState("");
 	const [createSlug, setCreateSlug] = useState("");
@@ -1435,7 +1480,17 @@ function createWikiActions(args: {
 	rawStartCreate: (parentId: string | null) => void;
 	rawSubmitCreate: () => Promise<string | undefined>;
 }) {
-	const { workspaceSlug, page, fetchTree, setSlug, setCreating, setEditing, setPage, setError, setToc } = args;
+	const {
+		workspaceSlug,
+		page,
+		fetchTree,
+		setSlug,
+		setCreating,
+		setEditing,
+		setPage,
+		setError,
+		setToc,
+	} = args;
 
 	function navigateTo(s: string) {
 		setCreating(false);
@@ -1461,7 +1516,10 @@ function createWikiActions(args: {
 		if (!page) return;
 		if (!window.confirm(`Delete "${page.title}"? This cannot be undone.`)) return;
 		try {
-			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, { method: "DELETE", workspaceSlug });
+			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
+				method: "DELETE",
+				workspaceSlug,
+			});
 			setPage(null);
 			setSlug("");
 			history.pushState(null, "", window.location.pathname);
@@ -1555,6 +1613,25 @@ function WikiPageShell(props: {
 			</main>
 		</div>
 	);
+}
+
+function deriveWikiPageState(
+	pageData: ReturnType<typeof useWikiPageData>,
+	pageMap: Record<string, FlatEntry>,
+	editState: ReturnType<typeof useWikiEditing>,
+	createForm: ReturnType<typeof useCreatePageForm>,
+	toc: TocItem[]
+) {
+	const latestRevision = pageData.revisions[0] ?? null;
+	// Breadcrumbs for current page (PROJ-114)
+	const breadcrumbs = pageData.page ? getBreadcrumbs(pageData.page.id, pageMap) : [];
+	// ToC sidebar (PROJ-113) — only when viewing page, ≥3 headings
+	const showToc = !editState.editing && !createForm.creating && toc.length >= 3;
+	const createParentTitle = createForm.createParentId
+		? (pageMap[createForm.createParentId]?.title ?? null)
+		: null;
+	const wikiPages = Object.values(pageMap);
+	return { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages };
 }
 
 function buildCreateFormProps(create: {
@@ -1659,12 +1736,20 @@ function buildArticleProps(article: {
 export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Props) {
 	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
-	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(workspaceSlug, projectId);
+	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(
+		workspaceSlug,
+		projectId
+	);
 
 	const pageData = useWikiPageData(workspaceSlug, slug);
 	const { toc, setToc, activeHeadingId } = useTableOfContents(pageData.page, pageData.contentRef);
 	const attach = useWikiAttachments(workspaceSlug, pageData.page);
-	const editState = useWikiEditing(workspaceSlug, pageData.page, pageData.fetchPage, pageData.fetchRevisions);
+	const editState = useWikiEditing(
+		workspaceSlug,
+		pageData.page,
+		pageData.fetchPage,
+		pageData.fetchRevisions
+	);
 	const createForm = useCreatePageForm(workspaceSlug, projectId, fetchTree);
 
 	const { navigateTo, startCreate, submitCreate, deletePage } = createWikiActions({
@@ -1681,13 +1766,8 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		rawSubmitCreate: createForm.submitCreate,
 	});
 
-	const latestRevision = pageData.revisions[0] ?? null;
-	// Breadcrumbs for current page (PROJ-114)
-	const breadcrumbs = pageData.page ? getBreadcrumbs(pageData.page.id, pageMap) : [];
-	// ToC sidebar (PROJ-113) — only when viewing page, ≥3 headings
-	const showToc = !editState.editing && !createForm.creating && toc.length >= 3;
-	const createParentTitle = createForm.createParentId ? (pageMap[createForm.createParentId]?.title ?? null) : null;
-	const wikiPages = Object.values(pageMap);
+	const { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages } =
+		deriveWikiPageState(pageData, pageMap, editState, createForm, toc);
 
 	const createProps = buildCreateFormProps({
 		createParentTitle,

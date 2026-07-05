@@ -6,9 +6,9 @@ import {
 	getStoryPoints,
 	PrioritySelect,
 	SortableHeader,
+	StatusSelect,
 	spBadge,
 	statusBadge,
-	StatusSelect,
 } from "./issue-render-helpers";
 
 function applyBacklogOrder(issues: Issue[], backlogOrder: string[]): Issue[] {
@@ -35,7 +35,13 @@ function BacklogTableHead({
 		<thead>
 			<tr class="bg-surface">
 				<th class="w-8 px-2 py-2 border-b-2 border-border" />
-				<SortableHeader label="#" sortKey="number" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+				<SortableHeader
+					label="#"
+					sortKey="number"
+					sortBy={sortBy}
+					sortDir={sortDir}
+					onSort={onSort}
+				/>
 				<SortableHeader
 					label="Title"
 					sortKey="title"
@@ -44,9 +50,27 @@ function BacklogTableHead({
 					onSort={onSort}
 					extraClass="w-full"
 				/>
-				<SortableHeader label="Priority" sortKey="priority" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-				<SortableHeader label="Assignee" sortKey="assignee" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-				<SortableHeader label="Status" sortKey="status" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+				<SortableHeader
+					label="Priority"
+					sortKey="priority"
+					sortBy={sortBy}
+					sortDir={sortDir}
+					onSort={onSort}
+				/>
+				<SortableHeader
+					label="Assignee"
+					sortKey="assignee"
+					sortBy={sortBy}
+					sortDir={sortDir}
+					onSort={onSort}
+				/>
+				<SortableHeader
+					label="Status"
+					sortKey="status"
+					sortBy={sortBy}
+					sortDir={sortDir}
+					onSort={onSort}
+				/>
 			</tr>
 		</thead>
 	);
@@ -91,7 +115,10 @@ function BacklogRow({
 			onDragOver={(e: DragEvent) => onDragOver(e, issue.id)}
 			onDrop={(e: DragEvent) => onDrop(e, issue.id)}
 			onDragEnd={onDragEnd}
-			style={{ opacity: isDragging ? 0.5 : 1, boxShadow: isOver ? "inset 0 2px 0 0 var(--accent)" : undefined }}
+			style={{
+				opacity: isDragging ? 0.5 : 1,
+				boxShadow: isOver ? "inset 0 2px 0 0 var(--accent)" : undefined,
+			}}
 		>
 			<td class="px-2 py-2 align-middle w-8">
 				<span
@@ -103,7 +130,9 @@ function BacklogRow({
 				</span>
 			</td>
 			<td class="px-3 py-2 align-middle whitespace-nowrap">
-				<span class="text-text-muted font-mono text-[0.8rem]">{formatIssueRef(issue.project_key, issue.number)}</span>
+				<span class="text-text-muted font-mono text-[0.8rem]">
+					{formatIssueRef(issue.project_key, issue.number)}
+				</span>
 			</td>
 			<td class="px-3 py-2 align-middle text-text-base">
 				<a
@@ -151,8 +180,13 @@ function BacklogMobileCards({
 		<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
 			{issues.map((issue) => (
 				<div key={issue.id} class="py-3 px-4 border border-border rounded-md bg-surface">
-					<div class="font-mono text-[0.8rem] text-text-muted mb-1">{formatIssueRef(issue.project_key, issue.number)}</div>
-					<a href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)} class="no-underline">
+					<div class="font-mono text-[0.8rem] text-text-muted mb-1">
+						{formatIssueRef(issue.project_key, issue.number)}
+					</div>
+					<a
+						href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
+						class="no-underline"
+					>
 						<div class="text-[0.9rem] text-text-base font-medium mb-2">{issue.title}</div>
 					</a>
 					<div class="flex gap-[0.375rem] flex-wrap">
@@ -267,7 +301,11 @@ export default function BacklogView({
 				</table>
 			</div>
 
-			<BacklogMobileCards issues={orderedIssues} updatingPriorityId={updatingPriorityId} changePriority={changePriority} />
+			<BacklogMobileCards
+				issues={orderedIssues}
+				updatingPriorityId={updatingPriorityId}
+				changePriority={changePriority}
+			/>
 		</>
 	);
 }

@@ -50,7 +50,8 @@ const TEXTAREA_CLASS =
 const DESC_VIEW_CLASS =
 	"cursor-pointer px-2 py-[0.375rem] rounded border border-transparent " +
 	"transition-[border-color,background] duration-100 hover:border-border hover:bg-surface";
-const SECTION_HEADING_CLASS = "text-xs font-semibold text-text-muted m-0 mb-3 uppercase tracking-[0.05em]";
+const SECTION_HEADING_CLASS =
+	"text-xs font-semibold text-text-muted m-0 mb-3 uppercase tracking-[0.05em]";
 const ISSUE_LINK_CLASS =
 	"text-text-base no-underline text-sm flex-1 min-w-0 overflow-hidden text-ellipsis " +
 	"whitespace-nowrap hover:underline focus:underline";
@@ -73,7 +74,9 @@ async function loadProjectData(
 ) {
 	const [proj, issuesData, wikiData] = await Promise.all([
 		apiFetch<Project>(`/api/projects/${id}`, { workspaceSlug }),
-		apiFetch<{ items: RecentIssue[] }>(`/api/issues?project=${id}`, { workspaceSlug }).catch(() => null),
+		apiFetch<{ items: RecentIssue[] }>(`/api/issues?project=${id}`, { workspaceSlug }).catch(
+			() => null
+		),
 		apiFetch<RecentWikiPage[]>(`/api/wiki?projectId=${encodeURIComponent(id)}`, {
 			workspaceSlug,
 		}).catch(() => null),
@@ -232,8 +235,7 @@ function DescriptionEditForm({
 
 function DescriptionView({ project, onStartEdit }: { project: Project; onStartEdit: () => void }) {
 	return (
-		// biome-ignore lint/a11y/useSemanticElements: div wraps block-level <p> content, so a native
-		// <button> would be invalid HTML; implemented as a fully-keyboard-accessible ARIA button
+		// biome-ignore lint/a11y/useSemanticElements: div wraps block-level <p>; button can't nest <p>
 		<div
 			role="button"
 			tabIndex={0}

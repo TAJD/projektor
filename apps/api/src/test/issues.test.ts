@@ -1144,11 +1144,10 @@ describe("Issues MCP — typeId", () => {
 describe("Issues KV cache", () => {
 	let token: string;
 	let slug: string;
-	let workspaceId: string;
 	let projectId: string;
 
 	beforeEach(async () => {
-		({ token, slug, workspaceId, projectId } = await seedProjectFixture());
+		({ token, slug, projectId } = await seedProjectFixture());
 	});
 
 	it("getIssue returns cached value on a second call (KV hit, D1 not re-read)", async () => {

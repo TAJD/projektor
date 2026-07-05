@@ -100,7 +100,10 @@ export interface UrlSyncFilters {
 }
 
 const URL_SYNC_KEYS = [
-	["status", (f: UrlSyncFilters) => (f.filterStatuses.length > 0 ? f.filterStatuses.join(",") : null)],
+	[
+		"status",
+		(f: UrlSyncFilters) => (f.filterStatuses.length > 0 ? f.filterStatuses.join(",") : null),
+	],
 	[
 		"priority",
 		(f: UrlSyncFilters) => (f.filterPriorities.length > 0 ? f.filterPriorities.join(",") : null),

@@ -93,7 +93,10 @@ function CreateIssueModalFields({
 							ariaLabel="Select type"
 							value={createTypeId}
 							onChange={setCreateTypeId}
-							options={[{ value: "", label: "No type" }, ...taskTypes.map((t) => ({ value: t.id, label: t.name }))]}
+							options={[
+								{ value: "", label: "No type" },
+								...taskTypes.map((t) => ({ value: t.id, label: t.name })),
+							]}
 						/>
 					</label>
 				</div>
@@ -107,7 +110,10 @@ function CreateIssueModalFields({
 							ariaLabel="Select status"
 							value={createStatusId}
 							onChange={setCreateStatusId}
-							options={[{ value: "", label: "Default" }, ...statuses.map((s) => ({ value: s.id, label: s.name }))]}
+							options={[
+								{ value: "", label: "Default" },
+								...statuses.map((s) => ({ value: s.id, label: s.name })),
+							]}
 						/>
 					</label>
 				</div>
@@ -129,6 +135,8 @@ export default function CreateIssueModal(props: CreateIssueModalProps) {
 		createProjectId,
 	} = props;
 	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-close; Escape handles keyboard
+		// biome-ignore lint/a11y/useKeyWithClickEvents: see above
 		<div
 			class="fixed inset-0 z-50 flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
 			onClick={(e) => {

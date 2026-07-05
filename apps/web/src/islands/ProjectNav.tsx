@@ -111,9 +111,7 @@ export default function ProjectNav({ workspaceSlug }: Props) {
 				<a href={`/projects/view?id=${encodeURIComponent(project.id)}`} class="no-underline">
 					<h2 class="m-0 text-[0.9375rem] font-semibold text-text-base">{project.name}</h2>
 				</a>
-				<span class={KEY_BADGE_CLASS}>
-					{project.key}
-				</span>
+				<span class={KEY_BADGE_CLASS}>{project.key}</span>
 			</div>
 			<nav class="flex gap-0.5 px-5" aria-label="Project sections">
 				{tabs.map((tab) => {

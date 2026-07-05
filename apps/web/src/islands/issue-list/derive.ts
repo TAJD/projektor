@@ -2,7 +2,10 @@ import type { Issue, TaskStatus } from "../board-utils";
 import type { ProjectMeta } from "./types";
 
 /** Description of the active project filter, for the banner under the toolbar. */
-export function deriveProjectDescription(projects: ProjectMeta[], filterProject: string): string | null {
+export function deriveProjectDescription(
+	projects: ProjectMeta[],
+	filterProject: string
+): string | null {
 	if (!filterProject) return null;
 	return projects.find((p) => p.key === filterProject)?.description ?? null;
 }

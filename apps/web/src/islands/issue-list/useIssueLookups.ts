@@ -5,10 +5,80 @@ import type { SprintDetail } from "./SprintBannerSection";
 import type { ProjectMeta } from "./types";
 
 /**
+ * Owns the active project's sprints and the active sprint's detail (for the
+ * sprint banner + selector), separated from the other lookups so each hook
+ * stays a manageable size.
+ */
+function useSprintLookups(
+	workspaceSlug: string | undefined,
+	filterProject: string,
+	filterSprintId: string
+) {
+	const [sprints, setSprints] = useState<Array<{ id: string; name: string; status: string }>>([]);
+	const [sprintDetail, setSprintDetail] = useState<SprintDetail | null>(null);
+
+	// Fetch project's sprints when project filter is active, or when a sprintId is set
+	// (so the sprint selector appears even when navigating directly to a ?sprintId= URL).
+	useEffect(() => {
+		const fallbackProjectId = !filterProject && sprintDetail ? sprintDetail.projectId : null;
+		if (!filterProject && !fallbackProjectId) {
+			setSprints([]);
+			return;
+		}
+		(async () => {
+			try {
+				let projectId: string;
+				if (fallbackProjectId) {
+					projectId = fallbackProjectId;
+				} else {
+					const allProjects = await apiFetch<Array<{ id: string; key: string }>>("/api/projects", {
+						workspaceSlug,
+					});
+					const proj = allProjects.find((p) => p.key === filterProject);
+					if (!proj) return;
+					projectId = proj.id;
+				}
+				const data = await apiFetch<{ items: Array<{ id: string; name: string; status: string }> }>(
+					`/api/sprints?projectId=${encodeURIComponent(projectId)}`,
+					{ workspaceSlug }
+				);
+				setSprints(Array.isArray(data?.items) ? data.items : []);
+			} catch {
+				// non-fatal
+			}
+		})();
+	}, [filterProject, sprintDetail, workspaceSlug]);
+
+	// Fetch sprint details when a sprintId filter is active, for the sprint banner.
+	useEffect(() => {
+		if (!filterSprintId) {
+			setSprintDetail(null);
+			return;
+		}
+		(async () => {
+			try {
+				const data = await apiFetch<SprintDetail>(`/api/sprints/${filterSprintId}`, {
+					workspaceSlug,
+				});
+				setSprintDetail(data);
+			} catch {
+				// non-fatal
+			}
+		})();
+	}, [filterSprintId, workspaceSlug]);
+
+	return { sprints, setSprints, sprintDetail, setSprintDetail };
+}
+
+/**
  * Owns the lookup lists behind the issue list: statuses, projects, task types,
  * the epic dropdown, the active project's sprints, and the active sprint's detail.
  */
-export function useIssueLookups(workspaceSlug: string | undefined, filterProject: string, filterSprintId: string) {
+export function useIssueLookups(
+	workspaceSlug: string | undefined,
+	filterProject: string,
+	filterSprintId: string
+) {
 	const [statuses, setStatuses] = useState<TaskStatus[]>([]);
 	const [projects, setProjects] = useState<ProjectMeta[]>([]);
 	const [taskTypes, setTaskTypes] = useState<Array<{ id: string; key: string; name: string }>>([]);
@@ -16,8 +86,11 @@ export function useIssueLookups(workspaceSlug: string | undefined, filterProject
 	// list (PROJ-211) so the dropdown is complete and survives "Hide epics", which
 	// now excludes epic-typed issues from the list server-side.
 	const [epics, setEpics] = useState<Issue[]>([]);
-	const [sprints, setSprints] = useState<Array<{ id: string; name: string; status: string }>>([]);
-	const [sprintDetail, setSprintDetail] = useState<SprintDetail | null>(null);
+	const { sprints, setSprints, sprintDetail, setSprintDetail } = useSprintLookups(
+		workspaceSlug,
+		filterProject,
+		filterSprintId
+	);
 
 	useEffect(() => {
 		(async () => {
@@ -34,9 +107,12 @@ export function useIssueLookups(workspaceSlug: string | undefined, filterProject
 	useEffect(() => {
 		(async () => {
 			try {
-				const data = await apiFetch<Array<{ id: string; key: string; name: string }>>("/api/task-types", {
-					workspaceSlug,
-				});
+				const data = await apiFetch<Array<{ id: string; key: string; name: string }>>(
+					"/api/task-types",
+					{
+						workspaceSlug,
+					}
+				);
 				if (Array.isArray(data)) setTaskTypes(data);
 			} catch {
 				// non-fatal
@@ -67,9 +143,13 @@ export function useIssueLookups(workspaceSlug: string | undefined, filterProject
 		(async () => {
 			try {
 				const qs = new URLSearchParams({ typeId: epicTypeId, limit: "100" });
-				const projectId = filterProject ? projects.find((p) => p.key === filterProject)?.id : undefined;
+				const projectId = filterProject
+					? projects.find((p) => p.key === filterProject)?.id
+					: undefined;
 				if (projectId) qs.set("project", projectId);
-				const data = await apiFetch<{ items: Issue[] }>(`/api/issues?${qs.toString()}`, { workspaceSlug });
+				const data = await apiFetch<{ items: Issue[] }>(`/api/issues?${qs.toString()}`, {
+					workspaceSlug,
+				});
 				setEpics(Array.isArray(data.items) ? data.items : []);
 			} catch {
 				// non-fatal — epic dropdown just won't populate
@@ -77,51 +157,14 @@ export function useIssueLookups(workspaceSlug: string | undefined, filterProject
 		})();
 	}, [workspaceSlug, taskTypes, filterProject, projects]);
 
-	// Fetch project's sprints when project filter is active, or when a sprintId is set
-	// (so the sprint selector appears even when navigating directly to a ?sprintId= URL).
-	useEffect(() => {
-		const fallbackProjectId = !filterProject && sprintDetail ? sprintDetail.projectId : null;
-		if (!filterProject && !fallbackProjectId) {
-			setSprints([]);
-			return;
-		}
-		(async () => {
-			try {
-				let projectId: string;
-				if (fallbackProjectId) {
-					projectId = fallbackProjectId;
-				} else {
-					const allProjects = await apiFetch<Array<{ id: string; key: string }>>("/api/projects", { workspaceSlug });
-					const proj = allProjects.find((p) => p.key === filterProject);
-					if (!proj) return;
-					projectId = proj.id;
-				}
-				const data = await apiFetch<{ items: Array<{ id: string; name: string; status: string }> }>(
-					`/api/sprints?projectId=${encodeURIComponent(projectId)}`,
-					{ workspaceSlug }
-				);
-				setSprints(Array.isArray(data?.items) ? data.items : []);
-			} catch {
-				// non-fatal
-			}
-		})();
-	}, [filterProject, sprintDetail, workspaceSlug]);
-
-	// Fetch sprint details when a sprintId filter is active, for the sprint banner.
-	useEffect(() => {
-		if (!filterSprintId) {
-			setSprintDetail(null);
-			return;
-		}
-		(async () => {
-			try {
-				const data = await apiFetch<SprintDetail>(`/api/sprints/${filterSprintId}`, { workspaceSlug });
-				setSprintDetail(data);
-			} catch {
-				// non-fatal
-			}
-		})();
-	}, [filterSprintId, workspaceSlug]);
-
-	return { statuses, projects, taskTypes, epics, sprints, sprintDetail, setSprintDetail, setSprints };
+	return {
+		statuses,
+		projects,
+		taskTypes,
+		epics,
+		sprints,
+		sprintDetail,
+		setSprintDetail,
+		setSprints,
+	};
 }

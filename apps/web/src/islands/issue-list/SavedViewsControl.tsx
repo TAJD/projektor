@@ -14,7 +14,12 @@ function ViewsMenuItem({
 			key={view.name}
 			class="select-option"
 			data-selected={view.name === activeViewName || undefined}
-			style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}
+			style={{
+				display: "flex",
+				justifyContent: "space-between",
+				alignItems: "center",
+				gap: "0.5rem",
+			}}
 		>
 			<button
 				type="button"
@@ -85,7 +90,8 @@ function ViewsMenu({ saved }: { saved: Saved }) {
 						setShowViewsMenu(false);
 					} else {
 						const rect = viewsButtonRef.current?.getBoundingClientRect();
-						if (rect) viewsMenuPos.current = { top: rect.bottom + 4, left: rect.left, width: rect.width };
+						if (rect)
+							viewsMenuPos.current = { top: rect.bottom + 4, left: rect.left, width: rect.width };
 						setShowViewsMenu(true);
 					}
 				}}

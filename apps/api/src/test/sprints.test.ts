@@ -1,6 +1,13 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedProject, seedProjectFixture, seedWorkspaceRoles } from "./helpers";
+import {
+	authHeaders,
+	seedFixture,
+	seedIssue,
+	seedProject,
+	seedProjectFixture,
+	seedWorkspaceRoles,
+} from "./helpers";
 
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Sprints API", () => {

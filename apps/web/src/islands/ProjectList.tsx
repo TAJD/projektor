@@ -134,7 +134,12 @@ function ProjectCreateForm({
 			)}
 
 			<div class="flex gap-2 justify-end">
-				<button type="button" onClick={onCancel} disabled={submitting} class="btn btn-outline btn-sm">
+				<button
+					type="button"
+					onClick={onCancel}
+					disabled={submitting}
+					class="btn btn-outline btn-sm"
+				>
 					Cancel
 				</button>
 				<button
@@ -254,7 +259,8 @@ function useProjectCreateForm(workspaceSlug: string | undefined, onCreated: (p: 
 
 function ProjectCard({ project }: { project: Project }) {
 	const count = project.open_issue_count ?? 0;
-	const countLabel = count === 0 ? "No open issues" : `${count} open issue${count !== 1 ? "s" : ""}`;
+	const countLabel =
+		count === 0 ? "No open issues" : `${count} open issue${count !== 1 ? "s" : ""}`;
 
 	return (
 		<a href={`/projects/view?id=${project.id}`} class={PROJECT_CARD_CLASS}>
@@ -284,7 +290,10 @@ function ProjectGrid({ projects }: { projects: Project[] }) {
 		return <p class="text-[var(--text-muted)] text-center py-12">No projects yet.</p>;
 	}
 	return (
-		<div class="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+		<div
+			class="grid gap-4"
+			style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}
+		>
 			{projects.map((p) => (
 				<ProjectCard key={p.id} project={p} />
 			))}
@@ -307,7 +316,9 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 			.finally(() => setLoading(false));
 	}, [workspaceSlug]);
 
-	const createForm = useProjectCreateForm(workspaceSlug, (p) => setProjects((prev) => [...prev, p]));
+	const createForm = useProjectCreateForm(workspaceSlug, (p) =>
+		setProjects((prev) => [...prev, p])
+	);
 
 	if (loading) return <p aria-live="polite">Loading projects…</p>;
 	if (error)

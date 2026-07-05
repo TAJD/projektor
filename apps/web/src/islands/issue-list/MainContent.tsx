@@ -3,8 +3,8 @@ import BacklogView from "./BacklogView";
 import BoardView from "./BoardView";
 import ListSection from "./ListSection";
 import SearchResultsSection from "./SearchResultsSection";
-import type { SearchResult } from "./useIssueSearch";
 import type { ViewMode } from "./types-view";
+import type { SearchResult } from "./useIssueSearch";
 
 interface MainContentProps {
 	isSearchActive: boolean;
@@ -46,7 +46,13 @@ export default function MainContent({
 	loadMore,
 }: MainContentProps) {
 	if (isSearchActive) {
-		return <SearchResultsSection searchLoading={searchLoading} searchResults={searchResults} searchQuery={searchQuery} />;
+		return (
+			<SearchResultsSection
+				searchLoading={searchLoading}
+				searchResults={searchResults}
+				searchQuery={searchQuery}
+			/>
+		);
 	}
 	if (view === "board") {
 		return <BoardView issues={issues} statuses={statuses} changeStatus={changeStatus} />;

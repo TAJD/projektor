@@ -1,11 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import type { Context } from "hono";
-import {
-	ConflictError,
-	ForbiddenError,
-	NotFoundError,
-	ValidationError,
-} from "../services/errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
 
 export function serviceErrToResponse(c: Context<HonoEnv>, err: unknown) {
 	if (err instanceof ValidationError) {
