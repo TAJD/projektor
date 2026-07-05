@@ -195,55 +195,22 @@ Agent workers should also use `--no-verify` for intermediate commits; run the fu
 
 ## Fleet coordination protocol
 
-Agents working in parallel on this repo use three coordination primitives. Use them in order.
+The workflow rules (definition of ready, state machine, human review gates, WIP
+limits) have exactly one home: the [workflow spec](https://tajd.github.io/projektor/agents/workflow-spec/),
+served live via the `get_workflow` MCP tool / `GET /api/workflow`. Call it before
+claiming work — don't rely on a copy of the rules here, they aren't restated in this
+file.
 
-### 1. Register on start
+What *is* repo-specific and stays here: the mechanical call sequence agents use to
+avoid colliding in this particular repo's git worktree/file layout.
 
-Call `register_agent` at the top of every session. Link to the issue you are implementing.
+1. `register_agent` at session start, linking the issue you're implementing — save the returned `id`.
+2. `claim_files` before touching any file (check `list_file_claims` first; back off, don't `force`).
+3. `post_message` to `scope: "issue:<uuid>"` when you start/blocker/finish; `scope: "workspace"` for fleet-wide notices.
+4. `heartbeat_agent` every ~60 s (sessions time out after 120 s of silence).
+5. `release_files` then `end_agent` when done.
 
-```json
-{ "name": "wt/my-feature", "issueId": "<issue-uuid>", "kind": "agent" }
-```
-
-Save the returned `id` - you'll need it for heartbeats and messages.
-
-### 2. Claim files before touching them
-
-Before editing any file, call `claim_files`. If a claim is already held by another issue, back off and coordinate rather than using `force`.
-
-```json
-{ "issueId": "<issue-uuid>", "agentId": "<session-id>", "paths": ["apps/api/src/services/foo.ts", ...] }
-```
-
-Check `list_file_claims` (filter by path) to see who holds a file before starting work.
-
-### 3. Post messages to coordinate
-
-Post to the **issue channel** when you start, when you discover a blocker, and when you finish. Post to the **workspace channel** for fleet-wide announcements (e.g. "I'm rebasing mcp.ts, hold off on that file").
-
-```json
-{ "scope": "issue:<uuid>", "agentId": "<session-id>", "body": "Starting work on X. Claiming foo.ts." }
-{ "scope": "workspace", "agentId": "<session-id>", "body": "Merging routes/mcp.ts in ~2 min." }
-```
-
-Poll `list_messages` with a `cursor` to receive messages posted since your last check.
-
-### 4. Heartbeat every ~60 s
-
-Sessions time out after 120 s without a heartbeat. Keep alive while working:
-
-```json
-{ "id": "<session-id>" }
-```
-
-### 5. Release and end on finish
-
-```json
-// release only your issue's claims
-{ "paths": ["apps/api/src/services/foo.ts", ...], "issueId": "<issue-uuid>" }
-// end the session
-{ "id": "<session-id>" }
-```
+See the [MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) for each tool's exact input schema.
 
 ---
 
@@ -294,6 +261,7 @@ These are the constraints the fleet skill reads to plan batches. Keep them curre
 | comments | `services/comments.ts` | `schemas/comments.ts` | `routes/comments.ts` | `mcp/comments.ts` | `test/comments.test.ts` |
 | task-types | `services/task-types.ts` | `schemas/task-types.ts` | `routes/task-types.ts` | `mcp/task-types.ts` | `test/task-types.test.ts` |
 | custom-fields | `services/custom-fields.ts` | `schemas/custom-fields.ts` | `routes/custom-fields.ts` | `mcp/custom-fields.ts` | `test/custom-fields.test.ts` |
+| workflow | `services/workflow.ts` | — (no input) | `routes/workflow.ts` | `mcp/workflow.ts` | `test/workflow.test.ts` |
 
 Frontend islands are **not** domain-locked in the same way, but two agents must never
 own the same island file. Assign each island to exactly one agent per batch.

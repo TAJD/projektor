@@ -59,9 +59,8 @@ describe("MCP endpoint", () => {
 		// __PROJEKTOR_VERSION__ is only injected by the release build (scripts/build-release.sh);
 		// tests run without that define, so the fallback applies.
 		expect(res.result.serverInfo.version).toBe("dev");
-		// Coordination protocol is surfaced to every client (PROJ fleet injection).
-		expect(res.result.instructions).toContain("register_agent");
-		expect(res.result.instructions).toContain("claim_files");
+		// Instructions point at the canonical workflow spec rather than restating rules (PROJ-251).
+		expect(res.result.instructions).toContain("get_workflow");
 	});
 
 	it("tools/list returns core tools", async () => {

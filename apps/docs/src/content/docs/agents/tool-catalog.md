@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**67 tools across 15 domains.**
+**68 tools across 16 domains.**
 
 ## Coordination
 
@@ -46,6 +46,12 @@ running server.
 |------|-------------|
 | `post_message` | Post a coordination message to a workspace or issue channel so the agent fleet can communicate |
 | `list_messages` | List coordination messages for a workspace or issue channel, in chronological order |
+
+### Workflow spec
+
+| Tool | Description |
+|------|-------------|
+| `get_workflow` | Fetch the canonical agent workflow spec: definition of ready, state machine, human gates, completion report requirements, and WIP limits. Call this before claiming work. |
 
 ## Project data
 

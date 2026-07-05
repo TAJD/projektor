@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "type-check": "tsc --noEmit",
-    "gen:catalog": "tsx scripts/gen-mcp-catalog.ts"
+    "gen:catalog": "tsx scripts/gen-mcp-catalog.ts",
+    "gen:workflow-spec": "tsx scripts/gen-workflow-spec.ts"
   },
   "dependencies": {
     "@projektor/db": "workspace:*",

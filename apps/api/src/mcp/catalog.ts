@@ -13,6 +13,7 @@ import { sprintsTools } from "./sprints";
 import { taskStatusesTools } from "./task-statuses";
 import { taskTypesTools } from "./task-types";
 import { wikiTools } from "./wiki";
+import { workflowTools } from "./workflow";
 import { workspacesTools } from "./workspaces";
 
 /**
@@ -75,6 +76,7 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 		group: "Coordination",
 		tools: agentMessagesTools,
 	},
+	{ domain: "workflow", title: "Workflow spec", group: "Coordination", tools: workflowTools },
 ];
 
 /** Total number of MCP tools across all domains. */
