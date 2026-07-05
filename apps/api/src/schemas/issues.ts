@@ -16,6 +16,14 @@ export const CreateIssueSchema = z.object({
 	customFields: z.record(z.string(), z.unknown()).optional(),
 });
 
+// PROJ-254: completion report an agent (or human) submits when entering review /
+// before an issue can be marked done.
+export const CompletionReportSchema = z.object({
+	summary: z.string().min(1),
+	verification: z.string().min(1),
+	prLink: z.string().url().optional(),
+});
+
 export const UpdateIssueSchema = z
 	.object({
 		title: z.string().min(1).max(500).optional(),
@@ -28,6 +36,10 @@ export const UpdateIssueSchema = z
 		parentId: z.string().uuid().nullable().optional(),
 		typeId: TaxonomyIdSchema.nullable().optional(),
 		customFields: z.record(z.string(), z.unknown()).optional(),
+		// PROJ-254: review gating. agentSessionId identifies the calling agent (if
+		// any) so the gate can tell agent-initiated transitions from human ones.
+		agentSessionId: z.string().uuid().optional(),
+		completionReport: CompletionReportSchema.optional(),
 	})
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 

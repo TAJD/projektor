@@ -24,11 +24,13 @@ import {
 } from "../schemas/issues";
 import { recordActivity } from "./activity";
 import * as cache from "./cache";
+import { addComment } from "./comments";
 import {
 	batchLoadCustomFields,
 	validateCustomFields,
 	writeCustomFieldValues,
 } from "./custom-fields";
+import { checkDefinitionOfReady } from "./definition-of-ready";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { liveLeasedIssueIds } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
@@ -598,6 +600,10 @@ type ExistingIssue = {
 	parentId: string | null;
 	status: string;
 	statusCategory: string | null;
+	readyAt: number | null;
+	claimedAt: number | null;
+	doneAt: number | null;
+	completionReportAt: number | null;
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
@@ -642,6 +648,110 @@ function applyCompletedAtTransition(
 	else if (!isDone && wasDone) setValues.completedAt = null;
 }
 
+// PROJ-252 flow metrics: stamp ready_at/claimed_at/done_at the first time an issue
+// enters the corresponding state, using the same category-or-legacy-key detection as
+// applyCompletedAtTransition. Unlike completed_at these are write-once — never cleared
+// on re-entry — so lead/cycle time still reflects rework after a reopen. "Ready" isn't
+// its own status_category (backlog and todo share category 'todo'), so it's detected
+// from the legacy `status` key instead: any status other than 'backlog'.
+function applyFlowTimestampTransitions(
+	setValues: SetValues,
+	existing: ExistingIssue,
+	resolvedStatusKey: string,
+	newStatusCategory: string | undefined
+): void {
+	const wasReady = existing.status !== "backlog";
+	const isReady = resolvedStatusKey !== "backlog";
+	if (isReady && !wasReady && existing.readyAt == null) setValues.readyAt = now();
+
+	const wasClaimed =
+		existing.statusCategory === "in_progress" ||
+		existing.status === "in_progress" ||
+		existing.status === "in_review";
+	const isClaimed =
+		newStatusCategory === "in_progress" ||
+		resolvedStatusKey === "in_progress" ||
+		resolvedStatusKey === "in_review";
+	if (isClaimed && !wasClaimed && existing.claimedAt == null) setValues.claimedAt = now();
+
+	const wasDone = existing.statusCategory === "done" || existing.status === "done";
+	const isDone = newStatusCategory === "done" || resolvedStatusKey === "done";
+	if (isDone && !wasDone && existing.doneAt == null) setValues.doneAt = now();
+}
+
+// PROJ-254: an agentSessionId identifies the session doing this update. No id (a
+// human via the browser, or any call that omits it) means "human" for gating purposes.
+async function resolveAgentKind(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	agentSessionId: string | undefined
+): Promise<"agent" | "human" | null> {
+	if (!agentSessionId) return null;
+	const session = await orm
+		.select({ kind: schema.agentSessions.kind })
+		.from(schema.agentSessions)
+		.where(
+			and(
+				eq(schema.agentSessions.id, agentSessionId),
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId)
+			)
+		)
+		.get();
+	if (!session) throw new NotFoundError("Agent session not found");
+	return session.kind;
+}
+
+function assertCompletionReportPresent(data: UpdateIssueData): void {
+	if (!data.completionReport) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: {
+				completionReport: [
+					"summary and verification are required for an agent to enter review (PROJ-254)",
+				],
+			},
+		});
+	}
+}
+
+// PROJ-254: entering in_review as an agent requires a completion report in the same
+// call; entering done always requires a human, and requires a completion report to
+// already be on record (or supplied in this same call).
+async function assertReviewGate(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	data: UpdateIssueData,
+	existing: ExistingIssue,
+	resolvedStatusKey: string,
+	newStatusCategory: string | undefined
+): Promise<void> {
+	const agentKind = await resolveAgentKind(orm, ctx, data.agentSessionId);
+
+	const wasInReview = existing.status === "in_review";
+	const enteringInReview = resolvedStatusKey === "in_review" && !wasInReview;
+	if (enteringInReview && agentKind === "agent") {
+		assertCompletionReportPresent(data);
+	}
+
+	const wasDone = existing.statusCategory === "done" || existing.status === "done";
+	const enteringDone = (newStatusCategory === "done" || resolvedStatusKey === "done") && !wasDone;
+	if (enteringDone) {
+		if (agentKind === "agent") {
+			throw new ForbiddenError(
+				"An agent cannot mark an issue done — a human must approve (PROJ-254)"
+			);
+		}
+		if (existing.completionReportAt == null && !data.completionReport) {
+			throw new ValidationError({
+				formErrors: [
+					"A completion report is required before an issue can be marked done (PROJ-254)",
+				],
+				fieldErrors: {},
+			});
+		}
+	}
+}
+
 async function applyStatusFields(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
@@ -656,16 +766,36 @@ async function applyStatusFields(
 		"statusId" in data ? data.statusId : undefined,
 		data.status
 	);
+
+	const newStatusCategory = await fetchStatusCategory(orm, resolvedStatusId);
+	await assertReviewGate(orm, ctx, data, existing, resolvedStatusKey, newStatusCategory);
+
 	setValues.status = resolvedStatusKey;
 	setValues.statusId = resolvedStatusId;
 	setValues.statusCategory = sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${resolvedStatusId}), '')`;
 
-	const newStatusCategory = await fetchStatusCategory(orm, resolvedStatusId);
 	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
+	applyFlowTimestampTransitions(setValues, existing, resolvedStatusKey, newStatusCategory);
 }
 
 function now(): number {
 	return Math.floor(Date.now() / 1000);
+}
+
+function formatCompletionReportComment(report: {
+	summary: string;
+	verification: string;
+	prLink?: string;
+}): string {
+	const lines = [
+		"**Completion report**",
+		"",
+		`**Summary:** ${report.summary}`,
+		"",
+		`**Verification:** ${report.verification}`,
+	];
+	if (report.prLink) lines.push("", `**PR:** ${report.prLink}`);
+	return lines.join("\n");
 }
 
 async function buildUpdateSetValues(
@@ -679,6 +809,9 @@ async function buildUpdateSetValues(
 	await applyStatusFields(ctx, orm, setValues, data, existing);
 	if ("typeId" in data) {
 		setValues.typeId = await resolveTypeId(ctx, data.typeId);
+	}
+	if (data.completionReport) {
+		setValues.completionReportAt = now();
 	}
 	return setValues;
 }
@@ -774,6 +907,10 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 			parentId: schema.issues.parentId,
 			status: schema.issues.status,
 			statusCategory: schema.issues.statusCategory,
+			readyAt: schema.issues.readyAt,
+			claimedAt: schema.issues.claimedAt,
+			doneAt: schema.issues.doneAt,
+			completionReportAt: schema.issues.completionReportAt,
 		})
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
@@ -786,6 +923,13 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 		.update(schema.issues)
 		.set(setValues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
+
+	if (data.completionReport) {
+		await addComment(ctx, {
+			issueId: id,
+			body: formatCompletionReportComment(data.completionReport),
+		});
+	}
 
 	await reindexIssueFts(ctx, orm, id, data);
 	await applyCustomFieldUpdates(ctx, id, data);
@@ -831,17 +975,28 @@ export async function deleteIssue(ctx: ServiceCtx, id: string) {
 
 const PRIORITY_SCORE: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1, none: 0 };
 
-type PrioritizedFilters = { limit: number; includeBacklog: boolean; excludeClaimed: boolean };
+type PrioritizedFilters = {
+	limit: number;
+	includeBacklog: boolean;
+	excludeClaimed: boolean;
+	includeNotReady: boolean;
+};
 
 function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
-	const input = raw as { limit?: unknown; includeBacklog?: unknown; excludeClaimed?: unknown };
+	const input = raw as {
+		limit?: unknown;
+		includeBacklog?: unknown;
+		excludeClaimed?: unknown;
+		includeNotReady?: unknown;
+	};
 	const limit =
 		typeof input.limit === "number" && input.limit > 0
 			? Math.min(Math.floor(input.limit), 100)
 			: 10;
 	const includeBacklog = input.includeBacklog !== false;
 	const excludeClaimed = input.excludeClaimed === true;
-	return { limit, includeBacklog, excludeClaimed };
+	const includeNotReady = input.includeNotReady === true;
+	return { limit, includeBacklog, excludeClaimed, includeNotReady };
 }
 
 async function fetchOpenIssuesForPrioritization(
@@ -859,6 +1014,7 @@ async function fetchOpenIssuesForPrioritization(
 			number: schema.issues.number,
 			status_id: schema.issues.statusId,
 			status_category: schema.taskStatuses.category,
+			body: schema.issues.body,
 		})
 		.from(schema.issues)
 		.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
@@ -968,7 +1124,7 @@ function scoreOpenIssues(
 }
 
 export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
-	const { limit, includeBacklog, excludeClaimed } = parsePrioritizedFilters(raw);
+	const { limit, includeBacklog, excludeClaimed, includeNotReady } = parsePrioritizedFilters(raw);
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -992,7 +1148,17 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 
 	const scored = scoreOpenIssues(openIssues, inDegree, storyPoints);
 
-	return { issues: scored.slice(0, limit) };
+	// PROJ-253: definition-of-ready gate. By default, issues missing acceptance
+	// criteria/scope/verification are dropped from "what should I work on next?" — an
+	// agent that claims one is set up to guess. includeNotReady surfaces them anyway,
+	// annotated with what's missing, for grooming.
+	const annotated = scored.map(({ body, ...issue }) => {
+		const { ready, missing } = checkDefinitionOfReady(body ?? "");
+		return ready ? issue : { ...issue, needsGrooming: true, missingCriteria: missing };
+	});
+	const ready = includeNotReady ? annotated : annotated.filter((i) => !("needsGrooming" in i));
+
+	return { issues: ready.slice(0, limit) };
 }
 
 function sanitizeFtsQuery(q: string): string {

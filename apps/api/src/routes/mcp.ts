@@ -7,6 +7,7 @@ import { commentsTools } from "../mcp/comments";
 import { customFieldsTools } from "../mcp/custom-fields";
 import { toMcpError } from "../mcp/error-adapter";
 import { fileClaimsTools } from "../mcp/file-claims";
+import { flowMetricsTools } from "../mcp/flow-metrics";
 import { issueLeasesTools } from "../mcp/issue-leases";
 import { issueLinksTools } from "../mcp/issue-links";
 import { issuesTools } from "../mcp/issues";
@@ -16,6 +17,7 @@ import { sprintsTools } from "../mcp/sprints";
 import { taskStatusesTools } from "../mcp/task-statuses";
 import { taskTypesTools } from "../mcp/task-types";
 import { wikiTools } from "../mcp/wiki";
+import { workflowTools } from "../mcp/workflow";
 import { workspacesTools } from "../mcp/workspaces";
 import { pluginRegistry } from "../plugins/registry";
 
@@ -25,27 +27,16 @@ const SERVER_VERSION = typeof __PROJEKTOR_VERSION__ === "string" ? __PROJEKTOR_V
 
 // Surfaced to every MCP client at `initialize` (the MCP spec's optional
 // `instructions` field). Clients like Claude Code inject this into the model's
-// context, so any session with the Projektor MCP connected learns the fleet
-// coordination protocol without it being repeated in each spawn prompt. Framed
-// conditionally so it's a no-op for solo sessions. Keep in sync with the
-// "Fleet coordination protocol" in AGENTS.md.
-const SERVER_INSTRUCTIONS = `Projektor is an MCP-native issue tracker + wiki. Every project-management action a \
-browser user can take is available here as a tool.
-
-Handy entry points: get_issue accepts a ref like "PROJ-42" (no UUID needed); get_prioritized_issues answers \
-"what should I work on next?"; search_issues / search_wiki ground you in existing context before you act.
-
-Fleet coordination — only when you are one of several agents working in parallel on a shared repo. Use these \
-primitives so parallel agents don't collide:
-1. register_agent at session start — link the issue you're implementing; save the returned id.
-2. claim_files before editing any file — check list_file_claims first and back off if another issue already \
-holds it (don't force).
-3. post_message to scope "issue:<uuid>" when you start, hit a blocker, and finish; use scope "workspace" for \
-fleet-wide notices (e.g. "rebasing mcp.ts, hold off").
-4. heartbeat_agent every ~60s while working (sessions time out after 120s of silence).
-5. release_files then end_agent when done.
-
-A single agent acting alone can ignore the coordination steps and just use the project-management tools directly.`;
+// context. Deliberately a one-paragraph pointer, not a restatement of the rules —
+// the workflow spec (definition of ready, state machine, human gates, WIP limits,
+// fleet coordination) has exactly one home: call `get_workflow` (or see
+// apps/docs/src/content/docs/agents/workflow-spec.md).
+const SERVER_INSTRUCTIONS =
+	"Projektor is an MCP-native issue tracker + wiki. Every project-management action a browser user can do " +
+	'is available here as a tool. Handy entry points: get_issue accepts a ref like "PROJ-42"; ' +
+	'get_prioritized_issues answers "what should I work on next?"; search_issues / search_wiki ground you in ' +
+	"existing context. Call get_workflow before claiming work — it returns the definition of ready, the state " +
+	"machine, human review gates, and fleet coordination rules.";
 
 const router = new Hono<HonoEnv>();
 
@@ -153,6 +144,8 @@ const coreMCPTools: MCPTool[] = [
 	...fileClaimsTools,
 	...issueLeasesTools,
 	...agentMessagesTools,
+	...workflowTools,
+	...flowMetricsTools,
 ];
 
 function jsonRpcResult(id: unknown, result: unknown) {

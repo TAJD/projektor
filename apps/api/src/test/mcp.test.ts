@@ -59,9 +59,8 @@ describe("MCP endpoint", () => {
 		// __PROJEKTOR_VERSION__ is only injected by the release build (scripts/build-release.sh);
 		// tests run without that define, so the fallback applies.
 		expect(res.result.serverInfo.version).toBe("dev");
-		// Coordination protocol is surfaced to every client (PROJ fleet injection).
-		expect(res.result.instructions).toContain("register_agent");
-		expect(res.result.instructions).toContain("claim_files");
+		// Instructions point at the canonical workflow spec rather than restating rules (PROJ-251).
+		expect(res.result.instructions).toContain("get_workflow");
 	});
 
 	it("tools/list returns core tools", async () => {
@@ -482,7 +481,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as { issues: unknown[] };
@@ -498,7 +497,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as {
@@ -525,7 +524,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as {
@@ -552,7 +551,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as { issues: Array<{ title: string }> };
@@ -571,7 +570,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: { limit: 2 } },
+			{ name: "get_prioritized_issues", arguments: { limit: 2, includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as { issues: unknown[] };
@@ -599,7 +598,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as {
@@ -632,7 +631,7 @@ describe("MCP endpoint", () => {
 		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
-			{ name: "get_prioritized_issues", arguments: {} },
+			{ name: "get_prioritized_issues", arguments: { includeNotReady: true } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(res.result.content[0].text) as {

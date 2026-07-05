@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**67 tools across 15 domains.**
+**69 tools across 17 domains.**
 
 ## Coordination
 
@@ -46,6 +46,12 @@ running server.
 |------|-------------|
 | `post_message` | Post a coordination message to a workspace or issue channel so the agent fleet can communicate |
 | `list_messages` | List coordination messages for a workspace or issue channel, in chronological order |
+
+### Workflow spec
+
+| Tool | Description |
+|------|-------------|
+| `get_workflow` | Fetch the canonical agent workflow spec: definition of ready, state machine, human gates, completion report requirements, and WIP limits. Call this before claiming work. |
 
 ## Project data
 
@@ -84,10 +90,10 @@ running server.
 | `list_issues` | List issues in the workspace, optionally filtered by status, priority, project, or assignee |
 | `get_issue` | Get a single issue by ID or project key + number (e.g. "PROJ-42") |
 | `create_issue` | Create a new issue in a project |
-| `update_issue` | Update an issue - status, priority, title, body, assignee, or labels |
+| `update_issue` | Update an issue - status, priority, title, body, assignee, or labels. Review gating (PROJ-254): pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport, and only a human can transition to done. |
 | `search_issues` | Search issues by keyword in title or body |
 | `delete_issue` | Delete an issue by ID |
-| `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. |
+| `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded. |
 
 ### Issue links
 
@@ -158,5 +164,11 @@ running server.
 | `complete_sprint` | Mark an active sprint as completed |
 | `delete_sprint` | Delete a sprint (issues in the sprint will have their sprint_id cleared) |
 | `move_issues_to_sprint` | Bulk move issues into a sprint by setting their sprint_id |
+
+### Flow metrics
+
+| Tool | Description |
+|------|-------------|
+| `get_flow_metrics` | Lead time (ready→done), cycle time (claimed→done), WIP over time, and agent-vs-human cycle time for a project, computed from indexed transition timestamps. Measure flow before tuning WIP limits. |
 
 <!-- gen-mcp-catalog:end -->

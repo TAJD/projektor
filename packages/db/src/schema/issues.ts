@@ -13,6 +13,8 @@ export const projects = sqliteTable(
 		description: text("description"),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
+		// Per-project agent WIP cap (PROJ-253). NULL = use the workspace default.
+		agentWipLimit: integer("agent_wip_limit"),
 	},
 	(t) => ({
 		wsIdx: index("projects_workspace_idx").on(t.workspaceId),
@@ -98,6 +100,13 @@ export const issues = sqliteTable(
 		// Stamped when the issue enters a done-category status, cleared when it
 		// leaves (PROJ-212). Indexed for completed-date range filtering.
 		completedAt: integer("completed_at"),
+		// Flow metrics (PROJ-252): stamped once, the first time the issue enters the
+		// corresponding state; never cleared (reopening is rework, not un-history).
+		readyAt: integer("ready_at"),
+		claimedAt: integer("claimed_at"),
+		doneAt: integer("done_at"),
+		// Review gating (PROJ-254): stamped when a completion report is submitted.
+		completionReportAt: integer("completion_report_at"),
 	},
 	(t) => ({
 		projectIdx: index("issues_project_idx").on(t.projectId),
@@ -112,6 +121,9 @@ export const issues = sqliteTable(
 			t.createdAt
 		),
 		wsCompletedIdx: index("idx_issues_workspace_completed").on(t.workspaceId, t.completedAt),
+		wsReadyIdx: index("idx_issues_workspace_ready_at").on(t.workspaceId, t.readyAt),
+		wsClaimedIdx: index("idx_issues_workspace_claimed_at").on(t.workspaceId, t.claimedAt),
+		wsDoneIdx: index("idx_issues_workspace_done_at").on(t.workspaceId, t.doneAt),
 	})
 );
 

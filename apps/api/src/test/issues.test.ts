@@ -947,7 +947,10 @@ describe("Issues API", () => {
 		const id = issue.id;
 		expect(await completedAtOf(id)).toBeNull();
 
-		await patch(id, { status: "done" });
+		await patch(id, {
+			status: "done",
+			completionReport: { summary: "Done", verification: "pnpm test" },
+		});
 		const completed = await completedAtOf(id);
 		expect(typeof completed).toBe("number");
 
@@ -1005,6 +1008,59 @@ describe("Issues API", () => {
 		expect((after.page.items as Array<{ title: string }>).map((i) => i.title)).toEqual([
 			"Edited just now",
 		]);
+	});
+
+	// ─── PROJ-252: flow timestamps (ready_at/claimed_at/done_at) ──────────────
+	async function flowTimestampsOf(
+		id: string
+	): Promise<{ ready_at: number | null; claimed_at: number | null; done_at: number | null }> {
+		const row = await env.DB.prepare(
+			"SELECT ready_at, claimed_at, done_at FROM issues WHERE id = ?"
+		)
+			.bind(id)
+			.first<{ ready_at: number | null; claimed_at: number | null; done_at: number | null }>();
+		return row ?? { ready_at: null, claimed_at: null, done_at: null };
+	}
+
+	it("stamps ready_at/claimed_at/done_at once, on first entry, and never clears them", async () => {
+		// 4 API requests (seed + 4 patches), under the rate-limit window.
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Flows through" });
+		const id = issue.id;
+		expect(await flowTimestampsOf(id)).toEqual({ ready_at: null, claimed_at: null, done_at: null });
+
+		await patch(id, { status: "todo" });
+		const afterReady = await flowTimestampsOf(id);
+		expect(typeof afterReady.ready_at).toBe("number");
+		expect(afterReady.claimed_at).toBeNull();
+		expect(afterReady.done_at).toBeNull();
+
+		await patch(id, { status: "in_progress" });
+		const afterClaimed = await flowTimestampsOf(id);
+		expect(afterClaimed.ready_at).toBe(afterReady.ready_at);
+		expect(typeof afterClaimed.claimed_at).toBe("number");
+		expect(afterClaimed.done_at).toBeNull();
+
+		await patch(id, {
+			status: "done",
+			completionReport: { summary: "Done", verification: "pnpm test" },
+		});
+		const afterDone = await flowTimestampsOf(id);
+		expect(typeof afterDone.done_at).toBe("number");
+
+		// Reopening does not clear done_at (unlike completed_at) — it's write-once history.
+		await patch(id, { status: "in_progress" });
+		const afterReopen = await flowTimestampsOf(id);
+		expect(afterReopen.ready_at).toBe(afterReady.ready_at);
+		expect(afterReopen.claimed_at).toBe(afterClaimed.claimed_at);
+		expect(afterReopen.done_at).toBe(afterDone.done_at);
+	});
+
+	it("stamps ready_at even when an issue skips straight from backlog to in_progress", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Fast-tracked" });
+		await patch(issue.id, { status: "in_progress" });
+		const stamps = await flowTimestampsOf(issue.id);
+		expect(typeof stamps.ready_at).toBe("number");
+		expect(typeof stamps.claimed_at).toBe("number");
 	});
 });
 
@@ -1331,7 +1387,7 @@ describe("get_prioritized_issues MCP tool", () => {
 	}
 
 	it("returns [] (not 500) when no open issues exist", async () => {
-		const body = await callPrioritized();
+		const body = await callPrioritized({ includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as { issues: unknown[] };
 		expect(Array.isArray(data.issues)).toBe(true);
@@ -1342,7 +1398,7 @@ describe("get_prioritized_issues MCP tool", () => {
 		await seedIssue(workspaceId, projectId, userId, { title: "High prio", priority: "high" });
 		await seedIssue(workspaceId, projectId, userId, { title: "Low prio", priority: "low" });
 
-		const body = await callPrioritized();
+		const body = await callPrioritized({ includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as {
 			issues: Array<{
@@ -1371,7 +1427,7 @@ describe("get_prioritized_issues MCP tool", () => {
 			await seedIssue(workspaceId, projectId, userId, { title: `Open ${i}`, priority: "medium" });
 		}
 
-		const body = await callPrioritized({ limit: 100 });
+		const body = await callPrioritized({ limit: 100, includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as { issues: Array<{ title: string }> };
 		expect(data.issues).toHaveLength(100);
@@ -1382,7 +1438,7 @@ describe("get_prioritized_issues MCP tool", () => {
 		await seedIssue(workspaceId, projectId, userId, { title: "Done", status: "done" });
 		await seedIssue(workspaceId, projectId, userId, { title: "Cancelled", status: "cancelled" });
 
-		const body = await callPrioritized();
+		const body = await callPrioritized({ includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as { issues: Array<{ title: string }> };
 		const titles = data.issues.map((i) => i.title);
@@ -1408,7 +1464,7 @@ describe("get_prioritized_issues MCP tool", () => {
 		await seedCustomFieldValue(small.id, field.id, "1");
 		await seedCustomFieldValue(large.id, field.id, "8");
 
-		const body = await callPrioritized();
+		const body = await callPrioritized({ includeNotReady: true });
 		expect(body.error).toBeUndefined();
 		const data = JSON.parse(body.result!.content[0].text) as {
 			issues: Array<{ title: string; _score: number }>;
@@ -1416,5 +1472,38 @@ describe("get_prioritized_issues MCP tool", () => {
 		const smallRow = data.issues.find((i) => i.title === "Small");
 		const largeRow = data.issues.find((i) => i.title === "Large");
 		expect(smallRow!._score).toBeGreaterThan(largeRow!._score);
+	});
+
+	// ─── PROJ-253: definition-of-ready filtering ──────────────────────────────
+	it("drops not-ready issues by default, and surfaces them with includeNotReady", async () => {
+		const ready = await seedIssue(workspaceId, projectId, userId, { title: "Ready" });
+		await env.DB.prepare("UPDATE issues SET body = ? WHERE id = ?")
+			.bind(
+				["## Acceptance criteria", "- Does the thing", "", "## Verification", "`pnpm test`"].join(
+					"\n"
+				),
+				ready.id
+			)
+			.run();
+		await seedIssue(workspaceId, projectId, userId, { title: "Not ready" });
+
+		const defaultBody = await callPrioritized();
+		const defaultTitles = (
+			JSON.parse(defaultBody.result!.content[0].text) as { issues: Array<{ title: string }> }
+		).issues.map((i) => i.title);
+		expect(defaultTitles).toContain("Ready");
+		expect(defaultTitles).not.toContain("Not ready");
+
+		const withNotReady = await callPrioritized({ includeNotReady: true });
+		const data = JSON.parse(withNotReady.result!.content[0].text) as {
+			issues: Array<{ title: string; needsGrooming?: boolean; missingCriteria?: string[] }>;
+		};
+		const notReadyRow = data.issues.find((i) => i.title === "Not ready");
+		expect(notReadyRow?.needsGrooming).toBe(true);
+		expect(notReadyRow?.missingCriteria).toEqual(
+			expect.arrayContaining(["acceptance criteria", "scope/files", "verification"])
+		);
+		const readyRow = data.issues.find((i) => i.title === "Ready");
+		expect(readyRow?.needsGrooming).toBeUndefined();
 	});
 });

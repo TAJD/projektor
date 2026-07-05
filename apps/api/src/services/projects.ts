@@ -83,7 +83,7 @@ export async function createProject(ctx: ServiceCtx, input: unknown) {
 	const parsed = CreateProjectSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 
-	const { name, key, description } = parsed.data;
+	const { name, key, description, agentWipLimit } = parsed.data;
 
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
@@ -102,6 +102,7 @@ export async function createProject(ctx: ServiceCtx, input: unknown) {
 		name,
 		key,
 		description: description ?? null,
+		agentWipLimit: agentWipLimit ?? null,
 		createdAt: now,
 		updatedAt: now,
 	});
@@ -120,6 +121,7 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 	if (parsed.data.name !== undefined) setObj.name = parsed.data.name;
 	if (parsed.data.key !== undefined) setObj.key = parsed.data.key;
 	if (parsed.data.description !== undefined) setObj.description = parsed.data.description;
+	if (parsed.data.agentWipLimit !== undefined) setObj.agentWipLimit = parsed.data.agentWipLimit;
 
 	if (Object.keys(setObj).length === 0)
 		throw new ValidationError({ formErrors: ["Nothing to update"], fieldErrors: {} });

@@ -13,6 +13,7 @@ import { commentsRouter } from "./routes/comments";
 import { customFieldsRouter } from "./routes/custom-fields";
 import { fileClaimsRouter } from "./routes/file-claims";
 import { filesRouter } from "./routes/files";
+import { flowMetricsRouter } from "./routes/flow-metrics";
 import { issueLinksRouter } from "./routes/issue-links";
 import { issuesRouter } from "./routes/issues";
 import { mcpRouter } from "./routes/mcp";
@@ -22,6 +23,7 @@ import { sprintsRouter } from "./routes/sprints";
 import { taskStatusesRouter } from "./routes/task-statuses";
 import { taskTypesRouter } from "./routes/task-types";
 import { wikiRouter } from "./routes/wiki";
+import { workflowRouter } from "./routes/workflow";
 import { workspacesRouter } from "./routes/workspaces";
 import { seedDefaultCustomFields } from "./services/custom-fields";
 import { listAllProjects } from "./services/projects";
@@ -212,9 +214,13 @@ app.use("/api/file-claims", authMiddleware, workspaceMiddleware);
 app.use("/api/file-claims/*", authMiddleware, workspaceMiddleware);
 app.use("/api/agent-messages", authMiddleware, workspaceMiddleware);
 app.use("/api/agent-messages/*", authMiddleware, workspaceMiddleware);
+// No workspaceMiddleware: the workflow spec is global, not workspace-scoped.
+app.use("/api/workflow", authMiddleware);
+app.use("/api/workflow/*", authMiddleware);
 
 app.route("/api/workspaces", workspacesRouter);
 app.route("/api/projects", projectsRouter);
+app.route("/api/projects", flowMetricsRouter);
 app.route("/api/issues", issuesRouter);
 app.route("/api/issues", issueLinksRouter);
 app.route("/api/issues", commentsRouter);
@@ -229,6 +235,7 @@ app.route("/api/sprints", sprintsRouter);
 app.route("/api/agents", agentsRouter);
 app.route("/api/file-claims", fileClaimsRouter);
 app.route("/api/agent-messages", agentMessagesRouter);
+app.route("/api/workflow", workflowRouter);
 
 // SPA fallback — paths with no matching static asset fall through here.
 // Only active in production where the ASSETS binding is present.
