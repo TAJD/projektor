@@ -114,13 +114,6 @@ async function tryBearerTokenAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	if (!authHeader?.startsWith("Bearer ")) return { kind: "skip" };
 
 	const token = authHeader.slice(7);
-
-	const sessionJson = await c.env.KV.get(`session:${token}`);
-	if (sessionJson) {
-		c.set("user", JSON.parse(sessionJson) as AuthUser);
-		return { kind: "allow" };
-	}
-
 	return authenticateApiToken(c, token);
 }
 

@@ -35,6 +35,12 @@ export interface Env {
 	CORS_ALLOWED_ORIGINS?: string;
 	// Static assets binding (production wrangler.toml only — absent in local dev).
 	ASSETS?: Fetcher;
+	// Resolve the workspace from the Host header's first label when X-Workspace-Slug
+	// is absent (e.g. team.example.com -> slug "team"). Off by default: most deployments
+	// sit behind a single Cloudflare Workers hostname, where the leading label is a
+	// CDN/proxy artifact, not a real tenant signal. Set "true" only when workspace
+	// subdomains are actually provisioned in DNS. (PROJ-267)
+	WORKSPACE_SUBDOMAIN_ROUTING?: string;
 }
 
 export interface Variables {
