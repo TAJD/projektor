@@ -38,3 +38,18 @@ import backlogScreenshot from '../../assets/backlog.png';
     Projektor's own roadmap is tracked inside Projektor. The docs you're reading are generated from the same repo.
   </Card>
 </CardGrid>
+
+## One-step deploy
+
+Clone the [deploy repo](https://github.com/TAJD/projektor-deploy-example) and run the
+zero-config script - wrangler auto-provisions D1, KV, and R2, applies migrations, and deploys:
+
+```bash
+PROJEKTOR_REPO=you/projektor ADMIN_EMAILS=you@example.com ./deploy-auto.sh
+```
+
+Or hand the repo to an AI agent - *"deploy projektor to my Cloudflare account"* - and let it
+run the same flow. Full walkthrough: [self-hosting guide](/projektor/guides/self-hosting/).
+
+Curious why Projektor looks like this? Read [where Projektor fits](/projektor/philosophy/where-projektor-fits/)
+in the agentic dev-tools stack.
