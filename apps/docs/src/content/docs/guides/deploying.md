@@ -219,6 +219,8 @@ commit, and push.
 - **Deploy triggers** are scoped: the deploy workflow runs on changes to
   `projektor.version`, `wrangler.toml`, `deploy.sh`, or the workflow itself - so
   documentation edits don't trigger redeploys, but version bumps do.
+- **Releases & changelog:** every tagged release is listed at
+  [github.com/TAJD/projektor/releases](https://github.com/TAJD/projektor/releases).
 
 ## Troubleshooting
 

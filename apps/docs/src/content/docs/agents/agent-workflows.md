@@ -14,7 +14,7 @@ It's possible to analyse agentic development through three different concerns. P
 | Layer | Runs where | What it does | Reference |
 |------|-----------|--------------|-----------|
 | **1 · Lifecycle** *(implementation)* | The client machine | Spawns an isolated workspace per agent (git worktree + branch + terminal), and reaps it cleanly when done | This page (§1) |
-| **2 · Coordination** | Projektor MCP | Lets parallel agents announce themselves, claim files, and message each other so they don't clobber each other's work | [Contributor conventions](https://github.com/TAJD/projektor/blob/main/AGENTS.md) (Fleet coordination protocol) |
+| **2 · Coordination** | Projektor MCP | Lets parallel agents announce themselves, claim files, and message each other so they don't clobber each other's work | [Contributor conventions](/projektor/contributing/conventions/) (Fleet coordination protocol) |
 | **3 · Project management** | Projektor MCP | The actual work: issues, sprints, wiki, links - and "what should I work on next?" | [MCP tool catalog](/projektor/agents/tool-catalog/), [Connect an agent](/projektor/agents/mcp-connection/) |
 
 Layers 2 and 3 are Projektor itself. Layer 1 is the harness around it. You can use any
@@ -71,7 +71,7 @@ backed by MCP tools:
 
 The **step-by-step protocol** - exact call order, payloads, and the file-ownership rules
 that keep agents on disjoint file sets - lives in
-[Contributor conventions → Fleet coordination protocol](https://github.com/TAJD/projektor/blob/main/AGENTS.md). That's the operational
+[Contributor conventions → Fleet coordination protocol](/projektor/contributing/conventions/). That's the operational
 home; this page is the why.
 
 ---
@@ -131,6 +131,6 @@ each layer looks like a curiosity; together they're a reliable multi-agent dev l
 ## Where to go next
 
 - **Run a single agent:** [Connect an agent](/projektor/agents/mcp-connection/) → then try the prompts in §3.
-- **Run a fleet on this repo:** [Contributor conventions](https://github.com/TAJD/projektor/blob/main/AGENTS.md) - the coordination
+- **Run a fleet on this repo:** [Contributor conventions](/projektor/contributing/conventions/) - the coordination
   protocol, serialized-file rules, and per-domain file ownership.
 - **Every tool, by domain:** [MCP tool catalog](/projektor/agents/tool-catalog/).

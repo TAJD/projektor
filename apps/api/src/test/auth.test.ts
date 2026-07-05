@@ -293,6 +293,31 @@ describe("PROJ-79: CF Access JWT HTTP rejection paths", () => {
 });
 
 // ---------------------------------------------------------------------------
+// PROJ-274 (C1): no cached auth path can bypass scope enforcement
+// ---------------------------------------------------------------------------
+
+describe("PROJ-274: read-scoped token is denied write on every request", () => {
+	it("read-only token gets 403 on POST /api/projects, never a cached bypass", async () => {
+		const fixture = await seedFixture();
+		const readOnlyToken = await seedToken(fixture.workspace.id, fixture.user.id, {
+			scopes: ["read"],
+		});
+
+		const res = await SELF.fetch("http://localhost/api/projects", {
+			method: "POST",
+			headers: {
+				...authHeaders(readOnlyToken, fixture.workspace.slug),
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ name: "Blocked", key: "BLK" }),
+		});
+		expect(res.status).toBe(403);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toMatch(/scope/i);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // PROJ-79 §3: /auth endpoints
 // ---------------------------------------------------------------------------
 

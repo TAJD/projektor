@@ -4,6 +4,8 @@ description: "How Projektor is put together: surfaces, service layer, and storag
 sidebar:
   order: 1
 ---
+import mcpStats from "../../../generated/mcp-stats.json";
+
 > Wiki + Jira-style issue tracker built MCP-native, running entirely on Cloudflare's edge.
 > Monorepo (pnpm + turbo).
 
@@ -23,7 +25,7 @@ handler runs.
 
 State lives entirely on Cloudflare's edge. **D1** (SQLite) holds the relational data -
 workspaces, users, projects, issues, comments, wiki pages, tokens, activity, and
-revisions. **KV** caches sessions, Access certs, and email lookups. **R2** is bound for
+revisions. **KV** caches Access certs and email lookups. **R2** is bound for
 file attachments. There are no servers and no containers: the whole system deploys as a
 Worker plus its bound data stores, which is what makes a five-minute self-host possible.
 
@@ -55,7 +57,7 @@ flowchart TB
 
     subgraph Storage["Cloudflare Data"]
         D1[("D1 / SQLite<br/>workspaces, users, projects,<br/>issues, comments, wiki, tokens,<br/>activity, revisions")]
-        KV[("KV<br/>sessions, CF certs,<br/>user-by-email cache")]
+        KV[("KV<br/>CF certs,<br/>user-by-email cache")]
         R2[("R2<br/>file attachments<br/>(upload / download API)")]
     end
 
@@ -88,16 +90,24 @@ flowchart TB
 |-------|------|---------|-------|
 | Frontend | Astro + Preact | `apps/web` | Full SPA - issues, board, sprints, wiki, settings, tokens. Dev-proxies `/api` + `/mcp` to `:8787`. |
 | API / edge runtime | Hono on Cloudflare Workers | `apps/api` | REST + MCP, two-mode auth, workspace tenancy. |
-| MCP server | JSON-RPC 2.0 over HTTP | `apps/api/src/routes/mcp.ts` | 64 tools across 14 domains (coordination + project data). Primary surface. |
+| MCP server | JSON-RPC 2.0 over HTTP | `apps/api/src/routes/mcp.ts` | {mcpStats.tools} tools across {mcpStats.domains} domains (coordination + project data). Primary surface. |
 | Plugin system | Registry + SDK | `apps/api/src/plugins`, `packages/plugin-sdk` | `definePlugin` / `defineMCPTool`. **Not loaded at runtime.** |
-| Data model | Drizzle ORM → D1 | `packages/db` | Drizzle is the query layer across the service modules; raw `c.env.DB.prepare` survives only in the dev bootstrap. |
+| Data model | Drizzle ORM → D1 | `packages/db` | Drizzle is the schema and primary query layer; raw `DB.prepare` remains in the auth/workspace middleware hot path, the dev bootstrap, and a handful of service queries (FTS, counters) where hand-written SQL is clearer. |
 | Shared types | TS | `packages/types` | `HonoEnv`, `Plugin`, `MCPTool`, `PluginContext`. |
 | Auth | CF Access JWT (RS256) + API tokens (SHA-256) | `middleware/auth.ts` | Plus dev bypass via `DEV_USER_EMAIL`. |
 | Deploy | wrangler + GitHub Actions | `projektor-deploy-example`, `projektor-workspace` | projektor publishes a release artifact; a config-only deploy repo downloads + ships it (no submodule). |
 
+## API surfaces
+
+REST (`/api/*`) is the SPA's **private contract** - versionless, and may change shape
+between releases without notice. MCP (`/mcp/:workspaceId`) is the **stable public
+surface** for agents. The two are usually kept at parity (see `AGENTS.md`'s
+service-layer contract), but a handful of deliberate REST↔MCP differences exist by
+design - see [Contributor conventions → Deliberate REST↔MCP parity exceptions](/projektor/contributing/conventions/).
+
 ## Request flow
 
 1. **Agent** → `POST /mcp/:workspaceId` with `Authorization: Bearer pk_…` + `X-Workspace-Slug`.
-2. `authMiddleware`: CF Access JWT → API-token (KV session cache → D1 hash lookup) → dev bypass.
+2. `authMiddleware`: CF Access JWT → API-token (D1 hash lookup) → dev bypass.
 3. `workspaceMiddleware`: resolve slug → load workspace → verify `workspace_members` row.
 4. MCP router dispatches `initialize` / `tools/list` / `tools/call` → core tool handler → D1.

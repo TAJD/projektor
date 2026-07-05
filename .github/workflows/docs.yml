@@ -8,6 +8,7 @@ on:
     paths:
       - "apps/docs/**"
       - "apps/api/src/mcp/**"
+      - "AGENTS.md"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -30,11 +31,11 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"   # astro 7 requires Node >= 22.12
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      # Generate the tool catalog from source before building, so the site is fresh.
-      - run: pnpm --filter @projektor/api gen:catalog
+      # Generate the tool catalog + contributor-conventions mirror before building, so the site is fresh.
+      - run: pnpm gen:docs
       - run: pnpm --filter @projektor/docs build
       - uses: actions/upload-pages-artifact@v3
         with:

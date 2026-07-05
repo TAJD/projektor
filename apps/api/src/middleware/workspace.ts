@@ -2,10 +2,23 @@ import type { HonoEnv } from "@projektor/types";
 import type { Context, Next } from "hono";
 
 export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
-	// Workspace resolved from subdomain or X-Workspace-Slug header
-	const slug = c.req.header("X-Workspace-Slug") ?? c.req.header("host")?.split(".")[0];
+	// Workspace resolved from the X-Workspace-Slug header, or (opt-in) the Host header's
+	// subdomain. See WORKSPACE_SUBDOMAIN_ROUTING in packages/types/src/env.ts. (PROJ-267)
+	const headerSlug = c.req.header("X-Workspace-Slug");
+	const subdomainRoutingEnabled = c.env.WORKSPACE_SUBDOMAIN_ROUTING === "true";
+	const slug =
+		headerSlug ?? (subdomainRoutingEnabled ? c.req.header("host")?.split(".")[0] : undefined);
 
-	if (!slug) return c.json({ error: "Workspace not specified" }, 400);
+	if (!slug) {
+		return c.json(
+			{
+				error: subdomainRoutingEnabled
+					? "Workspace not specified"
+					: "Workspace not specified: missing X-Workspace-Slug header",
+			},
+			400
+		);
+	}
 
 	const workspace = await c.env.DB.prepare("SELECT id, name, slug FROM workspaces WHERE slug = ?")
 		.bind(slug)

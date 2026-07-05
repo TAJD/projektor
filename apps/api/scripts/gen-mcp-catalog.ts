@@ -13,7 +13,7 @@
  *
  *   pnpm --filter @projektor/api gen:catalog
  */
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TOOL_COUNT, TOOL_DOMAINS } from "../src/mcp/catalog";
@@ -30,6 +30,8 @@ const outPath = join(
 	"agents",
 	"tool-catalog.md",
 );
+const statsPath = join(repoRoot, "apps", "docs", "src", "generated", "mcp-stats.json");
+const readmePath = join(repoRoot, "README.md");
 
 const START = "<!-- gen-mcp-catalog:start";
 const END = "<!-- gen-mcp-catalog:end -->";
@@ -78,5 +80,34 @@ const head = existing.slice(0, startLineEnd + 1); // through the start-marker li
 const tail = existing.slice(endIdx); // from the end-marker line onward
 
 writeFileSync(outPath, `${head}\n${middle}\n\n${tail}`, "utf8");
+
+// ── Emit the raw counts for other surfaces (system-design.mdx, README) to import ──
+mkdirSync(dirname(statsPath), { recursive: true });
+writeFileSync(
+	statsPath,
+	`${JSON.stringify({ tools: TOOL_COUNT, domains: domainCount }, null, "\t")}\n`,
+	"utf8",
+);
+
+// ── Rewrite the marked stats block in README.md ──
+const README_START = "<!-- gen-mcp-stats:start -->";
+const README_END = "<!-- gen-mcp-stats:end -->";
+const readme = readFileSync(readmePath, "utf8");
+const readmeStart = readme.indexOf(README_START);
+const readmeEnd = readme.indexOf(README_END);
+if (readmeStart === -1 || readmeEnd === -1) {
+	throw new Error(
+		`Could not find the "${README_START} … ${README_END}" markers in ${readmePath}. ` +
+			"README.md must keep them so the generator knows which text to rewrite.",
+	);
+}
+const readmeHead = readme.slice(0, readmeStart + README_START.length);
+const readmeTail = readme.slice(readmeEnd);
+writeFileSync(
+	readmePath,
+	`${readmeHead}${TOOL_COUNT} tools across ${domainCount} domains${readmeTail}`,
+	"utf8",
+);
+
 // cofferdam-ignore: Warning.NoConsoleLog: CLI generator script output, not a debug leftover
 console.log(`Updated tool table in ${outPath} (${TOOL_COUNT} tools, ${domainCount} domains)`);
