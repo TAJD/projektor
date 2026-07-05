@@ -31,7 +31,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"   # astro 7 requires Node >= 22.12
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
       # Generate the tool catalog + contributor-conventions mirror before building, so the site is fresh.
