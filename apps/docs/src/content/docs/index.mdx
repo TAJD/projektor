@@ -18,14 +18,18 @@ hero:
       variant: minimal
 ---
 
+import { Image } from 'astro:assets';
 import { Card, CardGrid } from '@astrojs/starlight/components';
+import backlogScreenshot from '../../assets/backlog.png';
+
+<Image src={backlogScreenshot} alt="Projektor issue backlog - list view with projects sidebar, issue refs, status, priority, and assignees" />
 
 <CardGrid stagger>
   <Card title="MCP-native" icon="puzzle">
     Every action available in the browser is available to an agent over JSON-RPC. The MCP server is the primary surface.
   </Card>
   <Card title="Edge-native" icon="cloudflare">
-    Hono on Cloudflare Workers. D1 for data, KV for sessions, R2 for attachments. No servers, no containers.
+    Hono on Cloudflare Workers. D1 for data, KV for caching, R2 for attachments. No servers, no containers.
   </Card>
   <Card title="Built for fleets" icon="seti:notebook">
     Agent sessions, file claims, and coordination messages let parallel agents work the same repo without colliding.

@@ -11,6 +11,7 @@
     "format": "biome format --write .",
     "cofferdam": "cofferdam check",
     "cofferdam:fix": "cofferdam baseline write",
+    "gen:docs": "pnpm --filter @projektor/api gen:catalog && tsx scripts/gen-conventions-page.ts",
     "prepare": "lefthook install"
   },
   "devDependencies": {
@@ -20,6 +21,7 @@
     "@cofferdam/cofferdam": "^0.3.7",
     "lefthook": "^1.11.0",
     "turbo": "^2.3.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.5.0"
   },
   "packageManager": "pnpm@10.18.0",

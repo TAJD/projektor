@@ -4,12 +4,12 @@ description: "Architecture contract and conventions for working on the Projektor
 sidebar:
   order: 1
 ---
+> **Note:** this page is generated from [`AGENTS.md`](https://github.com/TAJD/projektor/blob/main/AGENTS.md) in the repo root by `scripts/gen-conventions-page.ts`. Edit that file, not this page - it is overwritten on every generate.
+
 Guidance for AI agents (and humans) working **on** the projektor codebase.
 Read this before making changes - it captures conventions that aren't obvious from the code alone.
 
 > Portable source of truth across agent tools (Claude Code, Codex, Cursor, …). `CLAUDE.md` points here.
-
-> **Note:** this page mirrors [`AGENTS.md`](https://github.com/TAJD/projektor/blob/main/AGENTS.md) in the repo root. Edit that file, not this page — updates get ported here.
 
 ## What projektor is
 
@@ -24,8 +24,8 @@ Implementation details:
 
 - When implementing features or fixing bugs you must always implement a test or tests to confirm the functionality is implemented.
 - **Runtime:** Hono on Cloudflare Workers
-- **Data:** D1 (SQLite) for relational data, KV for sessions/caches, R2 for file attachments
-- **Schema:** Drizzle (migration + schema source of truth) - but query execution is raw `DB.prepare(...)`
+- **Data:** D1 (SQLite) for relational data, KV for caching (Access certs, user-by-email), R2 for file attachments
+- **Schema:** Drizzle is the schema and primary query layer; raw `DB.prepare` remains in the auth/workspace middleware hot path, the dev bootstrap, and a handful of service queries (FTS, counters) where hand-written SQL is clearer.
 - **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets - see below), `packages/*` (db, types, plugin-sdk), `plugins/*`
 - **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-workspace`) downloads it and ships it with `wrangler` - no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
 
@@ -49,6 +49,32 @@ mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live h
    - MCP: `mcp/error-adapter.ts` → JSON-RPC code (`-32602` for validation, `-32000` otherwise). Never return raw `String(err)` to clients.
 5. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role? }`. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
 
+### Deliberate REST↔MCP parity exceptions
+
+The parity audit (PROJ-236) confirmed these surface-only features are intentional, not
+drift — don't re-flag them in future audits:
+
+- **File attachments (`routes/files.ts`)** — REST-only. Binary/multipart upload and
+  streamed download can't cross JSON-RPC. Tracked separately as PROJ-234 (no MCP surface
+  at all for this domain).
+- **Auth (`routes/auth.ts`): login redirect, API token minting/revocation** — REST-only.
+  CF Access login is a browser redirect flow; token minting/revocation is a sensitive
+  credential operation kept off the MCP surface.
+- **Workspace-scoped API tokens (`POST/GET/DELETE /api/workspaces/:slug/tokens`)** —
+  REST-only, same rationale as auth tokens above.
+- **`GET /api/workspaces/:slug/mcp-info`** — REST-only. Bootstraps how to connect an MCP
+  client in the first place; inherently can't be an MCP tool.
+- **Cross-workspace project list (`GET /api/projects` → `listAllProjects`)** — REST-only.
+  MCP connections are bound to a single workspace (`/mcp/<workspaceId>`), so a
+  cross-workspace listing doesn't fit the MCP connection model. MCP's `list_projects` is
+  the single-workspace equivalent (different, plainer shape — no `open_issue_count` /
+  `workspace_name` rollups).
+- **Public issue sharing (`POST /api/issues/:id/share`, `GET /api/share/:token`)** —
+  REST-only. Share-link creation/redemption is a browser-facing feature (the redemption
+  endpoint is intentionally unauthenticated by token).
+- **`get_prioritized_issues`** — MCP-only. An agent-productivity tool ("what should I
+  work on next") with no natural REST/browser analog.
+
 ### The security invariant: always scope by workspace
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked - e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
 
@@ -65,6 +91,16 @@ const rows = await inChunks(issueIds, (chunk) =>
 ```
 
 Bounded arrays (enums like priority) are fine to bind directly. When in doubt, chunk.
+
+## Versioning
+
+**`apps/web/package.json` is the single version source** for the whole monorepo -
+bumped by `release-prepare.yml`, tagged by `release-tag.yml`, and read by
+`release.yml`/`scripts/build-release.sh` to produce the release artifact (embedded
+as `VERSION` in the tarball and injected into the MCP `serverInfo.version` via
+esbuild `--define`). Every other package's `package.json` `version` field is a fixed
+`0.0.0-workspace` placeholder - those packages are workspace-internal and not
+independently released, so their version field is unused and intentionally never bumped.
 
 ## File layout per domain
 
@@ -143,16 +179,16 @@ curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 Then open **http://localhost:4321** - with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
-**Before opening a PR:** `pnpm turbo type-check` and `pnpm --filter @projektor/api test` must both be green. CI runs exactly these.
+**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/api test`, `pnpm --filter @projektor/web test`, and `pnpm --filter @projektor/web build` must all be green. CI runs exactly these.
 
 ## Git hooks (lefthook)
 
 `pnpm install` runs `prepare`, which calls `lefthook install` and wires two hooks:
 
-- **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages).
-- **pre-push** - `pnpm --filter @projektor/api test` (the ~8s vitest suite; too slow for every commit but catches the failures that most often break CI).
+- **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages), `pnpm biome check --changed --no-errors-on-unmatched` (lint, changed files only), and the island API convention check.
+- **pre-push** - `pnpm --filter @projektor/api test` and `pnpm --filter @projektor/web test` (too slow for every commit but catches the failures that most often break CI).
 
-These mirror CI (`.github/workflows/ci.yml`) exactly. New contributors get them automatically after `pnpm install`.
+These mirror CI (`.github/workflows/ci.yml`), which additionally runs `pnpm lint` (full repo) and `pnpm --filter @projektor/web build` as PR gates. New contributors get the hooks automatically after `pnpm install`.
 
 **Bypass for WIP commits/pushes:** pass `--no-verify` (or `-n`) to git:
 
@@ -270,12 +306,15 @@ own the same island file. Assign each island to exactly one agent per batch.
 
 **Deploy:** tag a release (`git tag vX.Y.Z && git push --tags`) - `release.yml`
 builds the artifact and the config-only deploy repo (`projektor-workspace`) picks
-it up. See [docs/deploying.md](/projektor/guides/deploying/).
+it up. See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/).
 
-**CI commands** (must both pass before opening a PR):
+**CI commands** (must all pass before opening a PR):
 ```bash
+pnpm lint
 pnpm turbo type-check
 pnpm --filter @projektor/api test
+pnpm --filter @projektor/web test
+pnpm --filter @projektor/web build
 ```
 
 **Merge ordering rule:** if two agents both touch the same frontend file (e.g.
@@ -295,7 +334,8 @@ claude mcp add projektor --transport http https://<host>/mcp/<workspaceId> \
 ```
 
 **The full tool list is generated from source - do not hand-maintain a copy here.**
-See **[`docs/mcp-tools.generated.md`](/projektor/agents/tool-catalog/)** (produced by
+See the **[MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/)**
+(generated into `apps/docs/src/content/docs/agents/tool-catalog.md` by
 `apps/api/scripts/gen-mcp-catalog.ts` from `apps/api/src/mcp/*.ts`; CI fails if it is
 stale). The grouping there separates **Coordination** tools (the agent-native primitives
 used by the fleet protocol above) from **Project data** tools.

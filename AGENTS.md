@@ -18,8 +18,8 @@ Implementation details:
 
 - When implementing features or fixing bugs you must always implement a test or tests to confirm the functionality is implemented.
 - **Runtime:** Hono on Cloudflare Workers
-- **Data:** D1 (SQLite) for relational data, KV for sessions/caches, R2 for file attachments
-- **Schema:** Drizzle (migration + schema source of truth) - but query execution is raw `DB.prepare(...)`
+- **Data:** D1 (SQLite) for relational data, KV for caching (Access certs, user-by-email), R2 for file attachments
+- **Schema:** Drizzle is the schema and primary query layer; raw `DB.prepare` remains in the auth/workspace middleware hot path, the dev bootstrap, and a handful of service queries (FTS, counters) where hand-written SQL is clearer.
 - **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets - see below), `packages/*` (db, types, plugin-sdk), `plugins/*`
 - **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-workspace`) downloads it and ships it with `wrangler` - no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
 
@@ -85,6 +85,16 @@ const rows = await inChunks(issueIds, (chunk) =>
 ```
 
 Bounded arrays (enums like priority) are fine to bind directly. When in doubt, chunk.
+
+## Versioning
+
+**`apps/web/package.json` is the single version source** for the whole monorepo -
+bumped by `release-prepare.yml`, tagged by `release-tag.yml`, and read by
+`release.yml`/`scripts/build-release.sh` to produce the release artifact (embedded
+as `VERSION` in the tarball and injected into the MCP `serverInfo.version` via
+esbuild `--define`). Every other package's `package.json` `version` field is a fixed
+`0.0.0-workspace` placeholder - those packages are workspace-internal and not
+independently released, so their version field is unused and intentionally never bumped.
 
 ## File layout per domain
 

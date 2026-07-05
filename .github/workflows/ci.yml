@@ -18,16 +18,19 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - name: MCP catalog is fresh
+      - name: Generated docs are fresh
         run: |
-          pnpm --filter @projektor/api gen:catalog
+          pnpm gen:docs
           git diff --exit-code -- apps/docs/src/content/docs/agents/tool-catalog.md \
-            || { echo "::error::MCP tool catalog is stale. Run 'pnpm --filter @projektor/api gen:catalog' and commit the result."; exit 1; }
+            apps/docs/src/generated/mcp-stats.json README.md \
+            apps/docs/src/content/docs/contributing/conventions.md \
+            || { echo "::error::Generated docs are stale. Run 'pnpm gen:docs' and commit the result."; exit 1; }
       - run: pnpm lint
       - run: pnpm turbo type-check
       - run: pnpm --filter @projektor/api test
       - run: pnpm --filter @projektor/web test
       - run: pnpm --filter @projektor/web build
+      - run: pnpm --filter @projektor/docs build
       - name: Island API convention
         run: bash scripts/check-island-api.sh
 # E2E tests: run manually with 'pnpm --filter @projektor/web test:e2e'

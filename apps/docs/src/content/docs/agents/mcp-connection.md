@@ -80,16 +80,24 @@ curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
 
 ## 4. Verify the connection
 
+**1. Confirm the server is registered:**
+
 ```bash
-# projektor should appear in the list
 claude mcp list
-
-# Smoke test - list issues (returns empty array if no issues yet)
-claude mcp call projektor list_issues '{}'
-
-# Get workspace membership
-claude mcp call projektor list_members '{}'
+# projektor should appear in the list
 ```
+
+**2. Raw JSON-RPC smoke test** - exercises auth + workspace headers end-to-end, no agent required:
+
+```bash
+curl -s https://<your-worker>.workers.dev/mcp/<workspace-uuid> \
+  -H "Authorization: Bearer pk_..." \
+  -H "X-Workspace-Slug: <slug>" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+**3. Inside a Claude Code session:** run `/mcp` to confirm connection status, then give it a natural-language check - e.g. "list issues in PROJ".
 
 ---
 
@@ -149,7 +157,7 @@ claude mcp add --transport http \
   "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
 ```
 
-Without a valid CF Access service token, the Worker will return a `403` before the MCP layer is reached - the agent connection will silently fail. The bootstrap flow bypasses Access; agent workflows in production need both headers. (Tracked in PROJ-129.)
+Without a valid CF Access service token, the Worker will return a `403` before the MCP layer is reached - the agent connection will silently fail. The bootstrap flow bypasses Access; agent workflows in production need both headers.
 
 ---
 
@@ -201,7 +209,15 @@ The token is workspace-scoped - a token from workspace A is rejected for workspa
 }
 ```
 
-Error codes: `-32600` invalid request, `-32601` method/tool not found, `-32602` validation error, `-32000` other (not found, forbidden, conflict).
+Error codes: `-32600` invalid request, `-32601` method/tool not found, `-32602` validation error, `-32003` token lacks required scope, `-32000` other (not found, forbidden, conflict).
+
+| Code | Meaning |
+|------|---------|
+| `-32600` | Invalid Request (bad JSON-RPC envelope) |
+| `-32601` | Method or tool not found |
+| `-32602` | Validation error (invalid params) |
+| `-32003` | Token lacks the required scope |
+| `-32000` | Other (not found, forbidden, conflict) |
 
 ### Stable API contracts
 

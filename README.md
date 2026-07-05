@@ -105,7 +105,7 @@ command shown beside it (token + workspace pre-filled). The full walkthrough - A
 setup, first login, token, MCP - is in
 [CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
-See the **[agent connection guide](https://tajd.github.io/projektor/agents/mcp-connection/)** for the full connection guide, protocol reference, and tool catalog (64 tools across 14 domains - project data plus agent-coordination primitives).
+See the **[agent connection guide](https://tajd.github.io/projektor/agents/mcp-connection/)** for the full connection guide, protocol reference, and tool catalog (<!-- gen-mcp-stats:start -->67 tools across 15 domains<!-- gen-mcp-stats:end --> - project data plus agent-coordination primitives).
 
 ## Development
 
@@ -164,7 +164,7 @@ MCP   /mcp/:wsId    ─┘
 Routes and MCP tools are thin wrappers. All business logic and SQL live in `services/`. Both surfaces must stay at parity - adding a feature to only one is a bug.
 
 Runtime: **Hono on Cloudflare Workers** - no Node.js, no containers.
-Storage: **D1** (relational), **KV** (sessions/cache), **R2** (attachments).
+Storage: **D1** (relational), **KV** (cache), **R2** (attachments).
 Frontend: **Astro + Preact**, served as static assets via Workers Static Assets; `/api/*` and `/mcp/*` always hit the Worker.
 
 ## Roadmap / Contributing

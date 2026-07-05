@@ -8,6 +8,7 @@ on:
     paths:
       - "apps/docs/**"
       - "apps/api/src/mcp/**"
+      - "AGENTS.md"
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -33,8 +34,8 @@ jobs:
           node-version: "20"
           cache: "pnpm"
       - run: pnpm install --frozen-lockfile
-      # Generate the tool catalog from source before building, so the site is fresh.
-      - run: pnpm --filter @projektor/api gen:catalog
+      # Generate the tool catalog + contributor-conventions mirror before building, so the site is fresh.
+      - run: pnpm gen:docs
       - run: pnpm --filter @projektor/docs build
       - uses: actions/upload-pages-artifact@v3
         with:
