@@ -101,6 +101,18 @@ describe("MarkdownEditor", () => {
 		});
 	});
 
+	it("doesn't nest a second auto-overflow scroll container around CodeMirror's own scroller (PROJ-305)", () => {
+		// CodeMirror's `.cm-scroller` already sets `overflow: auto` internally. Wrapping
+		// it in a sibling container that ALSO has `overflow-auto` inside a stretched
+		// flex row caused a real-browser layout thrash (content height change -> flex
+		// re-stretch -> CM re-measures -> height changes again) that froze the page
+		// mid-typing. jsdom has no layout engine so this can't be caught by behavior —
+		// assert directly on the mount container's class instead.
+		const { container } = render(<MarkdownEditor value="" onChange={() => {}} />);
+		const editorPane = container.querySelector(".cm-editor")?.parentElement;
+		expect(editorPane?.className).not.toContain("overflow-auto");
+	});
+
 	it("switches to preview pane when the mobile Preview button is clicked", () => {
 		render(<MarkdownEditor value="" onChange={() => {}} />);
 		const buttons = screen.getAllByRole("button");

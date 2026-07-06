@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "preact/hooks";
 import { formatIssueRef } from "../../lib/issue-ref";
 import { issueUrl } from "../../utils/issue-url";
 import type { Issue, SortKey, TaskStatus } from "../board-utils";
@@ -178,6 +179,23 @@ export default function ListSection({
 	loadingMore,
 	loadMore,
 }: ListSectionProps) {
+	// Auto-paginate on scroll (PROJ-303): load the next page as soon as the sentinel
+	// at the bottom of the list scrolls into view, instead of requiring a manual click.
+	const sentinelRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		if (nextCursor == null) return;
+		const node = sentinelRef.current;
+		if (!node) return;
+		const observer = new IntersectionObserver(
+			(entries) => {
+				if (entries.some((e) => e.isIntersecting)) loadMore();
+			},
+			{ rootMargin: "400px" }
+		);
+		observer.observe(node);
+		return () => observer.disconnect();
+	}, [nextCursor, loadMore]);
+
 	if (issues.length === 0) {
 		return <p class="text-text-base">No issues match the current filters.</p>;
 	}
@@ -205,12 +223,11 @@ export default function ListSection({
 				changePriority={changePriority}
 			/>
 
-			{/* Load more (PROJ-201): visible only while the server has another page */}
+			{/* Auto-load sentinel (PROJ-201/303): fetches the next page once it scrolls
+			    into view; only rendered while the server has another page. */}
 			{nextCursor != null && (
-				<div class="flex justify-center mt-4">
-					<button type="button" class="btn btn-outline" onClick={loadMore} disabled={loadingMore}>
-						{loadingMore ? "Loading…" : "Load more"}
-					</button>
+				<div ref={sentinelRef} class="flex justify-center mt-4 py-2">
+					{loadingMore && <span class="text-sm text-text-muted">Loading more…</span>}
 				</div>
 			)}
 		</>

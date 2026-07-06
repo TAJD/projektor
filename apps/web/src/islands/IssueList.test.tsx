@@ -558,6 +558,30 @@ describe("project filter API contract", () => {
 		expect(String(issueCall?.[0])).toContain("limit=30");
 	});
 
+	it("header count shows the server's real total, not just the loaded page size (PROJ-303)", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const s = String(url);
+				if (s.includes("task-statuses"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(STATUSES) });
+				if (s.includes("/api/projects"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(PROJECTS) });
+				// Server reports 42 matches total even though only the loaded page (2 issues) is returned.
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ items: ISSUES, nextCursor: 999, total: 42 }),
+				});
+			})
+		);
+		render(<IssueList />);
+		await waitForLoaded();
+
+		await waitFor(() => {
+			expect(screen.getByText(/\(of 42\)/)).toBeTruthy();
+		});
+	});
+
 	it("includes project=<id> in issues fetch when ?project=KEY is active", async () => {
 		history.replaceState(null, "", "/?project=PROJ");
 		const mockFetch = setupProjectFetch();
