@@ -27,7 +27,11 @@ describe("Issues API", () => {
 		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
 	});
 
-	type IssuesPage = { items: Array<Record<string, unknown>>; nextCursor: number | null };
+	type IssuesPage = {
+		items: Array<Record<string, unknown>>;
+		nextCursor: number | null;
+		total: number;
+	};
 
 	async function listIssues(url = "http://localhost/api/issues") {
 		const res = await SELF.fetch(url, { headers: authHeaders(token, slug) });
@@ -300,6 +304,27 @@ describe("Issues API", () => {
 		);
 		expect(second.items).toHaveLength(5);
 		expect(second.nextCursor).toBeNull();
+	});
+
+	it("reports the real total match count, not just the loaded page size (PROJ-303)", async () => {
+		const base = 1_700_000_000;
+		for (let i = 0; i < 35; i++) {
+			await seedIssue(workspaceId, projectId, userId, {
+				title: `Issue ${i}`,
+				createdAt: base + i,
+			});
+		}
+
+		// The first page only loads 30 rows, but `total` must reflect all 35 matches —
+		// this is what the frontend header count relies on instead of items.length.
+		const { page: first } = await listIssues("http://localhost/api/issues");
+		expect(first.items).toHaveLength(30);
+		expect(first.total).toBe(35);
+
+		const { page: second } = await listIssues(
+			`http://localhost/api/issues?cursor=${first.nextCursor}`
+		);
+		expect(second.total).toBe(35);
 	});
 
 	it("projectId filter scopes results to that project only", async () => {

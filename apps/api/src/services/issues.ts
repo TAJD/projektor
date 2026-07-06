@@ -198,13 +198,12 @@ async function addCustomFieldFilter(
 
 // Date-range filters (PROJ-212) — inclusive bounds, index-backed.
 function addDateRangeFilters(conditions: Condition[], filters: ListIssuesFilters): void {
-	const { completedAfter, completedBefore, updatedAfter, updatedBefore, cursor } = filters;
+	const { completedAfter, completedBefore, updatedAfter, updatedBefore } = filters;
 
 	if (completedAfter) conditions.push(gte(schema.issues.completedAt, completedAfter));
 	if (completedBefore) conditions.push(lte(schema.issues.completedAt, completedBefore));
 	if (updatedAfter) conditions.push(gte(schema.issues.updatedAt, updatedAfter));
 	if (updatedBefore) conditions.push(lte(schema.issues.updatedAt, updatedBefore));
-	if (cursor) conditions.push(sql`${schema.issues.createdAt} < ${cursor}`);
 }
 
 async function buildListIssuesConditions(
@@ -228,7 +227,19 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 
+	// Conditions exclude the pagination cursor, so they represent the full filtered set —
+	// used as-is for the total count, and extended with the cursor below for the page query.
 	const conditions = await buildListIssuesConditions(orm, ctx, filters);
+	const pageConditions = filters.cursor
+		? [...conditions, sql`${schema.issues.createdAt} < ${filters.cursor}`]
+		: conditions;
+
+	const totalRow = await orm
+		.select({ count: sql<number>`count(*)` })
+		.from(schema.issues)
+		.where(and(...conditions))
+		.get();
+	const total = totalRow?.count ?? 0;
 
 	// Select with snake_case aliases to preserve the same response shape as the raw-SQL version.
 	// labels uses a raw SQL expression to return the stored JSON string (bypassing Drizzle's
@@ -267,7 +278,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 		.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
 		.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
-		.where(and(...conditions))
+		.where(and(...pageConditions))
 		.orderBy(desc(schema.issues.createdAt))
 		.limit(limit + 1);
 
@@ -283,7 +294,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		customFields: customFieldsByIssue[i.id as string] ?? [],
 	}));
 
-	return { items: itemsWithFields, nextCursor };
+	return { items: itemsWithFields, nextCursor, total };
 }
 
 // Snake-case aliases preserve the existing response contract. The labels raw expression

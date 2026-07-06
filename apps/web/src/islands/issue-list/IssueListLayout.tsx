@@ -113,7 +113,7 @@ function IssueListTop({
 				view={view}
 				setView={setView}
 				filtered={filtered}
-				totalIssues={data.issues.length}
+				totalIssues={data.total}
 				projectsCount={data.projects.length}
 				openCreateModal={createModal.openCreateModal}
 			/>

@@ -180,6 +180,13 @@ function useMarkdownEditorView(
 ) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const viewRef = useRef<EditorView | null>(null);
+	// The last doc content WE emitted via onChange. The "sync externally-driven value"
+	// effect below compares the incoming `value` prop against this — not against the
+	// live doc — so a same-tick echo of our own change (however delayed by Preact's
+	// scheduling) is recognized as our own and skipped, instead of being re-dispatched
+	// as if it were an external change and potentially clobbering keystrokes typed since
+	// (PROJ-305: this race was making the editor appear to freeze mid-typing).
+	const lastEmitted = useRef(value);
 
 	useEffect(() => {
 		if (!containerRef.current) return;
@@ -197,7 +204,9 @@ function useMarkdownEditorView(
 				keymap.of([...customKeymap, ...historyKeymap, ...defaultKeymap]),
 				EditorView.updateListener.of((update) => {
 					if (update.docChanged) {
-						onChange(update.state.doc.toString());
+						const next = update.state.doc.toString();
+						lastEmitted.current = next;
+						onChange(next);
 					}
 				}),
 				EditorView.theme({
@@ -227,8 +236,12 @@ function useMarkdownEditorView(
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
-	// Sync externally-driven value changes (e.g. switching issues)
+	// Sync externally-driven value changes (e.g. switching issues). If `value` matches
+	// what we last emitted, this render is just our own change echoing back through
+	// props — nothing to do, regardless of whether the doc has since moved on further.
 	useEffect(() => {
+		if (value === lastEmitted.current) return;
+		lastEmitted.current = value;
 		const view = viewRef.current;
 		if (!view) return;
 		const current = view.state.doc.toString();
@@ -328,7 +341,7 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 
 			<div class="flex flex-1" style={{ minHeight }}>
 				<div
-					class={`flex-1 min-w-0 overflow-auto flex flex-col${mobilePreview ? " max-sm:hidden" : ""}`}
+					class={`flex-1 min-w-0 flex flex-col${mobilePreview ? " max-sm:hidden" : ""}`}
 					ref={containerRef}
 				/>
 				<PreviewPane preview={preview} mobilePreview={mobilePreview} />

@@ -33,9 +33,13 @@ export function useIssueFetching(
 	// response from the most recently issued fetchIssues call is applied.
 	const fetchSeq = useRef(0);
 	const [error, setError] = useState<string | null>(null);
-	// Pagination (PROJ-201): list view loads 30 at a time and appends via "Load more".
+	// Pagination (PROJ-201/303): list view loads 30 at a time and appends automatically
+	// as the user scrolls near the bottom (see useInfiniteScroll / ListSection).
 	const [nextCursor, setNextCursor] = useState<number | null>(null);
 	const [loadingMore, setLoadingMore] = useState(false);
+	// Real total matching the current filters (server-computed), not just how many
+	// have been loaded so far — PROJ-303: the header count must never look capped.
+	const [total, setTotal] = useState(0);
 
 	// Build the filter query params shared by the initial fetch and "Load more"
 	// (everything except limit/cursor, which the callers set).
@@ -68,7 +72,7 @@ export function useIssueFetching(
 		try {
 			const qs = buildFilterParams();
 			qs.set("limit", String(pageSize));
-			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(
+			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null; total: number }>(
 				`/api/issues?${qs.toString()}`,
 				{
 					workspaceSlug,
@@ -77,6 +81,7 @@ export function useIssueFetching(
 			if (seq !== fetchSeq.current) return; // superseded by a newer request
 			setIssues(data.items);
 			setNextCursor(data.nextCursor ?? null);
+			setTotal(data.total ?? data.items.length);
 			hasLoadedOnce.current = true;
 		} catch (e) {
 			if (seq !== fetchSeq.current) return;
@@ -94,7 +99,7 @@ export function useIssueFetching(
 			const qs = buildFilterParams();
 			qs.set("limit", String(pageSize));
 			qs.set("cursor", String(nextCursor));
-			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null }>(
+			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null; total: number }>(
 				`/api/issues?${qs.toString()}`,
 				{
 					workspaceSlug,
@@ -102,6 +107,7 @@ export function useIssueFetching(
 			);
 			setIssues((prev) => [...prev, ...data.items]);
 			setNextCursor(data.nextCursor ?? null);
+			setTotal(data.total ?? 0);
 		} catch (e) {
 			setError(String(e));
 		} finally {
@@ -121,6 +127,7 @@ export function useIssueFetching(
 		error,
 		nextCursor,
 		loadingMore,
+		total,
 		fetchIssues,
 		loadMore,
 	};

@@ -426,6 +426,12 @@ const navItems = [
         /* Roomier tap targets inside the drawer */
         .sidebar-link { padding: 0.6875rem 0.75rem; }
         .theme-toggle { padding: 0.5rem 0.625rem; min-height: 44px; }
+
+        /* iOS Safari auto-zooms the page on focus of any form control rendered
+           below 16px; forcing 16px here (PROJ-304) prevents that zoom-in. */
+        input, textarea, select {
+          font-size: 16px;
+        }
       }
 
       /* ── Custom Select (islands) ───────────────────────────────────── */
