@@ -14,6 +14,7 @@ import {
 	sql,
 } from "drizzle-orm";
 import type { z } from "zod";
+import { issuePath } from "../lib/urls";
 import { IdSchema } from "../schemas/common";
 import {
 	CreateIssueSchema,
@@ -281,6 +282,9 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	const itemsWithFields = (items as Array<Record<string, unknown>>).map((i) => ({
 		...i,
 		customFields: customFieldsByIssue[i.id as string] ?? [],
+		url: i.project_key
+			? issuePath(i.project_key as string, i.number as number, i.title as string)
+			: null,
 	}));
 
 	return { items: itemsWithFields, nextCursor };
@@ -405,11 +409,19 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, [issueId]);
 	const customFields = customFieldsByIssue[issueId] ?? [];
 
+	const issueRecord = issue as Record<string, unknown>;
 	const fullIssue = {
-		...(issue as Record<string, unknown>),
+		...issueRecord,
 		rollup,
 		links,
 		customFields,
+		url: issueRecord.project_key
+			? issuePath(
+					issueRecord.project_key as string,
+					issueRecord.number as number,
+					issueRecord.title as string
+				)
+			: null,
 	};
 
 	await cache.set(ctx.kv, `issue:${ctx.workspaceId}:${issueId}`, fullIssue, ISSUE_TTL);
