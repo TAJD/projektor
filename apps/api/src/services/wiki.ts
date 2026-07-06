@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, desc, eq, or } from "drizzle-orm";
+import { wikiPagePath } from "../lib/urls";
 import { IdSchema } from "../schemas/common";
 import {
 	CreatePageSchema,
@@ -11,7 +12,7 @@ import { recordActivity } from "./activity";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
-type TreeNode = { id: string; slug: string; title: string; children: TreeNode[] };
+type TreeNode = { id: string; slug: string; title: string; url: string; children: TreeNode[] };
 
 function slugify(title: string): string {
 	return title
@@ -24,11 +25,12 @@ async function resolvePageByIdOrSlug(
 	db: D1Database,
 	idOrSlug: string,
 	workspaceId: string
-): Promise<{ id: string; content: string; projectId: string | null }> {
+): Promise<{ id: string; slug: string; content: string; projectId: string | null }> {
 	const orm = drizzle(db, { schema });
 	const page = await orm
 		.select({
 			id: schema.wikiPages.id,
+			slug: schema.wikiPages.slug,
 			content: schema.wikiPages.content,
 			projectId: schema.wikiPages.projectId,
 		})
@@ -171,7 +173,7 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 		conditions.push(eq(schema.wikiPages.projectId, parsed.data.projectId));
 	}
 
-	return orm
+	const rows = await orm
 		.select({
 			id: schema.wikiPages.id,
 			slug: schema.wikiPages.slug,
@@ -186,6 +188,8 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 		.from(schema.wikiPages)
 		.where(and(...conditions))
 		.orderBy(asc(schema.wikiPages.title));
+
+	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug, r.project_id) }));
 }
 
 export async function searchWiki(ctx: ServiceCtx, input: unknown) {
@@ -241,7 +245,7 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 		)
 		.get();
 	if (!page) throw new NotFoundError("Wiki page not found");
-	return page;
+	return { ...page, url: wikiPagePath(page.slug, page.project_id) };
 }
 
 export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
@@ -273,7 +277,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		updatedAt: now,
 	});
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
-	return { id, slug, projectId: projectId ?? null };
+	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug, projectId ?? null) };
 }
 
 export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
@@ -313,7 +317,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		diff: buildWikiPageUpdateDiff({ title, content }),
 	});
 
-	return { ok: true };
+	return { ok: true, url: wikiPagePath(page.slug, page.projectId) };
 }
 
 export async function deleteWikiPage(ctx: ServiceCtx, slug: string) {
@@ -344,6 +348,7 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 			slug: schema.wikiPages.slug,
 			title: schema.wikiPages.title,
 			parentId: schema.wikiPages.parentId,
+			projectId: schema.wikiPages.projectId,
 		})
 		.from(schema.wikiPages)
 		.where(and(...conditions))
@@ -351,7 +356,13 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 
 	const map = new Map<string, TreeNode>();
 	for (const p of rows) {
-		map.set(p.id, { id: p.id, slug: p.slug, title: p.title, children: [] });
+		map.set(p.id, {
+			id: p.id,
+			slug: p.slug,
+			title: p.title,
+			url: wikiPagePath(p.slug, p.projectId),
+			children: [],
+		});
 	}
 
 	const roots: TreeNode[] = [];

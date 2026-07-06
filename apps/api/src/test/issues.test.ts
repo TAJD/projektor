@@ -69,6 +69,24 @@ describe("Issues API", () => {
 		expect(page.items[0].title).toBe("Visible issue");
 	});
 
+	it("exposes a resolvable url on list items and single-issue fetches (PROJ-307)", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Wiki full-text search" }),
+		});
+		const created = (await createRes.json()) as { id: string; number: number };
+
+		const { page } = await listIssues();
+		expect(page.items[0].url).toBe(`/projects/PROJ/issues/${created.number}/wiki-full-text-search`);
+
+		const getRes = await SELF.fetch(`http://localhost/api/issues/${created.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const fetched = (await getRes.json()) as { url: string };
+		expect(fetched.url).toBe(`/projects/PROJ/issues/${created.number}/wiki-full-text-search`);
+	});
+
 	it("auto-increments issue number per project", async () => {
 		for (const title of ["Issue A", "Issue B", "Issue C"]) {
 			await SELF.fetch("http://localhost/api/issues", {

@@ -6,11 +6,13 @@ import { authHeaders, seedFixture, seedProject, seedWorkspaceRoles } from "./hel
 describe("Wiki API", () => {
 	let token: string;
 	let slug: string;
+	let workspaceId: string;
 
 	beforeEach(async () => {
 		const fixture = await seedFixture();
 		token = fixture.token;
 		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
 	});
 
 	it("GET /api/wiki returns empty list initially", async () => {
@@ -30,6 +32,55 @@ describe("Wiki API", () => {
 		expect(res.status).toBe(201);
 		const body = (await res.json()) as { id: string; slug: string };
 		expect(body.slug).toBe("getting-started");
+	});
+
+	describe("canonical page url (PROJ-307)", () => {
+		it("create/get/update/list/tree all expose a resolvable url", async () => {
+			const createRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title: "Weekly Updates", content: "index" }),
+			});
+			const created = (await createRes.json()) as { url: string };
+			expect(created.url).toBe("/wiki?slug=weekly-updates");
+
+			const getRes = await SELF.fetch("http://localhost/api/wiki/weekly-updates", {
+				headers: authHeaders(token, slug),
+			});
+			const fetched = (await getRes.json()) as { url: string };
+			expect(fetched.url).toBe("/wiki?slug=weekly-updates");
+
+			const updateRes = await SELF.fetch("http://localhost/api/wiki/weekly-updates", {
+				method: "PUT",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ content: "index v2" }),
+			});
+			const updated = (await updateRes.json()) as { url: string };
+			expect(updated.url).toBe("/wiki?slug=weekly-updates");
+
+			const listRes = await SELF.fetch("http://localhost/api/wiki", {
+				headers: authHeaders(token, slug),
+			});
+			const list = (await listRes.json()) as Array<{ slug: string; url: string }>;
+			expect(list.find((p) => p.slug === "weekly-updates")?.url).toBe("/wiki?slug=weekly-updates");
+
+			const treeRes = await SELF.fetch("http://localhost/api/wiki/tree", {
+				headers: authHeaders(token, slug),
+			});
+			const tree = (await treeRes.json()) as Array<{ slug: string; url: string }>;
+			expect(tree.find((p) => p.slug === "weekly-updates")?.url).toBe("/wiki?slug=weekly-updates");
+		});
+
+		it("includes projectId in the url when the page is scoped to a project", async () => {
+			const project = await seedProject(workspaceId);
+			const createRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title: "Project Notes", content: "notes", projectId: project.id }),
+			});
+			const created = (await createRes.json()) as { url: string };
+			expect(created.url).toBe(`/wiki?slug=project-notes&projectId=${project.id}`);
+		});
 	});
 
 	it("GET /api/wiki/:slug retrieves a page by slug", async () => {
