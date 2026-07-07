@@ -47,6 +47,31 @@ pnpm --filter @projektor/web exec playwright show-report
 
 ---
 
+## Long-running tests (`@long`)
+
+`editor-freeze.spec.ts` (PROJ-310) drives sustained, bursty typing into the
+wiki page editor and the issue description editor to catch "editor freeze"
+regressions (PROJ-305/306) that only reproduce in a real browser under
+realistic timing — not in unit tests. Each test runs for several minutes by
+design, so it's excluded from the default `test:e2e` script and run
+separately:
+
+```bash
+export E2E_BASE_URL=https://your-dev-instance.workers.dev
+pnpm --filter @projektor/web test:e2e:long
+```
+
+Tests tagged `@long` in their title are excluded from `test:e2e`
+(`--grep-invert @long`) and included in `test:e2e:long` (`--grep @long`).
+Follow this convention for any future long-running test: put `@long`
+literally in the test title.
+
+Not run in CI (same reason as the rest of the suite — no live
+`E2E_BASE_URL` deployment is available there); run manually or on a
+schedule against a dev deployment.
+
+---
+
 ## Environment variables
 
 | Variable | Required | Description |
