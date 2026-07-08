@@ -67,6 +67,11 @@ const INPUT =
 	"px-[0.625rem] py-[0.4rem] border border-border rounded text-[0.85rem] bg-bg text-text-base " +
 	"font-[inherit] focus:outline-[2px] focus:outline-accent focus:outline-offset-1";
 const CARD = "border border-border rounded-lg bg-surface p-4 mb-4";
+const INFO =
+	"flex items-center gap-2 border border-border rounded-lg bg-bg px-4 py-3 mb-4 text-[0.82rem] text-text-base";
+const ROLE_TAG =
+	"inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold " +
+	"bg-accent text-white uppercase tracking-wide";
 const CHIP =
 	"inline-flex items-center px-2 py-[0.1rem] mr-1 mb-1 rounded-full text-[0.72rem] " +
 	"bg-bg border border-border text-text-base";
@@ -92,16 +97,45 @@ interface Loaded {
 	members: WsMember[];
 	memberGroups: MemberGroupsRow[];
 	projects: ProjectLite[];
+	role: string;
+	isAdmin: boolean;
 }
 
 async function loadAll(slug: string): Promise<Loaded> {
-	const [groups, ws, memberGroups, projects] = await Promise.all([
+	const [groups, ws, projects] = await Promise.all([
 		apiFetch<GroupSummary[]>(`/api/workspaces/${slug}/groups`, { workspaceSlug: slug }),
-		apiFetch<{ members: WsMember[] }>(`/api/workspaces/${slug}`, { workspaceSlug: slug }),
-		apiFetch<MemberGroupsRow[]>(`/api/workspaces/${slug}/member-groups`, { workspaceSlug: slug }),
+		apiFetch<{ members: WsMember[]; currentUserRole: string }>(`/api/workspaces/${slug}`, {
+			workspaceSlug: slug,
+		}),
 		apiFetch<ProjectLite[]>("/api/projects", { workspaceSlug: slug }),
 	]);
-	return { groups, members: ws.members ?? [], memberGroups, projects };
+	const role = ws.currentUserRole;
+	const isAdmin = role === "owner" || role === "admin";
+	// member-groups is admin-only; skip it for non-admins so they get a read-only
+	// view of their own groups instead of a 403.
+	const memberGroups = isAdmin
+		? await apiFetch<MemberGroupsRow[]>(`/api/workspaces/${slug}/member-groups`, {
+				workspaceSlug: slug,
+			})
+		: [];
+	return { groups, members: ws.members ?? [], memberGroups, projects, role, isAdmin };
+}
+
+// ---------------------------------------------------------------------------
+// Role indicator — tells the caller what they can do here
+// ---------------------------------------------------------------------------
+
+function RoleBanner(props: { role: string; isAdmin: boolean }) {
+	return (
+		<div class={INFO}>
+			<span class={ROLE_TAG}>{props.role}</span>
+			<span>
+				{props.isAdmin
+					? "You manage which groups can access which projects."
+					: "Only owners and admins manage groups. Below are the groups that grant you access."}
+			</span>
+		</div>
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -470,35 +504,45 @@ export default function GroupManager({ workspaceSlug }: Props) {
 		}
 	}
 
+	const { isAdmin } = data;
+
 	return (
 		<div>
-			<MembersOverview members={data.members} memberGroups={data.memberGroups} />
+			<RoleBanner role={data.role} isAdmin={isAdmin} />
+
+			{isAdmin && <MembersOverview members={data.members} memberGroups={data.memberGroups} />}
 
 			<section class={CARD}>
-				<h2 class={H2}>Groups</h2>
-				<div class="flex items-center gap-2 mb-4">
-					<input
-						class={INPUT}
-						placeholder="New group name"
-						value={newName}
-						onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") void createGroup();
-						}}
-					/>
-					<button
-						type="button"
-						class={BTN_PRIMARY}
-						disabled={busy || !newName.trim()}
-						onClick={createGroup}
-					>
-						Create group
-					</button>
-				</div>
+				<h2 class={H2}>{isAdmin ? "Groups" : "Your groups"}</h2>
+				{isAdmin && (
+					<div class="flex items-center gap-2 mb-4">
+						<input
+							class={INPUT}
+							placeholder="New group name"
+							value={newName}
+							onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
+							onKeyDown={(e) => {
+								if (e.key === "Enter") void createGroup();
+							}}
+						/>
+						<button
+							type="button"
+							class={BTN_PRIMARY}
+							disabled={busy || !newName.trim()}
+							onClick={createGroup}
+						>
+							Create group
+						</button>
+					</div>
+				)}
 				{createErr && <div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{createErr}</div>}
 
 				{data.groups.length === 0 ? (
-					<div class="text-[0.85rem] text-text-muted">No groups yet.</div>
+					<div class="text-[0.85rem] text-text-muted">
+						{isAdmin
+							? "No groups yet."
+							: "You don't belong to any groups yet. An owner or admin can add you to one."}
+					</div>
 				) : (
 					<div class="overflow-x-auto">
 						<table class="w-full border-collapse">
@@ -507,33 +551,39 @@ export default function GroupManager({ workspaceSlug }: Props) {
 									<th class={TH}>Name</th>
 									<th class={TH}>Members</th>
 									<th class={TH}>Projects</th>
-									<th class={TH} />
+									{isAdmin && <th class={TH} />}
 								</tr>
 							</thead>
 							<tbody>
 								{data.groups.map((g) => (
 									<tr key={g.id}>
 										<td class={TD}>
-											<button
-												type="button"
-												class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
-												onClick={() => setSelected(g.id)}
-											>
-												{g.name}
-											</button>
+											{isAdmin ? (
+												<button
+													type="button"
+													class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
+													onClick={() => setSelected(g.id)}
+												>
+													{g.name}
+												</button>
+											) : (
+												<span class="font-medium text-text-base">{g.name}</span>
+											)}
 										</td>
 										<td class={TD}>{g.memberCount}</td>
 										<td class={TD}>{g.grantCount}</td>
-										<td class={TD}>
-											<button
-												type="button"
-												class={BTN_DANGER}
-												disabled={busy}
-												onClick={() => deleteGroup(g.id)}
-											>
-												Delete
-											</button>
-										</td>
+										{isAdmin && (
+											<td class={TD}>
+												<button
+													type="button"
+													class={BTN_DANGER}
+													disabled={busy}
+													onClick={() => deleteGroup(g.id)}
+												>
+													Delete
+												</button>
+											</td>
+										)}
 									</tr>
 								))}
 							</tbody>
@@ -542,7 +592,7 @@ export default function GroupManager({ workspaceSlug }: Props) {
 				)}
 			</section>
 
-			{selected && (
+			{isAdmin && selected && (
 				<GroupDetailEditor
 					slug={slug}
 					groupId={selected}
