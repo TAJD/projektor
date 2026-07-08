@@ -111,3 +111,7 @@ design - see [Contributor conventions → Deliberate REST↔MCP parity exception
 2. `authMiddleware`: CF Access JWT → API-token (D1 hash lookup) → dev bypass.
 3. `workspaceMiddleware`: resolve slug → load workspace → verify `workspace_members` row.
 4. MCP router dispatches `initialize` / `tools/list` / `tools/call` → core tool handler → D1.
+
+Workspace membership is only the outer gate. Which *projects* a member can see and
+what they can do inside them is decided per-request in the service layer — see
+[Access control](/projektor/architecture/access-control/).
