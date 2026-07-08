@@ -311,6 +311,29 @@ describe("DELETE /api/workspaces/:slug (PROJ-96)", () => {
 	});
 });
 
+describe("GET /api/workspaces/:slug (currentUserRole)", () => {
+	it("returns members and the caller's own role for an owner", async () => {
+		const fixture = await seedFixture({ role: "owner" });
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${fixture.workspace.slug}`, {
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { currentUserRole: string; members: unknown[] };
+		expect(body.currentUserRole).toBe("owner");
+		expect(Array.isArray(body.members)).toBe(true);
+	});
+
+	it("reports the caller's role as viewer when they are a viewer", async () => {
+		const fixture = await seedFixture({ role: "viewer" });
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${fixture.workspace.slug}`, {
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { currentUserRole: string };
+		expect(body.currentUserRole).toBe("viewer");
+	});
+});
+
 describe("GET /api/workspaces/:slug/mcp-info (PROJ-83)", () => {
 	let workspaceId: string;
 	let slug: string;

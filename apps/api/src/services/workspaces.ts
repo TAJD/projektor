@@ -84,7 +84,7 @@ export async function getWorkspaceWithMembers(
 		.innerJoin(schema.users, eq(schema.users.id, schema.workspaceMembers.userId))
 		.where(eq(schema.workspaceMembers.workspaceId, ctx.workspaceId))
 		.orderBy(asc(schema.workspaceMembers.joinedAt));
-	return { ...workspace, members };
+	return { ...workspace, members, currentUserRole: ctx.role };
 }
 
 export async function updateWorkspace(ctx: ServiceCtx, input: unknown) {
