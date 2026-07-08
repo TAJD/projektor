@@ -2,6 +2,7 @@ import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq } from "drizzle-orm";
 import { IdSchema } from "../schemas/common";
 import { CreateProjectSchema, UpdateProjectSchema } from "../schemas/projects";
+import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
 import { recordActivity } from "./activity";
 import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
@@ -10,19 +11,31 @@ import type { ServiceCtx } from "./types";
 const WS_META_TTL = 60;
 
 export async function listProjects(ctx: ServiceCtx) {
-	const cacheKey = `ws-meta:${ctx.workspaceId}:projects`;
-	const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
-	if (cached) return cached;
-
 	const orm = drizzle(ctx.db, { schema });
-	const result = await orm
+
+	// PROJ-311: owner/admin see every project and share the workspace cache. A
+	// non-admin sees only granted projects; that set is per-user and access can be
+	// revoked at any time, so it is computed per-request (uncached) to keep the
+	// "effective on next request" guarantee — no stale project can linger.
+	const visible = visibleProjectPredicate(ctx, schema.projects.id);
+	if (!visible) {
+		const cacheKey = `ws-meta:${ctx.workspaceId}:projects`;
+		const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
+		if (cached) return cached;
+		const result = await orm
+			.select()
+			.from(schema.projects)
+			.where(eq(schema.projects.workspaceId, ctx.workspaceId))
+			.orderBy(asc(schema.projects.name));
+		await cache.set(ctx.kv, cacheKey, result, WS_META_TTL);
+		return result;
+	}
+
+	return orm
 		.select()
 		.from(schema.projects)
-		.where(eq(schema.projects.workspaceId, ctx.workspaceId))
+		.where(and(eq(schema.projects.workspaceId, ctx.workspaceId), visible))
 		.orderBy(asc(schema.projects.name));
-
-	await cache.set(ctx.kv, cacheKey, result, WS_META_TTL);
-	return result;
 }
 
 export interface ProjectSummary {
@@ -57,11 +70,18 @@ export async function listAllProjects(userId: string, db: D1Database): Promise<P
       JOIN workspaces w         ON w.id  = p.workspace_id
       JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = ?
       LEFT JOIN issues i        ON i.project_id = p.id
+      -- PROJ-311: in each workspace the user sees all projects if owner/admin there,
+      -- otherwise only projects their groups grant (indexed EXISTS).
+      WHERE wm.role IN ('owner','admin')
+         OR EXISTS (
+              SELECT 1 FROM user_group_members ugm
+              JOIN group_project_grants gpg ON gpg.group_id = ugm.group_id
+              WHERE ugm.user_id = ? AND gpg.project_id = p.id)
       GROUP BY p.id, p.name, p.key, p.description, p.created_at, p.updated_at,
                w.id, w.name, w.slug
       ORDER BY w.slug, p.name`
 		)
-		.bind(userId)
+		.bind(userId, userId)
 		.all<ProjectSummary>();
 	return rows.results;
 }
@@ -74,6 +94,11 @@ export async function getProject(ctx: ServiceCtx, id: string) {
 		.where(and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!project) throw new NotFoundError("Project not found");
+
+	// PROJ-311: default-deny — a non-admin without a grant 404s (existence hidden).
+	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, id)) === null) {
+		throw new NotFoundError("Project not found");
+	}
 	return project;
 }
 

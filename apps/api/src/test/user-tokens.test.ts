@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
 	seedFixture,
+	seedGroupGrant,
 	seedMember,
 	seedProject,
 	seedUser,
@@ -54,6 +55,7 @@ describe("PROJ-91: user-scoped token — member workspace", () => {
 		await seedMember(ws.id, userId, "member");
 		userToken = await seedUserToken(userId);
 		projectId = (await seedProject(ws.id)).id;
+		await seedGroupGrant(ws.id, userId, projectId);
 	});
 
 	it("can read issues in a workspace the user is a member of", async () => {

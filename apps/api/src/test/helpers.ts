@@ -97,6 +97,37 @@ export async function seedProject(workspaceId: string, key = "PROJ") {
 	return { id, key };
 }
 
+/**
+ * PROJ-311: grant a user access to a project by putting them in a fresh group that
+ * holds a (project, role) grant. Mirrors what an admin does through the groups UI;
+ * used to give non-admin fixtures visibility now that access is default-deny.
+ */
+export async function seedGroupGrant(
+	workspaceId: string,
+	userId: string,
+	projectId: string,
+	role = "member"
+): Promise<{ groupId: string }> {
+	const now = Math.floor(Date.now() / 1000);
+	const groupId = crypto.randomUUID();
+	await env.DB.prepare(
+		"INSERT INTO user_groups (id, workspace_id, name, description, created_at) VALUES (?, ?, ?, NULL, ?)"
+	)
+		.bind(groupId, workspaceId, `grp-${groupId.slice(0, 8)}`, now)
+		.run();
+	await env.DB.prepare(
+		"INSERT INTO user_group_members (group_id, user_id, added_by, added_at) VALUES (?, ?, ?, ?)"
+	)
+		.bind(groupId, userId, userId, now)
+		.run();
+	await env.DB.prepare(
+		"INSERT INTO group_project_grants (group_id, project_id, role) VALUES (?, ?, ?)"
+	)
+		.bind(groupId, projectId, role)
+		.run();
+	return { groupId };
+}
+
 /** Returns headers needed for every authenticated request */
 export function authHeaders(token: string, slug: string) {
 	return {
@@ -307,6 +338,13 @@ export async function seedFixture(opts?: { slug?: string; email?: string; role?:
 export async function seedProjectFixture(opts?: { role?: string }) {
 	const fixture = await seedFixture({ role: opts?.role });
 	const project = await seedProject(fixture.workspace.id);
+	// PROJ-311: access is default-deny, so a non-admin fixture would otherwise see
+	// nothing. Grant the fixture user their workspace role on the project so the
+	// pre-existing (pre-groups) behaviour is preserved for all these tests.
+	const role = opts?.role ?? "member";
+	if (role === "member" || role === "viewer") {
+		await seedGroupGrant(fixture.workspace.id, fixture.user.id, project.id, role);
+	}
 	return {
 		token: fixture.token,
 		slug: fixture.workspace.slug,

@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**69 tools across 17 domains.**
+**79 tools across 18 domains.**
 
 ## Coordination
 
@@ -66,6 +66,21 @@ running server.
 | `invite_member` | Invite a user to the workspace by email. Admin+ only. Creates the user record if they do not exist yet. |
 | `remove_member` | Remove a member from the workspace. Owner only. Cannot remove yourself. |
 | `update_member_role` | Change a workspace member's role. Owner only. |
+
+### Groups & access
+
+| Tool | Description |
+|------|-------------|
+| `list_groups` | List access groups. Owner/admin see all groups in the workspace; other members see only groups they belong to. |
+| `get_group` | Get an access group with its members and project grants |
+| `list_member_groups` | List every workspace member with the access groups they belong to (owner/admin only). Members with no groups appear with an empty list — the pending/default-deny state. |
+| `create_group` | Create an access group (owner/admin only) |
+| `update_group` | Rename an access group or change its description (owner/admin only) |
+| `delete_group` | Delete an access group; its memberships and project grants cascade (owner/admin only) |
+| `add_group_member` | Add a workspace member to an access group (owner/admin only) |
+| `remove_group_member` | Remove a member from an access group (owner/admin only) |
+| `set_group_grant` | Grant an access group a role on a project (upsert — changes the role if a grant already exists). Owner/admin only. |
+| `remove_group_grant` | Remove an access group's grant on a project (owner/admin only) |
 
 ### Projects
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
@@ -146,6 +147,10 @@ export async function listProjectActivity(
 		.bind(projectId, ctx.workspaceId)
 		.first<{ id: string }>();
 	if (!project) throw new NotFoundError("Project not found");
+	// PROJ-311: a non-admin without a grant can't see the project's activity feed.
+	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+		throw new NotFoundError("Project not found");
+	}
 
 	const all = await fetchActivityRows(ctx, projectId, since, limit);
 	all.sort((a, b) => b.created_at - a.created_at);

@@ -1,6 +1,7 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, eq } from "drizzle-orm";
 import { GetFlowMetricsSchema } from "../schemas/flow-metrics";
+import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
@@ -28,6 +29,10 @@ async function assertProjectExists(ctx: ServiceCtx, projectId: string): Promise<
 		.where(and(eq(schema.projects.id, projectId), eq(schema.projects.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!project) throw new NotFoundError("Project not found");
+	// PROJ-311: a non-admin without a grant can't see the project's metrics.
+	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+		throw new NotFoundError("Project not found");
+	}
 }
 
 type FlowIssueRow = {

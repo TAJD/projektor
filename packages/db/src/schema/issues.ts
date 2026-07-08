@@ -178,7 +178,7 @@ export const activity = sqliteTable(
 		workspaceId: text("workspace_id")
 			.notNull()
 			.references(() => workspaces.id, { onDelete: "cascade" }),
-		entityType: text("entity_type", { enum: ["issue", "wiki_page", "project"] }).notNull(),
+		entityType: text("entity_type", { enum: ["issue", "wiki_page", "project", "group"] }).notNull(),
 		entityId: text("entity_id").notNull(),
 		actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
 		action: text("action").notNull(),

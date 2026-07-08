@@ -5,6 +5,7 @@ import {
 	seedCustomFieldDef,
 	seedCustomFieldValue,
 	seedFixture,
+	seedGroupGrant,
 	seedIssue,
 	seedMember,
 	seedProject,
@@ -1336,6 +1337,8 @@ describe("Issues role guards", () => {
 	it("viewer cannot create an issue (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
+		// PROJ-311: a viewer grant makes the project visible; the write is still denied.
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
 
 		const res = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
@@ -1348,6 +1351,7 @@ describe("Issues role guards", () => {
 	it("viewer cannot update an issue (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
 
 		const createRes = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",

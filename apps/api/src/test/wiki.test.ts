@@ -1,18 +1,26 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedProject, seedWorkspaceRoles } from "./helpers";
+import {
+	authHeaders,
+	seedFixture,
+	seedGroupGrant,
+	seedProject,
+	seedWorkspaceRoles,
+} from "./helpers";
 
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Wiki API", () => {
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
+	let userId: string;
 
 	beforeEach(async () => {
 		const fixture = await seedFixture();
 		token = fixture.token;
 		slug = fixture.workspace.slug;
 		workspaceId = fixture.workspace.id;
+		userId = fixture.user.id;
 	});
 
 	it("GET /api/wiki returns empty list initially", async () => {
@@ -73,6 +81,7 @@ describe("Wiki API", () => {
 
 		it("includes projectId in the url when the page is scoped to a project", async () => {
 			const project = await seedProject(workspaceId);
+			await seedGroupGrant(workspaceId, userId, project.id);
 			const createRes = await SELF.fetch("http://localhost/api/wiki", {
 				method: "POST",
 				headers: authHeaders(token, slug),
@@ -249,6 +258,7 @@ describe("Wiki API", () => {
 			.bind(slug)
 			.first<{ id: string }>();
 		const project = await seedProject(ws!.id, "WIKI");
+		await seedGroupGrant(ws!.id, userId, project.id);
 
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
@@ -281,6 +291,7 @@ describe("Wiki API", () => {
 			.bind(slug)
 			.first<{ id: string }>();
 		const project = await seedProject(ws!.id, "P2");
+		await seedGroupGrant(ws!.id, userId, project.id);
 
 		const createRes = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",

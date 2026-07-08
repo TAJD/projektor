@@ -3,11 +3,16 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
 	seedFixture,
+	seedGroupGrant,
 	seedIssue,
 	seedProject,
 	seedProjectFixture,
 	seedWorkspaceRoles,
 } from "./helpers";
+
+// PROJ-311: role-guard tests grant the member a member-role and the viewer a
+// viewer-role on the project so both can see it — the assertions then verify the
+// viewer's writes are still refused (read-only), not merely hidden.
 
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Sprints API", () => {
@@ -255,6 +260,7 @@ describe("Sprints role guards", () => {
 	it("viewer cannot create a sprint (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
 
 		const res = await SELF.fetch("http://localhost/api/sprints", {
 			method: "POST",
@@ -267,6 +273,8 @@ describe("Sprints role guards", () => {
 	it("viewer cannot update a sprint (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, project.id, "member");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
 
 		const createRes = await SELF.fetch("http://localhost/api/sprints", {
 			method: "POST",
@@ -286,6 +294,8 @@ describe("Sprints role guards", () => {
 	it("viewer cannot delete a sprint (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, project.id, "member");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
 
 		const createRes = await SELF.fetch("http://localhost/api/sprints", {
 			method: "POST",
@@ -304,6 +314,8 @@ describe("Sprints role guards", () => {
 	it("viewer cannot complete a sprint (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, project.id, "member");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
 
 		const createRes = await SELF.fetch("http://localhost/api/sprints", {
 			method: "POST",
@@ -327,6 +339,8 @@ describe("Sprints role guards", () => {
 	it("viewer cannot move issues to a sprint (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, project.id, "member");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
 
 		const createRes = await SELF.fetch("http://localhost/api/sprints", {
 			method: "POST",

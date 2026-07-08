@@ -427,13 +427,17 @@ describe("Projects MCP", () => {
 
 describe("GET /api/projects cross-workspace", () => {
 	it("returns projects from all workspaces the user belongs to", async () => {
-		const { seedFixture, seedProject, seedWorkspace, seedMember } = await import("./helpers");
+		const { seedFixture, seedProject, seedWorkspace, seedMember, seedGroupGrant } = await import(
+			"./helpers"
+		);
 
 		const ws1 = await seedFixture({ role: "owner" });
 		const ws2 = await seedWorkspace();
 		await seedProject(ws1.workspace.id, "WS1P");
-		await seedProject(ws2.id, "WS2P");
+		const ws2p = await seedProject(ws2.id, "WS2P");
 		await seedMember(ws2.id, ws1.user.id, "member");
+		// PROJ-311: a member sees a project only via a grant (owner-of-ws1 bypasses in ws1).
+		await seedGroupGrant(ws2.id, ws1.user.id, ws2p.id);
 
 		const res = await SELF.fetch("http://localhost/api/projects", {
 			headers: { Authorization: `Bearer ${ws1.token}` },
