@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { resolveWorkspaceSlug } from "../utils/workspace";
 
 type GrantRole = "viewer" | "member" | "admin";
 
@@ -398,7 +399,7 @@ function GroupDetailEditor(props: DetailProps) {
 
 // cofferdam-ignore: Readability.MaxFunctionLength: single-island admin screen, normal preact style
 export default function GroupManager({ workspaceSlug }: Props) {
-	const slug = workspaceSlug ?? "";
+	const slug = resolveWorkspaceSlug(workspaceSlug);
 	const [data, setData] = useState<Loaded | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);

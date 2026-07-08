@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { resolveWorkspaceSlug } from "../utils/workspace";
 
 interface ApiToken {
 	id: string;
@@ -686,7 +687,8 @@ function useWorkspaceMcpMeta(workspaceSlug: string | undefined) {
 	return { mcpCommandTemplate, mcpUrl };
 }
 
-export default function TokenManager({ workspaceSlug }: Props) {
+export default function TokenManager({ workspaceSlug: propWorkspaceSlug }: Props) {
+	const workspaceSlug = resolveWorkspaceSlug(propWorkspaceSlug);
 	const [tokens, setTokens] = useState<ApiToken[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
