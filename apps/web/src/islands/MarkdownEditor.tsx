@@ -187,6 +187,13 @@ function useMarkdownEditorView(
 	// as if it were an external change and potentially clobbering keystrokes typed since
 	// (PROJ-305: this race was making the editor appear to freeze mid-typing).
 	const lastEmitted = useRef(value);
+	// True while the sync effect below is applying an external `value` change via
+	// view.dispatch(). CM's own dispatch->updateListener call is synchronous, so
+	// without this flag that dispatch re-enters onChange, which re-renders, whose
+	// effect dispatches again — a synchronous ping-pong that locks the tab on every
+	// keystroke (PROJ-312; the lastEmitted equality check alone doesn't catch this
+	// because the echoed update can race ahead of it).
+	const applyingExternal = useRef(false);
 
 	useEffect(() => {
 		if (!containerRef.current) return;
@@ -203,7 +210,7 @@ function useMarkdownEditorView(
 				markdown(),
 				keymap.of([...customKeymap, ...historyKeymap, ...defaultKeymap]),
 				EditorView.updateListener.of((update) => {
-					if (update.docChanged) {
+					if (update.docChanged && !applyingExternal.current) {
 						const next = update.state.doc.toString();
 						lastEmitted.current = next;
 						onChange(next);
@@ -246,9 +253,14 @@ function useMarkdownEditorView(
 		if (!view) return;
 		const current = view.state.doc.toString();
 		if (current === value) return;
-		view.dispatch({
-			changes: { from: 0, to: current.length, insert: value },
-		});
+		applyingExternal.current = true;
+		try {
+			view.dispatch({
+				changes: { from: 0, to: current.length, insert: value },
+			});
+		} finally {
+			applyingExternal.current = false;
+		}
 	}, [value]);
 
 	return { containerRef, viewRef };
