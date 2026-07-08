@@ -1,0 +1,20 @@
+---
+import Base from '../../layouts/Base.astro';
+import GroupManager from '../../islands/GroupManager';
+
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Groups — Projektor">
+  <div class="page-container">
+    <header style="margin-bottom: 1.5rem;">
+      <h1 style="margin: 0 0 .25rem; font-size: 1.5rem; font-weight: 700; color: var(--text);">
+        Groups
+      </h1>
+      <p style="margin: 0; font-size: .875rem; color: var(--text-muted);">
+        Groups grant members access to projects. A member with no groups sees nothing until an
+        admin adds them to a group that grants a project.
+      </p>
+    </header>
+    <GroupManager client:load workspaceSlug={workspaceSlug} />
+  </div>
+</Base>

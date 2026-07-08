@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, desc, eq, or } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
 import { wikiPagePath } from "../lib/urls";
 import { IdSchema } from "../schemas/common";
 import {
@@ -8,11 +8,39 @@ import {
 	SearchWikiInputSchema,
 	UpdatePageSchema,
 } from "../schemas/wiki";
+import {
+	canWriteProject,
+	effectiveProjectRole,
+	isWorkspaceAdmin,
+	visibleProjectPredicate,
+	visibleProjectSqlFragment,
+} from "./access";
 import { recordActivity } from "./activity";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
 type TreeNode = { id: string; slug: string; title: string; url: string; children: TreeNode[] };
+
+// PROJ-311: a wiki page is either workspace-level (projectId null — every member
+// sees it) or project-scoped (visible only when the project is granted). Writes to
+// a project-scoped page need a member/admin grant; deletes need admin.
+async function assertWikiPageVisible(ctx: ServiceCtx, projectId: string | null): Promise<void> {
+	if (projectId === null || isWorkspaceAdmin(ctx.role)) return;
+	if ((await effectiveProjectRole(ctx, projectId)) === null) {
+		throw new NotFoundError("Wiki page not found");
+	}
+}
+
+async function requireWikiWrite(ctx: ServiceCtx, projectId: string | null): Promise<void> {
+	if (projectId === null) {
+		if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+		return;
+	}
+	if (isWorkspaceAdmin(ctx.role)) return;
+	const role = await effectiveProjectRole(ctx, projectId);
+	if (role === null) throw new NotFoundError("Wiki page not found");
+	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+}
 
 function slugify(title: string): string {
 	return title
@@ -172,6 +200,13 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 	if (parsed.data.projectId) {
 		conditions.push(eq(schema.wikiPages.projectId, parsed.data.projectId));
 	}
+	// PROJ-311: hide project-scoped pages whose project the user isn't granted
+	// (workspace-level pages, projectId null, stay visible to everyone).
+	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
+	if (visible) {
+		const cond = or(isNull(schema.wikiPages.projectId), visible);
+		if (cond) conditions.push(cond);
+	}
 
 	const rows = await orm
 		.select({
@@ -198,6 +233,10 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	const { query, limit, projectId } = parsed.data;
 	if (!query) return [];
 	if (projectId) {
+		// PROJ-311: searching a specific project the user can't see returns nothing.
+		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+			return [];
+		}
 		const { results } = await ctx.db
 			.prepare(
 				`SELECT id, slug, title, project_id, substr(content, 1, 250) as excerpt
@@ -209,14 +248,17 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 			.all();
 		return results;
 	}
+	// PROJ-311: across the workspace, exclude project-scoped pages the user isn't granted.
+	const visible = visibleProjectSqlFragment(ctx, "project_id");
+	const visClause = visible ? ` AND (project_id IS NULL OR ${visible.sql})` : "";
 	const { results } = await ctx.db
 		.prepare(
 			`SELECT id, slug, title, project_id, substr(content, 1, 250) as excerpt
        FROM wiki_pages
-       WHERE workspace_id = ? AND (title LIKE ? OR content LIKE ?)
+       WHERE workspace_id = ? AND (title LIKE ? OR content LIKE ?)${visClause}
        ORDER BY updated_at DESC LIMIT ?`
 		)
-		.bind(ctx.workspaceId, `%${query}%`, `%${query}%`, limit)
+		.bind(ctx.workspaceId, `%${query}%`, `%${query}%`, ...(visible ? visible.params : []), limit)
 		.all();
 	return results;
 }
@@ -245,14 +287,16 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 		)
 		.get();
 	if (!page) throw new NotFoundError("Wiki page not found");
+	await assertWikiPageVisible(ctx, page.project_id);
 	return { ...page, url: wikiPagePath(page.slug, page.project_id) };
 }
 
 export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
-	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 	const parsed = CreatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { title, content, parentId, projectId, slug: customSlug } = parsed.data;
+
+	await requireWikiWrite(ctx, projectId ?? null);
 
 	if (parentId) {
 		await validateNewPageParent(ctx.db, parentId, ctx.workspaceId, projectId);
@@ -281,11 +325,11 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 }
 
 export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
-	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 	const parsed = UpdatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { title, content, parentId } = parsed.data;
 	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
+	await requireWikiWrite(ctx, page.projectId);
 	const now = Math.floor(Date.now() / 1000);
 	const orm = drizzle(ctx.db, { schema });
 
@@ -324,15 +368,24 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string) {
 	const idCheck = IdSchema.safeParse(slug);
 	if (!idCheck.success)
 		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
-	if (ctx.role !== "admin" && ctx.role !== "owner")
-		throw new ForbiddenError("Insufficient permissions");
 	const orm = drizzle(ctx.db, { schema });
 	const page = await orm
-		.select({ id: schema.wikiPages.id })
+		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
 		.from(schema.wikiPages)
 		.where(and(eq(schema.wikiPages.slug, slug), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!page) throw new NotFoundError("Wiki page not found");
+
+	// PROJ-311: workspace-level pages need a workspace admin/owner; a project-scoped
+	// page can also be deleted by someone with a project-admin grant.
+	if (page.projectId === null) {
+		if (ctx.role !== "admin" && ctx.role !== "owner")
+			throw new ForbiddenError("Insufficient permissions");
+	} else if (!isWorkspaceAdmin(ctx.role)) {
+		if ((await effectiveProjectRole(ctx, page.projectId)) !== "admin")
+			throw new ForbiddenError("Insufficient permissions");
+	}
+
 	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: page.id, action: "deleted" });
 	return { ok: true };
@@ -342,6 +395,12 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 	const orm = drizzle(ctx.db, { schema });
 	const conditions = [eq(schema.wikiPages.workspaceId, ctx.workspaceId)];
 	if (projectId) conditions.push(eq(schema.wikiPages.projectId, projectId));
+	// PROJ-311: same visibility filter as listWikiPages.
+	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
+	if (visible) {
+		const cond = or(isNull(schema.wikiPages.projectId), visible);
+		if (cond) conditions.push(cond);
+	}
 	const rows = await orm
 		.select({
 			id: schema.wikiPages.id,
@@ -382,11 +441,12 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 export async function listWikiRevisions(ctx: ServiceCtx, slug: string) {
 	const orm = drizzle(ctx.db, { schema });
 	const page = await orm
-		.select({ id: schema.wikiPages.id })
+		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
 		.from(schema.wikiPages)
 		.where(and(eq(schema.wikiPages.slug, slug), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!page) throw new NotFoundError("Wiki page not found");
+	await assertWikiPageVisible(ctx, page.projectId);
 
 	return orm
 		.select({
@@ -407,11 +467,12 @@ export async function listWikiRevisions(ctx: ServiceCtx, slug: string) {
 export async function getWikiRevision(ctx: ServiceCtx, slug: string, revisionId: string) {
 	const orm = drizzle(ctx.db, { schema });
 	const page = await orm
-		.select({ id: schema.wikiPages.id })
+		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
 		.from(schema.wikiPages)
 		.where(and(eq(schema.wikiPages.slug, slug), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!page) throw new NotFoundError("Wiki page not found");
+	await assertWikiPageVisible(ctx, page.projectId);
 
 	const revision = await orm
 		.select({

@@ -23,6 +23,13 @@ import {
 	SearchIssuesInputSchema,
 	UpdateIssueSchema,
 } from "../schemas/issues";
+import {
+	canWriteProject,
+	effectiveProjectRole,
+	isWorkspaceAdmin,
+	visibleProjectPredicate,
+	visibleProjectSqlFragment,
+} from "./access";
 import { recordActivity } from "./activity";
 import * as cache from "./cache";
 import { addComment } from "./comments";
@@ -213,6 +220,9 @@ async function buildListIssuesConditions(
 	filters: ListIssuesFilters
 ): Promise<Condition[]> {
 	const conditions: Condition[] = [eq(schema.issues.workspaceId, ctx.workspaceId)];
+	// PROJ-311: default-deny — a non-admin only sees issues in projects their groups grant.
+	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
+	if (visible) conditions.push(visible);
 	addStatusFilters(conditions, filters);
 	addAssociationFilters(conditions, filters);
 	await addCustomFieldFilter(orm, ctx, conditions, filters);
@@ -381,6 +391,16 @@ function computeChildRollup(childRows: Array<{ status: string; count: number }>)
 	return { total, byStatus, done, remaining };
 }
 
+// PROJ-311: an issue is only visible if its project is granted to one of the
+// user's groups (owner/admin bypass). Throw the issue-not-found error rather than a
+// project one so an invisible issue's existence never leaks.
+async function assertIssueProjectVisible(ctx: ServiceCtx, projectId: string): Promise<void> {
+	if (isWorkspaceAdmin(ctx.role)) return;
+	if ((await effectiveProjectRole(ctx, projectId)) === null) {
+		throw new NotFoundError("Issue not found");
+	}
+}
+
 export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = GetIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -391,7 +411,12 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 			ctx.kv,
 			`issue:${ctx.workspaceId}:${id}`
 		);
-		if (cached) return cached;
+		// The cache is keyed by issue id, not user — re-check visibility so a member
+		// can't read an entry warmed by an admin.
+		if (cached) {
+			await assertIssueProjectVisible(ctx, cached.project_id as string);
+			return cached;
+		}
 	}
 
 	const orm = drizzle(ctx.db, { schema });
@@ -403,6 +428,8 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 			: null;
 
 	if (!issue) throw new NotFoundError("Issue not found");
+
+	await assertIssueProjectVisible(ctx, (issue as Record<string, unknown>).project_id as string);
 
 	const issueId = (issue as Record<string, unknown>).id as string;
 
@@ -582,11 +609,18 @@ async function finalizeCreateIssue(
 }
 
 export async function createIssue(ctx: ServiceCtx, raw: unknown) {
-	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 	const result = CreateIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const data = result.data;
 	const { projectId, title, body, priority, assigneeId, labels, parentId } = data;
+
+	// PROJ-311: writing requires a member/admin grant on this project (owner/admin
+	// bypass). No grant → the project is invisible → 404; a viewer grant is read-only.
+	if (!isWorkspaceAdmin(ctx.role)) {
+		const projRole = await effectiveProjectRole(ctx, projectId);
+		if (projRole === null) throw new NotFoundError("Project not found");
+		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
+	}
 
 	const { resolvedTypeId, resolvedStatusId, resolvedStatusKey, cfWrites } =
 		await resolveCreateIssueDeps(ctx, data);
@@ -929,7 +963,6 @@ async function invalidateUpdateCaches(
 }
 
 export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
-	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 	const result = UpdateIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const data = result.data;
@@ -943,6 +976,7 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 	const existing = await orm
 		.select({
 			id: schema.issues.id,
+			projectId: schema.issues.projectId,
 			parentId: schema.issues.parentId,
 			status: schema.issues.status,
 			statusCategory: schema.issues.statusCategory,
@@ -955,6 +989,14 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!existing) throw new NotFoundError("Issue not found");
+
+	// PROJ-311: gate the write on the effective project role (owner/admin bypass).
+	// No grant → invisible → 404; a viewer grant is read-only → 403.
+	if (!isWorkspaceAdmin(ctx.role)) {
+		const projRole = await effectiveProjectRole(ctx, existing.projectId);
+		if (projRole === null) throw new NotFoundError("Issue not found");
+		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
+	}
 
 	const { setValues, recordCompletionReport } = await buildUpdateSetValues(
 		ctx,
@@ -990,15 +1032,20 @@ export async function deleteIssue(ctx: ServiceCtx, id: string) {
 	const idCheck = IdSchema.safeParse(id);
 	if (!idCheck.success)
 		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
-	if (ctx.role !== "admin" && ctx.role !== "owner")
-		throw new ForbiddenError("Insufficient permissions");
 	const orm = drizzle(ctx.db, { schema });
 
 	const existing = await orm
-		.select({ parentId: schema.issues.parentId })
+		.select({ parentId: schema.issues.parentId, projectId: schema.issues.projectId })
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
+
+	// PROJ-311: deletion needs admin inside the project — workspace owner/admin bypass
+	// groups; everyone else needs a project-admin grant.
+	if (!isWorkspaceAdmin(ctx.role)) {
+		const projRole = existing ? await effectiveProjectRole(ctx, existing.projectId) : null;
+		if (projRole !== "admin") throw new ForbiddenError("Insufficient permissions");
+	}
 
 	await orm
 		.delete(schema.issues)
@@ -1048,6 +1095,7 @@ async function fetchOpenIssuesForPrioritization(
 	ctx: ServiceCtx,
 	includeBacklog: boolean
 ) {
+	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
 	return orm
 		.select({
 			id: schema.issues.id,
@@ -1065,6 +1113,8 @@ async function fetchOpenIssuesForPrioritization(
 		.where(
 			and(
 				eq(schema.issues.workspaceId, ctx.workspaceId),
+				// PROJ-311: only prioritize issues in projects the user can see.
+				...(visible ? [visible as Condition] : []),
 				or(
 					and(
 						isNull(schema.issues.statusId),
@@ -1237,6 +1287,13 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 	if (projectId) {
 		q += " AND i.project_id = ?";
 		params.push(projectId);
+	}
+
+	// PROJ-311: restrict full-text results to the user's visible projects.
+	const visible = visibleProjectSqlFragment(ctx, "i.project_id");
+	if (visible) {
+		q += ` AND ${visible.sql}`;
+		params.push(...visible.params);
 	}
 
 	q += " ORDER BY bm25(issues_fts) LIMIT ?";

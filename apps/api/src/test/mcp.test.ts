@@ -5,6 +5,7 @@ import {
 	seedCustomFieldDef,
 	seedCustomFieldValue,
 	seedFixture,
+	seedGroupGrant,
 	seedIssue,
 	seedMember,
 	seedProject,
@@ -46,6 +47,7 @@ describe("MCP endpoint", () => {
 		headers = authHeaders(token, slug);
 		const project = await seedProject(workspaceId);
 		projectId = project.id;
+		await seedGroupGrant(workspaceId, fixture.user.id, projectId);
 	});
 
 	it("initialize returns server info", async () => {

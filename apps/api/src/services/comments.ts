@@ -6,6 +6,7 @@ import {
 	ListCommentsSchema,
 	UpdateCommentSchema,
 } from "../schemas/comments";
+import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
@@ -19,13 +20,20 @@ interface CommentRow {
 	author_email: string;
 }
 
-async function getIssue(db: D1Database, issueId: string, workspaceId: string) {
-	const orm = drizzle(db, { schema });
-	return orm
-		.select({ id: schema.issues.id })
+// PROJ-311: a comment is reachable only if its issue's project is visible to the
+// user (owner/admin bypass). Throw the issue-not-found error to avoid leaking that
+// an issue exists in a project the user was never granted.
+async function assertIssueVisible(ctx: ServiceCtx, issueId: string): Promise<void> {
+	const orm = drizzle(ctx.db, { schema });
+	const issue = await orm
+		.select({ projectId: schema.issues.projectId })
 		.from(schema.issues)
-		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, workspaceId)))
+		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
+	if (!issue) throw new NotFoundError("Issue not found");
+	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, issue.projectId)) === null) {
+		throw new NotFoundError("Issue not found");
+	}
 }
 
 export async function listComments(ctx: ServiceCtx, input: unknown): Promise<CommentRow[]> {
@@ -33,9 +41,7 @@ export async function listComments(ctx: ServiceCtx, input: unknown): Promise<Com
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { issueId } = parsed.data;
 
-	if (!(await getIssue(ctx.db, issueId, ctx.workspaceId))) {
-		throw new NotFoundError("Issue not found");
-	}
+	await assertIssueVisible(ctx, issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const rows = await orm
@@ -66,9 +72,7 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { issueId, body } = parsed.data;
 
-	if (!(await getIssue(ctx.db, issueId, ctx.workspaceId))) {
-		throw new NotFoundError("Issue not found");
-	}
+	await assertIssueVisible(ctx, issueId);
 
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -91,9 +95,7 @@ export async function updateComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { issueId, commentId, body } = parsed.data;
 
-	if (!(await getIssue(ctx.db, issueId, ctx.workspaceId))) {
-		throw new NotFoundError("Issue not found");
-	}
+	await assertIssueVisible(ctx, issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const comment = await orm
@@ -118,9 +120,7 @@ export async function deleteComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { issueId, commentId } = parsed.data;
 
-	if (!(await getIssue(ctx.db, issueId, ctx.workspaceId))) {
-		throw new NotFoundError("Issue not found");
-	}
+	await assertIssueVisible(ctx, issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const comment = await orm

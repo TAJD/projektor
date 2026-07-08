@@ -1,6 +1,13 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedComment, seedFixture, seedProject, seedProjectFixture } from "./helpers";
+import {
+	authHeaders,
+	seedComment,
+	seedFixture,
+	seedGroupGrant,
+	seedProject,
+	seedProjectFixture,
+} from "./helpers";
 
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
 type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
@@ -154,6 +161,7 @@ describe("Comments MCP cross-workspace security", () => {
 		const wsA = await seedFixture({ slug: `ws-a-${crypto.randomUUID().slice(0, 6)}` });
 		const wsB = await seedFixture({ slug: `ws-b-${crypto.randomUUID().slice(0, 6)}` });
 		const projB = await seedProject(wsB.workspace.id, "VIC");
+		await seedGroupGrant(wsB.workspace.id, wsB.user.id, projB.id);
 
 		const issueRes = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
@@ -177,6 +185,7 @@ describe("Comments MCP cross-workspace security", () => {
 		const wsA = await seedFixture({ slug: `ws-c-${crypto.randomUUID().slice(0, 6)}` });
 		const wsB = await seedFixture({ slug: `ws-d-${crypto.randomUUID().slice(0, 6)}` });
 		const projB = await seedProject(wsB.workspace.id, "SEC");
+		await seedGroupGrant(wsB.workspace.id, wsB.user.id, projB.id);
 
 		const issueRes = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",

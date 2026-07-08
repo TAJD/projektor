@@ -26,6 +26,8 @@ import m0022 from "../../../../packages/db/migrations/0022_issue_completed_at.sq
 import m0023 from "../../../../packages/db/migrations/0023_issue_flow_timestamps.sql?raw";
 import m0024 from "../../../../packages/db/migrations/0024_project_agent_wip_limit.sql?raw";
 import m0025 from "../../../../packages/db/migrations/0025_issue_completion_report.sql?raw";
+import m0026 from "../../../../packages/db/migrations/0026_backfill_flow_timestamps.sql?raw";
+import m0027 from "../../../../packages/db/migrations/0027_user_groups.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -54,4 +56,6 @@ export const MIGRATIONS = [
 	m0023,
 	m0024,
 	m0025,
+	m0026,
+	m0027,
 ];
