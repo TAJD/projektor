@@ -123,7 +123,7 @@ test.describe("Editor freeze regression (long-running)", () => {
 		await page.keyboard.type("seed");
 		await page.locator("button", { hasText: "Create page" }).click();
 
-		await expect(page.locator("h1")).toContainText("E2E Freeze Test Wiki Page", {
+		await expect(page.locator("main h1")).toContainText("E2E Freeze Test Wiki Page", {
 			timeout: 15_000,
 		});
 
@@ -147,7 +147,7 @@ test.describe("Editor freeze regression (long-running)", () => {
 		await setWorkspaceSlug(page, ctx.workspaceSlug);
 		await page.reload();
 
-		await expect(page.locator("h1")).toBeVisible({ timeout: 15_000 });
+		await expect(page.locator("article h1")).toBeVisible({ timeout: 15_000 });
 
 		await page.getByTitle("Edit description").click();
 		await expect(page.locator(".cm-content").first()).toBeVisible({ timeout: 5_000 });

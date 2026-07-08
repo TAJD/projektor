@@ -55,6 +55,15 @@ async function wsPost(url: string, slug: string, body: unknown): Promise<unknown
 	return res.json();
 }
 
+async function wsGet(url: string, slug: string): Promise<unknown> {
+	const res = await fetch(url, { headers: { "X-Workspace-Slug": slug } });
+	if (!res.ok) {
+		const text = await res.text();
+		throw new Error(`GET ${url} (ws=${slug}) → ${res.status}: ${text}`);
+	}
+	return res.json();
+}
+
 // cofferdam-ignore: Design.OrphanExport: Playwright globalSetup convention, referenced by file path
 export default async function globalSetup(): Promise<void> {
 	const base = process.env.E2E_BASE_URL;
@@ -74,18 +83,19 @@ export default async function globalSetup(): Promise<void> {
 	// 1. Create workspace (auth: dev bypass on the server)
 	await post(`${base}/api/workspaces`, { name: "E2E Test Workspace", slug });
 
-	// 2. Seed task statuses in the new workspace
-	const todoStatus = (await wsPost(`${base}/api/task-statuses`, slug, {
-		key: "todo",
-		name: "Todo",
-		category: "todo",
-	})) as { id: string };
-
-	const inProgressStatus = (await wsPost(`${base}/api/task-statuses`, slug, {
-		key: "in_progress",
-		name: "In Progress",
-		category: "in_progress",
-	})) as { id: string };
+	// 2. Workspace creation auto-seeds default task statuses (including "todo"
+	// and "in_progress"), so read them back rather than re-creating them.
+	const seededStatuses = (await wsGet(`${base}/api/task-statuses`, slug)) as Array<{
+		id: string;
+		key: string;
+	}>;
+	const todoStatus = seededStatuses.find((s) => s.key === "todo");
+	const inProgressStatus = seededStatuses.find((s) => s.key === "in_progress");
+	if (!todoStatus || !inProgressStatus) {
+		throw new Error(
+			`Expected default 'todo' and 'in_progress' task statuses to be seeded for workspace ${slug}, got keys: ${seededStatuses.map((s) => s.key).join(", ")}`,
+		);
+	}
 
 	// 3. Create a project (issues require a projectId)
 	const project = (await wsPost(`${base}/api/projects`, slug, {
