@@ -9,7 +9,8 @@ export default function AccessPending() {
 		>
 			<div
 				aria-hidden="true"
-				class="flex items-center justify-center w-12 h-12 rounded-full bg-[var(--surface)] border border-[var(--border)] text-2xl"
+				class="flex items-center justify-center w-12 h-12 rounded-full bg-[var(--surface)] border
+					border-[var(--border)] text-2xl"
 			>
 				🔒
 			</div>
