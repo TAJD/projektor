@@ -1,7 +1,7 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import uPlot from "uplot";
 import { apiFetch } from "../utils/api-client";
-import UplotChart from "./charts/UplotChart";
+import UplotChart, { createTooltipPlugin } from "./charts/UplotChart";
 
 interface Distribution {
 	count: number;
@@ -29,6 +29,37 @@ function formatDuration(seconds: number | null): string {
 	if (abs < 3600) return `${(seconds / 60).toFixed(1)}m`;
 	if (abs < 86400) return `${(seconds / 3600).toFixed(1)}h`;
 	return `${(seconds / 86400).toFixed(1)}d`;
+}
+
+// uPlot bakes colors into the canvas at creation time, so callers re-read these live
+// (rather than caching) whenever a chart is (re)built, including on theme toggle.
+function readThemeColor(token: string, fallback: string): string {
+	const value = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+	return value || fallback;
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+	const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+	if (!match) return hex;
+	const [r, g, b] = match.slice(1).map((h) => parseInt(h, 16));
+	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function formatShortDate(iso: string): string {
+	const d = new Date(`${iso}T00:00:00Z`);
+	if (Number.isNaN(d.getTime())) return iso;
+	return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function formatFullDate(iso: string): string {
+	const d = new Date(`${iso}T00:00:00Z`);
+	if (Number.isNaN(d.getTime())) return iso;
+	return d.toLocaleDateString("en-US", {
+		month: "short",
+		day: "numeric",
+		year: "numeric",
+		timeZone: "UTC",
+	});
 }
 
 function useFlowMetrics(workspaceSlug: string | undefined) {
@@ -85,61 +116,119 @@ function DistributionTiles({ title, dist }: { title: string; dist: Distribution 
 	);
 }
 
-function ThroughputChart({ data }: { data: FlowMetrics["throughputOverTime"] }) {
-	if (data.length === 0) {
-		return <p class="text-sm text-text-muted m-0">No completed issues in this window yet.</p>;
-	}
-
-	const labels = data.map((d) => d.weekStart);
-	const xs = data.map((_, i) => i);
-	const ys = data.map((d) => d.count);
-
+function EmptyChartState({ message }: { message: string }) {
 	return (
-		<UplotChart
-			data={[xs, ys]}
-			options={{
-				width: 600,
-				height: 220,
+		<div class="flex items-center justify-center h-[220px] text-sm text-text-muted">{message}</div>
+	);
+}
+
+function ThroughputChart({ data }: { data: FlowMetrics["throughputOverTime"] }) {
+	const labels = useMemo(() => data.map((d) => d.weekStart), [data]);
+	const chartData = useMemo<uPlot.AlignedData>(
+		() => [data.map((_, i) => i), data.map((d) => d.count)],
+		[data]
+	);
+
+	const buildOptions = useMemo(() => {
+		return (width: number, height: number): uPlot.Options => {
+			const accent = readThemeColor("--accent", "#4f46e5");
+			const border = readThemeColor("--border", "#e2e8f0");
+			const textMuted = readThemeColor("--text-muted", "#6b7280");
+
+			return {
+				width,
+				height,
 				scales: { x: { time: false } },
+				legend: { show: false },
 				series: [
 					{},
 					{
 						label: "Issues completed",
-						stroke: "rgba(37,99,235,0.8)",
-						fill: "rgba(37,99,235,0.25)",
+						stroke: accent,
+						fill: hexToRgba(accent, 0.25),
 						paths: uPlot.paths.bars?.(),
 					},
 				],
 				axes: [
 					{
-						values: (_u, splits) => splits.map((s) => labels[s] ?? ""),
+						stroke: textMuted,
+						grid: { stroke: border },
+						splits: (u) => {
+							const n = labels.length;
+							const maxTicks = Math.max(2, Math.floor(u.width / 70));
+							const stride = Math.max(1, Math.ceil(n / maxTicks));
+							const idxs: number[] = [];
+							for (let i = 0; i < n; i += stride) idxs.push(i);
+							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
+							return idxs;
+						},
+						values: (_u, splits) => splits.map((s) => formatShortDate(labels[s] ?? "")),
 					},
-					{},
+					{ stroke: textMuted, grid: { stroke: border } },
 				],
-			}}
-		/>
-	);
+				plugins: [
+					createTooltipPlugin({
+						formatX: (xVal) => formatFullDate(labels[xVal] ?? ""),
+						formatY: (yVal) => `${yVal} completed`,
+					}),
+				],
+			};
+		};
+	}, [labels]);
+
+	if (data.length === 0) {
+		return <EmptyChartState message="No completed issues yet" />;
+	}
+
+	return <UplotChart data={chartData} buildOptions={buildOptions} />;
 }
 
 function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
+	const chartData = useMemo<uPlot.AlignedData>(
+		() => [
+			data.map((d) => Math.floor(new Date(d.date).getTime() / 1000)),
+			data.map((d) => d.count),
+		],
+		[data]
+	);
+
+	const buildOptions = useMemo(() => {
+		return (width: number, height: number): uPlot.Options => {
+			const border = readThemeColor("--border", "#e2e8f0");
+			const textMuted = readThemeColor("--text-muted", "#6b7280");
+			const wipLine = "#0d9488";
+
+			return {
+				width,
+				height,
+				scales: { x: { time: true } },
+				legend: { show: false },
+				series: [{}, { label: "WIP", stroke: wipLine, width: 2 }],
+				axes: [
+					{ stroke: textMuted, grid: { stroke: border }, space: 60 },
+					{ stroke: textMuted, grid: { stroke: border } },
+				],
+				plugins: [
+					createTooltipPlugin({
+						formatX: (xVal) =>
+							new Date(xVal * 1000).toLocaleDateString("en-US", {
+								month: "short",
+								day: "numeric",
+								year: "numeric",
+								timeZone: "UTC",
+							}),
+						formatY: (yVal) => `${yVal} in progress`,
+					}),
+				],
+			};
+		};
+	}, []);
+
 	if (data.length === 0) {
-		return <p class="text-sm text-text-muted m-0">No WIP data in this window yet.</p>;
+		return <EmptyChartState message="No WIP data yet" />;
 	}
 
-	const xs = data.map((d) => Math.floor(new Date(d.date).getTime() / 1000));
-	const ys = data.map((d) => d.count);
-
-	return (
-		<UplotChart
-			data={[xs, ys]}
-			options={{
-				width: 600,
-				height: 220,
-				scales: { x: { time: true } },
-				series: [{}, { label: "WIP", stroke: "rgba(22,163,74,0.8)", width: 2 }],
-			}}
-		/>
-	);
+	return <UplotChart data={chartData} buildOptions={buildOptions} />;
 }
 
 function AgentVsHumanTiles({ agentVsHuman }: { agentVsHuman: FlowMetrics["agentVsHuman"] }) {

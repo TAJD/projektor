@@ -84,8 +84,8 @@ describe("MetricsDashboard", () => {
 		render(<MetricsDashboard />);
 
 		expect(await screen.findByText("Throughput")).toBeTruthy();
-		expect(screen.getByText(/No completed issues in this window yet/i)).toBeTruthy();
-		expect(screen.getByText(/No WIP data in this window yet/i)).toBeTruthy();
+		expect(screen.getByText(/No completed issues yet/i)).toBeTruthy();
+		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
 	});
 
 	it("shows a message when no project is specified", async () => {
