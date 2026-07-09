@@ -1,11 +1,12 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import {
 	EndAgentSchema,
 	HeartbeatAgentSchema,
 	ListActiveAgentsSchema,
 	RegisterAgentSchema,
 } from "../schemas/agents";
+import { visibleProjectPredicate } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import { releaseClaimsForAgent } from "./file-claims";
 import { releaseLeasesForAgent } from "./issue-leases";
@@ -144,6 +145,18 @@ export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 
 	if (issueId) {
 		conditions.push(eq(schema.agentSessions.issueId, issueId));
+	}
+
+	// PROJ-316: a non-admin member only sees agents working an issue in a project
+	// they can access. Agents not tied to any issue carry no project, so they stay
+	// workspace-visible. Owner/admin (predicate undefined) see every agent.
+	const vis = visibleProjectPredicate(
+		ctx,
+		sql`(SELECT i.project_id FROM issues i WHERE i.id = ${schema.agentSessions.issueId})`
+	);
+	if (vis) {
+		const visibleOrUnpinned = or(isNull(schema.agentSessions.issueId), vis);
+		if (visibleOrUnpinned) conditions.push(visibleOrUnpinned);
 	}
 
 	const items = await orm

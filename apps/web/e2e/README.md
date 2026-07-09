@@ -77,6 +77,30 @@ schedule against a dev deployment.
 | Variable | Required | Description |
 |---|---|---|
 | `E2E_BASE_URL` | **Yes** | Root URL of the dev deployment. API must be at `<url>/api/*`. |
+| `E2E_MEMBER_EMAIL` | No | Email invited as a `member` into the ephemeral e2e workspace during `globalSetup`. Defaults to `e2e-member-<slug>@example.com`. Required (alongside `E2E_MEMBER_TOKEN`) to run `confinement.spec.ts`. |
+| `E2E_MEMBER_TOKEN` | No | A real, workspace-scoped API token owned by `E2E_MEMBER_EMAIL`. Required to run `confinement.spec.ts`. |
+
+---
+
+## Two-user group-access model (PROJ-313)
+
+`board.spec.ts`, `groups-flow.spec.ts`, and the admin parts of the suite run
+entirely as the dev-bypass admin — every unauthenticated request against the
+target deployment is auto-authenticated as the workspace owner. `globalSetup`
+uses this identity to additionally provision a **group-access fixture**: a
+second ("ungranted") project, a member invited into the workspace, a group
+that grants the member `member`-role access to the first project only, and
+that member added to the group.
+
+Testing *member*-eyes confinement (does the member actually see only the
+granted project?) requires authenticating as that member, and dev-bypass
+can't do that — it always resolves to the owner. Workspace-scoped API tokens
+also can't be auto-minted for the member: minting a token requires already
+being authenticated as its owner, and that owner identity isn't available to
+`globalSetup`. So `confinement.spec.ts` is **skipped unless `E2E_BASE_URL`,
+`E2E_MEMBER_EMAIL`, and `E2E_MEMBER_TOKEN` are all set** — the member token
+must be minted out-of-band (e.g. by logging in as `E2E_MEMBER_EMAIL` once and
+creating a workspace API token) and passed in via env.
 
 ---
 
@@ -91,9 +115,16 @@ deployment:
 2. `POST /api/task-statuses` → **Todo** (category: `todo`) and **In Progress** (category: `in_progress`)
 3. `POST /api/projects` → project **E2E** (key `E2E`)
 4. `POST /api/issues` × 2 → two issues seeded in the Todo status
+5. `POST /api/projects` → project **E2E Ungranted** (key `E2EU`), granted to nobody
+6. `POST /api/workspaces/<slug>/members` → invites `E2E_MEMBER_EMAIL` (or a
+   generated default) as a `member`
+7. `POST /api/workspaces/<slug>/groups` → group **E2E Access Group**
+8. `PUT .../groups/<id>/grants` → grants the group `member` role on the E2E project only
+9. `POST .../groups/<id>/members` → adds the invited member to the group
 
-The workspace slug, status IDs, and drag-target issue ID are written to
-`e2e/.e2e-ctx.json` (gitignored) for the spec to read.
+The workspace slug, status IDs, drag-target issue ID, both project IDs/keys,
+the group ID/name, and the member's email/userId are written to
+`e2e/.e2e-ctx.json` (gitignored) for specs to read.
 
 ### Global teardown (`e2e/global-teardown.ts`)
 
@@ -126,6 +157,29 @@ The `onDragStart` handler in IssueList.tsx calls `e.preventDefault()` when
 2. Performs `dragTo` on a card.
 3. Asserts the Todo column still has all its cards (nothing moved).
 4. Asserts `patches.length === 0` (no PATCH was fired).
+
+### Test: Groups flow — admin (`groups-flow.spec.ts`)
+
+API-driven, using Playwright's `request` fixture (inherits the admin headers
+from `playwright.config.ts`):
+
+1. Reads back the seeded group and asserts its grant covers the granted
+   project with role `member`, and the invited member is in its member list.
+2. Creates a new group, grants it a project, reads the group back, and
+   asserts the grant persisted (full create → grant → verify loop).
+3. One `page`-based test navigates to `/settings/groups` (the deployment's
+   **default** workspace, not the ephemeral one) and asserts the page
+   renders — a render smoke of the group-manager surface.
+
+### Test: Group-access confinement — member (`confinement.spec.ts`)
+
+Env-gated (see "Two-user group-access model" above). Builds a dedicated
+member-scoped `APIRequestContext` and asserts:
+
+1. `GET /api/projects` includes the granted project and excludes the
+   ungranted one.
+2. `GET /api/projects/<ungrantedProjectId>` returns `404` (existence is
+   hidden from members without a grant).
 
 ---
 

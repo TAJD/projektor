@@ -21,6 +21,14 @@ export interface E2EContext {
 	todoStatusId: string;
 	inProgressStatusId: string;
 	testIssueId: string;
+	grantedProjectId: string;
+	grantedProjectKey: string;
+	ungrantedProjectId: string;
+	ungrantedProjectKey: string;
+	groupId: string;
+	groupName: string;
+	memberEmail: string;
+	memberUserId: string;
 }
 
 // Resolved at runtime relative to the playwright config file's cwd (apps/web/).
@@ -55,6 +63,22 @@ async function wsPost(url: string, slug: string, body: unknown): Promise<unknown
 	return res.json();
 }
 
+async function wsPut(url: string, slug: string, body: unknown): Promise<unknown> {
+	const res = await fetch(url, {
+		method: "PUT",
+		headers: {
+			"Content-Type": "application/json",
+			"X-Workspace-Slug": slug,
+		},
+		body: JSON.stringify(body),
+	});
+	if (!res.ok) {
+		const text = await res.text();
+		throw new Error(`PUT ${url} (ws=${slug}) → ${res.status}: ${text}`);
+	}
+	return res.json();
+}
+
 async function wsGet(url: string, slug: string): Promise<unknown> {
 	const res = await fetch(url, { headers: { "X-Workspace-Slug": slug } });
 	if (!res.ok) {
@@ -71,7 +95,7 @@ export default async function globalSetup(): Promise<void> {
 		throw new Error(
 			"E2E_BASE_URL is required.\n" +
 				"Point it at a dev deployment (ENVIRONMENT=development, DEV_USER_EMAIL set).\n" +
-				"Example: E2E_BASE_URL=https://dev.your-instance.workers.dev pnpm --filter @projektor/web exec playwright test",
+				"Example: E2E_BASE_URL=https://dev.your-instance.workers.dev pnpm --filter @projektor/web exec playwright test"
 		);
 	}
 
@@ -93,7 +117,7 @@ export default async function globalSetup(): Promise<void> {
 	const inProgressStatus = seededStatuses.find((s) => s.key === "in_progress");
 	if (!todoStatus || !inProgressStatus) {
 		throw new Error(
-			`Expected default 'todo' and 'in_progress' task statuses to be seeded for workspace ${slug}, got keys: ${seededStatuses.map((s) => s.key).join(", ")}`,
+			`Expected default 'todo' and 'in_progress' task statuses to be seeded for workspace ${slug}, got keys: ${seededStatuses.map((s) => s.key).join(", ")}`
 		);
 	}
 
@@ -101,7 +125,7 @@ export default async function globalSetup(): Promise<void> {
 	const project = (await wsPost(`${base}/api/projects`, slug, {
 		name: "E2E Project",
 		key: "E2E",
-	})) as { id: string };
+	})) as { id: string; key: string };
 
 	// 4. Create the issue we'll drag in the desktop test
 	const dragIssue = (await wsPost(`${base}/api/issues`, slug, {
@@ -119,11 +143,55 @@ export default async function globalSetup(): Promise<void> {
 		priority: "low",
 	});
 
+	// 6. PROJ-313: group-access fixture — a second (ungranted) project, a member
+	// invited into the workspace, and a group that grants the member access to
+	// the first project only.
+	// cofferdam-ignore: Warning.NoConsoleLog: CI-visible e2e setup progress, not a debug leftover
+	console.log("[e2e setup] Provisioning group-access fixture");
+
+	const ungrantedProject = (await wsPost(`${base}/api/projects`, slug, {
+		name: "E2E Ungranted",
+		key: "E2EU",
+	})) as { id: string; key: string };
+
+	const memberEmail = process.env.E2E_MEMBER_EMAIL ?? `e2e-member-${slug}@example.com`;
+	await wsPost(`${base}/api/workspaces/${slug}/members`, slug, {
+		email: memberEmail,
+		role: "member",
+	});
+	const workspaceDetail = (await wsGet(`${base}/api/workspaces/${slug}`, slug)) as {
+		members: Array<{ id: string; email: string }>;
+	};
+	const memberRecord = workspaceDetail.members.find((m) => m.email === memberEmail);
+	if (!memberRecord) {
+		throw new Error(`Expected invited member ${memberEmail} in workspace members list`);
+	}
+
+	const group = (await wsPost(`${base}/api/workspaces/${slug}/groups`, slug, {
+		name: "E2E Access Group",
+	})) as { id: string; name: string };
+
+	await wsPut(`${base}/api/workspaces/${slug}/groups/${group.id}/grants`, slug, {
+		projectId: project.id,
+		role: "member",
+	});
+	await wsPost(`${base}/api/workspaces/${slug}/groups/${group.id}/members`, slug, {
+		userId: memberRecord.id,
+	});
+
 	const ctx: E2EContext = {
 		workspaceSlug: slug,
 		todoStatusId: todoStatus.id,
 		inProgressStatusId: inProgressStatus.id,
 		testIssueId: dragIssue.id,
+		grantedProjectId: project.id,
+		grantedProjectKey: project.key,
+		ungrantedProjectId: ungrantedProject.id,
+		ungrantedProjectKey: ungrantedProject.key,
+		groupId: group.id,
+		groupName: group.name,
+		memberEmail,
+		memberUserId: memberRecord.id,
 	};
 
 	fs.writeFileSync(CTX_FILE, JSON.stringify(ctx, null, 2));

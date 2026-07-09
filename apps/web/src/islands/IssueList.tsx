@@ -1,4 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
+import { useAccessGate } from "../utils/access-gate";
+import AccessPending from "./AccessPending";
 import { sortIssues } from "./board-utils";
 import { deriveProjectDescription } from "./issue-list/derive";
 import IssueListLayout from "./issue-list/IssueListLayout";
@@ -28,6 +30,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 		localStorage.setItem("issues-view", view);
 	}, [view]);
 
+	const gate = useAccessGate(workspaceSlug);
 	const filters = useIssueFilters();
 	const search = useIssueSearch(workspaceSlug);
 	const data = useIssueListData(workspaceSlug, view, {
@@ -57,6 +60,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 	// still page-local — tracked separately as a follow-up.)
 	const filtered = sortIssues(data.issues, filters.sortBy, filters.sortDir);
 
+	if (gate.pending) return <AccessPending />;
 	if (data.loading && !data.hasLoadedOnce.current) return <p aria-live="polite">Loading issues…</p>;
 	if (data.error) {
 		return (

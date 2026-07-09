@@ -1,8 +1,10 @@
 import type { RefObject } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
+import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
 import { renderMdWithWikilinks, renderMermaidDiagrams } from "../utils/markdown";
+import AccessPending from "./AccessPending";
 import MarkdownEditor from "./MarkdownEditor";
 
 interface SearchResult {
@@ -1734,6 +1736,7 @@ function buildArticleProps(article: {
 }
 
 export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Props) {
+	const gate = useAccessGate(workspaceSlug);
 	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
 	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(
@@ -1813,6 +1816,8 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		attach,
 		workspaceSlug,
 	});
+
+	if (gate.pending) return <AccessPending />;
 
 	return (
 		<WikiPageShell

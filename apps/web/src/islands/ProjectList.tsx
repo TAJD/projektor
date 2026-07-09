@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
+import AccessPending from "./AccessPending";
 
 interface Project {
 	id: string;
@@ -316,10 +318,13 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 			.finally(() => setLoading(false));
 	}, [workspaceSlug]);
 
+	const gate = useAccessGate(workspaceSlug);
+
 	const createForm = useProjectCreateForm(workspaceSlug, (p) =>
 		setProjects((prev) => [...prev, p])
 	);
 
+	if (gate.pending) return <AccessPending />;
 	if (loading) return <p aria-live="polite">Loading projects…</p>;
 	if (error)
 		return (

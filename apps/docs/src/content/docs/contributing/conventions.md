@@ -270,6 +270,7 @@ These are the constraints the fleet skill reads to plan batches. Keep them curre
 | custom-fields | `services/custom-fields.ts` | `schemas/custom-fields.ts` | `routes/custom-fields.ts` | `mcp/custom-fields.ts` | `test/custom-fields.test.ts` |
 | workflow | `services/workflow.ts` | — (no input) | `routes/workflow.ts` | `mcp/workflow.ts` | `test/workflow.test.ts` |
 | flow-metrics | `services/flow-metrics.ts` | `schemas/flow-metrics.ts` | `routes/flow-metrics.ts` | `mcp/flow-metrics.ts` | `test/flow-metrics.test.ts` |
+| groups | `services/groups.ts` | `schemas/groups.ts` | `routes/groups.ts` | `mcp/groups.ts` | `test/groups.test.ts` |
 
 Frontend islands are **not** domain-locked in the same way, but two agents must never
 own the same island file. Assign each island to exactly one agent per batch.

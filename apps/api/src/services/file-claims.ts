@@ -1,6 +1,7 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../schemas/file-claims";
+import { visibleProjectPredicate } from "./access";
 import { postMessage } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
@@ -246,6 +247,14 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	if (path) {
 		conditions.push(eq(schema.issueFileClaims.path, path));
 	}
+
+	// PROJ-316: a non-admin member only sees claims on issues whose project they
+	// can access; owner/admin (predicate undefined) see every claim.
+	const vis = visibleProjectPredicate(
+		ctx,
+		sql`(SELECT i.project_id FROM issues i WHERE i.id = ${schema.issueFileClaims.issueId})`
+	);
+	if (vis) conditions.push(vis);
 
 	const items = await orm
 		.select()

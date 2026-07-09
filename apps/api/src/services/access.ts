@@ -109,12 +109,21 @@ export function visibleProjectPredicate(
  * its bind params, or `null` for owner/admin (no filter needed).
  *
  * `projectColExpr` is inlined verbatim, so it MUST be a trusted column reference
- * (e.g. `"i.project_id"`), never user input.
+ * (e.g. `"i.project_id"`), never user input. It is validated as a bare or
+ * table-qualified identifier and throws otherwise, so a future caller can't turn
+ * this into an injection vector by passing something dynamic.
  */
+const COLUMN_EXPR = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;
+
 export function visibleProjectSqlFragment(
 	ctx: ServiceCtx,
 	projectColExpr: string
 ): { sql: string; params: unknown[] } | null {
+	if (!COLUMN_EXPR.test(projectColExpr)) {
+		throw new Error(
+			`visibleProjectSqlFragment: projectColExpr must be a column identifier, got ${JSON.stringify(projectColExpr)}`
+		);
+	}
 	if (isWorkspaceAdmin(ctx.role)) return null;
 	return {
 		sql: `EXISTS (SELECT 1 FROM user_group_members ugm
