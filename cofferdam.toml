@@ -7,6 +7,10 @@
 # `cofferdam check --fail-on=<level>`):
 #   info | low | medium | high | critical
 
+# packages/cofferdam-checks — local plugin checks (built via `pnpm --filter
+# @projektor/cofferdam-checks build`, gitignored dist/). See CD-69.
+plugins = ["./packages/cofferdam-checks"]
+
 # [checks."Readability.MaxLineLength"]
 # limit = 120
 # severity = "low"
