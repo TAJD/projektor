@@ -103,6 +103,18 @@ describe("Review gating (PROJ-254/287/289/292/293)", () => {
 		expect(res.status).toBe(403);
 	});
 
+	it("REGRESSION: a lease held ONLY by a self-declared kind:human session still gates the done transition", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Human-kind-only lease",
+		});
+		// No agent-kind lease at all — the issue's only lease holder declared kind:"human"
+		// at register_agent time (unprivileged, no role check on that field).
+		await seedAgentLease(workspaceId, issue.id, { kind: "human" });
+
+		const res = await patch(issue.id, { status: "done", completionReport: report });
+		expect(res.status).toBe(403);
+	});
+
 	it("REGRESSION: a stale/ended agentSessionId no longer hard-404s a valid update", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Stale session" });
 

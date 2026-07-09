@@ -282,11 +282,14 @@ export async function liveLeasedIssueIds(ctx: ServiceCtx): Promise<Set<string>> 
 }
 
 /**
- * Is there a LIVE lease held by an AGENT-kind session on this issue? This is the
- * authoritative "an agent is actively working this issue" signal used by the
- * review/done gate (PROJ-287), replacing the spoofable caller-supplied
- * agentSessionId/kind — a caller cannot omit a field or self-declare kind:"human"
- * to escape it while genuinely holding an agent lease.
+ * Is there a LIVE lease on this issue, held by any session regardless of its
+ * self-declared kind? This is the authoritative "an agent is actively working
+ * this issue" signal used by the review/done gate (PROJ-287), replacing the
+ * spoofable caller-supplied agentSessionId/kind. Gating deliberately ignores
+ * agentSessions.kind — a session's kind is self-declared at register_agent
+ * time with no privilege check, so a caller could register kind:"human",
+ * claim the issue, and mark it done directly if the gate trusted that label.
+ * Holding a lease at all is what triggers the gate, not the declared kind.
  */
 export async function issueHasLiveAgentLease(ctx: ServiceCtx, issueId: string): Promise<boolean> {
 	const orm = drizzle(ctx.db, { schema });
@@ -299,7 +302,6 @@ export async function issueHasLiveAgentLease(ctx: ServiceCtx, issueId: string): 
 				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
 				eq(schema.issueLeases.issueId, issueId),
 				isNull(schema.issueLeases.releasedAt),
-				eq(schema.agentSessions.kind, "agent"),
 				eq(schema.agentSessions.status, "active"),
 				gt(schema.agentSessions.lastHeartbeatAt, liveCutoff())
 			)
@@ -309,10 +311,11 @@ export async function issueHasLiveAgentLease(ctx: ServiceCtx, issueId: string): 
 }
 
 /**
- * Has this issue EVER been leased by an agent-kind session (live, released, or
- * stale)? Scopes the human-done completion-report requirement to agent-worked
- * issues (PROJ-289) so closing ordinary human/duplicate/won't-fix issues isn't
- * blocked for a report no agent was ever going to write.
+ * Has this issue EVER been leased by any session (live, released, or stale),
+ * regardless of its self-declared kind — see issueHasLiveAgentLease for why
+ * kind is ignored. Scopes the human-done completion-report requirement to
+ * agent-worked issues (PROJ-289) so closing ordinary human/duplicate/won't-fix
+ * issues isn't blocked for a report no agent was ever going to write.
  */
 export async function issueEverHadAgentLease(ctx: ServiceCtx, issueId: string): Promise<boolean> {
 	const orm = drizzle(ctx.db, { schema });
@@ -323,8 +326,7 @@ export async function issueEverHadAgentLease(ctx: ServiceCtx, issueId: string): 
 		.where(
 			and(
 				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
-				eq(schema.issueLeases.issueId, issueId),
-				eq(schema.agentSessions.kind, "agent")
+				eq(schema.issueLeases.issueId, issueId)
 			)
 		)
 		.get();
