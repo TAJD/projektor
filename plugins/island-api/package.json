@@ -1,0 +1,23 @@
+{
+  "name": "@projektor/cofferdam-island-api",
+  "private": true,
+  "version": "0.0.0",
+  "description": "cofferdam plugin: enforce the island API convention (no raw fetch/local buildHeaders in apps/web/src/islands). Ports scripts/check-island-api.sh (CD-69).",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "node scripts/check-fixture.mjs"
+  },
+  "dependencies": {
+    "@cofferdam/check-sdk": "^0.3.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
