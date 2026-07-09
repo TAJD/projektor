@@ -17,6 +17,25 @@ const EMPTY_METRICS = {
 	},
 };
 
+// The real API always returns a fixed-size bucket window, even with zero completions —
+// it never returns [] for an active project. This is the actual "no data" shape.
+const ZERO_BUCKET_METRICS = {
+	leadTime: { count: 0, avg: null, p50: null, p90: null },
+	cycleTime: { count: 0, avg: null, p50: null, p90: null },
+	wipOverTime: [
+		{ date: "2026-06-01", count: 0 },
+		{ date: "2026-06-02", count: 0 },
+	],
+	throughputOverTime: [
+		{ weekStart: "2026-05-25", count: 0 },
+		{ weekStart: "2026-06-01", count: 0 },
+	],
+	agentVsHuman: {
+		agent: { count: 0, avg: null, p50: null, p90: null },
+		human: { count: 0, avg: null, p50: null, p90: null },
+	},
+};
+
 const FULL_METRICS = {
 	leadTime: { count: 4, avg: 86400 * 2.3, p50: 86400 * 2, p90: 86400 * 4 },
 	cycleTime: { count: 4, avg: 3600 * 5, p50: 3600 * 4, p90: 3600 * 9 },
@@ -81,6 +100,16 @@ describe("MetricsDashboard", () => {
 	it("does not crash on an empty-metrics response", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		mockFetchMetrics(EMPTY_METRICS);
+		render(<MetricsDashboard />);
+
+		expect(await screen.findByText("Throughput")).toBeTruthy();
+		expect(screen.getByText(/No completed issues yet/i)).toBeTruthy();
+		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
+	});
+
+	it("shows empty-chart states for a fixed-size all-zero bucket window (real API shape)", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchMetrics(ZERO_BUCKET_METRICS);
 		render(<MetricsDashboard />);
 
 		expect(await screen.findByText("Throughput")).toBeTruthy();

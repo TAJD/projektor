@@ -176,7 +176,7 @@ function ThroughputChart({ data }: { data: FlowMetrics["throughputOverTime"] }) 
 		};
 	}, [labels]);
 
-	if (data.length === 0) {
+	if (data.length === 0 || data.every((d) => d.count === 0)) {
 		return <EmptyChartState message="No completed issues yet" />;
 	}
 
@@ -224,7 +224,7 @@ function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 		};
 	}, []);
 
-	if (data.length === 0) {
+	if (data.length === 0 || data.every((d) => d.count === 0)) {
 		return <EmptyChartState message="No WIP data yet" />;
 	}
 
