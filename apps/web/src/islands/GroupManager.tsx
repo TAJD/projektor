@@ -210,6 +210,7 @@ function GroupDetailEditor(props: DetailProps) {
 	const [detail, setDetail] = useState<GroupDetail | null>(null);
 	const [err, setErr] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	const [nameDraft, setNameDraft] = useState("");
 	const [addUserId, setAddUserId] = useState("");
 	const [grantProjectId, setGrantProjectId] = useState("");
 	const [grantRole, setGrantRole] = useState<GrantRole>("member");
@@ -220,6 +221,7 @@ function GroupDetailEditor(props: DetailProps) {
 				workspaceSlug: slug,
 			});
 			setDetail(d);
+			setNameDraft(d.name);
 		} catch (e) {
 			setErr(String(e));
 		}
@@ -257,13 +259,37 @@ function GroupDetailEditor(props: DetailProps) {
 	);
 	const grantedIds = new Set(detail.grants.map((g) => g.projectId));
 	const grantable = props.projects.filter((p) => !grantedIds.has(p.id));
+	const trimmedName = nameDraft.trim();
 
 	return (
 		<section class={CARD}>
-			<div class="flex items-center justify-between mb-3">
-				<h2 class={H2} style="margin-bottom:0;">
-					{detail.name}
-				</h2>
+			<div class="flex items-center gap-2 mb-3">
+				<label class="sr-only" for="group-name">
+					Group name
+				</label>
+				<input
+					id="group-name"
+					class={`${INPUT} flex-1 font-semibold`}
+					value={nameDraft}
+					disabled={busy}
+					onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
+				/>
+				<button
+					type="button"
+					class={BTN_PRIMARY}
+					disabled={busy || trimmedName === "" || trimmedName === detail.name}
+					onClick={() =>
+						run(async () => {
+							await apiFetch(`/api/workspaces/${slug}/groups/${groupId}`, {
+								method: "PATCH",
+								workspaceSlug: slug,
+								body: { name: trimmedName },
+							});
+						})
+					}
+				>
+					Rename
+				</button>
 				<button type="button" class={BTN_SECONDARY} onClick={props.onClose}>
 					Close
 				</button>
