@@ -6,10 +6,10 @@
       "priority": 15,
       "severity": "high",
       "file": "fixtures/apps/web/src/islands/fixture.ts",
-      "line": 10,
+      "line": 13,
       "column": 3,
-      "start_byte": 396,
-      "end_byte": 417,
+      "start_byte": 607,
+      "end_byte": 628,
       "message": "Local \"buildHeaders\" declared here — use apiFetch from utils/api-client.ts instead.",
       "baselined": false
     },
@@ -19,10 +19,10 @@
       "priority": 15,
       "severity": "high",
       "file": "fixtures/apps/web/src/islands/fixture.ts",
-      "line": 17,
+      "line": 20,
       "column": 3,
-      "start_byte": 621,
-      "end_byte": 639,
+      "start_byte": 832,
+      "end_byte": 850,
       "message": "Local \"buildHeaders\" declared here — use apiFetch from utils/api-client.ts instead.",
       "baselined": false
     },
@@ -33,9 +33,22 @@
       "severity": "high",
       "file": "fixtures/apps/web/src/islands/fixture.ts",
       "line": 25,
+      "column": 3,
+      "start_byte": 1022,
+      "end_byte": 1040,
+      "message": "Local \"buildHeaders\" declared here — use apiFetch from utils/api-client.ts instead.",
+      "baselined": false
+    },
+    {
+      "id": "Warning.IslandApiConvention",
+      "category": "warning",
+      "priority": 15,
+      "severity": "high",
+      "file": "fixtures/apps/web/src/islands/fixture.ts",
+      "line": 33,
       "column": 19,
-      "start_byte": 949,
-      "end_byte": 975,
+      "start_byte": 1372,
+      "end_byte": 1398,
       "message": "Raw \"fetch()\" call — use apiFetch from utils/api-client.ts instead.",
       "baselined": false
     },
@@ -45,18 +58,12 @@
       "priority": 15,
       "severity": "high",
       "file": "fixtures/apps/web/src/islands/fixture.ts",
-      "line": 26,
+      "line": 34,
       "column": 19,
-      "start_byte": 1016,
-      "end_byte": 1049,
+      "start_byte": 1439,
+      "end_byte": 1472,
       "message": "Raw \"window.fetch()\" call — use apiFetch from utils/api-client.ts instead.",
       "baselined": false
     }
-  ],
-  "summary": {
-    "total": 4,
-    "by_category": {
-      "warning": 4
-    }
-  }
+  ]
 }

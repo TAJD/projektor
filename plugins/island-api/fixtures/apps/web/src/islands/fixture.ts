@@ -1,8 +1,11 @@
 // fixture.ts — input to `cofferdam check` for the IslandApiConvention
 // plugin (CD-69). Comments label the expected outcome on each line.
-// The plugin should emit FOUR issues total:
+// The plugin should emit FIVE issues total:
 //   - FLAG buildHeaders (function form)
 //   - FLAG buildHeaders (const/arrow form — not AST-visible, see CD-78)
+//   - FLAG buildHeaders (const/arrow form, string literal on the same
+//     line — regression guard: the line scan must not skip lines
+//     LineView.isStringLiteral flags, or this declaration goes unseen)
 //   - FLAG bare fetch()
 //   - FLAG window.fetch()
 
@@ -16,6 +19,11 @@ function withFunctionBuildHeaders() {
 function withConstBuildHeaders() {
   const buildHeaders = (token: string) => ({ Authorization: token }); // FLAG buildHeaders (const form)
   return buildHeaders("token");
+}
+
+function withConstBuildHeadersAndStringLiteral() {
+  const buildHeaders = () => ({ "Content-Type": "application/json" }); // FLAG buildHeaders (const form, string literal on the line)
+  return buildHeaders();
 }
 
 declare function apiFetch(url: string): Promise<unknown>;

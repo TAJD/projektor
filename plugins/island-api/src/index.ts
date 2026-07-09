@@ -11,12 +11,16 @@
 //     `findAll` — only `function buildHeaders(){}` would be reachable
 //     via the `Function` kind. A line scan catches both forms, matching
 //     the original grep's behavior.
-//   - The scan does not skip `LineView.isComment` lines: that flag is
-//     true for any line a comment overlaps *at all*, including ordinary
-//     code with a trailing `// note`, which would silently swallow real
-//     declarations. The original grep has the same blind spot (it never
-//     excluded comments either), so not filtering keeps parity rather
-//     than regressing coverage.
+//   - The scan does not skip `LineView.isComment` OR `isStringLiteral`
+//     lines: `isComment` is true for any line a comment overlaps at
+//     all, including ordinary code with a trailing `// note`, and
+//     `isStringLiteral` is true for any line a string/template literal
+//     touches — a single-line declaration like
+//     `const buildHeaders = () => ({ "Content-Type": "json" })` has a
+//     string literal on the same line as the real declaration, so
+//     skipping it would silently swallow a common header-builder shape.
+//     The original grep excluded neither, so not filtering on either
+//     flag keeps parity rather than regressing coverage.
 //   - Raw fetch() detection is AST-based: bare `fetch(...)` calls, plus
 //     `window.fetch` / `globalThis.fetch` / `self.fetch` — a deliberate
 //     widening over the original grep, which only matched bare fetch
@@ -47,7 +51,6 @@ export default defineCheck({
   },
   run(file, ctx) {
     for (const ln of file.lines()) {
-      if (ln.isStringLiteral) continue;
       const m = BUILD_HEADERS_PATTERN.exec(ln.text);
       if (!m) continue;
       ctx.report({
