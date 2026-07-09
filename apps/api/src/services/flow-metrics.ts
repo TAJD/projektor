@@ -58,18 +58,30 @@ function buildWipOverTime(
 	return buckets;
 }
 
+// Unix epoch day 0 (1970-01-01) was a Thursday; align to the preceding Monday so
+// week boundaries read as conventional (ISO) weeks rather than landing on Thursdays.
+function mondayAtOrBefore(t: number): number {
+	const DAY = 86400;
+	const dayIndex = Math.floor(t / DAY);
+	const daysSinceMonday = ((dayIndex % 7) + 7 - 4) % 7; // day 0 (Thu) is 4 days after Monday
+	return (dayIndex - daysSinceMonday) * DAY;
+}
+
 function buildThroughputOverTime(
 	issues: FlowIssueRow[],
 	since: number,
 	until: number
 ): Array<{ weekStart: string; count: number }> {
-	const DAY = 86400;
-	const WEEK = 7 * DAY;
+	const WEEK = 7 * 86400;
 	const buckets: Array<{ weekStart: string; count: number }> = [];
-	for (let t = since - (since % WEEK); t <= until; t += WEEK) {
+	for (let t = mondayAtOrBefore(since); t <= until; t += WEEK) {
 		const bucketEnd = t + WEEK;
+		// Clamp each bucket to the requested window so edge weeks don't pull in
+		// completions from just outside [since, until], matching leadTime/cycleTime.
+		const clampedStart = Math.max(t, since);
+		const clampedEnd = Math.min(bucketEnd, until + 1);
 		const count = issues.filter(
-			(i) => i.doneAt !== null && i.doneAt >= t && i.doneAt < bucketEnd
+			(i) => i.doneAt !== null && i.doneAt >= clampedStart && i.doneAt < clampedEnd
 		).length;
 		buckets.push({ weekStart: new Date(t * 1000).toISOString().slice(0, 10), count });
 	}

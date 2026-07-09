@@ -15,11 +15,11 @@ export const flowMetricsTools: MCPTool[] = [
 				projectId: { type: "string", description: "Project UUID" },
 				since: {
 					type: "number",
-					description: "Only issues created at/after this epoch-seconds time",
+					description: "Only issues completed/active at/after this epoch-seconds time",
 				},
 				until: {
 					type: "number",
-					description: "Only issues created at/before this epoch-seconds time",
+					description: "Only issues completed/active at/before this epoch-seconds time",
 				},
 			},
 		},

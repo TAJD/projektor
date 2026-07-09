@@ -218,6 +218,55 @@ describe("Flow metrics (PROJ-252)", () => {
 		}
 	});
 
+	it("excludes an issue completed just before `since` even though it falls in the aligned first bucket", async () => {
+		const WEEK = 7 * 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const since = now - 2 * WEEK;
+		const until = now;
+
+		const justInsideIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Just inside since",
+		});
+		await stampFlowTimestamps(justInsideIssue.id, {
+			readyAt: since - 100,
+			claimedAt: since - 50,
+			doneAt: since + 10,
+		});
+
+		const justOutsideIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Just before since, same aligned bucket",
+		});
+		await stampFlowTimestamps(justOutsideIssue.id, {
+			readyAt: since - 200,
+			claimedAt: since - 150,
+			doneAt: since - 10,
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		const totalCounted = metrics.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
+		expect(totalCounted).toBe(1);
+	});
+
+	it("aligns weekStart labels to Monday", async () => {
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${Math.floor(Date.now() / 1000) - 4 * 7 * 86400}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		for (const bucket of metrics.throughputOverTime) {
+			const weekday = new Date(`${bucket.weekStart}T00:00:00Z`).getUTCDay();
+			expect(weekday).toBe(1); // 1 === Monday
+		}
+	});
+
 	it("returns an empty throughput series for a project with no completed issues", async () => {
 		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
 			headers: authHeaders(token, slug),
