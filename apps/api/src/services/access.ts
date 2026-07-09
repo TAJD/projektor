@@ -70,11 +70,17 @@ export async function effectiveProjectRole(
 /**
  * Resolve the effective project role, throwing `NotFoundError` when the user has
  * no access. Invisible projects 404 rather than 403 so their existence never
- * leaks to a member who was never granted them.
+ * leaks to a member who was never granted them. `notFoundMessage` lets callers
+ * keep their own resource's not-found wording (e.g. "Issue not found") instead
+ * of leaking "Project not found" for a different resource type.
  */
-export async function requireProjectAccess(ctx: ServiceCtx, projectId: string): Promise<Role> {
+export async function requireProjectAccess(
+	ctx: ServiceCtx,
+	projectId: string,
+	notFoundMessage = "Project not found"
+): Promise<Role> {
 	const role = await effectiveProjectRole(ctx, projectId);
-	if (role === null) throw new NotFoundError("Project not found");
+	if (role === null) throw new NotFoundError(notFoundMessage);
 	return role;
 }
 

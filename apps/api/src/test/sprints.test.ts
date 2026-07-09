@@ -271,6 +271,7 @@ describe("Sprints role guards", () => {
 	});
 
 	it("viewer cannot update a sprint (403)", async () => {
+		// cofferdam-ignore: Refactor.DuplicateBlock: shares arrange-block setup with "delete a sprint" below
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
 		await seedGroupGrant(roles.workspace.id, roles.member.user.id, project.id, "member");

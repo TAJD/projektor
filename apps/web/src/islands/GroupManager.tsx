@@ -61,14 +61,15 @@ const BTN_SECONDARY =
 	"px-3 py-[0.4rem] rounded text-[0.8rem] font-semibold bg-bg text-text-base border border-border " +
 	"cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
 const BTN_DANGER =
-	"px-2 py-[0.3rem] rounded text-[0.75rem] font-semibold bg-transparent text-[var(--danger-text)] border border-border " +
-	"cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
+	"px-2 py-[0.3rem] rounded text-[0.75rem] font-semibold bg-transparent text-[var(--danger-text)] " +
+	"border border-border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
 const INPUT =
 	"px-[0.625rem] py-[0.4rem] border border-border rounded text-[0.85rem] bg-bg text-text-base " +
 	"font-[inherit] focus:outline-[2px] focus:outline-accent focus:outline-offset-1";
 const CARD = "border border-border rounded-lg bg-surface p-4 mb-4";
 const INFO =
-	"flex items-center gap-2 border border-border rounded-lg bg-bg px-4 py-3 mb-4 text-[0.82rem] text-text-base";
+	"flex items-center gap-2 border border-border rounded-lg bg-bg px-4 py-3 mb-4 " +
+	"text-[0.82rem] text-text-base";
 const ROLE_TAG =
 	"inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold " +
 	"bg-accent text-white uppercase tracking-wide";
@@ -193,6 +194,117 @@ function MembersOverview(props: { members: WsMember[]; memberGroups: MemberGroup
 }
 
 // ---------------------------------------------------------------------------
+// Groups section — create form + groups table
+// ---------------------------------------------------------------------------
+
+interface GroupsSectionProps {
+	groups: GroupSummary[];
+	isAdmin: boolean;
+	busy: boolean;
+	newName: string;
+	setNewName: (v: string) => void;
+	createErr: string | null;
+	onCreateGroup: () => void;
+	onSelectGroup: (id: string) => void;
+	onDeleteGroup: (id: string) => void;
+}
+
+function GroupsSection(props: GroupsSectionProps) {
+	const {
+		groups,
+		isAdmin,
+		busy,
+		newName,
+		setNewName,
+		createErr,
+		onCreateGroup,
+		onSelectGroup,
+		onDeleteGroup,
+	} = props;
+	return (
+		<section class={CARD}>
+			<h2 class={H2}>{isAdmin ? "Groups" : "Your groups"}</h2>
+			{isAdmin && (
+				<div class="flex items-center gap-2 mb-4">
+					<input
+						class={INPUT}
+						placeholder="New group name"
+						value={newName}
+						onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") onCreateGroup();
+						}}
+					/>
+					<button
+						type="button"
+						class={BTN_PRIMARY}
+						disabled={busy || !newName.trim()}
+						onClick={onCreateGroup}
+					>
+						Create group
+					</button>
+				</div>
+			)}
+			{createErr && <div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{createErr}</div>}
+
+			{groups.length === 0 ? (
+				<div class="text-[0.85rem] text-text-muted">
+					{isAdmin
+						? "No groups yet."
+						: "You don't belong to any groups yet. An owner or admin can add you to one."}
+				</div>
+			) : (
+				<div class="overflow-x-auto">
+					<table class="w-full border-collapse">
+						<thead>
+							<tr>
+								<th class={TH}>Name</th>
+								<th class={TH}>Members</th>
+								<th class={TH}>Projects</th>
+								{isAdmin && <th class={TH} />}
+							</tr>
+						</thead>
+						<tbody>
+							{groups.map((g) => (
+								<tr key={g.id}>
+									<td class={TD}>
+										{isAdmin ? (
+											<button
+												type="button"
+												class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
+												onClick={() => onSelectGroup(g.id)}
+											>
+												{g.name}
+											</button>
+										) : (
+											<span class="font-medium text-text-base">{g.name}</span>
+										)}
+									</td>
+									<td class={TD}>{g.memberCount}</td>
+									<td class={TD}>{g.grantCount}</td>
+									{isAdmin && (
+										<td class={TD}>
+											<button
+												type="button"
+												class={BTN_DANGER}
+												disabled={busy}
+												onClick={() => onDeleteGroup(g.id)}
+											>
+												Delete
+											</button>
+										</td>
+									)}
+								</tr>
+							))}
+						</tbody>
+					</table>
+				</div>
+			)}
+		</section>
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Group detail editor — rename, members, grants
 // ---------------------------------------------------------------------------
 
@@ -205,6 +317,7 @@ interface DetailProps {
 	onClose: () => void;
 }
 
+// cofferdam-ignore: Readability.MaxFunctionLength: single-island admin screen, normal preact style
 function GroupDetailEditor(props: DetailProps) {
 	const { slug, groupId } = props;
 	const [detail, setDetail] = useState<GroupDetail | null>(null);
@@ -431,7 +544,7 @@ function GroupDetailEditor(props: DetailProps) {
 // Root
 // ---------------------------------------------------------------------------
 
-// cofferdam-ignore: Readability.MaxFunctionLength: single-island admin screen, normal preact style
+// cofferdam-ignore: Design.OrphanExport: imported from groups.astro, which cofferdam doesn't parse
 export default function GroupManager({ workspaceSlug }: Props) {
 	const slug = resolveWorkspaceSlug(workspaceSlug);
 	const [data, setData] = useState<Loaded | null>(null);
@@ -512,85 +625,17 @@ export default function GroupManager({ workspaceSlug }: Props) {
 
 			{isAdmin && <MembersOverview members={data.members} memberGroups={data.memberGroups} />}
 
-			<section class={CARD}>
-				<h2 class={H2}>{isAdmin ? "Groups" : "Your groups"}</h2>
-				{isAdmin && (
-					<div class="flex items-center gap-2 mb-4">
-						<input
-							class={INPUT}
-							placeholder="New group name"
-							value={newName}
-							onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
-							onKeyDown={(e) => {
-								if (e.key === "Enter") void createGroup();
-							}}
-						/>
-						<button
-							type="button"
-							class={BTN_PRIMARY}
-							disabled={busy || !newName.trim()}
-							onClick={createGroup}
-						>
-							Create group
-						</button>
-					</div>
-				)}
-				{createErr && <div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{createErr}</div>}
-
-				{data.groups.length === 0 ? (
-					<div class="text-[0.85rem] text-text-muted">
-						{isAdmin
-							? "No groups yet."
-							: "You don't belong to any groups yet. An owner or admin can add you to one."}
-					</div>
-				) : (
-					<div class="overflow-x-auto">
-						<table class="w-full border-collapse">
-							<thead>
-								<tr>
-									<th class={TH}>Name</th>
-									<th class={TH}>Members</th>
-									<th class={TH}>Projects</th>
-									{isAdmin && <th class={TH} />}
-								</tr>
-							</thead>
-							<tbody>
-								{data.groups.map((g) => (
-									<tr key={g.id}>
-										<td class={TD}>
-											{isAdmin ? (
-												<button
-													type="button"
-													class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
-													onClick={() => setSelected(g.id)}
-												>
-													{g.name}
-												</button>
-											) : (
-												<span class="font-medium text-text-base">{g.name}</span>
-											)}
-										</td>
-										<td class={TD}>{g.memberCount}</td>
-										<td class={TD}>{g.grantCount}</td>
-										{isAdmin && (
-											<td class={TD}>
-												<button
-													type="button"
-													class={BTN_DANGER}
-													disabled={busy}
-													onClick={() => deleteGroup(g.id)}
-												>
-													Delete
-												</button>
-											</td>
-										)}
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
-				)}
-			</section>
+			<GroupsSection
+				groups={data.groups}
+				isAdmin={isAdmin}
+				busy={busy}
+				newName={newName}
+				setNewName={setNewName}
+				createErr={createErr}
+				onCreateGroup={() => void createGroup()}
+				onSelectGroup={setSelected}
+				onDeleteGroup={deleteGroup}
+			/>
 
 			{isAdmin && selected && (
 				<GroupDetailEditor

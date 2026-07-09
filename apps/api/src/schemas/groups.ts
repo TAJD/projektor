@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // PROJ-311: grant roles are the per-project subset of workspace roles (no owner).
-export const GrantRoleEnum = z.enum(["viewer", "member", "admin"]);
+const GrantRoleEnum = z.enum(["viewer", "member", "admin"]);
 
 export const CreateGroupSchema = z.object({
 	name: z.string().min(1).max(100),

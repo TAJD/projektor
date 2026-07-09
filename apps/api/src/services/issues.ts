@@ -27,6 +27,7 @@ import {
 	canWriteProject,
 	effectiveProjectRole,
 	isWorkspaceAdmin,
+	requireProjectAccess,
 	visibleProjectPredicate,
 	visibleProjectSqlFragment,
 } from "./access";
@@ -395,10 +396,7 @@ function computeChildRollup(childRows: Array<{ status: string; count: number }>)
 // user's groups (owner/admin bypass). Throw the issue-not-found error rather than a
 // project one so an invisible issue's existence never leaks.
 async function assertIssueProjectVisible(ctx: ServiceCtx, projectId: string): Promise<void> {
-	if (isWorkspaceAdmin(ctx.role)) return;
-	if ((await effectiveProjectRole(ctx, projectId)) === null) {
-		throw new NotFoundError("Issue not found");
-	}
+	await requireProjectAccess(ctx, projectId, "Issue not found");
 }
 
 export async function getIssue(ctx: ServiceCtx, raw: unknown) {
