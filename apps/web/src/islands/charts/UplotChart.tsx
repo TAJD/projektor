@@ -43,9 +43,23 @@ export default function UplotChart({ data, buildOptions, height = 220 }: Props) 
 		};
 		systemTheme.addEventListener("change", onSystemThemeChange);
 
+		// Width is baked into series/axis options (e.g. tick-thinning reads u.width at
+		// creation time), so a resize needs a full rebuild, not just uPlot's setSize —
+		// otherwise a window resize or mobile orientation change leaves stale tick density.
+		let lastWidth = container.clientWidth;
+		const resizeObserver = new ResizeObserver((entries) => {
+			const newWidth = entries[0]?.contentRect.width;
+			if (newWidth && Math.abs(newWidth - lastWidth) > 1) {
+				lastWidth = newWidth;
+				create(container);
+			}
+		});
+		resizeObserver.observe(container);
+
 		return () => {
 			themeObserver.disconnect();
 			systemTheme.removeEventListener("change", onSystemThemeChange);
+			resizeObserver.disconnect();
 			chartRef.current?.destroy();
 			chartRef.current = null;
 		};

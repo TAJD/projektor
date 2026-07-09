@@ -22,6 +22,15 @@ if (!window.matchMedia) {
 	})) as unknown as typeof window.matchMedia;
 }
 
+// jsdom has no ResizeObserver; UplotChart uses one to rebuild on container resize.
+if (typeof window.ResizeObserver === "undefined") {
+	window.ResizeObserver = class {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	} as unknown as typeof ResizeObserver;
+}
+
 beforeEach(() => {
 	vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
 });
