@@ -58,6 +58,24 @@ function buildWipOverTime(
 	return buckets;
 }
 
+function buildThroughputOverTime(
+	issues: FlowIssueRow[],
+	since: number,
+	until: number
+): Array<{ weekStart: string; count: number }> {
+	const DAY = 86400;
+	const WEEK = 7 * DAY;
+	const buckets: Array<{ weekStart: string; count: number }> = [];
+	for (let t = since - (since % WEEK); t <= until; t += WEEK) {
+		const bucketEnd = t + WEEK;
+		const count = issues.filter(
+			(i) => i.doneAt !== null && i.doneAt >= t && i.doneAt < bucketEnd
+		).length;
+		buckets.push({ weekStart: new Date(t * 1000).toISOString().slice(0, 10), count });
+	}
+	return buckets;
+}
+
 async function computeAgentVsHuman(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
@@ -134,6 +152,10 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const wipUntil = until ?? now;
 	const wipOverTime = buildWipOverTime(issues, wipSince, wipUntil);
 
+	const throughputSince = since ?? now - 12 * 7 * 86400;
+	const throughputUntil = until ?? now;
+	const throughputOverTime = buildThroughputOverTime(issues, throughputSince, throughputUntil);
+
 	const cycleWindowIssues = issues.filter((i) => i.doneAt === null || inWindow(i.doneAt));
 	const agentVsHuman = await computeAgentVsHuman(ctx, orm, cycleWindowIssues);
 
@@ -141,6 +163,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		leadTime: summarize(leadTimes),
 		cycleTime: summarize(cycleTimes),
 		wipOverTime,
+		throughputOverTime,
 		agentVsHuman,
 	};
 }

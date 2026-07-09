@@ -15,6 +15,7 @@ interface FlowMetrics {
 	leadTime: Distribution;
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
+	throughputOverTime: Array<{ weekStart: string; count: number }>;
 	agentVsHuman: { agent: Distribution; human: Distribution };
 }
 
@@ -171,5 +172,60 @@ describe("Flow metrics (PROJ-252)", () => {
 
 		expect(metrics.leadTime.count).toBe(1);
 		expect(metrics.cycleTime.count).toBe(1);
+	});
+
+	it("buckets throughput weekly and excludes issues outside the window", async () => {
+		const WEEK = 7 * 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const since = now - 3 * WEEK;
+		const until = now;
+
+		const thisWeekIssue = await seedIssue(workspaceId, projectId, userId, { title: "This week" });
+		await stampFlowTimestamps(thisWeekIssue.id, {
+			readyAt: now - 100,
+			claimedAt: now - 50,
+			doneAt: now,
+		});
+
+		const lastWeekIssue = await seedIssue(workspaceId, projectId, userId, { title: "Last week" });
+		await stampFlowTimestamps(lastWeekIssue.id, {
+			readyAt: now - WEEK - 100,
+			claimedAt: now - WEEK - 50,
+			doneAt: now - WEEK,
+		});
+
+		const outsideWindowIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Too old",
+		});
+		await stampFlowTimestamps(outsideWindowIssue.id, {
+			readyAt: now - 10 * WEEK,
+			claimedAt: now - 10 * WEEK + 50,
+			doneAt: now - 10 * WEEK + 100,
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		const totalCounted = metrics.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
+		expect(totalCounted).toBe(2);
+		expect(metrics.throughputOverTime.length).toBeGreaterThan(0);
+		for (const bucket of metrics.throughputOverTime) {
+			expect(bucket.weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		}
+	});
+
+	it("returns an empty throughput series for a project with no completed issues", async () => {
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(Array.isArray(metrics.throughputOverTime)).toBe(true);
+		expect(metrics.throughputOverTime.every((b) => b.count === 0)).toBe(true);
 	});
 });
