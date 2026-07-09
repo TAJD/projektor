@@ -23,10 +23,14 @@ Implementation details:
 - **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets - see below), `packages/*` (db, types, plugin-sdk), `plugins/*`
 - **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-workspace`) downloads it and ships it with `wrangler` - no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
 
-## Architecture: the service-layer contract (most important)
+
+TODO: I think this could be made more precise
+## Architecture: the service-layer contract
 
 There are **two surfaces** over the same data - a REST API and an MCP (JSON-RPC) server.
 They MUST behave identically. The mechanism that guarantees this:
+
+TODO: Could this sort of parity check be something that's folded into cofferdam?
 
 ```
 routes/<domain>.ts   (REST wrapper)  ─┐
@@ -44,6 +48,8 @@ mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live h
 5. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role? }`. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
 
 ### Deliberate REST↔MCP parity exceptions
+
+TODO: We should remove ticket references everywhere, but I also think that this section is either out of date or could be made more specific - either way it shouldn't be in the top level AGENTS.md
 
 The parity audit (PROJ-236) confirmed these surface-only features are intentional, not
 drift — don't re-flag them in future audits:
@@ -69,13 +75,17 @@ drift — don't re-flag them in future audits:
 - **`get_prioritized_issues`** — MCP-only. An agent-productivity tool ("what should I
   work on next") with no natural REST/browser analog.
 
-### The security invariant: always scope by workspace
+### The security invariant: always scope by workspace and project access
+
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked - e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
 
+Within a workspace, project-scoped data is further gated by **group-based project access (PROJ-311)** - see `services/access.ts` (`visibleProjectPredicate`, `effectiveProjectRole`/`requireProjectAccess`, `canWriteProject`) and the full explanation under Conventions & gotchas below. Every project-scoped list/read/write must go through those helpers, not just a bare `workspace_id` check.
+
 ### The D1 limit: never bind a row-scaled array into one query
+
 Cloudflare **D1 rejects any query with more than 100 bound parameters.** A query whose parameter count grows with an input array - drizzle `inArray`, a raw `IN (...)`, or a batched mutation keyed by ids - will throw at runtime (a 500) once the array is large enough. **This is invisible in tests:** the vitest runner backs D1 with SQLite (cap 32766), so an un-chunked query passes CI and only fails on real D1.
 
-Route every variable-length `IN`/`inArray` load through **`inChunks` (`services/sql.ts`)**, which splits the array so each query stays under the cap:
+Route every variable-length `IN`/`inArray` load through **`inChunks` (`services/sql.ts`)**, which splits the array so each query stays under the cap - see the header comment there for the full rationale.
 
 ```ts
 const rows = await inChunks(issueIds, (chunk) =>
@@ -86,6 +96,8 @@ const rows = await inChunks(issueIds, (chunk) =>
 
 Bounded arrays (enums like priority) are fine to bind directly. When in doubt, chunk.
 
+COMMENT: Versioning is important but it should be repo documentation referenced here, not hidden in AGENTS.md
+
 ## Versioning
 
 **`apps/web/package.json` is the single version source** for the whole monorepo -
@@ -95,6 +107,8 @@ as `VERSION` in the tarball and injected into the MCP `serverInfo.version` via
 esbuild `--define`). Every other package's `package.json` `version` field is a fixed
 `0.0.0-workspace` placeholder - those packages are workspace-internal and not
 independently released, so their version field is unused and intentionally never bumped.
+
+COMMENT: This should not be in here - or perhaps we have a way of keeping it up to date? Or put docs in the referenced directories.
 
 ## File layout per domain
 
@@ -164,6 +178,8 @@ pnpm dev                               # local dev - API on :8787, web on :4321
 # so /api/* won't 500 with "no such table" on a fresh checkout.
 ```
 
+COMMENT: Is the bootstrap idea actually a good one? Perhaps we should have a standalone script and not something wired in that goes to production.
+
 `GET /bootstrap` (non-prod only, needs `BOOTSTRAP_SECRET`) seeds a workspace + user + token
 + membership in one shot and prints the `claude mcp add ...` command to connect an agent. Seed it once:
 
@@ -174,16 +190,13 @@ curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 Then open **http://localhost:4321** - with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
-**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/api test`, `pnpm --filter @projektor/web test`, and `pnpm --filter @projektor/web build` must all be green. CI runs exactly these.
+**Before opening a PR:** all of CI must be green - see the canonical CI command list under "Working in parallel (multi-agent)" below.
 
 ## Git hooks (lefthook)
 
-`pnpm install` runs `prepare`, which calls `lefthook install` and wires two hooks:
+`pnpm install` runs `prepare`, which calls `lefthook install` and wires the hooks defined in `lefthook.yml` (pre-commit: type-check, lint-changed, island API convention; pre-push: API/web tests). New contributors get these automatically.
 
-- **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages), `pnpm biome check --changed --no-errors-on-unmatched` (lint, changed files only), and the island API convention check.
-- **pre-push** - `pnpm --filter @projektor/api test` and `pnpm --filter @projektor/web test` (too slow for every commit but catches the failures that most often break CI).
-
-These mirror CI (`.github/workflows/ci.yml`), which additionally runs `pnpm lint` (full repo) and `pnpm --filter @projektor/web build` as PR gates. New contributors get the hooks automatically after `pnpm install`.
+**Keep `lefthook.yml` and CI (`.github/workflows/ci.yml`) in parity** - CI is the authority (it additionally runs full-repo lint and the web build as PR gates); if you add or change a check in one, check whether the other needs it too. See the canonical CI command list at the end of this file.
 
 **Bypass for WIP commits/pushes:** pass `--no-verify` (or `-n`) to git:
 
@@ -193,6 +206,8 @@ git push --no-verify
 ```
 
 Agent workers should also use `--no-verify` for intermediate commits; run the full checks before opening a PR. To manually re-run a hook without committing: `pnpm lefthook run pre-push`.
+
+TODO: How much of this should be folded into a new document or something that is actually injected by the MCP server instead? We need to think about that, but it shouldn't be in the AGENTS.md. We need to have a reproducible skill for it to run.
 
 ## Fleet coordination protocol
 
@@ -221,23 +236,6 @@ This repo is built out via parallel workers in separate git worktrees. To avoid 
 - Give each worker a **disjoint file set** (one domain = its 4-5 files above). Domains don't share files *except* read-only shared scaffolding (`services/types.ts`, `services/errors.ts`, `schemas/common.ts`, the adapters) and `routes/mcp.ts`/`index.ts`.
 - **Never let two parallel workers edit `routes/mcp.ts`, `index.ts`, or `test/mcp.test.ts`** - serialize those, or assign to exactly one worker.
 - Large refactors that touch shared files go in a **foundation phase first** (behavior-preserving), then fan out per-domain.
-
-### Spawn prompt requirement
-
-Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination` section:
-
-```
-## Coordination (required)
-You are working in a parallel fleet. Use the projektor MCP to coordinate:
-
-1. `register_agent` at session start - link to your issue ID, save the returned `id`.
-2. `claim_files` before touching any file - check `list_file_claims` first; back off if another agent holds a file.
-3. `post_message` to `scope: "issue:<uuid>"` when you start, hit a blocker, and finish. Use `scope: "workspace"` for fleet-wide announcements (e.g. "rebasing mcp.ts, hold off").
-4. `heartbeat_agent` every ~60 s while working (sessions time out after 120 s of silence).
-5. `release_files` then `end_agent` when done.
-```
-
-See `~/.claude/docs/spawning-sessions.md` for the full prompt template (Coordination + Finish line are both required sections).
 
 ### Fleet planning rules (for the `/fleet` skill and human planners)
 
