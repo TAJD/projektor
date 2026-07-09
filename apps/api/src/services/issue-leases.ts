@@ -1,10 +1,11 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import {
 	ClaimIssueSchema,
 	ListIssueLeasesSchema,
 	ReleaseIssueSchema,
 } from "../schemas/issue-leases";
+import { visibleProjectPredicate } from "./access";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
@@ -349,6 +350,14 @@ export async function listIssueLeases(ctx: ServiceCtx, raw: unknown) {
 	];
 	if (issueId) conditions.push(eq(schema.issueLeases.issueId, issueId));
 	if (agentId) conditions.push(eq(schema.issueLeases.agentSessionId, agentId));
+
+	// PROJ-316: a non-admin member only sees leases on issues whose project they
+	// can access; owner/admin (predicate undefined) see every lease.
+	const vis = visibleProjectPredicate(
+		ctx,
+		sql`(SELECT i.project_id FROM issues i WHERE i.id = ${schema.issueLeases.issueId})`
+	);
+	if (vis) conditions.push(vis);
 
 	const rows = await orm
 		.select({
