@@ -7,6 +7,11 @@
 # `cofferdam check --fail-on=<level>`):
 #   info | low | medium | high | critical
 
+# IslandApiConvention (CD-69): ports scripts/check-island-api.sh.
+# pathPatterns is declared inside the plugin itself (plugins/island-api,
+# cd-81a.5), not here — this file has no per-path override.
+plugins = ["./plugins/island-api"]
+
 # [checks."Readability.MaxLineLength"]
 # limit = 120
 # severity = "low"

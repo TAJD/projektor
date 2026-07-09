@@ -5,7 +5,7 @@ pre-commit:
     lint:
       run: pnpm biome check --changed --no-errors-on-unmatched
     island-api:
-      run: bash scripts/check-island-api.sh
+      run: pnpm --filter @projektor/cofferdam-island-api build && node scripts/check-island-api.mjs
 
 pre-push:
   commands:
