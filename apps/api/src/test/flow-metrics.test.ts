@@ -15,6 +15,7 @@ interface FlowMetrics {
 	leadTime: Distribution;
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
+	throughputOverTime: Array<{ weekStart: string; count: number }>;
 	agentVsHuman: { agent: Distribution; human: Distribution };
 }
 
@@ -171,5 +172,109 @@ describe("Flow metrics (PROJ-252)", () => {
 
 		expect(metrics.leadTime.count).toBe(1);
 		expect(metrics.cycleTime.count).toBe(1);
+	});
+
+	it("buckets throughput weekly and excludes issues outside the window", async () => {
+		const WEEK = 7 * 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const since = now - 3 * WEEK;
+		const until = now;
+
+		const thisWeekIssue = await seedIssue(workspaceId, projectId, userId, { title: "This week" });
+		await stampFlowTimestamps(thisWeekIssue.id, {
+			readyAt: now - 100,
+			claimedAt: now - 50,
+			doneAt: now,
+		});
+
+		const lastWeekIssue = await seedIssue(workspaceId, projectId, userId, { title: "Last week" });
+		await stampFlowTimestamps(lastWeekIssue.id, {
+			readyAt: now - WEEK - 100,
+			claimedAt: now - WEEK - 50,
+			doneAt: now - WEEK,
+		});
+
+		const outsideWindowIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Too old",
+		});
+		await stampFlowTimestamps(outsideWindowIssue.id, {
+			readyAt: now - 10 * WEEK,
+			claimedAt: now - 10 * WEEK + 50,
+			doneAt: now - 10 * WEEK + 100,
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		const totalCounted = metrics.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
+		expect(totalCounted).toBe(2);
+		expect(metrics.throughputOverTime.length).toBeGreaterThan(0);
+		for (const bucket of metrics.throughputOverTime) {
+			expect(bucket.weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+		}
+	});
+
+	it("excludes an issue completed just before `since` even though it falls in the aligned first bucket", async () => {
+		const WEEK = 7 * 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const since = now - 2 * WEEK;
+		const until = now;
+
+		const justInsideIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Just inside since",
+		});
+		await stampFlowTimestamps(justInsideIssue.id, {
+			readyAt: since - 100,
+			claimedAt: since - 50,
+			doneAt: since + 10,
+		});
+
+		const justOutsideIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Just before since, same aligned bucket",
+		});
+		await stampFlowTimestamps(justOutsideIssue.id, {
+			readyAt: since - 200,
+			claimedAt: since - 150,
+			doneAt: since - 10,
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		const totalCounted = metrics.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
+		expect(totalCounted).toBe(1);
+	});
+
+	it("aligns weekStart labels to Monday", async () => {
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${Math.floor(Date.now() / 1000) - 4 * 7 * 86400}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		for (const bucket of metrics.throughputOverTime) {
+			const weekday = new Date(`${bucket.weekStart}T00:00:00Z`).getUTCDay();
+			expect(weekday).toBe(1); // 1 === Monday
+		}
+	});
+
+	it("returns an empty throughput series for a project with no completed issues", async () => {
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(Array.isArray(metrics.throughputOverTime)).toBe(true);
+		expect(metrics.throughputOverTime.every((b) => b.count === 0)).toBe(true);
 	});
 });

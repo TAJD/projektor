@@ -1,0 +1,13 @@
+---
+import Base from '../layouts/Base.astro';
+import ProjectNav from '../islands/ProjectNav';
+import MetricsDashboard from '../islands/MetricsDashboard';
+
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Metrics — Projektor">
+  <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Metrics" />
+  <div class="page-container">
+    <MetricsDashboard client:load workspaceSlug={workspaceSlug} />
+  </div>
+</Base>

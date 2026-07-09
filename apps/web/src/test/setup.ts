@@ -13,6 +13,24 @@
 import { cleanup } from "@testing-library/preact";
 import { afterEach, beforeEach, vi } from "vitest";
 
+// jsdom has no matchMedia; uPlot's pixel-ratio watcher calls it at import time.
+if (!window.matchMedia) {
+	window.matchMedia = vi.fn().mockImplementation(() => ({
+		matches: false,
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+	})) as unknown as typeof window.matchMedia;
+}
+
+// jsdom has no ResizeObserver; UplotChart uses one to rebuild on container resize.
+if (typeof window.ResizeObserver === "undefined") {
+	window.ResizeObserver = class {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	} as unknown as typeof ResizeObserver;
+}
+
 beforeEach(() => {
 	vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
 });

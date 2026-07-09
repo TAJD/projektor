@@ -18,6 +18,7 @@ const TABS = [
 	{ label: "Wiki", path: "/wiki" },
 	{ label: "Sprints", path: "/sprints" },
 	{ label: "Epics", path: "/epics" },
+	{ label: "Metrics", path: "/metrics" },
 ];
 
 const KEY_BADGE_CLASS =
