@@ -273,6 +273,43 @@ describe("Groups MCP parity", () => {
 		expect((res as JsonRpcError).error.code).toBe(-32000);
 	});
 
+	it("list_groups via MCP: member sees only their own groups; owner sees all (PROJ-319)", async () => {
+		const g1 = mcpData<{ id: string }>(
+			(await mcpCall(workspaceId, "create_group", { name: "G1" }, ownerHeaders)) as JsonRpcResult<{
+				content: Array<{ text: string }>;
+			}>
+		);
+		await mcpCall(workspaceId, "create_group", { name: "G2" }, ownerHeaders);
+		await mcpCall(
+			workspaceId,
+			"add_group_member",
+			{ groupId: g1.id, userId: roles.member.user.id },
+			ownerHeaders
+		);
+
+		const memberList = (await mcpCall(
+			workspaceId,
+			"list_groups",
+			{},
+			memberHeaders
+		)) as JsonRpcResult<{
+			content: Array<{ text: string }>;
+		}>;
+		const memberGroups = mcpData<Array<{ name: string }>>(memberList);
+		expect(memberGroups.map((g) => g.name)).toEqual(["G1"]);
+
+		const ownerList = (await mcpCall(
+			workspaceId,
+			"list_groups",
+			{},
+			ownerHeaders
+		)) as JsonRpcResult<{
+			content: Array<{ text: string }>;
+		}>;
+		const ownerGroups = mcpData<Array<{ name: string }>>(ownerList);
+		expect(ownerGroups.map((g) => g.name).sort()).toEqual(["G1", "G2"]);
+	});
+
 	it("full admin loop over MCP: group -> grant -> member", async () => {
 		const project = await seedProject(workspaceId, "LOOP");
 		const created = mcpData<{ id: string }>(
