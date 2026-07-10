@@ -132,4 +132,97 @@ describe("Share tokens", () => {
 			expect(res.status).toBe(200);
 		}
 	});
+
+	it("PROJ-240: viewer role cannot create a share link", async () => {
+		const viewerFixture = await seedIssueFixture({ role: "viewer" });
+		const res = await SELF.fetch(`http://localhost/api/issues/${viewerFixture.issueId}/share`, {
+			method: "POST",
+			headers: authHeaders(viewerFixture.token, viewerFixture.slug),
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("PROJ-241: excludes internal custom fields and includes non-internal ones from the public share payload", async () => {
+		const { env } = await import("cloudflare:test");
+		const now = Math.floor(Date.now() / 1000);
+
+		const internalFieldId = crypto.randomUUID();
+		await env.DB.prepare(
+			"INSERT INTO custom_field_definitions (id, workspace_id, project_id, key, label, type, options, created_at, is_internal) VALUES (?, ?, NULL, ?, ?, 'text', NULL, ?, 1)"
+		)
+			.bind(internalFieldId, workspaceId, "secret_notes", "Secret Notes", now)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO custom_field_values (issue_id, field_id, value) VALUES (?, ?, ?)"
+		)
+			.bind(issueId, internalFieldId, "confidential")
+			.run();
+
+		const publicFieldId = crypto.randomUUID();
+		await env.DB.prepare(
+			"INSERT INTO custom_field_definitions (id, workspace_id, project_id, key, label, type, options, created_at, is_internal) VALUES (?, ?, NULL, ?, ?, 'text', NULL, ?, 0)"
+		)
+			.bind(publicFieldId, workspaceId, "public_note", "Public Note", now)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO custom_field_values (issue_id, field_id, value) VALUES (?, ?, ?)"
+		)
+			.bind(issueId, publicFieldId, "hello world")
+			.run();
+
+		const createRes = await SELF.fetch(`http://localhost/api/issues/${issueId}/share`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		const { token: shareToken } = (await createRes.json()) as { token: string; url: string };
+
+		const res = await SELF.fetch(`http://localhost/api/share/${shareToken}`);
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as {
+			customFields: Array<{ key: string; value: string }>;
+		};
+		expect(data.customFields.some((f) => f.key === "secret_notes")).toBe(false);
+		expect(data.customFields.some((f) => f.key === "public_note")).toBe(true);
+	});
+
+	it("PROJ-242: revokes a share token so it no longer resolves", async () => {
+		const createRes = await SELF.fetch(`http://localhost/api/issues/${issueId}/share`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		const { token: shareToken } = (await createRes.json()) as { token: string; url: string };
+
+		const revokeRes = await SELF.fetch(`http://localhost/api/issues/${issueId}/share`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(revokeRes.status).toBe(200);
+
+		const res = await SELF.fetch(`http://localhost/api/share/${shareToken}`);
+		expect(res.status).toBe(404);
+	});
+
+	it("PROJ-242: viewer role cannot revoke a share link", async () => {
+		const viewerFixture = await seedIssueFixture({ role: "viewer" });
+		const { env } = await import("cloudflare:test");
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			"INSERT INTO share_tokens (id, issue_id, workspace_id, created_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+		)
+			.bind(
+				await hashToken("11111111111111111111111111111111"),
+				viewerFixture.issueId,
+				viewerFixture.workspaceId,
+				viewerFixture.userId,
+				now + 86400,
+				now
+			)
+			.run();
+
+		const res = await SELF.fetch(`http://localhost/api/issues/${viewerFixture.issueId}/share`, {
+			method: "DELETE",
+			headers: authHeaders(viewerFixture.token, viewerFixture.slug),
+		});
+		expect(res.status).toBe(403);
+	});
 });

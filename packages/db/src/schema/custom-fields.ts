@@ -15,6 +15,7 @@ export const customFieldDefinitions = sqliteTable(
 		type: text("type", { enum: ["text", "number", "select", "date", "user"] }).notNull(),
 		options: text("options"),
 		createdAt: integer("created_at").notNull(),
+		isInternal: integer("is_internal", { mode: "boolean" }).notNull().default(true),
 	},
 	(t) => ({
 		wsIdx: index("cfd_workspace_idx").on(t.workspaceId),

@@ -1,4 +1,4 @@
-import { NotFoundError } from "./errors";
+import { ForbiddenError, NotFoundError } from "./errors";
 import type { ServiceCtx } from "./types";
 
 async function hashToken(token: string): Promise<string> {
@@ -12,6 +12,8 @@ export async function createShareToken(
 	ctx: ServiceCtx,
 	issueId: string
 ): Promise<{ token: string; url: string }> {
+	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+
 	const now = Math.floor(Date.now() / 1000);
 
 	// Verify the issue belongs to this workspace
@@ -93,10 +95,25 @@ export async function getSharedIssue(
 			`SELECT cfd.key, cfd.label, cfd.type, cfv.value
        FROM custom_field_values cfv
        JOIN custom_field_definitions cfd ON cfd.id = cfv.field_id
-       WHERE cfv.issue_id = ?`
+       WHERE cfv.issue_id = ? AND cfd.is_internal = 0`
 		)
 		.bind(tokenMeta.issue_id)
 		.all<{ key: string; label: string; type: string; value: string }>();
 
 	return { ...row, customFields: cfRows.results ?? [] };
+}
+
+export async function revokeShareToken(ctx: ServiceCtx, issueId: string): Promise<void> {
+	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+
+	const issue = await ctx.db
+		.prepare("SELECT id FROM issues WHERE id = ? AND workspace_id = ?")
+		.bind(issueId, ctx.workspaceId)
+		.first<{ id: string }>();
+	if (!issue) throw new NotFoundError("Issue not found");
+
+	await ctx.db
+		.prepare("DELETE FROM share_tokens WHERE issue_id = ? AND workspace_id = ?")
+		.bind(issueId, ctx.workspaceId)
+		.run();
 }
