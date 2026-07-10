@@ -10,7 +10,8 @@ router.get("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
 		const projectId = c.req.query("projectId");
-		return c.json(await wikiService.listWikiPages(ctx, { projectId }));
+		const parentId = c.req.query("parentId");
+		return c.json(await wikiService.listWikiPages(ctx, { parentId, projectId }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

@@ -174,6 +174,34 @@ describe("Wiki API", () => {
 
 	// --- canonical behavior parity tests ---
 
+	it("GET /api/wiki?parentId= filters to children of that page (PROJ-244)", async () => {
+		const parentRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Parent Page", content: "root" }),
+		});
+		const parent = (await parentRes.json()) as { id: string };
+
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Child Page", content: "child", parentId: parent.id }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Unrelated Page", content: "sibling" }),
+		});
+
+		const res = await SELF.fetch(`http://localhost/api/wiki?parentId=${parent.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const pages = (await res.json()) as Array<{ title: string }>;
+		expect(pages).toHaveLength(1);
+		expect(pages[0].title).toBe("Child Page");
+	});
+
 	it("GET /api/wiki returns ALL pages regardless of parent hierarchy", async () => {
 		const parentRes = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",

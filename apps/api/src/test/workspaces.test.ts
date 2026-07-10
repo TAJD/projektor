@@ -246,6 +246,48 @@ describe("Workspaces MCP", () => {
 		expect(isMcpError(res)).toBe(true);
 		expect(res.error.message).toMatch(/delete all projects/i);
 	});
+
+	it("update_workspace renames the workspace (PROJ-246)", async () => {
+		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+			workspaceId,
+			"update_workspace",
+			{ name: "Renamed via MCP" },
+			userHeaders
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+
+		expect(isMcpError(res)).toBe(false);
+		const data = JSON.parse(res.result.content[0].text) as { ok: boolean };
+		expect(data.ok).toBe(true);
+
+		const getRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}`, {
+			headers: userHeaders,
+		});
+		const workspace = (await getRes.json()) as { name: string };
+		expect(workspace.name).toBe("Renamed via MCP");
+	});
+
+	it("update_workspace returns error for member role (PROJ-246)", async () => {
+		const ws = await seedWorkspace(`mcp-update-${crypto.randomUUID().slice(0, 8)}`);
+		const memberUser = await import("./helpers").then((h) =>
+			h.seedUser(`m-${crypto.randomUUID().slice(0, 8)}@example.com`)
+		);
+		await seedMember(ws.id, memberUser.id, "member");
+		const memberToken = await seedToken(ws.id, memberUser.id);
+		const memberHeaders = authHeaders(memberToken, ws.slug);
+
+		const res = (await mcpCall(
+			ws.id,
+			"update_workspace",
+			{ name: "Should Fail" },
+			memberHeaders
+		)) as JsonRpcError;
+		expect(isMcpError(res)).toBe(true);
+	});
+
+	it("update_workspace returns error when name missing (PROJ-246)", async () => {
+		const res = (await mcpCall(workspaceId, "update_workspace", {}, userHeaders)) as JsonRpcError;
+		expect(isMcpError(res)).toBe(true);
+	});
 });
 
 describe("DELETE /api/workspaces/:slug (PROJ-96)", () => {

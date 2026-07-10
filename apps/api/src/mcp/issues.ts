@@ -24,21 +24,44 @@ export const issuesTools: MCPTool[] = [
 					enum: ["backlog", "todo", "in_progress", "in_review", "done", "cancelled"],
 				},
 				statusId: { type: "string", description: "Filter by task status ID" },
+				statusIds: {
+					type: "string",
+					description: "Comma-separated task status IDs (OR-matched)",
+				},
 				category: {
 					type: "string",
 					enum: ["todo", "in_progress", "done", "cancelled"],
 					description: "Filter by status category",
 				},
 				priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
+				priorities: {
+					type: "string",
+					description: "Comma-separated priorities (OR-matched), e.g. urgent,high",
+				},
 				assignee: { type: "string", description: "Filter by assignee user ID" },
 				parentId: {
 					type: "string",
 					description: "Filter by parent issue ID (returns direct children only)",
 				},
+				noParent: {
+					type: "boolean",
+					description: "Only return issues with no parent (top-level issues)",
+				},
 				typeId: { type: "string", description: "Filter by task type ID" },
 				excludeTypeIds: {
 					type: "string",
 					description: "Comma-separated task type IDs to exclude (e.g. the epic type)",
+				},
+				sprintId: { type: "string", description: "Filter by sprint ID" },
+				cfKey: { type: "string", description: "Custom field key to filter by" },
+				cfOp: {
+					type: "string",
+					enum: ["eq", "gt", "gte", "lt", "lte"],
+					description: "Comparison operator for the custom field filter (requires cfKey)",
+				},
+				cfValue: {
+					type: "string",
+					description: "Value to compare the custom field against (requires cfKey)",
 				},
 				completedAfter: {
 					type: "number",

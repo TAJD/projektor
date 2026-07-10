@@ -11,6 +11,7 @@ import {
 	listUserWorkspaces,
 	removeMember,
 	updateMemberRole,
+	updateWorkspace,
 } from "../services/workspaces";
 
 export const workspacesTools: MCPTool[] = [
@@ -70,6 +71,20 @@ export const workspacesTools: MCPTool[] = [
 			if (!ws) throw new NotFoundError("Workspace not found");
 
 			return deleteWorkspace({ ...ctx, workspaceId: ws.id }, "projektor");
+		},
+	},
+	{
+		name: "update_workspace",
+		description: "Rename the current workspace. Admin+ only.",
+		inputSchema: {
+			type: "object",
+			required: ["name"],
+			properties: {
+				name: { type: "string", description: "New display name for the workspace" },
+			},
+		},
+		async handler(input, ctx) {
+			return updateWorkspace(ctx, input);
 		},
 	},
 	{
