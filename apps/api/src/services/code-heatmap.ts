@@ -32,6 +32,16 @@ export interface CodeHeatmapEntry {
 	claimCount: number;
 }
 
+// PROJ-338: contention-mode counterpart to CodeHeatmapEntry — sized by claim_conflicts
+// (rejected/overridden claimFiles attempts) instead of successful claims.
+export interface ContentionHeatmapEntry {
+	path: string;
+	segment: string;
+	isLeaf: boolean;
+	distinctRejectedIssueCount: number;
+	conflictCount: number;
+}
+
 // PROJ-332: group claims one path segment below `prefix` — the natural "list this
 // directory's children" step a file explorer takes, so the caller drills down by
 // re-requesting with `prefix` set to the entry clicked.
@@ -74,10 +84,55 @@ function groupClaimsByNextSegment(
 		.sort((a, b) => b.distinctIssueCount - a.distinctIssueCount || a.path.localeCompare(b.path));
 }
 
+// PROJ-338: contention counterpart to groupClaimsByNextSegment — same segment-splitting
+// and isLeaf-freeze behavior, but tracks rejected-issue ids and raw conflict rows.
+function groupConflictsByNextSegment(
+	conflicts: Array<{ path: string; rejectedIssueId: string }>,
+	prefix: string
+): ContentionHeatmapEntry[] {
+	const prefixWithSlash = prefix ? `${prefix}/` : "";
+	const groups = new Map<
+		string,
+		{ rejectedIssueIds: Set<string>; conflictCount: number; isLeaf: boolean }
+	>();
+
+	for (const conflict of conflicts) {
+		if (prefix && !conflict.path.startsWith(prefixWithSlash)) continue;
+		const rest = conflict.path.slice(prefixWithSlash.length);
+		if (!rest) continue;
+		const slashIdx = rest.indexOf("/");
+		const isLeaf = slashIdx === -1;
+		const segment = isLeaf ? rest : rest.slice(0, slashIdx);
+		const path = prefix ? `${prefix}/${segment}` : segment;
+
+		let group = groups.get(path);
+		if (!group) {
+			group = { rejectedIssueIds: new Set(), conflictCount: 0, isLeaf };
+			groups.set(path, group);
+		}
+		if (!isLeaf) group.isLeaf = false;
+		group.rejectedIssueIds.add(conflict.rejectedIssueId);
+		group.conflictCount++;
+	}
+
+	return [...groups.entries()]
+		.map(([path, group]) => ({
+			path,
+			segment: path.slice(prefixWithSlash.length),
+			isLeaf: group.isLeaf,
+			distinctRejectedIssueCount: group.rejectedIssueIds.size,
+			conflictCount: group.conflictCount,
+		}))
+		.sort(
+			(a, b) =>
+				b.distinctRejectedIssueCount - a.distinctRejectedIssueCount || a.path.localeCompare(b.path)
+		);
+}
+
 export async function getCodeHeatmap(ctx: ServiceCtx, raw: unknown) {
 	const result = GetCodeHeatmapSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { projectId, since, until, prefix } = result.data;
+	const { projectId, since, until, prefix, mode } = result.data;
 
 	await assertProjectExists(ctx, projectId);
 
@@ -89,6 +144,41 @@ export async function getCodeHeatmap(ctx: ServiceCtx, raw: unknown) {
 	const now = Math.floor(Date.now() / 1000);
 	const windowSince = since ?? now - 42 * 86400;
 	const windowUntil = until ?? now;
+
+	const resolvedMode = mode ?? "claims";
+
+	if (resolvedMode === "contention") {
+		// PROJ-338: same window predicate as claims mode, but over claim_conflicts —
+		// occurredAt within [since, until], joined to issues (via rejectedIssueId) to scope
+		// by project.
+		const conflicts = await orm
+			.select({
+				path: schema.claimConflicts.path,
+				rejectedIssueId: schema.claimConflicts.rejectedIssueId,
+			})
+			.from(schema.claimConflicts)
+			.innerJoin(schema.issues, eq(schema.claimConflicts.rejectedIssueId, schema.issues.id))
+			.where(
+				and(
+					eq(schema.claimConflicts.workspaceId, ctx.workspaceId),
+					eq(schema.issues.projectId, projectId),
+					gte(schema.claimConflicts.occurredAt, windowSince),
+					lte(schema.claimConflicts.occurredAt, windowUntil)
+				)
+			);
+
+		const entries = groupConflictsByNextSegment(conflicts, prefix ?? "");
+
+		return {
+			prefix: prefix ?? "",
+			mode: resolvedMode,
+			// Reuses the claims-mode field name so the response shape doesn't fork in two —
+			// here it's the distinct count of *rejected* issues, i.e. issues whose claim
+			// attempt lost.
+			totalDistinctIssues: new Set(conflicts.map((c) => c.rejectedIssueId)).size,
+			entries,
+		};
+	}
 
 	// PROJ-332: window predicate matches the rest of flow-metrics — claimedAt within
 	// [since, until], not claim overlap. issue_file_claims has no project column, so join
@@ -110,6 +200,7 @@ export async function getCodeHeatmap(ctx: ServiceCtx, raw: unknown) {
 
 	return {
 		prefix: prefix ?? "",
+		mode: resolvedMode,
 		totalDistinctIssues: new Set(claims.map((c) => c.issueId)).size,
 		entries,
 	};

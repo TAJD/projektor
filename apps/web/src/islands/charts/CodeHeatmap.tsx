@@ -2,12 +2,16 @@ import { useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../../utils/api-client";
 import { SectionHeading } from "../MetricHelp";
 
+type HeatmapMode = "claims" | "contention";
+
 interface CodeHeatmapEntry {
 	path: string;
 	segment: string;
 	isLeaf: boolean;
-	distinctIssueCount: number;
-	claimCount: number;
+	distinctIssueCount?: number;
+	claimCount?: number;
+	distinctRejectedIssueCount?: number;
+	conflictCount?: number;
 }
 
 interface CodeHeatmapResponse {
@@ -29,6 +33,7 @@ function useCodeHeatmap(
 	since: number,
 	until: number
 ) {
+	const [mode, setMode] = useState<HeatmapMode>("claims");
 	const [prefix, setPrefix] = useState("");
 	const [data, setData] = useState<CodeHeatmapResponse | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -40,10 +45,17 @@ function useCodeHeatmap(
 		setPrefix("");
 	}, [since, until]);
 
+	// A contention drill-down path may not exist in claims mode and vice versa, so reset
+	// to the root when the mode itself changes (but not on range changes above, since
+	// mode is a user-chosen view, not part of the query window).
+	useEffect(() => {
+		setPrefix("");
+	}, [mode]);
+
 	useEffect(() => {
 		setLoading(true);
 		setError(null);
-		const query = new URLSearchParams({ since: String(since), until: String(until) });
+		const query = new URLSearchParams({ since: String(since), until: String(until), mode });
 		if (prefix) query.set("prefix", prefix);
 		apiFetch<CodeHeatmapResponse>(
 			`/api/projects/${encodeURIComponent(projectId)}/code-heatmap?${query}`,
@@ -52,13 +64,17 @@ function useCodeHeatmap(
 			.then((res) => setData(res))
 			.catch((e) => setError(String(e)))
 			.finally(() => setLoading(false));
-	}, [workspaceSlug, projectId, since, until, prefix]);
+	}, [workspaceSlug, projectId, since, until, prefix, mode]);
 
-	return { prefix, setPrefix, data, loading, error };
+	return { mode, setMode, prefix, setPrefix, data, loading, error };
 }
 
 function formatIssueCount(n: number): string {
 	return `${n} ${n === 1 ? "issue" : "issues"}`;
+}
+
+function formatConflictCount(n: number): string {
+	return `${n} ${n === 1 ? "conflict" : "conflicts"}`;
 }
 
 // PROJ-332: sequential heat — one hue (the app accent), lighter-to-darker by each
@@ -112,15 +128,52 @@ function Breadcrumb({
 	);
 }
 
+function ModeToggle({
+	mode,
+	onChange,
+}: {
+	mode: HeatmapMode;
+	onChange: (mode: HeatmapMode) => void;
+}) {
+	return (
+		<div class="flex flex-wrap items-center gap-1 mb-3 text-[0.78rem]">
+			<button
+				type="button"
+				onClick={() => onChange("claims")}
+				class={`px-1.5 py-0.5 rounded hover:bg-border ${
+					mode === "claims" ? "font-semibold text-text-base" : "text-accent"
+				}`}
+			>
+				Claim volume
+			</button>
+			<button
+				type="button"
+				onClick={() => onChange("contention")}
+				class={`px-1.5 py-0.5 rounded hover:bg-border ${
+					mode === "contention" ? "font-semibold text-text-base" : "text-accent"
+				}`}
+			>
+				Contention
+			</button>
+		</div>
+	);
+}
+
 function HeatmapRow({
 	entry,
+	mode,
 	ratio,
 	onDrillDown,
 }: {
 	entry: CodeHeatmapEntry;
+	mode: HeatmapMode;
 	ratio: number;
 	onDrillDown: (path: string) => void;
 }) {
+	const formattedCount =
+		mode === "contention"
+			? formatConflictCount(entry.distinctRejectedIssueCount ?? 0)
+			: formatIssueCount(entry.distinctIssueCount ?? 0);
 	const content = (
 		<>
 			<span class="min-w-0 truncate text-[0.82rem] text-text-base" title={entry.path}>
@@ -137,7 +190,7 @@ function HeatmapRow({
 				/>
 			</span>
 			<span class="w-[5.5rem] shrink-0 text-right text-[0.78rem] tabular-nums text-text-muted">
-				{formatIssueCount(entry.distinctIssueCount)}
+				{formattedCount}
 			</span>
 		</>
 	);
@@ -173,27 +226,44 @@ function CodeHeatmapEmptyState() {
 	);
 }
 
+function ContentionEmptyState() {
+	return (
+		<div class="py-8 text-center">
+			<p class="m-0 text-sm text-text-base">No claim conflicts in this window</p>
+			<p class="m-0 mt-1 text-[0.78rem] text-text-muted">
+				Agents aren't queuing up over the same files — that's a healthy sign for fleet parallelism.
+			</p>
+		</div>
+	);
+}
+
 // PROJ-332: "Where work lands" — a hand-rolled proportional bar list rather than a
 // treemap (per the ticket's fallback: keep the dependency footprint small). Bars carry
 // the sequential heat encoding; sizing (bar length) and shading (fill intensity) are
 // redundant on purpose, which is what makes a "heat map" read at a glance.
 export default function CodeHeatmap({ workspaceSlug, projectId, since, until }: Props) {
-	const { prefix, setPrefix, data, loading, error } = useCodeHeatmap(
+	const { mode, setMode, prefix, setPrefix, data, loading, error } = useCodeHeatmap(
 		workspaceSlug,
 		projectId,
 		since,
 		until
 	);
 
-	const maxCount = data ? Math.max(1, ...data.entries.map((e) => e.distinctIssueCount)) : 1;
+	const countField = mode === "contention" ? "distinctRejectedIssueCount" : "distinctIssueCount";
+	const maxCount = data ? Math.max(1, ...data.entries.map((e) => e[countField] ?? 0)) : 1;
 
 	return (
 		<div class="mb-8">
 			<SectionHeading
-				metricId="code-heatmap"
-				caption="Directories sized by distinct issues claiming files there — click a row to drill in"
+				metricId={mode === "contention" ? "code-heatmap-contention" : "code-heatmap"}
+				caption={
+					mode === "contention"
+						? "Directories sized by distinct issues whose claim was rejected or overridden there — click a row to drill in"
+						: "Directories sized by distinct issues claiming files there — click a row to drill in"
+				}
 			/>
 			<div class="p-4 bg-surface border border-border rounded-lg">
+				<ModeToggle mode={mode} onChange={setMode} />
 				{loading && <p aria-live="polite">Loading…</p>}
 				{!loading && error && (
 					<p role="alert" class="text-[var(--danger-text)]">
@@ -204,14 +274,19 @@ export default function CodeHeatmap({ workspaceSlug, projectId, since, until }: 
 					<>
 						<Breadcrumb prefix={prefix} onNavigate={setPrefix} />
 						{data.entries.length === 0 ? (
-							<CodeHeatmapEmptyState />
+							mode === "contention" ? (
+								<ContentionEmptyState />
+							) : (
+								<CodeHeatmapEmptyState />
+							)
 						) : (
 							<div class="flex flex-col gap-0.5">
 								{data.entries.map((entry) => (
 									<HeatmapRow
 										key={entry.path}
 										entry={entry}
-										ratio={entry.distinctIssueCount / maxCount}
+										mode={mode}
+										ratio={(entry[countField] ?? 0) / maxCount}
 										onDrillDown={setPrefix}
 									/>
 								))}
