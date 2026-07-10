@@ -15,7 +15,7 @@ interface FlowMetrics {
 	leadTime: Distribution;
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
-	throughputOverTime: Array<{ weekStart: string; count: number }>;
+	throughputOverTime: Array<{ bucketStart: string; count: number }>;
 }
 
 interface Props {
@@ -253,7 +253,7 @@ function EmptyChartState({ message }: { message: string }) {
 }
 
 function ThroughputChart({ data }: { data: FlowMetrics["throughputOverTime"] }) {
-	const labels = useMemo(() => data.map((d) => d.weekStart), [data]);
+	const labels = useMemo(() => data.map((d) => d.bucketStart), [data]);
 	const chartData = useMemo<uPlot.AlignedData>(
 		() => [data.map((_, i) => i), data.map((d) => d.count)],
 		[data]

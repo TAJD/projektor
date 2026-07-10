@@ -15,7 +15,7 @@ interface FlowMetrics {
 	leadTime: Distribution;
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
-	throughputOverTime: Array<{ weekStart: string; count: number }>;
+	throughputOverTime: Array<{ bucketStart: string; count: number }>;
 }
 
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
@@ -208,7 +208,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(totalCounted).toBe(2);
 		expect(metrics.throughputOverTime.length).toBeGreaterThan(0);
 		for (const bucket of metrics.throughputOverTime) {
-			expect(bucket.weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+			expect(bucket.bucketStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
 		}
 	});
 
@@ -247,7 +247,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(totalCounted).toBe(1);
 	});
 
-	it("aligns weekStart labels to Monday", async () => {
+	it("aligns weekly bucketStart labels to Monday", async () => {
 		const res = await SELF.fetch(
 			`http://localhost/api/projects/${projectId}/flow-metrics?since=${Math.floor(Date.now() / 1000) - 4 * 7 * 86400}`,
 			{ headers: authHeaders(token, slug) }
@@ -256,7 +256,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		const metrics = (await res.json()) as FlowMetrics;
 
 		for (const bucket of metrics.throughputOverTime) {
-			const weekday = new Date(`${bucket.weekStart}T00:00:00Z`).getUTCDay();
+			const weekday = new Date(`${bucket.bucketStart}T00:00:00Z`).getUTCDay();
 			expect(weekday).toBe(1); // 1 === Monday
 		}
 	});
@@ -326,7 +326,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		const total = metrics.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
 		expect(total).toBe(1);
 
-		const earliestBucket = metrics.throughputOverTime[0]?.weekStart;
+		const earliestBucket = metrics.throughputOverTime[0]?.bucketStart;
 		expect(earliestBucket).toBeDefined();
 		const dayIndex = Math.floor(new Date(`${earliestBucket}T00:00:00Z`).getTime() / 1000 / DAY);
 		const daysSinceMonday = ((dayIndex % 7) + 7 - 4) % 7;

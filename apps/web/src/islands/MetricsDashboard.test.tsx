@@ -23,8 +23,8 @@ const ZERO_BUCKET_METRICS = {
 		{ date: "2026-06-02", count: 0 },
 	],
 	throughputOverTime: [
-		{ weekStart: "2026-05-25", count: 0 },
-		{ weekStart: "2026-06-01", count: 0 },
+		{ bucketStart: "2026-05-25", count: 0 },
+		{ bucketStart: "2026-06-01", count: 0 },
 	],
 };
 
@@ -36,8 +36,8 @@ const FULL_METRICS = {
 		{ date: "2026-06-02", count: 3 },
 	],
 	throughputOverTime: [
-		{ weekStart: "2026-05-25", count: 1 },
-		{ weekStart: "2026-06-01", count: 3 },
+		{ bucketStart: "2026-05-25", count: 1 },
+		{ bucketStart: "2026-06-01", count: 3 },
 	],
 };
 

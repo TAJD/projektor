@@ -72,12 +72,12 @@ function buildThroughputOverTime(
 	since: number,
 	until: number,
 	granularity: "day" | "week"
-): Array<{ weekStart: string; count: number }> {
+): Array<{ bucketStart: string; count: number }> {
 	const DAY = 86400;
 	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
-	const bucketStart = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
-	const buckets: Array<{ weekStart: string; count: number }> = [];
-	for (let t = bucketStart; t <= until; t += bucketSize) {
+	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
+	const buckets: Array<{ bucketStart: string; count: number }> = [];
+	for (let t = firstBucket; t <= until; t += bucketSize) {
 		const bucketEnd = t + bucketSize;
 		// Clamp each bucket to the requested window so edge buckets don't pull in
 		// completions from just outside [since, until], matching leadTime/cycleTime.
@@ -86,7 +86,7 @@ function buildThroughputOverTime(
 		const count = issues.filter(
 			(i) => i.doneAt !== null && i.doneAt >= clampedStart && i.doneAt < clampedEnd
 		).length;
-		buckets.push({ weekStart: new Date(t * 1000).toISOString().slice(0, 10), count });
+		buckets.push({ bucketStart: new Date(t * 1000).toISOString().slice(0, 10), count });
 	}
 	return buckets;
 }
