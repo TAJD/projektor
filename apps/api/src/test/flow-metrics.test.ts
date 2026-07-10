@@ -389,6 +389,50 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(metrics.throughputOverTime.every((b) => b.count === 0)).toBe(true);
 	});
 
+	it("returns null (not NaN/throw) percentiles for a project with zero issues (PROJ-301)", async () => {
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		for (const dist of [metrics.leadTime, metrics.cycleTime, metrics.reviewLatency]) {
+			expect(dist.count).toBe(0);
+			expect(dist.avg).toBeNull();
+			expect(dist.p50).toBeNull();
+			expect(dist.p90).toBeNull();
+		}
+	});
+
+	it("excludes a NULL-timestamp legacy issue from lead/cycle time without crashing (PROJ-301)", async () => {
+		const now = Math.floor(Date.now() / 1000);
+
+		// Pre-dates the PROJ-328 backfill: ready_at/claimed_at/done_at all NULL, even
+		// though the issue is otherwise done.
+		const legacyIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Legacy done issue",
+			status: "done",
+		});
+
+		const modernIssue = await seedIssue(workspaceId, projectId, userId, { title: "Modern issue" });
+		await stampFlowTimestamps(modernIssue.id, {
+			readyAt: now - 300,
+			claimedAt: now - 200,
+			doneAt: now,
+		});
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		// The legacy issue contributes nothing — only the modern issue is counted.
+		expect(metrics.leadTime.count).toBe(1);
+		expect(metrics.cycleTime.count).toBe(1);
+		expect(metrics.agingWip.every((a) => a.id !== legacyIssue.id)).toBe(true);
+	});
+
 	// PROJ-328: collaboration-shape metrics (review latency, human interventions, autonomy ratio).
 	async function stampLease(
 		id: string,

@@ -25,6 +25,9 @@ import { pluginRegistry } from "../plugins/registry";
 
 // __PROJEKTOR_VERSION__ is injected by esbuild --define at release-build time
 // (scripts/build-release.sh); it's absent in local `wrangler dev` and tests.
+// The dogfood deploy (local wrangler-OAuth post-commit hook, outside this repo) also
+// skips build-release.sh, so dogfood intentionally reports "dev" here - only versioned
+// release tarballs carry a real version string.
 const SERVER_VERSION = typeof __PROJEKTOR_VERSION__ === "string" ? __PROJEKTOR_VERSION__ : "dev";
 
 // Surfaced to every MCP client at `initialize` (the MCP spec's optional

@@ -300,4 +300,61 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		const res = await claim(second.id, agent);
 		expect(res.status).toBe(409);
 	});
+
+	// --- REST/MCP parity (PROJ-301) ---
+
+	it("MCP parity: update_project sets agent_wip_limit the same as REST PATCH", async () => {
+		const mcpRes = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "update_project", arguments: { id: projectId, agentWipLimit: 1 } },
+			}),
+		});
+		expect(mcpRes.status).toBe(200);
+
+		const agent = await registerAgent("worker");
+		const [first, second] = await Promise.all([
+			seedIssue(workspaceId, projectId, userId, { title: "First" }),
+			seedIssue(workspaceId, projectId, userId, { title: "Second" }),
+		]);
+
+		expect((await claim(first.id, agent)).status).toBe(201);
+		const res = await claim(second.id, agent);
+		expect(res.status).toBe(409);
+	});
+
+	it("MCP parity: create_project sets agent_wip_limit the same as REST create", async () => {
+		const mcpRes = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: {
+					name: "create_project",
+					arguments: { name: "MCP WIP Project", key: "MCPWIP", agentWipLimit: 1 },
+				},
+			}),
+		});
+		expect(mcpRes.status).toBe(200);
+		const body = (await mcpRes.json()) as {
+			result: { content: Array<{ text: string }> };
+		};
+		const created = JSON.parse(body.result.content[0].text) as { id: string };
+
+		const agent = await registerAgent("worker2");
+		const [first, second] = await Promise.all([
+			seedIssue(workspaceId, created.id, userId, { title: "First" }),
+			seedIssue(workspaceId, created.id, userId, { title: "Second" }),
+		]);
+
+		expect((await claim(first.id, agent)).status).toBe(201);
+		const res = await claim(second.id, agent);
+		expect(res.status).toBe(409);
+	});
 });
