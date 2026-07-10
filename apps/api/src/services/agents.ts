@@ -155,8 +155,7 @@ export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 		sql`(SELECT i.project_id FROM issues i WHERE i.id = ${schema.agentSessions.issueId})`
 	);
 	if (vis) {
-		const visibleOrUnpinned = or(isNull(schema.agentSessions.issueId), vis);
-		if (visibleOrUnpinned) conditions.push(visibleOrUnpinned);
+		conditions.push(or(isNull(schema.agentSessions.issueId), vis) ?? vis);
 	}
 
 	const items = await orm
