@@ -73,10 +73,6 @@ function formatIssueCount(n: number): string {
 	return `${n} ${n === 1 ? "issue" : "issues"}`;
 }
 
-function formatConflictCount(n: number): string {
-	return `${n} ${n === 1 ? "conflict" : "conflicts"}`;
-}
-
 // PROJ-332: sequential heat — one hue (the app accent), lighter-to-darker by each
 // entry's distinct-issue count relative to the strongest sibling at this drill-down
 // level (not a global max), so the ramp stays legible whether you're looking at a
@@ -172,7 +168,7 @@ function HeatmapRow({
 }) {
 	const formattedCount =
 		mode === "contention"
-			? formatConflictCount(entry.distinctRejectedIssueCount ?? 0)
+			? formatIssueCount(entry.distinctRejectedIssueCount ?? 0)
 			: formatIssueCount(entry.distinctIssueCount ?? 0);
 	const content = (
 		<>
