@@ -422,7 +422,7 @@ export function BodySection({
 				</div>
 			) : issue.body ? (
 				<div
-					class="prose prose-sm max-w-none"
+					class="prose prose-sm max-w-none overflow-x-auto break-words"
 					dangerouslySetInnerHTML={{ __html: renderMd(issue.body) }}
 				/>
 			) : (
@@ -974,7 +974,7 @@ function CommentItem({
 				</div>
 			) : (
 				<div
-					class="prose prose-sm max-w-none"
+					class="prose prose-sm max-w-none overflow-x-auto break-words"
 					dangerouslySetInnerHTML={{ __html: renderMd(comment.body) }}
 				/>
 			)}
