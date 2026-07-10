@@ -17,6 +17,10 @@ const EMPTY_METRICS = {
 	autonomyRatio: { count: 0, avg: null, p50: null, p90: null },
 	cfdOverTime: [],
 	timeInProgress: { count: 0, avg: null, p50: null, p90: null },
+	arrivalVsCompletionOverTime: [],
+	flowEfficiency: { count: 0, avg: null, p50: null, p90: null },
+	flowEfficiencyOverTime: [],
+	agingWip: [],
 };
 
 // The real API always returns a fixed-size bucket window, even with zero completions —
@@ -44,6 +48,16 @@ const ZERO_BUCKET_METRICS = {
 		{ bucketStart: "2026-06-01", backlogTodo: 0, inProgress: 0, inReview: 0, done: 0 },
 	],
 	timeInProgress: { count: 0, avg: null, p50: null, p90: null },
+	arrivalVsCompletionOverTime: [
+		{ bucketStart: "2026-05-25", created: 0, completed: 0, net: 0 },
+		{ bucketStart: "2026-06-01", created: 0, completed: 0, net: 0 },
+	],
+	flowEfficiency: { count: 0, avg: null, p50: null, p90: null },
+	flowEfficiencyOverTime: [
+		{ bucketStart: "2026-05-25", p50: null },
+		{ bucketStart: "2026-06-01", p50: null },
+	],
+	agingWip: [],
 };
 
 const FULL_METRICS = {
@@ -69,6 +83,19 @@ const FULL_METRICS = {
 		{ bucketStart: "2026-06-01", backlogTodo: 1, inProgress: 1, inReview: 1, done: 2 },
 	],
 	timeInProgress: { count: 4, avg: 3600 * 4, p50: 3600 * 3, p90: 3600 * 8 },
+	arrivalVsCompletionOverTime: [
+		{ bucketStart: "2026-05-25", created: 2, completed: 1, net: 1 },
+		{ bucketStart: "2026-06-01", created: 1, completed: 3, net: -2 },
+	],
+	flowEfficiency: { count: 4, avg: 0.4, p50: 0.35, p90: 0.7 },
+	flowEfficiencyOverTime: [
+		{ bucketStart: "2026-05-25", p50: 0.3 },
+		{ bucketStart: "2026-06-01", p50: 0.45 },
+	],
+	agingWip: [
+		{ id: "issue-1", status: "in_progress", ageSeconds: 86400 * 12 },
+		{ id: "issue-2", status: "in_review", ageSeconds: 86400 * 3 },
+	],
 };
 
 function mockFetchMetrics(metrics: unknown) {
@@ -111,6 +138,10 @@ describe("MetricsDashboard", () => {
 		expect(screen.getByText("Lead time")).toBeTruthy();
 		expect(screen.getByText("Cycle time")).toBeTruthy();
 		expect(screen.getByText("WIP over time")).toBeTruthy();
+		expect(screen.getByText("Arrival vs completion")).toBeTruthy();
+		expect(screen.getByText("Flow efficiency")).toBeTruthy();
+		expect(screen.getByText("40%")).toBeTruthy();
+		expect(screen.getByText("Aging WIP")).toBeTruthy();
 	});
 
 	it("does not crash on an empty-metrics response", async () => {
@@ -121,6 +152,8 @@ describe("MetricsDashboard", () => {
 		expect(await screen.findByText("Throughput")).toBeTruthy();
 		expect(screen.getByText(/No completed issues yet/i)).toBeTruthy();
 		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
+		expect(screen.getByText(/No arrivals or completions yet/i)).toBeTruthy();
+		expect(screen.getByText(/No issues currently in progress or review/i)).toBeTruthy();
 	});
 
 	it("shows empty-chart states for a fixed-size all-zero bucket window (real API shape)", async () => {
@@ -131,6 +164,8 @@ describe("MetricsDashboard", () => {
 		expect(await screen.findByText("Throughput")).toBeTruthy();
 		expect(screen.getByText(/No completed issues yet/i)).toBeTruthy();
 		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
+		expect(screen.getByText(/No arrivals or completions yet/i)).toBeTruthy();
+		expect(screen.getByText(/No issues currently in progress or review/i)).toBeTruthy();
 	});
 
 	it("shows a message when no project is specified", async () => {

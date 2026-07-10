@@ -15,7 +15,16 @@ export const flowMetricsTools: MCPTool[] = [
 			"stage (backlogTodo, inProgress, inReview, done), derived from the same transition " +
 			"timestamps — done is cumulative (never decreases) and a widening band is a choke point. " +
 			"timeInProgress (claimed→next stage) pairs with reviewLatency as the time-in-state " +
-			"breakdown. Measure flow before tuning WIP limits. Throughput/review-latency/CFD bucketing " +
+			"breakdown. arrivalVsCompletionOverTime is created vs completed issues per bucket plus " +
+			"net (created - completed), answering whether the backlog is growing or burning. " +
+			"flowEfficiency is lease-held time / lead time (lead time = done - ready) for issues " +
+			"completed in the window, with a flowEfficiencyOverTime trend - distinct from " +
+			"autonomyRatio, which divides by cycle time (done - claimed) instead and so excludes " +
+			"queueing time between ready and claimed. agingWip lists every currently open " +
+			"(in_progress/in_review) issue with its age since claim, a present-state snapshot not " +
+			"scoped to since/until, meant to be read against this response's cycleTime p50/p90 as " +
+			"reference lines - makes stuck items visible before they finish and skew the percentiles. " +
+			"Measure flow before tuning WIP limits. Throughput/review-latency/CFD/arrival bucketing " +
 			"defaults to weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' " +
 			"for daily buckets.",
 		inputSchema: {

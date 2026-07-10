@@ -28,6 +28,15 @@ interface FlowMetrics {
 		done: number;
 	}>;
 	timeInProgress: Distribution;
+	arrivalVsCompletionOverTime: Array<{
+		bucketStart: string;
+		created: number;
+		completed: number;
+		net: number;
+	}>;
+	flowEfficiency: Distribution;
+	flowEfficiencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
+	agingWip: Array<{ id: string; status: "in_progress" | "in_review"; ageSeconds: number }>;
 }
 
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
@@ -554,5 +563,101 @@ describe("Flow metrics (PROJ-252)", () => {
 
 		expect(metrics.timeInProgress.count).toBe(1);
 		expect(metrics.timeInProgress.avg).toBeCloseTo(300, 0); // claimed -400 -> in_review -100
+	});
+
+	// PROJ-330: arrival vs completion, flow efficiency, aging-WIP scatter.
+	it("buckets arrival vs completion, reporting net = created - completed", async () => {
+		const WEEK = 7 * 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const since = now - 2 * WEEK;
+		const until = now;
+
+		// Created this window, not yet done: counts as an arrival, not a completion.
+		await seedIssue(workspaceId, projectId, userId, { title: "New arrival", createdAt: now - 100 });
+
+		// Created before the window, completed inside it: counts as a completion only.
+		const completedIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Completed",
+			createdAt: now - 10 * WEEK,
+		});
+		await stampFlowTimestamps(completedIssue.id, {
+			readyAt: now - 300,
+			claimedAt: now - 200,
+			doneAt: now - 50,
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		const totalCreated = metrics.arrivalVsCompletionOverTime.reduce((sum, b) => sum + b.created, 0);
+		const totalCompleted = metrics.arrivalVsCompletionOverTime.reduce(
+			(sum, b) => sum + b.completed,
+			0
+		);
+		expect(totalCreated).toBe(1);
+		expect(totalCompleted).toBe(1);
+		for (const bucket of metrics.arrivalVsCompletionOverTime) {
+			expect(bucket.net).toBe(bucket.created - bucket.completed);
+		}
+	});
+
+	it("computes flow efficiency as lease-held time over lead time, distinct from autonomy ratio", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Queued then leased" });
+		// ready -500, claimed -300 (200s queued before claim), done now: lead time 500, cycle time 300.
+		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 300, doneAt: now });
+		await stampLease(crypto.randomUUID(), issue.id, now - 300, now - 150); // 150s held
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.flowEfficiency.count).toBe(1);
+		expect(metrics.flowEfficiency.avg).toBeCloseTo(150 / 500, 1); // held / lead time
+		expect(metrics.autonomyRatio.avg).toBeCloseTo(150 / 300, 1); // held / cycle time
+		expect(metrics.flowEfficiency.avg).toBeLessThan(metrics.autonomyRatio.avg ?? 0);
+		expect(Array.isArray(metrics.flowEfficiencyOverTime)).toBe(true);
+	});
+
+	it("includes an old still-open issue in the aging-WIP scatter", async () => {
+		const DAY = 86400;
+		const now = Math.floor(Date.now() / 1000);
+
+		const oldInProgress = await seedIssue(workspaceId, projectId, userId, {
+			title: "Stuck in progress",
+			status: "in_progress",
+			createdAt: now - 30 * DAY,
+		});
+		await stampFlowTimestamps(oldInProgress.id, { claimedAt: now - 20 * DAY });
+
+		const inReview = await seedIssue(workspaceId, projectId, userId, {
+			title: "In review",
+			status: "in_review",
+			createdAt: now - 5 * DAY,
+		});
+		await stampFlowTimestamps(inReview.id, { claimedAt: now - 2 * DAY });
+
+		// Backlog issue must not appear in the scatter (not currently in progress/review).
+		await seedIssue(workspaceId, projectId, userId, { title: "Still backlog" });
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.agingWip.length).toBe(2);
+		const stuck = metrics.agingWip.find((a) => a.id === oldInProgress.id);
+		expect(stuck).toBeDefined();
+		expect(stuck?.status).toBe("in_progress");
+		expect(stuck?.ageSeconds).toBeCloseTo(20 * DAY, -2);
+		const reviewing = metrics.agingWip.find((a) => a.id === inReview.id);
+		expect(reviewing?.status).toBe("in_review");
 	});
 });

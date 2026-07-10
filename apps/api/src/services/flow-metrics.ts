@@ -44,6 +44,7 @@ type FlowIssueRow = {
 	doneAt: number | null;
 	inReviewAt: number | null;
 	reviewBounceCount: number;
+	status: string;
 };
 
 function buildWipOverTime(
@@ -124,6 +125,40 @@ function buildReviewLatencyOverTime(
 		buckets.push({
 			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
 			p50: summarize(latencies).p50,
+		});
+	}
+	return buckets;
+}
+
+// PROJ-330: arrival vs completion — issues created vs issues completed per bucket, plus
+// the net (created - completed), bucketed the same way as throughput. Answers "is the
+// backlog growing or burning?" at a glance.
+function buildArrivalVsCompletion(
+	issues: FlowIssueRow[],
+	since: number,
+	until: number,
+	granularity: "day" | "week"
+): Array<{ bucketStart: string; created: number; completed: number; net: number }> {
+	const DAY = 86400;
+	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
+	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
+	const buckets: Array<{ bucketStart: string; created: number; completed: number; net: number }> =
+		[];
+	for (let t = firstBucket; t <= until; t += bucketSize) {
+		const bucketEnd = t + bucketSize;
+		const clampedStart = Math.max(t, since);
+		const clampedEnd = Math.min(bucketEnd, until + 1);
+		const created = issues.filter(
+			(i) => i.createdAt >= clampedStart && i.createdAt < clampedEnd
+		).length;
+		const completed = issues.filter(
+			(i) => i.doneAt !== null && i.doneAt >= clampedStart && i.doneAt < clampedEnd
+		).length;
+		buckets.push({
+			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
+			created,
+			completed,
+			net: created - completed,
 		});
 	}
 	return buckets;
@@ -262,6 +297,80 @@ function computeAutonomyRatios(
 		});
 }
 
+// PROJ-330: flow efficiency per completed issue = lease-held time / lead time (lead time
+// = done - ready, i.e. time since the issue was ready to work, not since it was claimed).
+// This is deliberately distinct from PROJ-328's autonomyRatio (lease-held / cycle time =
+// done - claimed): flow efficiency also counts queueing time between ready and claimed as
+// "waste", so it's always <= autonomyRatio for the same issue. Clamped to [0, 1] for the
+// same reason as autonomyRatio (sequential re-leases can sum close to the full lead time).
+function computeFlowEfficiencies(
+	issues: FlowIssueRow[],
+	leaseHeldSeconds: Map<string, number>,
+	inWindow: (t: number) => boolean
+): number[] {
+	return issues
+		.filter((i) => i.readyAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		.map((i) => {
+			// biome-ignore lint/style/noNonNullAssertion: filtered above
+			const leadTime = i.doneAt! - i.readyAt!;
+			if (leadTime <= 0) return 0;
+			const held = leaseHeldSeconds.get(i.id) ?? 0;
+			return Math.min(1, held / leadTime);
+		});
+}
+
+// PROJ-330: flow efficiency bucketed the same way as reviewLatencyOverTime, reporting the
+// bucket's p50 as the "trend" the ticket asks for.
+function buildFlowEfficiencyOverTime(
+	issues: FlowIssueRow[],
+	leaseHeldSeconds: Map<string, number>,
+	since: number,
+	until: number,
+	granularity: "day" | "week"
+): Array<{ bucketStart: string; p50: number | null }> {
+	const DAY = 86400;
+	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
+	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
+	const buckets: Array<{ bucketStart: string; p50: number | null }> = [];
+	for (let t = firstBucket; t <= until; t += bucketSize) {
+		const bucketEnd = t + bucketSize;
+		const clampedStart = Math.max(t, since);
+		const clampedEnd = Math.min(bucketEnd, until + 1);
+		const ratios = computeFlowEfficiencies(
+			issues,
+			leaseHeldSeconds,
+			(t) => t >= clampedStart && t < clampedEnd
+		);
+		buckets.push({
+			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
+			p50: summarize(ratios).p50,
+		});
+	}
+	return buckets;
+}
+
+// PROJ-330: aging-WIP scatter — every currently open (in_progress/in_review) issue with
+// its age since claim. Not scoped to since/until (it's a present-state snapshot, not a
+// historical series); the p50/p90 reference lines the UI overlays come from the window-
+// scoped cycleTime distribution already returned alongside this, so the chart still
+// reflects the shared date-range controls. Surfaces items stuck long enough to be worth
+// investigating before they finish and pollute the cycle-time percentiles.
+function buildAgingWip(
+	issues: FlowIssueRow[],
+	now: number
+): Array<{ id: string; status: "in_progress" | "in_review"; ageSeconds: number }> {
+	return issues
+		.filter(
+			(i): i is FlowIssueRow & { claimedAt: number } =>
+				i.claimedAt !== null && (i.status === "in_progress" || i.status === "in_review")
+		)
+		.map((i) => ({
+			id: i.id,
+			status: i.status as "in_progress" | "in_review",
+			ageSeconds: now - i.claimedAt,
+		}));
+}
+
 export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const result = GetFlowMetricsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -283,6 +392,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 			doneAt: schema.issues.doneAt,
 			inReviewAt: schema.issues.inReviewAt,
 			reviewBounceCount: schema.issues.reviewBounceCount,
+			status: schema.issues.status,
 		})
 		.from(schema.issues)
 		.where(
@@ -338,6 +448,21 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		granularity
 	);
 	const cfdOverTime = buildCfdOverTime(issues, throughputSince, throughputUntil, granularity);
+	const arrivalVsCompletionOverTime = buildArrivalVsCompletion(
+		issues,
+		throughputSince,
+		throughputUntil,
+		granularity
+	);
+	const flowEfficiencies = computeFlowEfficiencies(issues, leaseHeldSeconds, inWindow);
+	const flowEfficiencyOverTime = buildFlowEfficiencyOverTime(
+		issues,
+		leaseHeldSeconds,
+		throughputSince,
+		throughputUntil,
+		granularity
+	);
+	const agingWip = buildAgingWip(issues, now);
 
 	return {
 		leadTime: summarize(leadTimes),
@@ -354,5 +479,10 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		// PROJ-329: cumulative flow diagram + time-in-state breakdown.
 		cfdOverTime,
 		timeInProgress: summarize(timeInProgress),
+		// PROJ-330: arrival vs completion, flow efficiency, aging-WIP scatter.
+		arrivalVsCompletionOverTime,
+		flowEfficiency: summarize(flowEfficiencies),
+		flowEfficiencyOverTime,
+		agingWip,
 	};
 }

@@ -30,6 +30,16 @@ interface FlowMetrics {
 		done: number;
 	}>;
 	timeInProgress: Distribution;
+	// PROJ-330: arrival vs completion, flow efficiency, aging-WIP scatter.
+	arrivalVsCompletionOverTime: Array<{
+		bucketStart: string;
+		created: number;
+		completed: number;
+		net: number;
+	}>;
+	flowEfficiency: Distribution;
+	flowEfficiencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
+	agingWip: Array<{ id: string; status: "in_progress" | "in_review"; ageSeconds: number }>;
 }
 
 interface Props {
@@ -558,6 +568,200 @@ function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 	return <UplotChart data={chartData} buildOptions={buildOptions} />;
 }
 
+// PROJ-330: arrival vs completion. Created and completed share one axis (both counts),
+// per the "never dual-axis" rule; net is derived from the other two so it gets a muted
+// dashed line rather than a third categorical hue. "Completed" reuses the accent color
+// ThroughputChart already uses for the same concept.
+const ARRIVAL_CREATED_COLOR = "#d97706";
+
+function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsCompletionOverTime"] }) {
+	const labels = useMemo(() => data.map((d) => d.bucketStart), [data]);
+	const chartData = useMemo<uPlot.AlignedData>(
+		() => [
+			data.map((_, i) => i),
+			data.map((d) => d.created),
+			data.map((d) => d.completed),
+			data.map((d) => d.net),
+		],
+		[data]
+	);
+
+	const buildOptions = useMemo(() => {
+		return (width: number, height: number): uPlot.Options => {
+			const accent = readThemeColor("--accent", "#4f46e5");
+			const border = readThemeColor("--border", "#e2e8f0");
+			const textMuted = readThemeColor("--text-muted", "#6b7280");
+
+			return {
+				width,
+				height,
+				scales: { x: { time: false } },
+				legend: { show: true },
+				series: [
+					{},
+					{ label: "Created", stroke: ARRIVAL_CREATED_COLOR, width: 2, points: { show: false } },
+					{ label: "Completed", stroke: accent, width: 2, points: { show: false } },
+					{
+						label: "Net (created − completed)",
+						stroke: textMuted,
+						width: 1,
+						dash: [4, 4],
+						points: { show: false },
+					},
+				],
+				axes: [
+					{
+						stroke: textMuted,
+						grid: { stroke: border },
+						splits: (u) => {
+							const n = labels.length;
+							const maxTicks = Math.max(2, Math.floor(u.width / 70));
+							const stride = Math.max(1, Math.ceil(n / maxTicks));
+							const idxs: number[] = [];
+							for (let i = 0; i < n; i += stride) idxs.push(i);
+							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
+							return idxs;
+						},
+						values: (_u, splits) => splits.map((s) => formatShortDate(labels[s] ?? "")),
+					},
+					{ stroke: textMuted, grid: { stroke: border } },
+				],
+			};
+		};
+	}, [labels]);
+
+	if (data.length === 0 || data.every((d) => d.created === 0 && d.completed === 0)) {
+		return <EmptyChartState message="No arrivals or completions yet" />;
+	}
+
+	return <UplotChart data={chartData} buildOptions={buildOptions} />;
+}
+
+// PROJ-330: flow-efficiency trend sparkline — a minimal, axis-less line for the "% tile
+// with trend" the ticket asks for, not a full standalone chart (the headline number is
+// the tile above it).
+function FlowEfficiencyTrendChart({ data }: { data: FlowMetrics["flowEfficiencyOverTime"] }) {
+	const chartData = useMemo<uPlot.AlignedData>(
+		() => [data.map((_, i) => i), data.map((d) => d.p50)],
+		[data]
+	);
+
+	const buildOptions = useMemo(() => {
+		return (width: number, height: number): uPlot.Options => {
+			const accent = readThemeColor("--accent", "#4f46e5");
+			return {
+				width,
+				height,
+				scales: { x: { time: false }, y: { range: [0, 1] } },
+				legend: { show: false },
+				cursor: { show: false },
+				series: [{}, { stroke: accent, width: 2, points: { show: false } }],
+				axes: [{ show: false }, { show: false }],
+			};
+		};
+	}, []);
+
+	if (data.length === 0 || data.every((d) => d.p50 === null)) return null;
+
+	return <UplotChart data={chartData} buildOptions={buildOptions} height={40} />;
+}
+
+// PROJ-330: aging-WIP scatter. x is the two open statuses (jittered slightly per-issue so
+// overlapping ages are visible, a beeswarm-lite); y is age since claim. p50/p90 reference
+// lines reuse this window's cycleTime distribution (already returned alongside agingWip)
+// rather than a separate all-time query, so the baseline moves with the shared date-range
+// controls same as every other chart on this page. Colors reuse CFD_COLORS so "in
+// progress" / "in review" read the same hue here as in the cumulative-flow chart above.
+const AGING_WIP_STATUS_X: Record<"in_progress" | "in_review", number> = {
+	in_progress: 0,
+	in_review: 1,
+};
+
+function hashJitter(id: string): number {
+	let h = 0;
+	for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+	return ((h >>> 0) % 1000) / 1000;
+}
+
+function AgingWipScatter({
+	data,
+	p50,
+	p90,
+}: {
+	data: FlowMetrics["agingWip"];
+	p50: number | null;
+	p90: number | null;
+}) {
+	const points = useMemo(
+		() =>
+			data
+				.map((d) => ({ ...d, x: AGING_WIP_STATUS_X[d.status] + (hashJitter(d.id) - 0.5) * 0.5 }))
+				.sort((a, b) => a.x - b.x),
+		[data]
+	);
+
+	const chartData = useMemo<uPlot.AlignedData>(() => {
+		const xs = points.map((p) => p.x);
+		return [xs, points.map((p) => p.ageSeconds), xs.map(() => p50), xs.map(() => p90)];
+	}, [points, p50, p90]);
+
+	const buildOptions = useMemo(() => {
+		return (width: number, height: number): uPlot.Options => {
+			const border = readThemeColor("--border", "#e2e8f0");
+			const textMuted = readThemeColor("--text-muted", "#6b7280");
+
+			return {
+				width,
+				height,
+				scales: { x: { time: false, range: [-0.5, 1.5] } },
+				legend: { show: true },
+				series: [
+					{},
+					{
+						label: "Age since claim",
+						stroke: CFD_COLORS.inProgress,
+						points: { show: true, size: 8 },
+						paths: () => null,
+					},
+					{
+						label: "p50 cycle time",
+						stroke: textMuted,
+						width: 1,
+						dash: [4, 4],
+						points: { show: false },
+					},
+					{
+						label: "p90 cycle time",
+						stroke: textMuted,
+						width: 1,
+						dash: [2, 2],
+						points: { show: false },
+					},
+				],
+				axes: [
+					{
+						stroke: textMuted,
+						grid: { stroke: border },
+						splits: () => [0, 1],
+						values: (_u, splits) => splits.map((s) => (s === 0 ? "In progress" : "In review")),
+					},
+					{
+						stroke: textMuted,
+						grid: { stroke: border },
+						values: (_u, ticks) => ticks.map((v) => formatDuration(v)),
+					},
+				],
+			};
+		};
+	}, []);
+
+	if (data.length === 0) {
+		return <EmptyChartState message="No issues currently in progress or review" />;
+	}
+
+	return <UplotChart data={chartData} buildOptions={buildOptions} />;
+}
+
 export default function MetricsDashboard({ workspaceSlug }: Props) {
 	const [range, setRange] = useRangeUrlSync();
 	const { projectId, metrics, loading, error } = useFlowMetrics(workspaceSlug, range);
@@ -584,6 +788,22 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">Throughput</h2>
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 							<ThroughputChart data={metrics.throughputOverTime} />
+						</div>
+					</div>
+
+					<div class="mb-8">
+						<h2
+							class="m-0 mb-1 text-base font-semibold text-text-base"
+							title="Issues created vs completed per bucket, with the net — is the backlog growing or burning?"
+						>
+							Arrival vs completion
+						</h2>
+						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+							Issues created vs completed per bucket, with the net — is the backlog growing or
+							burning?
+						</p>
+						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+							<ArrivalVsCompletionChart data={metrics.arrivalVsCompletionOverTime} />
 						</div>
 					</div>
 
@@ -654,9 +874,52 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 					/>
 
 					<div class="mb-8">
+						<h2
+							class="m-0 mb-1 text-base font-semibold text-text-base"
+							title="Lease-held time ÷ lead time (ready→done), for issues completed in the window — unlike autonomy ratio, this also counts queue time before claim as non-agent time"
+						>
+							Flow efficiency
+						</h2>
+						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+							Lease-held time ÷ lead time — how much of the wait, not just the work, was
+							agent-driven
+						</p>
+						<div class="p-4 bg-surface border border-border rounded-lg">
+							<div class="flex items-end gap-4">
+								<p class="m-0 text-3xl font-semibold text-text-base">
+									{formatPercent(metrics.flowEfficiency.avg)}
+								</p>
+								<div class="flex-1 min-w-0">
+									<FlowEfficiencyTrendChart data={metrics.flowEfficiencyOverTime} />
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div class="mb-8">
 						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">WIP over time</h2>
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 							<WipChart data={metrics.wipOverTime} />
+						</div>
+					</div>
+
+					<div class="mb-8">
+						<h2
+							class="m-0 mb-1 text-base font-semibold text-text-base"
+							title="Age since claim for every currently open in_progress/in_review issue, against this window's cycle-time p50/p90 — stuck items show up before they finish and skew the percentiles"
+						>
+							Aging WIP
+						</h2>
+						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+							Age since claim for every currently open issue, against this window's cycle-time
+							p50/p90 — stuck items show up before they finish and skew the percentiles
+						</p>
+						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+							<AgingWipScatter
+								data={metrics.agingWip}
+								p50={metrics.cycleTime.p50}
+								p90={metrics.cycleTime.p90}
+							/>
 						</div>
 					</div>
 				</>
