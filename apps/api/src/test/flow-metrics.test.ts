@@ -20,6 +20,14 @@ interface FlowMetrics {
 	reviewLatencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
 	humanInterventions: Distribution;
 	autonomyRatio: Distribution;
+	cfdOverTime: Array<{
+		bucketStart: string;
+		backlogTodo: number;
+		inProgress: number;
+		inReview: number;
+		done: number;
+	}>;
+	timeInProgress: Distribution;
 }
 
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
@@ -461,5 +469,90 @@ describe("Flow metrics (PROJ-252)", () => {
 
 		expect(metrics.autonomyRatio.avg).toBeLessThanOrEqual(1);
 		expect(metrics.autonomyRatio.avg).toBeCloseTo(1, 1);
+	});
+
+	// PROJ-329: cumulative flow diagram + time-in-state breakdown.
+	it("buckets CFD bands correctly for seeded transitions, never negative, done monotonic", async () => {
+		const DAY = 86400;
+		const WEEK = 7 * DAY;
+		const now = Math.floor(Date.now() / 1000);
+		// Day-align since/until so the bucket loop (which starts at a day boundary and
+		// steps by exactly one day) lands its first/last samples exactly on since/until,
+		// regardless of what time of day the suite runs.
+		const todayStart = now - (now % DAY);
+		const since = todayStart - 2 * WEEK;
+		const until = todayStart;
+
+		// Sits in backlog/todo for the whole window.
+		await seedIssue(workspaceId, projectId, userId, {
+			title: "Backlog",
+			createdAt: since - DAY - 100,
+		});
+
+		// Claimed mid-window, never reaches review or done — in_progress by the end.
+		const inProgressIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "In progress",
+			createdAt: since - DAY - 100,
+		});
+		await stampFlowTimestamps(inProgressIssue.id, { claimedAt: since + WEEK });
+
+		// Reaches review a week before `until` and finishes right at `until`.
+		const doneIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Done",
+			createdAt: since - DAY - 100,
+		});
+		await stampFlowTimestamps(doneIssue.id, {
+			claimedAt: since + 10,
+			doneAt: until,
+		});
+		await stampReviewFields(doneIssue.id, { inReviewAt: until - WEEK });
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}&granularity=day`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.cfdOverTime.length).toBeGreaterThan(0);
+
+		for (const bucket of metrics.cfdOverTime) {
+			expect(bucket.backlogTodo).toBeGreaterThanOrEqual(0);
+			expect(bucket.inProgress).toBeGreaterThanOrEqual(0);
+			expect(bucket.inReview).toBeGreaterThanOrEqual(0);
+			expect(bucket.done).toBeGreaterThanOrEqual(0);
+		}
+
+		// done is cumulative — never decreases bucket over bucket.
+		for (let i = 1; i < metrics.cfdOverTime.length; i++) {
+			expect(metrics.cfdOverTime[i].done).toBeGreaterThanOrEqual(metrics.cfdOverTime[i - 1].done);
+		}
+
+		const firstBucket = metrics.cfdOverTime[0];
+		expect(firstBucket.backlogTodo).toBe(3);
+		expect(firstBucket.inProgress).toBe(0);
+		expect(firstBucket.inReview).toBe(0);
+		expect(firstBucket.done).toBe(0);
+
+		const lastBucket = metrics.cfdOverTime[metrics.cfdOverTime.length - 1];
+		expect(lastBucket.backlogTodo).toBe(1);
+		expect(lastBucket.inProgress).toBe(1);
+		expect(lastBucket.done).toBe(1);
+	});
+
+	it("computes time in progress (claimed -> next stage) for issues completing in the window", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Progressed" });
+		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
+		await stampReviewFields(issue.id, { inReviewAt: now - 100 });
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.timeInProgress.count).toBe(1);
+		expect(metrics.timeInProgress.avg).toBeCloseTo(300, 0); // claimed -400 -> in_review -100
 	});
 });

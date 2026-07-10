@@ -21,6 +21,15 @@ interface FlowMetrics {
 	reviewLatencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
 	humanInterventions: Distribution;
 	autonomyRatio: Distribution;
+	// PROJ-329: cumulative flow diagram + time-in-state breakdown.
+	cfdOverTime: Array<{
+		bucketStart: string;
+		backlogTodo: number;
+		inProgress: number;
+		inReview: number;
+		done: number;
+	}>;
+	timeInProgress: Distribution;
 }
 
 interface Props {
@@ -403,6 +412,78 @@ function ReviewLatencyChart({ data }: { data: FlowMetrics["reviewLatencyOverTime
 	return <UplotChart data={chartData} buildOptions={buildOptions} />;
 }
 
+// PROJ-329: cumulative flow diagram. Bands are stacked bottom-up (done at the base,
+// backlog/todo on top) by plotting cumulative sums and drawing widest-first so each
+// later, narrower fill paints over the tail of the one before it — the classic uPlot
+// stacked-area trick, since uPlot has no native "stacked" series mode. Colors are a
+// single-hue ordinal ramp (lightest = earliest stage, darkest = done) rather than
+// unrelated categorical hues, since the bands read as an ordered progression, not
+// independent categories.
+const CFD_COLORS = {
+	backlogTodo: "#86b6ef",
+	inProgress: "#5598e7",
+	inReview: "#2a78d6",
+	done: "#1c5cab",
+} as const;
+
+function CfdChart({ data }: { data: FlowMetrics["cfdOverTime"] }) {
+	const labels = useMemo(() => data.map((d) => d.bucketStart), [data]);
+	const chartData = useMemo<uPlot.AlignedData>(() => {
+		const total = data.map((d) => d.backlogTodo + d.inProgress + d.inReview + d.done);
+		const upToInProgress = data.map((d) => d.inProgress + d.inReview + d.done);
+		const upToInReview = data.map((d) => d.inReview + d.done);
+		const done = data.map((d) => d.done);
+		return [data.map((_, i) => i), total, upToInProgress, upToInReview, done];
+	}, [data]);
+
+	const buildOptions = useMemo(() => {
+		return (width: number, height: number): uPlot.Options => {
+			const border = readThemeColor("--border", "#e2e8f0");
+			const textMuted = readThemeColor("--text-muted", "#6b7280");
+
+			return {
+				width,
+				height,
+				scales: { x: { time: false } },
+				legend: { show: true },
+				series: [
+					{},
+					{ label: "Backlog/todo", stroke: CFD_COLORS.backlogTodo, fill: CFD_COLORS.backlogTodo },
+					{ label: "In progress", stroke: CFD_COLORS.inProgress, fill: CFD_COLORS.inProgress },
+					{ label: "In review", stroke: CFD_COLORS.inReview, fill: CFD_COLORS.inReview },
+					{ label: "Done", stroke: CFD_COLORS.done, fill: CFD_COLORS.done },
+				],
+				axes: [
+					{
+						stroke: textMuted,
+						grid: { stroke: border },
+						splits: (u) => {
+							const n = labels.length;
+							const maxTicks = Math.max(2, Math.floor(u.width / 70));
+							const stride = Math.max(1, Math.ceil(n / maxTicks));
+							const idxs: number[] = [];
+							for (let i = 0; i < n; i += stride) idxs.push(i);
+							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
+							return idxs;
+						},
+						values: (_u, splits) => splits.map((s) => formatShortDate(labels[s] ?? "")),
+					},
+					{ stroke: textMuted, grid: { stroke: border } },
+				],
+			};
+		};
+	}, [labels]);
+
+	if (
+		data.length === 0 ||
+		data.every((d) => d.backlogTodo + d.inProgress + d.inReview + d.done === 0)
+	) {
+		return <EmptyChartState message="No issues in this window yet" />;
+	}
+
+	return <UplotChart data={chartData} buildOptions={buildOptions} />;
+}
+
 function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 	const chartData = useMemo<uPlot.AlignedData>(
 		() => [
@@ -482,6 +563,34 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 
 					<DistributionTiles title="Lead time" dist={metrics.leadTime} />
 					<DistributionTiles title="Cycle time" dist={metrics.cycleTime} />
+
+					<div class="mb-8">
+						<h2
+							class="m-0 mb-1 text-base font-semibold text-text-base"
+							title="Issue counts per status category over time — a widening band is where the factory is choking"
+						>
+							Cumulative flow
+						</h2>
+						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+							Issue counts per status category over time — a widening band is where the factory is
+							choking
+						</p>
+						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
+							<CfdChart data={metrics.cfdOverTime} />
+						</div>
+						<div class="grid grid-cols-2 gap-3">
+							<DistributionTiles
+								title="Time in progress"
+								dist={metrics.timeInProgress}
+								help="Claimed to entering review (or done, if review was skipped), for issues completing in the window"
+							/>
+							<DistributionTiles
+								title="Time in review"
+								dist={metrics.reviewLatency}
+								help="Entering review to done, for issues completing in the window"
+							/>
+						</div>
+					</div>
 
 					<div class="mb-8">
 						<h2

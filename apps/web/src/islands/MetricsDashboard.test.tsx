@@ -15,6 +15,8 @@ const EMPTY_METRICS = {
 	reviewLatencyOverTime: [],
 	humanInterventions: { count: 0, avg: null, p50: null, p90: null },
 	autonomyRatio: { count: 0, avg: null, p50: null, p90: null },
+	cfdOverTime: [],
+	timeInProgress: { count: 0, avg: null, p50: null, p90: null },
 };
 
 // The real API always returns a fixed-size bucket window, even with zero completions —
@@ -37,6 +39,11 @@ const ZERO_BUCKET_METRICS = {
 	],
 	humanInterventions: { count: 0, avg: null, p50: null, p90: null },
 	autonomyRatio: { count: 0, avg: null, p50: null, p90: null },
+	cfdOverTime: [
+		{ bucketStart: "2026-05-25", backlogTodo: 0, inProgress: 0, inReview: 0, done: 0 },
+		{ bucketStart: "2026-06-01", backlogTodo: 0, inProgress: 0, inReview: 0, done: 0 },
+	],
+	timeInProgress: { count: 0, avg: null, p50: null, p90: null },
 };
 
 const FULL_METRICS = {
@@ -57,6 +64,11 @@ const FULL_METRICS = {
 	],
 	humanInterventions: { count: 4, avg: 1.5, p50: 1, p90: 3 },
 	autonomyRatio: { count: 4, avg: 0.6, p50: 0.65, p90: 0.9 },
+	cfdOverTime: [
+		{ bucketStart: "2026-05-25", backlogTodo: 2, inProgress: 1, inReview: 0, done: 1 },
+		{ bucketStart: "2026-06-01", backlogTodo: 1, inProgress: 1, inReview: 1, done: 2 },
+	],
+	timeInProgress: { count: 4, avg: 3600 * 4, p50: 3600 * 3, p90: 3600 * 8 },
 };
 
 function mockFetchMetrics(metrics: unknown) {

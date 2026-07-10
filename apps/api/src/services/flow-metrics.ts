@@ -38,6 +38,7 @@ async function assertProjectExists(ctx: ServiceCtx, projectId: string): Promise<
 
 type FlowIssueRow = {
 	id: string;
+	createdAt: number;
 	readyAt: number | null;
 	claimedAt: number | null;
 	doneAt: number | null;
@@ -123,6 +124,56 @@ function buildReviewLatencyOverTime(
 		buckets.push({
 			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
 			p50: summarize(latencies).p50,
+		});
+	}
+	return buckets;
+}
+
+// PROJ-329: cumulative flow diagram bands, sampled at each bucket start from the
+// write-once transition timestamps. An issue's band at time t is the furthest stage
+// it has reached by t (done > in_review > in_progress > backlog/todo); the done band
+// is therefore monotonic non-decreasing (an issue never leaves it), which is what
+// makes CFD bands readable as a choke-point signal.
+function buildCfdOverTime(
+	issues: FlowIssueRow[],
+	since: number,
+	until: number,
+	granularity: "day" | "week"
+): Array<{
+	bucketStart: string;
+	backlogTodo: number;
+	inProgress: number;
+	inReview: number;
+	done: number;
+}> {
+	const DAY = 86400;
+	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
+	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
+	const buckets: Array<{
+		bucketStart: string;
+		backlogTodo: number;
+		inProgress: number;
+		inReview: number;
+		done: number;
+	}> = [];
+	for (let t = firstBucket; t <= until; t += bucketSize) {
+		let backlogTodo = 0;
+		let inProgress = 0;
+		let inReview = 0;
+		let done = 0;
+		for (const i of issues) {
+			if (i.createdAt > t) continue;
+			if (i.doneAt !== null && i.doneAt <= t) done++;
+			else if (i.inReviewAt !== null && i.inReviewAt <= t) inReview++;
+			else if (i.claimedAt !== null && i.claimedAt <= t) inProgress++;
+			else backlogTodo++;
+		}
+		buckets.push({
+			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
+			backlogTodo,
+			inProgress,
+			inReview,
+			done,
 		});
 	}
 	return buckets;
@@ -226,6 +277,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const issues = await orm
 		.select({
 			id: schema.issues.id,
+			createdAt: schema.issues.createdAt,
 			readyAt: schema.issues.readyAt,
 			claimedAt: schema.issues.claimedAt,
 			doneAt: schema.issues.doneAt,
@@ -252,6 +304,12 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		.filter((i) => i.inReviewAt !== null && i.doneAt !== null && inWindow(i.doneAt))
 		// biome-ignore lint/style/noNonNullAssertion: filtered above
 		.map((i) => i.doneAt! - i.inReviewAt!);
+	// PROJ-329: time in in_progress = claimed -> the issue's next recorded stage
+	// (entering review, or done directly for issues that skipped review).
+	const timeInProgress = issues
+		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		// biome-ignore lint/style/noNonNullAssertion: filtered above
+		.map((i) => (i.inReviewAt ?? i.doneAt!) - i.claimedAt!);
 
 	const issueIds = issues.map((i) => i.id);
 	const humanCommentCounts = await fetchHumanCommentCounts(orm, issueIds);
@@ -279,6 +337,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		throughputUntil,
 		granularity
 	);
+	const cfdOverTime = buildCfdOverTime(issues, throughputSince, throughputUntil, granularity);
 
 	return {
 		leadTime: summarize(leadTimes),
@@ -292,5 +351,8 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		reviewLatencyOverTime,
 		humanInterventions: summarize(humanInterventions),
 		autonomyRatio: summarize(autonomyRatios),
+		// PROJ-329: cumulative flow diagram + time-in-state breakdown.
+		cfdOverTime,
+		timeInProgress: summarize(timeInProgress),
 	};
 }

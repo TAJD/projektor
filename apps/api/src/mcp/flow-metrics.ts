@@ -11,8 +11,13 @@ export const flowMetricsTools: MCPTool[] = [
 			"reviewLatency (in_review→done, the primary human choke point) with a reviewLatencyOverTime " +
 			"trend; humanInterventions (human-authored comments + status bounces out of review, per " +
 			"completed issue); and autonomyRatio (lease-held time ÷ cycle time, per completed issue). " +
-			"Measure flow before tuning WIP limits. Throughput/review-latency bucketing defaults to " +
-			"weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' for daily buckets.",
+			"cfdOverTime is a cumulative flow diagram: per-bucket counts of issues currently in each " +
+			"stage (backlogTodo, inProgress, inReview, done), derived from the same transition " +
+			"timestamps — done is cumulative (never decreases) and a widening band is a choke point. " +
+			"timeInProgress (claimed→next stage) pairs with reviewLatency as the time-in-state " +
+			"breakdown. Measure flow before tuning WIP limits. Throughput/review-latency/CFD bucketing " +
+			"defaults to weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' " +
+			"for daily buckets.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],
