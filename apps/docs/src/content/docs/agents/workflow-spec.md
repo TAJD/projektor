@@ -43,7 +43,8 @@ picking up autonomous work.
 - **In Review → Done**: **always requires a human.** An agent session can never move
   its own (or any) issue to `done` — attempting it is rejected outright, regardless of
   whether a completion report is attached. A human reviews the report and the diff,
-  then makes the transition themselves (browser, or a human-kind session).
+  then makes the transition themselves (browser, or any session not holding a live
+  lease on the issue).
 
 ## Completion reports
 
