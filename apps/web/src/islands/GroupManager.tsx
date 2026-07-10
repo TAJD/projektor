@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import type { JSX } from "preact";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { resolveWorkspaceSlug } from "../utils/workspace";
 
@@ -83,6 +84,14 @@ const TH =
 const TD =
 	"px-3 py-2 border-b border-border align-middle text-[0.85rem] [tr:last-child_&]:border-b-0";
 const H2 = "text-[1.05rem] font-bold text-text-base m-0 mb-3";
+const TAB_LIST = "flex gap-1 border-b border-border mb-4";
+const tabBtnClass = (active: boolean) =>
+	"px-4 py-2 text-[0.85rem] font-semibold border-b-2 -mb-px bg-transparent cursor-pointer " +
+	(active
+		? "border-accent text-text-base"
+		: "border-transparent text-text-muted hover:text-text-base");
+
+type TabId = "members" | "groups";
 
 function isForbidden(e: unknown): boolean {
 	return String(e).includes(": 403");
@@ -468,6 +477,11 @@ export default function GroupManager({ workspaceSlug }: Props) {
 	const [newName, setNewName] = useState("");
 	const [createErr, setCreateErr] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	// Default admins to the Groups tab so the existing create/rename/grant flows
+	// (and their tests) stay reachable without an extra click; non-admins always
+	// land on Groups anyway since they have no Members tab.
+	const [tab, setTab] = useState<TabId>("groups");
+	const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({});
 
 	const refetch = useCallback(async () => {
 		if (!slug) return;
@@ -531,13 +545,32 @@ export default function GroupManager({ workspaceSlug }: Props) {
 	}
 
 	const { isAdmin } = data;
+	const tabs: TabId[] = isAdmin ? ["members", "groups"] : ["groups"];
+	const activeTab: TabId = isAdmin ? tab : "groups";
 
-	return (
-		<div>
-			<RoleBanner role={data.role} isAdmin={isAdmin} />
+	function focusTab(id: TabId) {
+		tabRefs.current[id]?.focus();
+	}
 
-			{isAdmin && <MembersOverview members={data.members} memberGroups={data.memberGroups} />}
+	// WAI-ARIA tabs pattern: arrow keys move focus AND activate (automatic
+	// activation), Home/End jump to the first/last tab.
+	function onTabKeyDown(e: JSX.TargetedKeyboardEvent<HTMLDivElement>) {
+		const idx = tabs.indexOf(activeTab);
+		let nextId: TabId | null = null;
+		if (e.key === "ArrowRight") nextId = tabs[(idx + 1) % tabs.length];
+		else if (e.key === "ArrowLeft") nextId = tabs[(idx - 1 + tabs.length) % tabs.length];
+		else if (e.key === "Home") nextId = tabs[0];
+		else if (e.key === "End") nextId = tabs[tabs.length - 1];
+		if (!nextId) return;
+		e.preventDefault();
+		setTab(nextId);
+		focusTab(nextId);
+	}
 
+	const TAB_LABELS: Record<TabId, string> = { members: "Members", groups: "Groups" };
+
+	const groupsSection = (
+		<>
 			<section class={CARD}>
 				<h2 class={H2}>{isAdmin ? "Groups" : "Your groups"}</h2>
 				{isAdmin && (
@@ -628,6 +661,50 @@ export default function GroupManager({ workspaceSlug }: Props) {
 					onClose={() => setSelected(null)}
 				/>
 			)}
+		</>
+	);
+
+	return (
+		<div>
+			<RoleBanner role={data.role} isAdmin={isAdmin} />
+
+			{tabs.length > 1 && (
+				<div role="tablist" aria-label="Groups" class={TAB_LIST} onKeyDown={onTabKeyDown}>
+					{tabs.map((id) => (
+						<button
+							key={id}
+							ref={(el) => {
+								tabRefs.current[id] = el;
+							}}
+							type="button"
+							role="tab"
+							id={`group-tab-${id}`}
+							aria-selected={activeTab === id}
+							aria-controls={`group-tabpanel-${id}`}
+							tabIndex={activeTab === id ? 0 : -1}
+							class={tabBtnClass(activeTab === id)}
+							onClick={() => setTab(id)}
+						>
+							{TAB_LABELS[id]}
+						</button>
+					))}
+				</div>
+			)}
+
+			{isAdmin && activeTab === "members" && (
+				<div role="tabpanel" id="group-tabpanel-members" aria-labelledby="group-tab-members">
+					<MembersOverview members={data.members} memberGroups={data.memberGroups} />
+				</div>
+			)}
+
+			{activeTab === "groups" &&
+				(isAdmin ? (
+					<div role="tabpanel" id="group-tabpanel-groups" aria-labelledby="group-tab-groups">
+						{groupsSection}
+					</div>
+				) : (
+					groupsSection
+				))}
 		</div>
 	);
 }

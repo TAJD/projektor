@@ -91,3 +91,60 @@ describe("GroupManager rename", () => {
 		});
 	});
 });
+
+// PROJ-343: Members and Groups now render as separate tabs, defaulting to
+// Groups so the flows above stay reachable without switching tabs first.
+const REGULAR_MEMBER = { id: "u2", email: "mo@example.com", name: "Mo Member", role: "member" };
+
+function mockFetchForTabs(opts: { role: string }) {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn().mockImplementation((url: string) => {
+			const u = String(url);
+			const json = (body: unknown) =>
+				Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+			if (u.includes("/member-groups")) {
+				return json([{ userId: "u2", groups: [{ id: "g1", name: "Engineering" }] }]);
+			}
+			if (u.includes("/groups")) return json([GROUP]);
+			if (u.includes("/api/projects")) return json([]);
+			return json({ members: [REGULAR_MEMBER], currentUserRole: opts.role });
+		})
+	);
+}
+
+describe("GroupManager tabs", () => {
+	it("renders both Members and Groups tabs for an admin, defaulting to Groups", async () => {
+		mockFetchForTabs({ role: "admin" });
+		render(<GroupManager workspaceSlug="my-ws" />);
+
+		const groupsTab = await screen.findByRole("tab", { name: "Groups" });
+		const membersTab = screen.getByRole("tab", { name: "Members" });
+		expect(groupsTab.getAttribute("aria-selected")).toBe("true");
+		expect(membersTab.getAttribute("aria-selected")).toBe("false");
+
+		expect(screen.getByText("Engineering")).toBeTruthy();
+		expect(screen.queryByText("Mo Member")).toBeNull();
+	});
+
+	it("shows the Members panel and hides Groups when the Members tab is clicked", async () => {
+		mockFetchForTabs({ role: "admin" });
+		render(<GroupManager workspaceSlug="my-ws" />);
+
+		await screen.findByText("Engineering");
+		fireEvent.click(screen.getByRole("tab", { name: "Members" }));
+
+		expect(await screen.findByText("Mo Member")).toBeTruthy();
+		expect(screen.queryByPlaceholderText("New group name")).toBeNull();
+		expect(screen.getByRole("tab", { name: "Members" }).getAttribute("aria-selected")).toBe("true");
+	});
+
+	it("shows no Members tab (or tablist) for a non-admin caller", async () => {
+		mockFetchForTabs({ role: "member" });
+		render(<GroupManager workspaceSlug="my-ws" />);
+
+		await screen.findByText("Your groups");
+		expect(screen.queryByRole("tab", { name: "Members" })).toBeNull();
+		expect(screen.queryByRole("tablist")).toBeNull();
+	});
+});
