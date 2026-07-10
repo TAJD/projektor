@@ -88,41 +88,6 @@ function buildThroughputOverTime(
 	return buckets;
 }
 
-async function computeAgentVsHuman(
-	ctx: ServiceCtx,
-	orm: ReturnType<typeof drizzle>,
-	issues: FlowIssueRow[]
-): Promise<{ agent: Distribution; human: Distribution }> {
-	const doneIssues = issues.filter((i) => i.claimedAt !== null && i.doneAt !== null);
-	if (doneIssues.length === 0) return { agent: summarize([]), human: summarize([]) };
-
-	const issueIds = doneIssues.map((i) => i.id);
-	const leaseRows = await orm
-		.select({
-			issueId: schema.issueLeases.issueId,
-			kind: schema.agentSessions.kind,
-		})
-		.from(schema.issueLeases)
-		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
-		.where(eq(schema.issueLeases.workspaceId, ctx.workspaceId));
-
-	const agentIssueIds = new Set(
-		leaseRows
-			.filter((r) => r.kind === "agent" && issueIds.includes(r.issueId))
-			.map((r) => r.issueId)
-	);
-
-	const agentDurations: number[] = [];
-	const humanDurations: number[] = [];
-	for (const i of doneIssues) {
-		// biome-ignore lint/style/noNonNullAssertion: filtered to claimedAt/doneAt !== null above
-		const cycleTime = i.doneAt! - i.claimedAt!;
-		(agentIssueIds.has(i.id) ? agentDurations : humanDurations).push(cycleTime);
-	}
-
-	return { agent: summarize(agentDurations), human: summarize(humanDurations) };
-}
-
 export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const result = GetFlowMetricsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -168,14 +133,10 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const throughputUntil = until ?? now;
 	const throughputOverTime = buildThroughputOverTime(issues, throughputSince, throughputUntil);
 
-	const cycleWindowIssues = issues.filter((i) => i.doneAt === null || inWindow(i.doneAt));
-	const agentVsHuman = await computeAgentVsHuman(ctx, orm, cycleWindowIssues);
-
 	return {
 		leadTime: summarize(leadTimes),
 		cycleTime: summarize(cycleTimes),
 		wipOverTime,
 		throughputOverTime,
-		agentVsHuman,
 	};
 }

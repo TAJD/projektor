@@ -11,10 +11,6 @@ const EMPTY_METRICS = {
 	cycleTime: { count: 0, avg: null, p50: null, p90: null },
 	wipOverTime: [],
 	throughputOverTime: [],
-	agentVsHuman: {
-		agent: { count: 0, avg: null, p50: null, p90: null },
-		human: { count: 0, avg: null, p50: null, p90: null },
-	},
 };
 
 // The real API always returns a fixed-size bucket window, even with zero completions —
@@ -30,10 +26,6 @@ const ZERO_BUCKET_METRICS = {
 		{ weekStart: "2026-05-25", count: 0 },
 		{ weekStart: "2026-06-01", count: 0 },
 	],
-	agentVsHuman: {
-		agent: { count: 0, avg: null, p50: null, p90: null },
-		human: { count: 0, avg: null, p50: null, p90: null },
-	},
 };
 
 const FULL_METRICS = {
@@ -47,10 +39,6 @@ const FULL_METRICS = {
 		{ weekStart: "2026-05-25", count: 1 },
 		{ weekStart: "2026-06-01", count: 3 },
 	],
-	agentVsHuman: {
-		agent: { count: 2, avg: 3600 * 3, p50: 3600 * 2, p90: 3600 * 6 },
-		human: { count: 2, avg: 3600 * 7, p50: 3600 * 6, p90: 3600 * 12 },
-	},
 };
 
 function mockFetchMetrics(metrics: unknown) {
@@ -85,7 +73,7 @@ describe("MetricsDashboard", () => {
 		expect(screen.getByText(/Loading metrics/i)).toBeTruthy();
 	});
 
-	it("renders throughput, lead/cycle tiles, and agent-vs-human after fetch resolves", async () => {
+	it("renders throughput, lead/cycle tiles after fetch resolves", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		mockFetchMetrics(FULL_METRICS);
 		render(<MetricsDashboard />);
@@ -94,7 +82,6 @@ describe("MetricsDashboard", () => {
 		expect(screen.getByText("Lead time")).toBeTruthy();
 		expect(screen.getByText("Cycle time")).toBeTruthy();
 		expect(screen.getByText("WIP over time")).toBeTruthy();
-		expect(screen.getByText("Agent vs human")).toBeTruthy();
 	});
 
 	it("does not crash on an empty-metrics response", async () => {

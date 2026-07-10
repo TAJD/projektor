@@ -71,6 +71,6 @@ has a few weeks of real data, not a fixed rule.
 ## Flow metrics
 
 `get_flow_metrics` reports lead time (ready → done), cycle time (claimed → done),
-WIP-over-time, and agent-vs-human cycle time for a project, computed from indexed
-timestamps stamped the first time an issue enters each state. Use it to decide whether
-the WIP limit above is too tight, too loose, or about right — measure before you tune.
+and WIP-over-time for a project, computed from indexed timestamps stamped the first
+time an issue enters each state. Use it to decide whether the WIP limit above is too
+tight, too loose, or about right — measure before you tune.

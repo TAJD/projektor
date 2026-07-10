@@ -184,6 +184,6 @@ running server.
 
 | Tool | Description |
 |------|-------------|
-| `get_flow_metrics` | Lead time (ready→done), cycle time (claimed→done), WIP over time, throughput over time, and agent-vs-human cycle time for a project, computed from indexed transition timestamps. Measure flow before tuning WIP limits. |
+| `get_flow_metrics` | Lead time (ready→done), cycle time (claimed→done), WIP over time, and throughput over time for a project, computed from indexed transition timestamps. Measure flow before tuning WIP limits. |
 
 <!-- gen-mcp-catalog:end -->

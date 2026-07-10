@@ -5,9 +5,9 @@ export const flowMetricsTools: MCPTool[] = [
 	{
 		name: "get_flow_metrics",
 		description:
-			"Lead time (ready→done), cycle time (claimed→done), WIP over time, throughput over time, and " +
-			"agent-vs-human cycle time for a project, computed from indexed transition timestamps. Measure " +
-			"flow before tuning WIP limits.",
+			"Lead time (ready→done), cycle time (claimed→done), WIP over time, and throughput over time " +
+			"for a project, computed from indexed transition timestamps. Measure flow before tuning WIP " +
+			"limits.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],

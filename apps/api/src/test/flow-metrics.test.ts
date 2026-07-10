@@ -16,7 +16,6 @@ interface FlowMetrics {
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
 	throughputOverTime: Array<{ weekStart: string; count: number }>;
-	agentVsHuman: { agent: Distribution; human: Distribution };
 }
 
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
@@ -58,7 +57,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		});
 	}
 
-	it("computes lead/cycle time and agent-vs-human split", async () => {
+	it("computes lead/cycle time", async () => {
 		const now = Math.floor(Date.now() / 1000);
 
 		const agentIssue = await seedIssue(workspaceId, projectId, userId, { title: "Agent-worked" });
@@ -87,11 +86,6 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(metrics.leadTime.avg).toBeCloseTo((500 + 250) / 2, 0);
 		expect(metrics.cycleTime.count).toBe(2);
 		expect(metrics.cycleTime.avg).toBeCloseTo((400 + 200) / 2, 0);
-
-		expect(metrics.agentVsHuman.agent.count).toBe(1);
-		expect(metrics.agentVsHuman.agent.avg).toBeCloseTo(400, 0);
-		expect(metrics.agentVsHuman.human.count).toBe(1);
-		expect(metrics.agentVsHuman.human.avg).toBeCloseTo(200, 0);
 
 		expect(Array.isArray(metrics.wipOverTime)).toBe(true);
 	});

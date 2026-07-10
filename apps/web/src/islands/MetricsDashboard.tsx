@@ -15,7 +15,6 @@ interface FlowMetrics {
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
 	throughputOverTime: Array<{ weekStart: string; count: number }>;
-	agentVsHuman: { agent: Distribution; human: Distribution };
 }
 
 interface Props {
@@ -231,36 +230,6 @@ function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 	return <UplotChart data={chartData} buildOptions={buildOptions} />;
 }
 
-function AgentVsHumanTiles({ agentVsHuman }: { agentVsHuman: FlowMetrics["agentVsHuman"] }) {
-	return (
-		<div class="mb-8">
-			<h2 class="m-0 mb-3 text-base font-semibold text-text-base">Agent vs human</h2>
-			<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-				<div class="px-4 py-3 bg-surface border border-border rounded-lg">
-					<p class="m-0 mb-2 text-[0.72rem] font-semibold text-text-muted uppercase tracking-[0.04em]">
-						Agent
-					</p>
-					<div class="grid grid-cols-3 gap-2 text-sm">
-						<span>Count: {agentVsHuman.agent.count}</span>
-						<span>Avg: {formatDuration(agentVsHuman.agent.avg)}</span>
-						<span>p90: {formatDuration(agentVsHuman.agent.p90)}</span>
-					</div>
-				</div>
-				<div class="px-4 py-3 bg-surface border border-border rounded-lg">
-					<p class="m-0 mb-2 text-[0.72rem] font-semibold text-text-muted uppercase tracking-[0.04em]">
-						Human
-					</p>
-					<div class="grid grid-cols-3 gap-2 text-sm">
-						<span>Count: {agentVsHuman.human.count}</span>
-						<span>Avg: {formatDuration(agentVsHuman.human.avg)}</span>
-						<span>p90: {formatDuration(agentVsHuman.human.p90)}</span>
-					</div>
-				</div>
-			</div>
-		</div>
-	);
-}
-
 export default function MetricsDashboard({ workspaceSlug }: Props) {
 	const { projectId, metrics, loading, error } = useFlowMetrics(workspaceSlug);
 
@@ -297,8 +266,6 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 					<WipChart data={metrics.wipOverTime} />
 				</div>
 			</div>
-
-			<AgentVsHumanTiles agentVsHuman={metrics.agentVsHuman} />
 		</div>
 	);
 }
