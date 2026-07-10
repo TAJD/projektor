@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { capabilityForMcpTool, tokenAllows } from "../auth/scopes";
 import { agentMessagesTools } from "../mcp/agent-messages";
 import { agentsTools } from "../mcp/agents";
+import { codeHeatmapTools } from "../mcp/code-heatmap";
 import { commentsTools } from "../mcp/comments";
 import { customFieldsTools } from "../mcp/custom-fields";
 import { toMcpError } from "../mcp/error-adapter";
@@ -150,6 +151,7 @@ const coreMCPTools: MCPTool[] = [
 	...agentMessagesTools,
 	...workflowTools,
 	...flowMetricsTools,
+	...codeHeatmapTools,
 ];
 
 function jsonRpcResult(id: unknown, result: unknown) {

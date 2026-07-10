@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 import uPlot from "uplot";
 import { apiFetch } from "../utils/api-client";
+import CodeHeatmap from "./charts/CodeHeatmap";
 import UplotChart, { createTooltipPlugin } from "./charts/UplotChart";
 import Select, { type SelectOption } from "./Select";
 
@@ -989,6 +990,15 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 							<WipChart data={metrics.wipOverTime} />
 						</div>
 					</div>
+
+					{projectId && (
+						<CodeHeatmap
+							workspaceSlug={workspaceSlug}
+							projectId={projectId}
+							since={dateStrToEpochStart(range.since)}
+							until={dateStrToEpochEnd(range.until)}
+						/>
+					)}
 
 					<div class="mb-8">
 						<h2

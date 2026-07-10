@@ -107,11 +107,16 @@ const FULL_METRICS = {
 	],
 };
 
+const EMPTY_CODE_HEATMAP = { prefix: "", totalDistinctIssues: 0, entries: [] };
+
 function mockFetchMetrics(metrics: unknown) {
 	const fetchMock = vi.fn().mockImplementation((url: string) => {
 		const u = String(url);
 		if (u.includes("/flow-metrics")) {
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(metrics) });
+		}
+		if (u.includes("/code-heatmap")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(EMPTY_CODE_HEATMAP) });
 		}
 		return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
 	});
@@ -152,6 +157,16 @@ describe("MetricsDashboard", () => {
 		expect(screen.getByText("Flow efficiency")).toBeTruthy();
 		expect(screen.getByText("40%")).toBeTruthy();
 		expect(screen.getByText("Aging WIP")).toBeTruthy();
+	});
+
+	it("shows the code-heatmap empty state fed by claim_files", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+
+		expect(await screen.findByText("Where work lands")).toBeTruthy();
+		expect(await screen.findByText(/No file claims in this window yet/i)).toBeTruthy();
+		expect(screen.getByText(/claim_files/i)).toBeTruthy();
 	});
 
 	it("does not crash on an empty-metrics response", async () => {

@@ -1,6 +1,7 @@
 import type { MCPTool } from "@projektor/types";
 import { agentMessagesTools } from "./agent-messages";
 import { agentsTools } from "./agents";
+import { codeHeatmapTools } from "./code-heatmap";
 import { commentsTools } from "./comments";
 import { customFieldsTools } from "./custom-fields";
 import { fileClaimsTools } from "./file-claims";
@@ -81,6 +82,12 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 	},
 	{ domain: "workflow", title: "Workflow spec", group: "Coordination", tools: workflowTools },
 	{ domain: "flow-metrics", title: "Flow metrics", group: "Project data", tools: flowMetricsTools },
+	{
+		domain: "code-heatmap",
+		title: "Code heatmap",
+		group: "Project data",
+		tools: codeHeatmapTools,
+	},
 ];
 
 /** Total number of MCP tools across all domains. */
