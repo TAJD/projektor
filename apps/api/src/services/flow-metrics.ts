@@ -45,6 +45,7 @@ type FlowIssueRow = {
 	inReviewAt: number | null;
 	reviewBounceCount: number;
 	status: string;
+	typeKey: string | null;
 };
 
 function buildWipOverTime(
@@ -92,6 +93,44 @@ function buildThroughputOverTime(
 			(i) => i.doneAt !== null && i.doneAt >= clampedStart && i.doneAt < clampedEnd
 		).length;
 		buckets.push({ bucketStart: new Date(t * 1000).toISOString().slice(0, 10), count });
+	}
+	return buckets;
+}
+
+// PROJ-331: bug share of throughput, bucketed the same way as throughput. Untyped issues
+// (typeKey null) count toward the bucket total (so they aren't silently dropped from the
+// denominator) but never toward bugCount — "untyped" is treated as "not a bug", the same
+// as any other non-bug type. bugSharePercent is null (not 0) when a bucket completed
+// nothing, so an empty bucket reads as "no data" rather than "zero defects".
+function buildBugShareOverTime(
+	issues: FlowIssueRow[],
+	since: number,
+	until: number,
+	granularity: "day" | "week"
+): Array<{ bucketStart: string; total: number; bugCount: number; bugSharePercent: number | null }> {
+	const DAY = 86400;
+	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
+	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
+	const buckets: Array<{
+		bucketStart: string;
+		total: number;
+		bugCount: number;
+		bugSharePercent: number | null;
+	}> = [];
+	for (let t = firstBucket; t <= until; t += bucketSize) {
+		const bucketEnd = t + bucketSize;
+		const clampedStart = Math.max(t, since);
+		const clampedEnd = Math.min(bucketEnd, until + 1);
+		const completed = issues.filter(
+			(i) => i.doneAt !== null && i.doneAt >= clampedStart && i.doneAt < clampedEnd
+		);
+		const bugCount = completed.filter((i) => i.typeKey === "bug").length;
+		buckets.push({
+			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
+			total: completed.length,
+			bugCount,
+			bugSharePercent: completed.length > 0 ? bugCount / completed.length : null,
+		});
 	}
 	return buckets;
 }
@@ -393,8 +432,10 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 			inReviewAt: schema.issues.inReviewAt,
 			reviewBounceCount: schema.issues.reviewBounceCount,
 			status: schema.issues.status,
+			typeKey: schema.taskTypes.key,
 		})
 		.from(schema.issues)
+		.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
 		.where(
 			and(eq(schema.issues.workspaceId, ctx.workspaceId), eq(schema.issues.projectId, projectId))
 		);
@@ -448,6 +489,12 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		granularity
 	);
 	const cfdOverTime = buildCfdOverTime(issues, throughputSince, throughputUntil, granularity);
+	const bugShareOverTime = buildBugShareOverTime(
+		issues,
+		throughputSince,
+		throughputUntil,
+		granularity
+	);
 	const arrivalVsCompletionOverTime = buildArrivalVsCompletion(
 		issues,
 		throughputSince,
@@ -469,6 +516,9 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		cycleTime: summarize(cycleTimes),
 		wipOverTime,
 		throughputOverTime,
+		// PROJ-331: bug share of throughput — a rising share signals the factory shipping
+		// more defects, not just more work.
+		bugShareOverTime,
 		// PROJ-328: collaboration-shape metrics. reviewLatency is the primary human
 		// choke point (in_review -> done); humanInterventions and autonomyRatio are
 		// aggregated per completed issue.

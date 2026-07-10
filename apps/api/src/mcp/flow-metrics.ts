@@ -24,9 +24,12 @@ export const flowMetricsTools: MCPTool[] = [
 			"(in_progress/in_review) issue with its age since claim, a present-state snapshot not " +
 			"scoped to since/until, meant to be read against this response's cycleTime p50/p90 as " +
 			"reference lines - makes stuck items visible before they finish and skew the percentiles. " +
-			"Measure flow before tuning WIP limits. Throughput/review-latency/CFD/arrival bucketing " +
-			"defaults to weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' " +
-			"for daily buckets.",
+			"bugShareOverTime is the bug share of completed throughput per bucket (total completed, " +
+			"bugCount, bugSharePercent) - untyped issues count toward total but never bugCount; a " +
+			"rising trend signals the factory shipping more defects, not just more work. " +
+			"Measure flow before tuning WIP limits. Throughput/review-latency/CFD/arrival/bug-share " +
+			"bucketing defaults to weekly (current ISO week plus the preceding 5 weeks); pass " +
+			"granularity: 'day' for daily buckets.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],

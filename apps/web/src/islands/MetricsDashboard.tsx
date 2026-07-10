@@ -16,6 +16,14 @@ interface FlowMetrics {
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
 	throughputOverTime: Array<{ bucketStart: string; count: number }>;
+	// PROJ-331: bug share of completed throughput — a rising trend signals the factory
+	// shipping more defects, not just more work.
+	bugShareOverTime: Array<{
+		bucketStart: string;
+		total: number;
+		bugCount: number;
+		bugSharePercent: number | null;
+	}>;
 	// PROJ-328: collaboration-shape metrics — human attention, not agent-vs-human split.
 	reviewLatency: Distribution;
 	reviewLatencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
@@ -355,6 +363,69 @@ function ThroughputChart({ data }: { data: FlowMetrics["throughputOverTime"] }) 
 	}, [labels]);
 
 	if (data.length === 0 || data.every((d) => d.count === 0)) {
+		return <EmptyChartState message="No completed issues yet" />;
+	}
+
+	return <UplotChart data={chartData} buildOptions={buildOptions} />;
+}
+
+// PROJ-331: bug share % trend line, chosen over stacked-bars-by-type per the ticket's
+// "or" — this dashboard already has a lot of charts landing in this epic, and a single
+// trend line answers the ticket's actual question ("is the factory shipping more
+// defects?") without adding a new per-type legend/color scheme to learn. Buckets with
+// no completions are gapped (null) rather than drawn as 0%, so an empty bucket reads as
+// "no data" rather than "no bugs".
+function BugShareChart({ data }: { data: FlowMetrics["bugShareOverTime"] }) {
+	const labels = useMemo(() => data.map((d) => d.bucketStart), [data]);
+	const chartData = useMemo<uPlot.AlignedData>(
+		() => [data.map((_, i) => i), data.map((d) => d.bugSharePercent)],
+		[data]
+	);
+
+	const buildOptions = useMemo(() => {
+		return (width: number, height: number): uPlot.Options => {
+			const accent = readThemeColor("--accent", "#4f46e5");
+			const border = readThemeColor("--border", "#e2e8f0");
+			const textMuted = readThemeColor("--text-muted", "#6b7280");
+
+			return {
+				width,
+				height,
+				scales: { x: { time: false }, y: { range: [0, 1] } },
+				legend: { show: false },
+				series: [{}, { label: "Bug share", stroke: accent, width: 2, points: { show: true } }],
+				axes: [
+					{
+						stroke: textMuted,
+						grid: { stroke: border },
+						splits: (u) => {
+							const n = labels.length;
+							const maxTicks = Math.max(2, Math.floor(u.width / 70));
+							const stride = Math.max(1, Math.ceil(n / maxTicks));
+							const idxs: number[] = [];
+							for (let i = 0; i < n; i += stride) idxs.push(i);
+							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
+							return idxs;
+						},
+						values: (_u, splits) => splits.map((s) => formatShortDate(labels[s] ?? "")),
+					},
+					{
+						stroke: textMuted,
+						grid: { stroke: border },
+						values: (_u, ticks) => ticks.map((v) => formatPercent(v as number)),
+					},
+				],
+				plugins: [
+					createTooltipPlugin({
+						formatX: (xVal) => formatFullDate(labels[xVal] ?? ""),
+						formatY: (yVal) => formatPercent(yVal),
+					}),
+				],
+			};
+		};
+	}, [labels]);
+
+	if (data.length === 0 || data.every((d) => d.bugSharePercent === null)) {
 		return <EmptyChartState message="No completed issues yet" />;
 	}
 
@@ -788,6 +859,22 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">Throughput</h2>
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 							<ThroughputChart data={metrics.throughputOverTime} />
+						</div>
+					</div>
+
+					<div class="mb-8">
+						<h2
+							class="m-0 mb-1 text-base font-semibold text-text-base"
+							title="Bugs as a share of completed throughput per bucket — a rising trend signals the factory shipping more defects, not just more work"
+						>
+							Bug share
+						</h2>
+						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+							Bugs as a share of completed throughput — a rising trend is a quality signal, not just
+							a volume one
+						</p>
+						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+							<BugShareChart data={metrics.bugShareOverTime} />
 						</div>
 					</div>
 

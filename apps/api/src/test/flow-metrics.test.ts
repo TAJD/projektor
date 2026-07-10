@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedComment, seedIssue, seedProjectFixture } from "./helpers";
+import { authHeaders, seedComment, seedIssue, seedProjectFixture, seedTaskType } from "./helpers";
 
 type JsonRpcResult<T> = { jsonrpc: "2.0"; id: unknown; result: T };
 
@@ -16,6 +16,12 @@ interface FlowMetrics {
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
 	throughputOverTime: Array<{ bucketStart: string; count: number }>;
+	bugShareOverTime: Array<{
+		bucketStart: string;
+		total: number;
+		bugCount: number;
+		bugSharePercent: number | null;
+	}>;
 	reviewLatency: Distribution;
 	reviewLatencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
 	humanInterventions: Distribution;
@@ -659,5 +665,56 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(stuck?.ageSeconds).toBeCloseTo(20 * DAY, -2);
 		const reviewing = metrics.agingWip.find((a) => a.id === inReview.id);
 		expect(reviewing?.status).toBe("in_review");
+	});
+
+	// PROJ-331: throughput by task type — bug-share % trend, untyped grouped in (not dropped).
+	it("computes bug share per bucket, counting untyped issues toward total but not bugCount", async () => {
+		const DAY = 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const bugType = await seedTaskType(workspaceId, { key: "bug", name: "Bug" });
+		const taskType = await seedTaskType(workspaceId, { key: "task", name: "Task" });
+
+		// Bucket A (older): 1 bug + 1 task completed -> 50% bug share.
+		const bug1 = await seedIssue(workspaceId, projectId, userId, {
+			title: "Bug 1",
+			typeId: bugType.id,
+		});
+		await stampFlowTimestamps(bug1.id, { doneAt: now - 10 * DAY });
+		const task1 = await seedIssue(workspaceId, projectId, userId, {
+			title: "Task 1",
+			typeId: taskType.id,
+		});
+		await stampFlowTimestamps(task1.id, { doneAt: now - 10 * DAY });
+
+		// Bucket B (recent): 1 bug + 1 untyped completed -> 50% bug share, untyped counts
+		// toward total but not bugCount.
+		const bug2 = await seedIssue(workspaceId, projectId, userId, {
+			title: "Bug 2",
+			typeId: bugType.id,
+		});
+		await stampFlowTimestamps(bug2.id, { doneAt: now });
+		const untyped = await seedIssue(workspaceId, projectId, userId, { title: "Untyped" });
+		await stampFlowTimestamps(untyped.id, { doneAt: now });
+
+		const since = now - 11 * DAY;
+		const until = now;
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}&granularity=week`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(Array.isArray(metrics.bugShareOverTime)).toBe(true);
+		const nonEmptyBuckets = metrics.bugShareOverTime.filter((b) => b.total > 0);
+		expect(nonEmptyBuckets.length).toBe(2);
+		for (const bucket of nonEmptyBuckets) {
+			expect(bucket.total).toBe(2);
+			expect(bucket.bugCount).toBe(1);
+			expect(bucket.bugSharePercent).toBeCloseTo(0.5, 5);
+		}
+
+		const emptyBucket = metrics.bugShareOverTime.find((b) => b.total === 0);
+		if (emptyBucket) expect(emptyBucket.bugSharePercent).toBeNull();
 	});
 });

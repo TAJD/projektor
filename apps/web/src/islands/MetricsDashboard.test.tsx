@@ -11,6 +11,7 @@ const EMPTY_METRICS = {
 	cycleTime: { count: 0, avg: null, p50: null, p90: null },
 	wipOverTime: [],
 	throughputOverTime: [],
+	bugShareOverTime: [],
 	reviewLatency: { count: 0, avg: null, p50: null, p90: null },
 	reviewLatencyOverTime: [],
 	humanInterventions: { count: 0, avg: null, p50: null, p90: null },
@@ -35,6 +36,10 @@ const ZERO_BUCKET_METRICS = {
 	throughputOverTime: [
 		{ bucketStart: "2026-05-25", count: 0 },
 		{ bucketStart: "2026-06-01", count: 0 },
+	],
+	bugShareOverTime: [
+		{ bucketStart: "2026-05-25", total: 0, bugCount: 0, bugSharePercent: null },
+		{ bucketStart: "2026-06-01", total: 0, bugCount: 0, bugSharePercent: null },
 	],
 	reviewLatency: { count: 0, avg: null, p50: null, p90: null },
 	reviewLatencyOverTime: [
@@ -70,6 +75,10 @@ const FULL_METRICS = {
 	throughputOverTime: [
 		{ bucketStart: "2026-05-25", count: 1 },
 		{ bucketStart: "2026-06-01", count: 3 },
+	],
+	bugShareOverTime: [
+		{ bucketStart: "2026-05-25", total: 1, bugCount: 0, bugSharePercent: 0 },
+		{ bucketStart: "2026-06-01", total: 3, bugCount: 1, bugSharePercent: 1 / 3 },
 	],
 	reviewLatency: { count: 4, avg: 3600 * 3, p50: 3600 * 2, p90: 3600 * 6 },
 	reviewLatencyOverTime: [
@@ -135,6 +144,7 @@ describe("MetricsDashboard", () => {
 		render(<MetricsDashboard />);
 
 		expect(await screen.findByText("Throughput")).toBeTruthy();
+		expect(screen.getByText("Bug share")).toBeTruthy();
 		expect(screen.getByText("Lead time")).toBeTruthy();
 		expect(screen.getByText("Cycle time")).toBeTruthy();
 		expect(screen.getByText("WIP over time")).toBeTruthy();
@@ -150,7 +160,8 @@ describe("MetricsDashboard", () => {
 		render(<MetricsDashboard />);
 
 		expect(await screen.findByText("Throughput")).toBeTruthy();
-		expect(screen.getByText(/No completed issues yet/i)).toBeTruthy();
+		// Both ThroughputChart and BugShareChart render the same empty-state message.
+		expect(screen.getAllByText(/No completed issues yet/i)).toHaveLength(2);
 		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
 		expect(screen.getByText(/No arrivals or completions yet/i)).toBeTruthy();
 		expect(screen.getByText(/No issues currently in progress or review/i)).toBeTruthy();
@@ -162,7 +173,7 @@ describe("MetricsDashboard", () => {
 		render(<MetricsDashboard />);
 
 		expect(await screen.findByText("Throughput")).toBeTruthy();
-		expect(screen.getByText(/No completed issues yet/i)).toBeTruthy();
+		expect(screen.getAllByText(/No completed issues yet/i)).toHaveLength(2);
 		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
 		expect(screen.getByText(/No arrivals or completions yet/i)).toBeTruthy();
 		expect(screen.getByText(/No issues currently in progress or review/i)).toBeTruthy();
