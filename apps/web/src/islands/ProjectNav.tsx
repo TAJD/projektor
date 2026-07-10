@@ -26,8 +26,9 @@ const KEY_BADGE_CLASS =
 	" text-text-muted";
 
 const TAB_BASE_CLASS =
-	"inline-flex items-center px-3 py-2 rounded-t-md text-sm font-medium no-underline border border-b-0 -mb-px" +
-	" transition-[color,background] duration-100";
+	"inline-flex items-center shrink-0 whitespace-nowrap px-3 py-2 rounded-t-md text-sm font-medium no-underline" +
+	" border border-b-0 -mb-px transition-[color,background] duration-100 max-sm:px-2.5 max-sm:py-1.5" +
+	" max-sm:text-[0.8125rem]";
 
 function tabClass(active: boolean): string {
 	return `${TAB_BASE_CLASS} ${
@@ -110,13 +111,18 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 
 	return (
 		<div class="border-b border-border bg-[var(--nav-bg)]">
-			<div class="flex items-center gap-2 px-6 pt-3 pb-[0.375rem]">
+			<div class="flex items-center gap-2 px-6 pt-3 pb-[0.375rem] max-sm:px-3 max-sm:pt-1.5 max-sm:pb-1">
 				<a href={`/projects/view?id=${encodeURIComponent(project.id)}`} class="no-underline">
-					<h2 class="m-0 text-[0.9375rem] font-semibold text-text-base">{project.name}</h2>
+					<h2 class="m-0 text-[0.9375rem] max-sm:text-[0.8125rem] font-semibold text-text-base">
+						{project.name}
+					</h2>
 				</a>
 				<span class={KEY_BADGE_CLASS}>{project.key}</span>
 			</div>
-			<nav class="flex gap-0.5 px-5" aria-label="Project sections">
+			<nav
+				class="flex gap-0.5 px-5 max-sm:px-3 max-sm:overflow-x-auto"
+				aria-label="Project sections"
+			>
 				{tabs.map((tab) => {
 					const active = activePath === tab.path;
 					return (
