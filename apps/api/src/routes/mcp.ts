@@ -47,6 +47,7 @@ router.post("/:workspaceId", async (c) => {
 	const workspace = c.get("workspace") as { id: string };
 	const user = c.get("user") as { id: string };
 	const role = c.get("role") as Role | undefined;
+	const authKind = c.get("authKind") as "human" | "agent" | undefined;
 	const body = await c.req.json<{
 		jsonrpc: "2.0";
 		id: unknown;
@@ -65,6 +66,7 @@ router.post("/:workspaceId", async (c) => {
 		workspaceId: workspace.id,
 		userId: user.id,
 		role,
+		authKind,
 	};
 
 	switch (body.method) {

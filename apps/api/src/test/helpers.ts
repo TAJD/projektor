@@ -137,13 +137,18 @@ export function authHeaders(token: string, slug: string) {
 	};
 }
 
-export async function seedComment(issueId: string, authorId: string, body = "Test comment") {
+export async function seedComment(
+	issueId: string,
+	authorId: string,
+	body = "Test comment",
+	authorKind?: "human" | "agent"
+) {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
 	await env.DB.prepare(
-		"INSERT INTO issue_comments (id, issue_id, author_id, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+		"INSERT INTO issue_comments (id, issue_id, author_id, body, created_at, updated_at, author_kind) VALUES (?, ?, ?, ?, ?, ?, ?)"
 	)
-		.bind(id, issueId, authorId, body, now, now)
+		.bind(id, issueId, authorId, body, now, now, authorKind ?? null)
 		.run();
 	return { id, body };
 }

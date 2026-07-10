@@ -54,6 +54,10 @@ export interface Variables {
 	// Cloudflare Access session or the dev bypass — those are governed by member
 	// role only, not by token scope.
 	tokenScopes: string[] | undefined;
+	// PROJ-328: the authenticated principal type, derived from which auth path fired
+	// (Cloudflare Access / dev bypass => "human", Bearer API token => "agent") — not a
+	// caller-declared field like the deprecated agent_sessions.kind (PROJ-336).
+	authKind: "human" | "agent";
 }
 
 export type HonoEnv = { Bindings: Env; Variables: Variables };

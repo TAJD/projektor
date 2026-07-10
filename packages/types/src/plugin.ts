@@ -17,6 +17,7 @@ export interface PluginContext {
 	workspaceId: string;
 	userId: string;
 	role?: Role;
+	authKind?: "human" | "agent";
 }
 
 export interface Plugin {

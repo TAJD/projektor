@@ -16,6 +16,11 @@ interface FlowMetrics {
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
 	throughputOverTime: Array<{ bucketStart: string; count: number }>;
+	// PROJ-328: collaboration-shape metrics — human attention, not agent-vs-human split.
+	reviewLatency: Distribution;
+	reviewLatencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
+	humanInterventions: Distribution;
+	autonomyRatio: Distribution;
 }
 
 interface Props {
@@ -232,15 +237,39 @@ function StatTile({ label, value }: { label: string; value: string }) {
 	);
 }
 
-function DistributionTiles({ title, dist }: { title: string; dist: Distribution }) {
+function formatCount(n: number | null): string {
+	return n === null ? "—" : n.toFixed(1);
+}
+
+function formatPercent(n: number | null): string {
+	return n === null ? "—" : `${Math.round(n * 100)}%`;
+}
+
+// `help` is a one-line accessible explanation (rendered as a native tooltip via title=)
+// for metrics whose meaning isn't obvious from the label alone — a dedicated help-icon
+// system is PROJ-335, later in this epic; this is the interim, no-build-required version.
+function DistributionTiles({
+	title,
+	dist,
+	help,
+	format = formatDuration,
+}: {
+	title: string;
+	dist: Distribution;
+	help?: string;
+	format?: (v: number | null) => string;
+}) {
 	return (
 		<div class="mb-8">
-			<h2 class="m-0 mb-3 text-base font-semibold text-text-base">{title}</h2>
+			<h2 class="m-0 mb-1 text-base font-semibold text-text-base" title={help}>
+				{title}
+			</h2>
+			{help && <p class="m-0 mb-3 text-[0.72rem] text-text-muted">{help}</p>}
 			<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
 				<StatTile label="Count" value={String(dist.count)} />
-				<StatTile label="Avg" value={formatDuration(dist.avg)} />
-				<StatTile label="p50" value={formatDuration(dist.p50)} />
-				<StatTile label="p90" value={formatDuration(dist.p90)} />
+				<StatTile label="Avg" value={format(dist.avg)} />
+				<StatTile label="p50" value={format(dist.p50)} />
+				<StatTile label="p90" value={format(dist.p90)} />
 			</div>
 		</div>
 	);
@@ -308,6 +337,67 @@ function ThroughputChart({ data }: { data: FlowMetrics["throughputOverTime"] }) 
 
 	if (data.length === 0 || data.every((d) => d.count === 0)) {
 		return <EmptyChartState message="No completed issues yet" />;
+	}
+
+	return <UplotChart data={chartData} buildOptions={buildOptions} />;
+}
+
+// PROJ-328: p50 review latency per bucket — the trend for the primary human choke point.
+function ReviewLatencyChart({ data }: { data: FlowMetrics["reviewLatencyOverTime"] }) {
+	const labels = useMemo(() => data.map((d) => d.bucketStart), [data]);
+	const chartData = useMemo<uPlot.AlignedData>(
+		() => [data.map((_, i) => i), data.map((d) => d.p50)],
+		[data]
+	);
+
+	const buildOptions = useMemo(() => {
+		return (width: number, height: number): uPlot.Options => {
+			const accent = readThemeColor("--accent", "#4f46e5");
+			const border = readThemeColor("--border", "#e2e8f0");
+			const textMuted = readThemeColor("--text-muted", "#6b7280");
+
+			return {
+				width,
+				height,
+				scales: { x: { time: false } },
+				legend: { show: false },
+				series: [
+					{},
+					{ label: "Review latency (p50)", stroke: accent, width: 2, points: { show: true } },
+				],
+				axes: [
+					{
+						stroke: textMuted,
+						grid: { stroke: border },
+						splits: (u) => {
+							const n = labels.length;
+							const maxTicks = Math.max(2, Math.floor(u.width / 70));
+							const stride = Math.max(1, Math.ceil(n / maxTicks));
+							const idxs: number[] = [];
+							for (let i = 0; i < n; i += stride) idxs.push(i);
+							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
+							return idxs;
+						},
+						values: (_u, splits) => splits.map((s) => formatShortDate(labels[s] ?? "")),
+					},
+					{
+						stroke: textMuted,
+						grid: { stroke: border },
+						values: (_u, ticks) => ticks.map((v) => formatDuration(v)),
+					},
+				],
+				plugins: [
+					createTooltipPlugin({
+						formatX: (xVal) => formatFullDate(labels[xVal] ?? ""),
+						formatY: (yVal) => formatDuration(yVal),
+					}),
+				],
+			};
+		};
+	}, [labels]);
+
+	if (data.length === 0 || data.every((d) => d.p50 === null)) {
+		return <EmptyChartState message="No review-latency data yet" />;
 	}
 
 	return <UplotChart data={chartData} buildOptions={buildOptions} />;
@@ -392,6 +482,41 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 
 					<DistributionTiles title="Lead time" dist={metrics.leadTime} />
 					<DistributionTiles title="Cycle time" dist={metrics.cycleTime} />
+
+					<div class="mb-8">
+						<h2
+							class="m-0 mb-1 text-base font-semibold text-text-base"
+							title="Time from entering review to done — the primary human choke point"
+						>
+							Review latency
+						</h2>
+						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+							Time from entering review to done — the primary human choke point
+						</p>
+						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
+							<ReviewLatencyChart data={metrics.reviewLatencyOverTime} />
+						</div>
+						<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+							<StatTile label="Count" value={String(metrics.reviewLatency.count)} />
+							<StatTile label="Avg" value={formatDuration(metrics.reviewLatency.avg)} />
+							<StatTile label="p50" value={formatDuration(metrics.reviewLatency.p50)} />
+							<StatTile label="p90" value={formatDuration(metrics.reviewLatency.p90)} />
+						</div>
+					</div>
+
+					<DistributionTiles
+						title="Human interventions per issue"
+						dist={metrics.humanInterventions}
+						help="Human-authored comments plus status bounces (review → in progress), per completed issue"
+						format={formatCount}
+					/>
+
+					<DistributionTiles
+						title="Autonomy ratio"
+						dist={metrics.autonomyRatio}
+						help="Lease-held time ÷ total cycle time, per completed issue — how much of the work an agent did unattended"
+						format={formatPercent}
+					/>
 
 					<div class="mb-8">
 						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">WIP over time</h2>

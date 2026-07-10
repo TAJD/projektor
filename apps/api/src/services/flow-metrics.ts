@@ -1,8 +1,9 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { GetFlowMetricsSchema } from "../schemas/flow-metrics";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 interface Distribution {
@@ -40,6 +41,8 @@ type FlowIssueRow = {
 	readyAt: number | null;
 	claimedAt: number | null;
 	doneAt: number | null;
+	inReviewAt: number | null;
+	reviewBounceCount: number;
 };
 
 function buildWipOverTime(
@@ -91,6 +94,123 @@ function buildThroughputOverTime(
 	return buckets;
 }
 
+// PROJ-328: review latency (in_review -> done) bucketed the same way as throughput, but
+// showing the bucket's p50 rather than a count — the "trend" the ticket asks for.
+function buildReviewLatencyOverTime(
+	issues: FlowIssueRow[],
+	since: number,
+	until: number,
+	granularity: "day" | "week"
+): Array<{ bucketStart: string; p50: number | null }> {
+	const DAY = 86400;
+	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
+	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
+	const buckets: Array<{ bucketStart: string; p50: number | null }> = [];
+	for (let t = firstBucket; t <= until; t += bucketSize) {
+		const bucketEnd = t + bucketSize;
+		const clampedStart = Math.max(t, since);
+		const clampedEnd = Math.min(bucketEnd, until + 1);
+		const latencies = issues
+			.filter(
+				(i) =>
+					i.inReviewAt !== null &&
+					i.doneAt !== null &&
+					i.doneAt >= clampedStart &&
+					i.doneAt < clampedEnd
+			)
+			// biome-ignore lint/style/noNonNullAssertion: filtered above
+			.map((i) => i.doneAt! - i.inReviewAt!);
+		buckets.push({
+			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
+			p50: summarize(latencies).p50,
+		});
+	}
+	return buckets;
+}
+
+// PROJ-328: human-authored comments per issue, keyed by the ctx.authKind stamped at
+// write time (comments.ts) — not the deprecated agent_sessions.kind. Rows written before
+// that column existed have author_kind NULL and are excluded rather than guessed.
+async function fetchHumanCommentCounts(
+	orm: ReturnType<typeof drizzle>,
+	issueIds: string[]
+): Promise<Map<string, number>> {
+	const rows = await inChunks(issueIds, (chunk) =>
+		orm
+			.select({ issueId: schema.issueComments.issueId })
+			.from(schema.issueComments)
+			.where(
+				and(
+					inArray(schema.issueComments.issueId, chunk),
+					eq(schema.issueComments.authorKind, "human")
+				)
+			)
+	);
+	const counts = new Map<string, number>();
+	for (const row of rows) counts.set(row.issueId, (counts.get(row.issueId) ?? 0) + 1);
+	return counts;
+}
+
+// PROJ-328: total lease-held seconds per issue, from issue_leases (already the
+// authoritative "an agent worked this issue" record — see issue-leases.ts). A lease
+// still held when the issue finished counts through doneAt, not "now".
+async function fetchLeaseHeldSeconds(
+	orm: ReturnType<typeof drizzle>,
+	issues: FlowIssueRow[]
+): Promise<Map<string, number>> {
+	const doneAtById = new Map(issues.map((i) => [i.id, i.doneAt]));
+	const rows = await inChunks(
+		issues.map((i) => i.id),
+		(chunk) =>
+			orm
+				.select({
+					issueId: schema.issueLeases.issueId,
+					claimedAt: schema.issueLeases.claimedAt,
+					releasedAt: schema.issueLeases.releasedAt,
+				})
+				.from(schema.issueLeases)
+				.where(inArray(schema.issueLeases.issueId, chunk))
+	);
+	const held = new Map<string, number>();
+	for (const row of rows) {
+		const end = row.releasedAt ?? doneAtById.get(row.issueId) ?? null;
+		if (end === null) continue;
+		const seconds = Math.max(0, end - row.claimedAt);
+		held.set(row.issueId, (held.get(row.issueId) ?? 0) + seconds);
+	}
+	return held;
+}
+
+// PROJ-328: human interventions per completed issue = human comments + status bounces
+// out of review. The primary "how much human attention did this take" signal.
+function computeHumanInterventions(
+	issues: FlowIssueRow[],
+	humanCommentCounts: Map<string, number>,
+	inWindow: (t: number) => boolean
+): number[] {
+	return issues
+		.filter((i) => i.doneAt !== null && inWindow(i.doneAt))
+		.map((i) => (humanCommentCounts.get(i.id) ?? 0) + i.reviewBounceCount);
+}
+
+// PROJ-328: autonomy ratio per completed issue = lease-held time / cycle time. Clamped
+// to [0, 1] — sequential re-leases can sum close to the full cycle but shouldn't exceed it.
+function computeAutonomyRatios(
+	issues: FlowIssueRow[],
+	leaseHeldSeconds: Map<string, number>,
+	inWindow: (t: number) => boolean
+): number[] {
+	return issues
+		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		.map((i) => {
+			// biome-ignore lint/style/noNonNullAssertion: filtered above
+			const cycle = i.doneAt! - i.claimedAt!;
+			if (cycle <= 0) return 0;
+			const held = leaseHeldSeconds.get(i.id) ?? 0;
+			return Math.min(1, held / cycle);
+		});
+}
+
 export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const result = GetFlowMetricsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -109,6 +229,8 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 			readyAt: schema.issues.readyAt,
 			claimedAt: schema.issues.claimedAt,
 			doneAt: schema.issues.doneAt,
+			inReviewAt: schema.issues.inReviewAt,
+			reviewBounceCount: schema.issues.reviewBounceCount,
 		})
 		.from(schema.issues)
 		.where(
@@ -126,6 +248,16 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
 		// biome-ignore lint/style/noNonNullAssertion: filtered above
 		.map((i) => i.doneAt! - i.claimedAt!);
+	const reviewLatencies = issues
+		.filter((i) => i.inReviewAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		// biome-ignore lint/style/noNonNullAssertion: filtered above
+		.map((i) => i.doneAt! - i.inReviewAt!);
+
+	const issueIds = issues.map((i) => i.id);
+	const humanCommentCounts = await fetchHumanCommentCounts(orm, issueIds);
+	const leaseHeldSeconds = await fetchLeaseHeldSeconds(orm, issues);
+	const humanInterventions = computeHumanInterventions(issues, humanCommentCounts, inWindow);
+	const autonomyRatios = computeAutonomyRatios(issues, leaseHeldSeconds, inWindow);
 
 	const now = Math.floor(Date.now() / 1000);
 	const wipSince = since ?? now - 30 * 86400;
@@ -141,11 +273,24 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		throughputUntil,
 		granularity
 	);
+	const reviewLatencyOverTime = buildReviewLatencyOverTime(
+		issues,
+		throughputSince,
+		throughputUntil,
+		granularity
+	);
 
 	return {
 		leadTime: summarize(leadTimes),
 		cycleTime: summarize(cycleTimes),
 		wipOverTime,
 		throughputOverTime,
+		// PROJ-328: collaboration-shape metrics. reviewLatency is the primary human
+		// choke point (in_review -> done); humanInterventions and autonomyRatio are
+		// aggregated per completed issue.
+		reviewLatency: summarize(reviewLatencies),
+		reviewLatencyOverTime,
+		humanInterventions: summarize(humanInterventions),
+		autonomyRatio: summarize(autonomyRatios),
 	};
 }

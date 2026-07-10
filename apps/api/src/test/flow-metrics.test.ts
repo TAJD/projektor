@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedIssue, seedProjectFixture } from "./helpers";
+import { authHeaders, seedComment, seedIssue, seedProjectFixture } from "./helpers";
 
 type JsonRpcResult<T> = { jsonrpc: "2.0"; id: unknown; result: T };
 
@@ -16,6 +16,10 @@ interface FlowMetrics {
 	cycleTime: Distribution;
 	wipOverTime: Array<{ date: string; count: number }>;
 	throughputOverTime: Array<{ bucketStart: string; count: number }>;
+	reviewLatency: Distribution;
+	reviewLatencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
+	humanInterventions: Distribution;
+	autonomyRatio: Distribution;
 }
 
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
@@ -36,6 +40,15 @@ describe("Flow metrics (PROJ-252)", () => {
 	) {
 		await env.DB.prepare("UPDATE issues SET ready_at = ?, claimed_at = ?, done_at = ? WHERE id = ?")
 			.bind(readyAt ?? null, claimedAt ?? null, doneAt ?? null, id)
+			.run();
+	}
+
+	async function stampReviewFields(
+		id: string,
+		{ inReviewAt, reviewBounceCount }: { inReviewAt?: number; reviewBounceCount?: number }
+	) {
+		await env.DB.prepare("UPDATE issues SET in_review_at = ?, review_bounce_count = ? WHERE id = ?")
+			.bind(inReviewAt ?? null, reviewBounceCount ?? 0, id)
 			.run();
 	}
 
@@ -346,5 +359,107 @@ describe("Flow metrics (PROJ-252)", () => {
 
 		expect(Array.isArray(metrics.throughputOverTime)).toBe(true);
 		expect(metrics.throughputOverTime.every((b) => b.count === 0)).toBe(true);
+	});
+
+	// PROJ-328: collaboration-shape metrics (review latency, human interventions, autonomy ratio).
+	async function stampLease(
+		id: string,
+		issueId: string,
+		claimedAt: number,
+		releasedAt: number | null
+	) {
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			`INSERT INTO agent_sessions
+			   (id, workspace_id, issue_id, token_id, name, kind, status, started_at, last_heartbeat_at, ended_at)
+			 VALUES (?, ?, ?, NULL, 'lease-test-agent', 'agent', 'ended', ?, ?, ?)`
+		)
+			.bind(id, workspaceId, issueId, now, now, now)
+			.run();
+		await env.DB.prepare(
+			`INSERT INTO issue_leases (id, workspace_id, issue_id, agent_session_id, claimed_at, released_at, release_reason)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`
+		)
+			.bind(
+				crypto.randomUUID(),
+				workspaceId,
+				issueId,
+				id,
+				claimedAt,
+				releasedAt,
+				releasedAt ? "released" : null
+			)
+			.run();
+	}
+
+	it("computes review latency (in_review -> done)", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Reviewed" });
+		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
+		await stampReviewFields(issue.id, { inReviewAt: now - 100 });
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.reviewLatency.count).toBe(1);
+		expect(metrics.reviewLatency.avg).toBeCloseTo(100, 0);
+		expect(Array.isArray(metrics.reviewLatencyOverTime)).toBe(true);
+	});
+
+	it("counts human comments + review bounces as human interventions, excluding agent comments", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Intervened" });
+		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
+		await stampReviewFields(issue.id, { inReviewAt: now - 100, reviewBounceCount: 2 });
+		await seedComment(issue.id, userId, "Looks good", "human");
+		await seedComment(issue.id, userId, "wip update", "agent");
+		await seedComment(issue.id, userId, "legacy comment, no authorKind");
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.humanInterventions.count).toBe(1);
+		// 1 human comment + 2 review bounces; the agent comment and the authorKind-less
+		// legacy comment are both excluded.
+		expect(metrics.humanInterventions.avg).toBe(3);
+	});
+
+	it("computes autonomy ratio as lease-held time over cycle time", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Leased" });
+		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
+		await stampLease(crypto.randomUUID(), issue.id, now - 400, now - 200);
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.autonomyRatio.count).toBe(1);
+		expect(metrics.autonomyRatio.avg).toBeCloseTo(0.5, 1);
+	});
+
+	it("clamps autonomy ratio to 1 when leases held time exceeds cycle time", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Over-leased" });
+		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
+		// Lease still held past doneAt (released_at NULL) — counts through doneAt, not "now".
+		await stampLease(crypto.randomUUID(), issue.id, now - 400, null);
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.autonomyRatio.avg).toBeLessThanOrEqual(1);
+		expect(metrics.autonomyRatio.avg).toBeCloseTo(1, 1);
 	});
 });

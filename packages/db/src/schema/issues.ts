@@ -107,6 +107,11 @@ export const issues = sqliteTable(
 		doneAt: integer("done_at"),
 		// Review gating (PROJ-254): stamped when a completion report is submitted.
 		completionReportAt: integer("completion_report_at"),
+		// Collaboration-shape metrics (PROJ-328): write-once, same rules as ready_at/
+		// claimed_at/done_at above. reviewBounceCount counts status bounces OUT of
+		// review back to in-progress (never cleared, never re-derived from history).
+		inReviewAt: integer("in_review_at"),
+		reviewBounceCount: integer("review_bounce_count").notNull().default(0),
 	},
 	(t) => ({
 		projectIdx: index("issues_project_idx").on(t.projectId),
@@ -124,6 +129,7 @@ export const issues = sqliteTable(
 		wsReadyIdx: index("idx_issues_workspace_ready_at").on(t.workspaceId, t.readyAt),
 		wsClaimedIdx: index("idx_issues_workspace_claimed_at").on(t.workspaceId, t.claimedAt),
 		wsDoneIdx: index("idx_issues_workspace_done_at").on(t.workspaceId, t.doneAt),
+		wsInReviewIdx: index("idx_issues_workspace_in_review_at").on(t.workspaceId, t.inReviewAt),
 	})
 );
 
@@ -140,6 +146,10 @@ export const issueComments = sqliteTable(
 		body: text("body").notNull(),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
+		// Collaboration-shape metrics (PROJ-328): the authenticated principal type at
+		// write time ("human" = Cloudflare Access JWT, "agent" = Bearer API token — see
+		// middleware/auth.ts). NULL for comments written before this column existed.
+		authorKind: text("author_kind", { enum: ["human", "agent"] }),
 	},
 	(t) => ({
 		issueIdx: index("issue_comments_issue_idx").on(t.issueId),

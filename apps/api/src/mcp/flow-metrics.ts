@@ -5,10 +5,14 @@ export const flowMetricsTools: MCPTool[] = [
 	{
 		name: "get_flow_metrics",
 		description:
-			"Lead time (ready→done), cycle time (claimed→done), WIP over time, and throughput over time " +
-			"for a project, computed from indexed transition timestamps. Measure flow before tuning WIP " +
-			"limits. Throughput bucketing defaults to weekly (current ISO week plus the preceding 5 " +
-			"weeks); pass granularity: 'day' for daily buckets.",
+			"Lead time (ready→done), cycle time (claimed→done), WIP over time, throughput over time, and " +
+			"collaboration-shape metrics for a project, computed from indexed transition timestamps. " +
+			"Collaboration-shape metrics measure human attention rather than agent-vs-human split: " +
+			"reviewLatency (in_review→done, the primary human choke point) with a reviewLatencyOverTime " +
+			"trend; humanInterventions (human-authored comments + status bounces out of review, per " +
+			"completed issue); and autonomyRatio (lease-held time ÷ cycle time, per completed issue). " +
+			"Measure flow before tuning WIP limits. Throughput/review-latency bucketing defaults to " +
+			"weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' for daily buckets.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],

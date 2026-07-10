@@ -85,6 +85,9 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 		body,
 		createdAt: now,
 		updatedAt: now,
+		// PROJ-328: stamped from the authenticated principal type, not a caller-supplied
+		// field — see ServiceCtx.authKind.
+		authorKind: ctx.authKind ?? null,
 	});
 
 	return { id };

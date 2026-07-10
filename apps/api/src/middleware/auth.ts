@@ -37,6 +37,7 @@ async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 
 	await provisionUserOnLogin(c.env, user);
 	c.set("user", user);
+	c.set("authKind", "human");
 	return { kind: "allow" };
 }
 
@@ -98,6 +99,7 @@ async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise
 	c.set("user", { id: row.user_id, email: row.email, name: row.name } satisfies AuthUser);
 	c.set("tokenWorkspaceId", row.workspace_id);
 	c.set("tokenScopes", scopes);
+	c.set("authKind", "agent");
 
 	c.executionCtx.waitUntil(
 		c.env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?")
@@ -124,6 +126,7 @@ async function tryDevBypassAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	const user = await upsertUserByEmail(c.env.DEV_USER_EMAIL, c.env.DB);
 	await provisionUserOnLogin(c.env, user);
 	c.set("user", user);
+	c.set("authKind", "human");
 	return { kind: "allow" };
 }
 

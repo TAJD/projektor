@@ -661,6 +661,8 @@ type ExistingIssue = {
 	claimedAt: number | null;
 	doneAt: number | null;
 	completionReportAt: number | null;
+	inReviewAt: number | null;
+	reviewBounceCount: number;
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
@@ -740,6 +742,27 @@ function applyFlowTimestampTransitions(
 	const wasDone = isDoneState(existing.statusCategory, existing.status);
 	const isDone = isDoneState(newStatusCategory, resolvedStatusKey);
 	if (isDone && !wasDone && existing.doneAt == null) setValues.doneAt = now();
+}
+
+// PROJ-328 (collaboration-shape metrics): stamp in_review_at the first time an issue
+// enters a review status (write-once, same rule as applyFlowTimestampTransitions), and
+// count a bounce every time it leaves review back to non-review, non-done — the "a human
+// sent it back for more work" signal for the human-interventions metric. "Entering
+// review" is detected the same way the review gate (PROJ-292) detects it: isReviewStatusKey,
+// not status_category (there is no dedicated in_review category).
+function applyReviewTransitions(
+	setValues: SetValues,
+	existing: ExistingIssue,
+	resolvedStatusKey: string,
+	enteringInReview: boolean,
+	enteringDone: boolean
+): void {
+	if (enteringInReview && existing.inReviewAt == null) setValues.inReviewAt = now();
+
+	const wasInReview = isReviewStatusKey(existing.status);
+	const leavingReviewNotDone =
+		wasInReview && !isReviewStatusKey(resolvedStatusKey) && !enteringDone;
+	if (leavingReviewNotDone) setValues.reviewBounceCount = existing.reviewBounceCount + 1;
 }
 
 function assertCompletionReportPresent(data: UpdateIssueData): void {
@@ -843,6 +866,13 @@ async function applyStatusFields(
 
 	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
 	applyFlowTimestampTransitions(setValues, existing, resolvedStatusKey, newStatusCategory);
+	applyReviewTransitions(
+		setValues,
+		existing,
+		resolvedStatusKey,
+		transition.enteringInReview,
+		transition.enteringDone
+	);
 
 	return transition.enteringInReview || transition.enteringDone;
 }
@@ -984,6 +1014,8 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 			claimedAt: schema.issues.claimedAt,
 			doneAt: schema.issues.doneAt,
 			completionReportAt: schema.issues.completionReportAt,
+			inReviewAt: schema.issues.inReviewAt,
+			reviewBounceCount: schema.issues.reviewBounceCount,
 		})
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
