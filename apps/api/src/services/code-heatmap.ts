@@ -56,6 +56,9 @@ function groupClaimsByNextSegment(
 			group = { issueIds: new Set(), claimCount: 0, isLeaf };
 			groups.set(path, group);
 		}
+		// A path claimed as both a file and a directory (e.g. `docs` and `docs/x.md`) is a
+		// directory: keep it drillable rather than freezing isLeaf on the first claim seen.
+		if (!isLeaf) group.isLeaf = false;
 		group.issueIds.add(claim.issueId);
 		group.claimCount++;
 	}

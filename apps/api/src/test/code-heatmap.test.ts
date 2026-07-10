@@ -114,6 +114,22 @@ describe("Code heatmap (PROJ-332)", () => {
 		expect(body.totalDistinctIssues).toBe(1);
 	});
 
+	it("treats a path claimed as both file and directory as a drillable directory", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const fileIssue = await seedIssue(workspaceId, projectId, userId, { title: "File claim" });
+		const dirIssue = await seedIssue(workspaceId, projectId, userId, { title: "Dir claim" });
+		// File claim seeded first so its isLeaf=true must not freeze the group as a leaf.
+		await seedClaim(fileIssue.id, "docs", now - 200);
+		await seedClaim(dirIssue.id, "docs/guide.md", now - 100);
+
+		const res = await getHeatmap({ since: String(now - 3600), until: String(now) });
+		const body = (await res.json()) as CodeHeatmapResponse;
+		const docs = body.entries.find((e) => e.path === "docs");
+		expect(docs).toBeDefined();
+		expect(docs?.isLeaf).toBe(false);
+		expect(docs?.distinctIssueCount).toBe(2);
+	});
+
 	it("returns an empty entries array when no claims exist in the window", async () => {
 		const now = Math.floor(Date.now() / 1000);
 		const res = await getHeatmap({ since: String(now - 3600), until: String(now) });
