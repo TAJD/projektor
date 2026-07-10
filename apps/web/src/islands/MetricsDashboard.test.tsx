@@ -168,7 +168,7 @@ describe("MetricsDashboard", () => {
 		render(<MetricsDashboard />);
 
 		const heading = await screen.findByText("Factory health");
-		const section = within(heading.closest("div") as HTMLElement);
+		const section = within(heading.closest("section") as HTMLElement);
 		expect(section.getByText("Lease expiries")).toBeTruthy();
 		expect(section.getByText("2")).toBeTruthy();
 		expect(section.getByText("Abandoned claims")).toBeTruthy();
@@ -184,7 +184,7 @@ describe("MetricsDashboard", () => {
 		render(<MetricsDashboard />);
 
 		const heading = await screen.findByText("Factory health");
-		const section = within(heading.closest("div") as HTMLElement);
+		const section = within(heading.closest("section") as HTMLElement);
 		expect(section.getAllByText("0")).toHaveLength(3);
 	});
 

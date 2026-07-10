@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import uPlot from "uplot";
 import { apiFetch } from "../utils/api-client";
@@ -285,27 +286,35 @@ function formatPercent(n: number | null): string {
 // title/caption are optional overrides for when the group's on-screen heading differs
 // from the definitions-map label (e.g. "Human interventions per issue" vs. the map's
 // "Human interventions"); the MetricHelp popover always uses the map copy.
+// showHeading=false drops the h2+MetricHelp+caption entirely, for call sites where a
+// SectionHeading above already draws the heading (e.g. the Review-latency section) — every
+// 4-tile block on the dashboard goes through this one component either way, so tile density
+// and typography stay identical whichever heading mode is used.
 function DistributionTiles({
 	metricId,
 	title,
 	caption,
 	dist,
 	format = formatDuration,
+	showHeading = true,
 }: {
 	metricId: MetricId;
 	title?: string;
 	caption?: string;
 	dist: Distribution;
 	format?: (v: number | null) => string;
+	showHeading?: boolean;
 }) {
 	const def = METRIC_DEFINITIONS[metricId];
 	return (
 		<div class="mb-8">
-			<h2 class="m-0 mb-1 text-base font-semibold text-text-base inline-flex items-center gap-1.5">
-				{title ?? def.label}
-				<MetricHelp id={metricId} />
-			</h2>
-			{caption && <p class="m-0 mb-3 text-[0.72rem] text-text-muted">{caption}</p>}
+			{showHeading && (
+				<h2 class="m-0 mb-1 text-base font-semibold text-text-base inline-flex items-center gap-1.5">
+					{title ?? def.label}
+					<MetricHelp id={metricId} />
+				</h2>
+			)}
+			{showHeading && caption && <p class="m-0 mb-3 text-[0.72rem] text-text-muted">{caption}</p>}
 			<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
 				<StatTile label="Count" value={String(dist.count)} />
 				<StatTile label="Avg" value={format(dist.avg)} />
@@ -543,13 +552,16 @@ function ReviewLatencyChart({ data }: { data: FlowMetrics["reviewLatencyOverTime
 // stacked-area trick, since uPlot has no native "stacked" series mode. Colors are a
 // single-hue ordinal ramp (lightest = earliest stage, darkest = done) rather than
 // unrelated categorical hues, since the bands read as an ordered progression, not
-// independent categories.
-const CFD_COLORS = {
-	backlogTodo: "#86b6ef",
-	inProgress: "#5598e7",
-	inReview: "#2a78d6",
-	done: "#1c5cab",
-} as const;
+// independent categories. Read from the --chart-seq-* tokens (Base.astro) rather than
+// baked-in hex so the ramp repaints on theme toggle, same as every other chart color here.
+function readChartSeqColors() {
+	return {
+		backlogTodo: readThemeColor("--chart-seq-1", "#86b6ef"),
+		inProgress: readThemeColor("--chart-seq-2", "#5598e7"),
+		inReview: readThemeColor("--chart-seq-3", "#2a78d6"),
+		done: readThemeColor("--chart-seq-4", "#1c5cab"),
+	};
+}
 
 function CfdChart({ data }: { data: FlowMetrics["cfdOverTime"] }) {
 	const labels = useMemo(() => data.map((d) => d.bucketStart), [data]);
@@ -565,6 +577,7 @@ function CfdChart({ data }: { data: FlowMetrics["cfdOverTime"] }) {
 		return (width: number, height: number): uPlot.Options => {
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
+			const seq = readChartSeqColors();
 
 			return {
 				width,
@@ -578,29 +591,29 @@ function CfdChart({ data }: { data: FlowMetrics["cfdOverTime"] }) {
 					// would report the running total, not the band's actual size.
 					{
 						label: "Backlog/todo",
-						stroke: CFD_COLORS.backlogTodo,
-						fill: CFD_COLORS.backlogTodo,
+						stroke: seq.backlogTodo,
+						fill: seq.backlogTodo,
 						value: (u, _v, _si, i) =>
 							i == null ? "" : (u.data[1][i] as number) - (u.data[2][i] as number),
 					},
 					{
 						label: "In progress",
-						stroke: CFD_COLORS.inProgress,
-						fill: CFD_COLORS.inProgress,
+						stroke: seq.inProgress,
+						fill: seq.inProgress,
 						value: (u, _v, _si, i) =>
 							i == null ? "" : (u.data[2][i] as number) - (u.data[3][i] as number),
 					},
 					{
 						label: "In review",
-						stroke: CFD_COLORS.inReview,
-						fill: CFD_COLORS.inReview,
+						stroke: seq.inReview,
+						fill: seq.inReview,
 						value: (u, _v, _si, i) =>
 							i == null ? "" : (u.data[3][i] as number) - (u.data[4][i] as number),
 					},
 					{
 						label: "Done",
-						stroke: CFD_COLORS.done,
-						fill: CFD_COLORS.done,
+						stroke: seq.done,
+						fill: seq.done,
 						value: (_u, v) => v ?? "",
 					},
 				],
@@ -646,16 +659,16 @@ function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
+			const accent = readThemeColor("--accent", "#4f46e5");
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
-			const wipLine = "#0d9488";
 
 			return {
 				width,
 				height,
 				scales: { x: { time: true } },
 				legend: { show: false },
-				series: [{}, { label: "WIP", stroke: wipLine, width: 2 }],
+				series: [{}, { label: "WIP", stroke: accent, width: 2 }],
 				axes: [
 					{ stroke: textMuted, grid: { stroke: border }, space: 60 },
 					{ stroke: textMuted, grid: { stroke: border } },
@@ -686,9 +699,9 @@ function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 // PROJ-330: arrival vs completion. Created and completed share one axis (both counts),
 // per the "never dual-axis" rule; net is derived from the other two so it gets a muted
 // dashed line rather than a third categorical hue. "Completed" reuses the accent color
-// ThroughputChart already uses for the same concept.
-const ARRIVAL_CREATED_COLOR = "#d97706";
-
+// ThroughputChart already uses for the same concept; "Created" is the dashboard's second
+// categorical color (--chart-secondary, Base.astro), validated against --accent with
+// scripts/validate_palette.js.
 function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsCompletionOverTime"] }) {
 	const labels = useMemo(() => data.map((d) => d.bucketStart), [data]);
 	const chartData = useMemo<uPlot.AlignedData>(
@@ -704,6 +717,7 @@ function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsComple
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
 			const accent = readThemeColor("--accent", "#4f46e5");
+			const chartSecondary = readThemeColor("--chart-secondary", "#d97706");
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
@@ -714,7 +728,7 @@ function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsComple
 				legend: { show: true },
 				series: [
 					{},
-					{ label: "Created", stroke: ARRIVAL_CREATED_COLOR, width: 2, points: { show: false } },
+					{ label: "Created", stroke: chartSecondary, width: 2, points: { show: false } },
 					{ label: "Completed", stroke: accent, width: 2, points: { show: false } },
 					{
 						label: "Net (created − completed)",
@@ -752,41 +766,12 @@ function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsComple
 	return <UplotChart data={chartData} buildOptions={buildOptions} />;
 }
 
-// PROJ-330: flow-efficiency trend sparkline — a minimal, axis-less line for the "% tile
-// with trend" the ticket asks for, not a full standalone chart (the headline number is
-// the tile above it).
-function FlowEfficiencyTrendChart({ data }: { data: FlowMetrics["flowEfficiencyOverTime"] }) {
-	const chartData = useMemo<uPlot.AlignedData>(
-		() => [data.map((_, i) => i), data.map((d) => d.p50)],
-		[data]
-	);
-
-	const buildOptions = useMemo(() => {
-		return (width: number, height: number): uPlot.Options => {
-			const accent = readThemeColor("--accent", "#4f46e5");
-			return {
-				width,
-				height,
-				scales: { x: { time: false }, y: { range: [0, 1] } },
-				legend: { show: false },
-				cursor: { show: false },
-				series: [{}, { stroke: accent, width: 2, points: { show: false } }],
-				axes: [{ show: false }, { show: false }],
-			};
-		};
-	}, []);
-
-	if (data.length === 0 || data.every((d) => d.p50 === null)) return null;
-
-	return <UplotChart data={chartData} buildOptions={buildOptions} height={40} />;
-}
-
 // PROJ-330: aging-WIP scatter. x is the two open statuses (jittered slightly per-issue so
 // overlapping ages are visible, a beeswarm-lite); y is age since claim. p50/p90 reference
 // lines reuse this window's cycleTime distribution (already returned alongside agingWip)
 // rather than a separate all-time query, so the baseline moves with the shared date-range
-// controls same as every other chart on this page. Colors reuse CFD_COLORS so "in
-// progress" / "in review" read the same hue here as in the cumulative-flow chart above.
+// controls same as every other chart on this page. Colors reuse the --chart-seq-* tokens so
+// "in progress" / "in review" read the same hue here as in the cumulative-flow chart above.
 const AGING_WIP_STATUS_X: Record<"in_progress" | "in_review", number> = {
 	in_progress: 0,
 	in_review: 1,
@@ -824,6 +809,7 @@ function AgingWipScatter({
 		return (width: number, height: number): uPlot.Options => {
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
+			const seq = readChartSeqColors();
 
 			return {
 				width,
@@ -834,7 +820,7 @@ function AgingWipScatter({
 					{},
 					{
 						label: "Age since claim",
-						stroke: CFD_COLORS.inProgress,
+						stroke: seq.inProgress,
 						points: { show: true, size: 8 },
 						paths: () => null,
 					},
@@ -877,6 +863,26 @@ function AgingWipScatter({
 	return <UplotChart data={chartData} buildOptions={buildOptions} />;
 }
 
+// PROJ-325 polish pass: groups the dashboard's ~14 panels into a narrative order (Flow →
+// Efficiency & collaboration → Where work lands → Factory health) instead of landing order.
+// Reuses the existing h2 pattern rather than a new layout primitive — just a heavier/larger
+// h2 with a bottom rule to read as a band header above the per-metric h2s inside it.
+// title is omitted for the "Where work lands" band: its single panel (CodeHeatmap) already
+// renders its own SectionHeading with the same label, so a second h2 would be a literal
+// duplicate rather than a useful band header.
+function SectionBand({ title, children }: { title?: string; children: ComponentChildren }) {
+	return (
+		<section class="mb-10">
+			{title && (
+				<h2 class="m-0 mb-4 pb-2 text-lg font-bold text-text-base border-b border-border">
+					{title}
+				</h2>
+			)}
+			<div class="flex flex-col">{children}</div>
+		</section>
+	);
+}
+
 export default function MetricsDashboard({ workspaceSlug }: Props) {
 	const [range, setRange] = useRangeUrlSync();
 	const { projectId, metrics, loading, error } = useFlowMetrics(workspaceSlug, range);
@@ -899,146 +905,152 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 			)}
 			{!loading && !error && metrics && (
 				<>
-					<div class="mb-8">
-						<h2 class="m-0 mb-1 text-base font-semibold text-text-base">Factory health</h2>
-						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-							Fault signals for the factory itself, for the selected window — a low background rate
-							is normal; watch the trend, not any single nonzero tile
-						</p>
-						<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-							<HealthTile metricId="lease-expiries" value={metrics.factoryHealth.leaseExpiries} />
-							<HealthTile
-								metricId="abandoned-claims"
-								value={metrics.factoryHealth.abandonedClaims}
+					<SectionBand title="Flow">
+						<DistributionTiles metricId="lead-time" dist={metrics.leadTime} />
+						<DistributionTiles metricId="cycle-time" dist={metrics.cycleTime} />
+
+						<div class="mb-8">
+							<SectionHeading metricId="throughput" />
+							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+								<ThroughputChart data={metrics.throughputOverTime} />
+							</div>
+						</div>
+
+						<div class="mb-8">
+							<SectionHeading
+								metricId="bug-share"
+								caption="Bugs as a share of completed throughput — a rising trend is a quality signal, not just a volume one"
 							/>
-							<HealthTile metricId="gate-rejections" value={metrics.factoryHealth.gateRejections} />
+							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+								<BugShareChart data={metrics.bugShareOverTime} />
+							</div>
 						</div>
-						<p class="m-0 mt-2 text-[0.68rem] text-text-muted">
-							WIP-cap pressure (claims denied for exceeding the project's agent WIP limit) isn't
-							tracked yet — the denial site doesn't record an event today (PROJ-334 follow-up).
-						</p>
-					</div>
 
-					<div class="mb-8">
-						<SectionHeading metricId="throughput" />
-						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-							<ThroughputChart data={metrics.throughputOverTime} />
+						<div class="mb-8">
+							<SectionHeading metricId="wip" />
+							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+								<WipChart data={metrics.wipOverTime} />
+							</div>
 						</div>
-					</div>
 
-					<div class="mb-8">
-						<SectionHeading
-							metricId="bug-share"
-							caption="Bugs as a share of completed throughput — a rising trend is a quality signal, not just a volume one"
-						/>
-						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-							<BugShareChart data={metrics.bugShareOverTime} />
-						</div>
-					</div>
-
-					<div class="mb-8">
-						<SectionHeading
-							metricId="arrival-vs-completion"
-							caption="Issues created vs completed per bucket, with the net — is the backlog growing or burning?"
-						/>
-						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-							<ArrivalVsCompletionChart data={metrics.arrivalVsCompletionOverTime} />
-						</div>
-					</div>
-
-					<DistributionTiles metricId="lead-time" dist={metrics.leadTime} />
-					<DistributionTiles metricId="cycle-time" dist={metrics.cycleTime} />
-
-					<div class="mb-8">
-						<SectionHeading
-							metricId="cumulative-flow"
-							caption="Issue counts per status category over time — a widening band is where the factory is choking"
-						/>
-						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
-							<CfdChart data={metrics.cfdOverTime} />
-						</div>
-						<div class="grid grid-cols-2 gap-3">
-							<DistributionTiles metricId="time-in-progress" dist={metrics.timeInProgress} />
-							<DistributionTiles
-								metricId="review-latency"
-								title="Time in review"
-								dist={metrics.reviewLatency}
+						<div class="mb-8">
+							<SectionHeading
+								metricId="aging-wip"
+								caption="Age since claim for every currently open issue, against this window's cycle-time p50/p90 — stuck items show up before they finish and skew the percentiles"
 							/>
+							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+								<AgingWipScatter
+									data={metrics.agingWip}
+									p50={metrics.cycleTime.p50}
+									p90={metrics.cycleTime.p90}
+								/>
+							</div>
 						</div>
-					</div>
 
-					<div class="mb-8">
-						<SectionHeading metricId="review-latency" />
-						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
-							<ReviewLatencyChart data={metrics.reviewLatencyOverTime} />
-						</div>
-						<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-							<StatTile label="Count" value={String(metrics.reviewLatency.count)} />
-							<StatTile label="Avg" value={formatDuration(metrics.reviewLatency.avg)} />
-							<StatTile label="p50" value={formatDuration(metrics.reviewLatency.p50)} />
-							<StatTile label="p90" value={formatDuration(metrics.reviewLatency.p90)} />
-						</div>
-					</div>
-
-					<DistributionTiles
-						metricId="human-interventions"
-						title="Human interventions per issue"
-						dist={metrics.humanInterventions}
-						format={formatCount}
-					/>
-
-					<DistributionTiles
-						metricId="autonomy-ratio"
-						dist={metrics.autonomyRatio}
-						format={formatPercent}
-					/>
-
-					<div class="mb-8">
-						<SectionHeading
-							metricId="flow-efficiency"
-							caption="Lease-held time ÷ lead time — how much of the wait, not just the work, was agent-driven"
-						/>
-						<div class="p-4 bg-surface border border-border rounded-lg">
-							<div class="flex items-end gap-4">
-								<p class="m-0 text-3xl font-semibold text-text-base">
-									{formatPercent(metrics.flowEfficiency.avg)}
-								</p>
-								<div class="flex-1 min-w-0">
-									<FlowEfficiencyTrendChart data={metrics.flowEfficiencyOverTime} />
+						<div class="mb-8">
+							<SectionHeading
+								metricId="cumulative-flow"
+								caption="Issue counts per status category over time — a widening band is where the factory is choking"
+							/>
+							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
+								<CfdChart data={metrics.cfdOverTime} />
+							</div>
+							<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+								<DistributionTiles metricId="time-in-progress" dist={metrics.timeInProgress} />
+								{/* Single-line reference to the canonical Review-latency section below —
+							    not a second 4-tile group. Label matches the popover copy it reuses. */}
+								<div class="mb-8">
+									<h2 class="m-0 mb-1 text-base font-semibold text-text-base inline-flex items-center gap-1.5">
+										Review latency
+										<MetricHelp id="review-latency" />
+									</h2>
+									<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+										Full breakdown in Efficiency &amp; collaboration, below
+									</p>
+									<StatTile label="p50" value={formatDuration(metrics.reviewLatency.p50)} />
 								</div>
 							</div>
 						</div>
-					</div>
 
-					<div class="mb-8">
-						<SectionHeading metricId="wip" />
-						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-							<WipChart data={metrics.wipOverTime} />
+						<div class="mb-8">
+							<SectionHeading
+								metricId="arrival-vs-completion"
+								caption="Issues created vs completed per bucket, with the net — is the backlog growing or burning?"
+							/>
+							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+								<ArrivalVsCompletionChart data={metrics.arrivalVsCompletionOverTime} />
+							</div>
 						</div>
-					</div>
+					</SectionBand>
 
-					{projectId && (
-						<CodeHeatmap
-							workspaceSlug={workspaceSlug}
-							projectId={projectId}
-							since={dateStrToEpochStart(range.since)}
-							until={dateStrToEpochEnd(range.until)}
+					<SectionBand title="Efficiency & collaboration">
+						<DistributionTiles
+							metricId="flow-efficiency"
+							caption="Lease-held time ÷ lead time — how much of the wait, not just the work, was agent-driven"
+							dist={metrics.flowEfficiency}
+							format={formatPercent}
 						/>
-					)}
 
-					<div class="mb-8">
-						<SectionHeading
-							metricId="aging-wip"
-							caption="Age since claim for every currently open issue, against this window's cycle-time p50/p90 — stuck items show up before they finish and skew the percentiles"
+						<DistributionTiles
+							metricId="autonomy-ratio"
+							dist={metrics.autonomyRatio}
+							format={formatPercent}
 						/>
-						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-							<AgingWipScatter
-								data={metrics.agingWip}
-								p50={metrics.cycleTime.p50}
-								p90={metrics.cycleTime.p90}
+
+						<div class="mb-8">
+							<SectionHeading metricId="review-latency" />
+							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
+								<ReviewLatencyChart data={metrics.reviewLatencyOverTime} />
+							</div>
+							<DistributionTiles
+								metricId="review-latency"
+								dist={metrics.reviewLatency}
+								showHeading={false}
 							/>
 						</div>
-					</div>
+
+						<DistributionTiles
+							metricId="human-interventions"
+							title="Human interventions per issue"
+							dist={metrics.humanInterventions}
+							format={formatCount}
+						/>
+					</SectionBand>
+
+					<SectionBand>
+						{projectId && (
+							<CodeHeatmap
+								workspaceSlug={workspaceSlug}
+								projectId={projectId}
+								since={dateStrToEpochStart(range.since)}
+								until={dateStrToEpochEnd(range.until)}
+							/>
+						)}
+					</SectionBand>
+
+					<SectionBand title="Factory health">
+						<div class="mb-8">
+							<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+								Fault signals for the factory itself, for the selected window — a low background
+								rate is normal; watch the trend, not any single nonzero tile
+							</p>
+							<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+								<HealthTile metricId="lease-expiries" value={metrics.factoryHealth.leaseExpiries} />
+								<HealthTile
+									metricId="abandoned-claims"
+									value={metrics.factoryHealth.abandonedClaims}
+								/>
+								<HealthTile
+									metricId="gate-rejections"
+									value={metrics.factoryHealth.gateRejections}
+								/>
+							</div>
+							<p class="m-0 mt-2 text-[0.68rem] text-text-muted">
+								WIP-cap pressure (claims denied for exceeding the project's agent WIP limit) isn't
+								tracked yet — the denial site doesn't record an event today (PROJ-334 follow-up).
+							</p>
+						</div>
+					</SectionBand>
 				</>
 			)}
 		</div>
