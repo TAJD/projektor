@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { capabilityForMcpTool, tokenAllows } from "../auth/scopes";
 import { agentMessagesTools } from "../mcp/agent-messages";
 import { agentsTools } from "../mcp/agents";
+import { codeHeatmapTools } from "../mcp/code-heatmap";
 import { commentsTools } from "../mcp/comments";
 import { customFieldsTools } from "../mcp/custom-fields";
 import { toMcpError } from "../mcp/error-adapter";
@@ -47,6 +48,7 @@ router.post("/:workspaceId", async (c) => {
 	const workspace = c.get("workspace") as { id: string };
 	const user = c.get("user") as { id: string };
 	const role = c.get("role") as Role | undefined;
+	const authKind = c.get("authKind") as "human" | "agent" | undefined;
 	const body = await c.req.json<{
 		jsonrpc: "2.0";
 		id: unknown;
@@ -65,6 +67,7 @@ router.post("/:workspaceId", async (c) => {
 		workspaceId: workspace.id,
 		userId: user.id,
 		role,
+		authKind,
 	};
 
 	switch (body.method) {
@@ -148,6 +151,7 @@ const coreMCPTools: MCPTool[] = [
 	...agentMessagesTools,
 	...workflowTools,
 	...flowMetricsTools,
+	...codeHeatmapTools,
 ];
 
 function jsonRpcResult(id: unknown, result: unknown) {

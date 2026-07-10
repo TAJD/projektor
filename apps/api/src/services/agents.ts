@@ -14,10 +14,27 @@ import type { ServiceCtx } from "./types";
 
 const ACTIVE_TTL = 120;
 
+// PROJ-336: agent_sessions.kind is caller-declared at register_agent with no
+// privilege check (the original review-gate spoof vector; PROJ-287 rebound the
+// gate to live leases instead, ignoring kind entirely). It drives no remaining
+// behavior, so it's excluded here to stop it reading as a trust/attribution
+// signal in list_active_agents and register/heartbeat/end responses.
+const AGENT_SESSION_COLUMNS = {
+	id: schema.agentSessions.id,
+	workspaceId: schema.agentSessions.workspaceId,
+	issueId: schema.agentSessions.issueId,
+	tokenId: schema.agentSessions.tokenId,
+	name: schema.agentSessions.name,
+	status: schema.agentSessions.status,
+	startedAt: schema.agentSessions.startedAt,
+	lastHeartbeatAt: schema.agentSessions.lastHeartbeatAt,
+	endedAt: schema.agentSessions.endedAt,
+};
+
 export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 	const result = RegisterAgentSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, name, kind } = result.data;
+	const { issueId, name } = result.data;
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -33,13 +50,15 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
 
+	// PROJ-336: kind is no longer read from the caller — see AGENT_SESSION_COLUMNS
+	// for why it's dropped from every response. The DB column keeps its "agent"
+	// default so existing rows/queries are unaffected.
 	await orm.insert(schema.agentSessions).values({
 		id,
 		workspaceId: ctx.workspaceId,
 		issueId: issueId ?? null,
 		tokenId: null,
 		name,
-		kind: kind ?? "agent",
 		status: "active",
 		startedAt: now,
 		lastHeartbeatAt: now,
@@ -47,7 +66,7 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 	});
 
 	const row = await orm
-		.select()
+		.select(AGENT_SESSION_COLUMNS)
 		.from(schema.agentSessions)
 		.where(eq(schema.agentSessions.id, id))
 		.get();
@@ -84,7 +103,7 @@ export async function heartbeatAgent(ctx: ServiceCtx, raw: unknown) {
 		);
 
 	const row = await orm
-		.select()
+		.select(AGENT_SESSION_COLUMNS)
 		.from(schema.agentSessions)
 		.where(eq(schema.agentSessions.id, id))
 		.get();
@@ -120,7 +139,7 @@ export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 	await releaseLeasesForAgent(ctx, id);
 
 	const row = await orm
-		.select()
+		.select(AGENT_SESSION_COLUMNS)
 		.from(schema.agentSessions)
 		.where(eq(schema.agentSessions.id, id))
 		.get();
@@ -159,7 +178,7 @@ export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 	}
 
 	const items = await orm
-		.select()
+		.select(AGENT_SESSION_COLUMNS)
 		.from(schema.agentSessions)
 		.where(and(...conditions))
 		.orderBy(desc(schema.agentSessions.startedAt));

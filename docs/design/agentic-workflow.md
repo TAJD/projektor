@@ -87,11 +87,11 @@ rework and should still show up in a lead-time calculation, not be erased. This 
 ### Flow metrics service
 
 `services/flow-metrics.ts` computes, per project (optionally filtered by date range):
-lead time (`done_at - ready_at`), cycle time (`done_at - claimed_at`), WIP-over-time
-(count of issues with `claimed_at` set and no `done_at`/`cancelled` bucketed by day),
-and agent-vs-human cycle time (joins `issue_leases`/`agent_sessions.kind` — an issue
-worked by a live agent lease at claim time is "agent", otherwise "human"). Exposed as
-`get_flow_metrics` (MCP) and `GET /api/projects/:id/flow-metrics` (REST).
+lead time (`done_at - ready_at`), cycle time (`done_at - claimed_at`), and WIP-over-time
+(count of issues with `claimed_at` set and no `done_at`/`cancelled` bucketed by day).
+The agent-vs-human split originally computed here was retired (PROJ-327) — it labelled
+a whole issue by lease presence, a false dichotomy since every issue is a human+agent
+collaboration. Exposed as `get_flow_metrics` (MCP) and `GET /api/projects/:id/flow-metrics` (REST).
 
 ## Phase 3 — Definition of ready + WIP limit
 

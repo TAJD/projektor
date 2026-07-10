@@ -43,7 +43,8 @@ picking up autonomous work.
 - **In Review → Done**: **always requires a human.** An agent session can never move
   its own (or any) issue to `done` — attempting it is rejected outright, regardless of
   whether a completion report is attached. A human reviews the report and the diff,
-  then makes the transition themselves (browser, or a human-kind session).
+  then makes the transition themselves (browser, or any session not holding a live
+  lease on the issue).
 
 ## Completion reports
 
@@ -71,6 +72,6 @@ has a few weeks of real data, not a fixed rule.
 ## Flow metrics
 
 `get_flow_metrics` reports lead time (ready → done), cycle time (claimed → done),
-WIP-over-time, and agent-vs-human cycle time for a project, computed from indexed
-timestamps stamped the first time an issue enters each state. Use it to decide whether
-the WIP limit above is too tight, too loose, or about right — measure before you tune.
+and WIP-over-time for a project, computed from indexed timestamps stamped the first
+time an issue enters each state. Use it to decide whether the WIP limit above is too
+tight, too loose, or about right — measure before you tune.

@@ -1,23 +1,23 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
-import { getFlowMetrics } from "../services/flow-metrics";
+import { getCodeHeatmap } from "../services/code-heatmap";
 import { ctxFromHono } from "../services/types";
 
 const router = new Hono<HonoEnv>();
 
-router.get("/:id/flow-metrics", async (c) => {
+router.get("/:id/code-heatmap", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
 		const since = c.req.query("since");
 		const until = c.req.query("until");
-		const granularity = c.req.query("granularity");
+		const prefix = c.req.query("prefix");
 		return c.json(
-			await getFlowMetrics(ctx, {
+			await getCodeHeatmap(ctx, {
 				projectId: c.req.param("id"),
 				since: since ? Number(since) : undefined,
 				until: until ? Number(until) : undefined,
-				granularity,
+				prefix,
 			})
 		);
 	} catch (e) {
@@ -25,4 +25,4 @@ router.get("/:id/flow-metrics", async (c) => {
 	}
 });
 
-export { router as flowMetricsRouter };
+export { router as codeHeatmapRouter };

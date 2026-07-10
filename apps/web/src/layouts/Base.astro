@@ -89,6 +89,12 @@ const navItems = [
         --danger-text: #dc2626;
         --danger-bg: rgba(220, 38, 38, 0.10);
         --danger-border: rgba(220, 38, 38, 0.30);
+        /* Chart series tokens (light) - metrics dashboard */
+        --chart-secondary: #d97706;
+        --chart-seq-1: #86b6ef;
+        --chart-seq-2: #5598e7;
+        --chart-seq-3: #2a78d6;
+        --chart-seq-4: #1c5cab;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -129,6 +135,12 @@ const navItems = [
           --danger-text: #f87171;
           --danger-bg: rgba(248, 113, 113, 0.12);
           --danger-border: rgba(248, 113, 113, 0.32);
+          /* Chart series tokens (dark) - metrics dashboard */
+          --chart-secondary: #d97706;
+          --chart-seq-1: #bcd7f7;
+          --chart-seq-2: #8ab8f0;
+          --chart-seq-3: #5a94e4;
+          --chart-seq-4: #3a72c8;
         }
       }
       [data-theme='dark'] {
@@ -163,6 +175,11 @@ const navItems = [
         --danger-text: #f87171;
         --danger-bg: rgba(248, 113, 113, 0.12);
         --danger-border: rgba(248, 113, 113, 0.32);
+        --chart-secondary: #d97706;
+        --chart-seq-1: #bcd7f7;
+        --chart-seq-2: #8ab8f0;
+        --chart-seq-3: #5a94e4;
+        --chart-seq-4: #3a72c8;
       }
       [data-theme='light'] {
         --bg: #ffffff;
@@ -195,6 +212,11 @@ const navItems = [
         --danger-text: #dc2626;
         --danger-bg: rgba(220, 38, 38, 0.10);
         --danger-border: rgba(220, 38, 38, 0.30);
+        --chart-secondary: #d97706;
+        --chart-seq-1: #86b6ef;
+        --chart-seq-2: #5598e7;
+        --chart-seq-3: #2a78d6;
+        --chart-seq-4: #1c5cab;
       }
       *, *::before, *::after { box-sizing: border-box; }
       body {
@@ -492,6 +514,41 @@ const navItems = [
         margin-left: auto;
         font-size: 0.75rem;
         color: var(--accent);
+      }
+
+      /* ── Metric help (islands) ─────────────────────────────────────── */
+      .metric-help { position: relative; display: inline-flex; }
+      .metric-help-trigger {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1rem;
+        height: 1rem;
+        padding: 0;
+        border: none;
+        background: none;
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .metric-help-trigger:hover { color: var(--text); }
+      .metric-help-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .metric-help-popover {
+        position: absolute;
+        z-index: 200;
+        top: calc(100% + 4px);
+        left: 0;
+        width: 16rem;
+        max-width: min(16rem, 80vw);
+        padding: 0.625rem 0.75rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        box-shadow: var(--shadow-sm);
+        font-weight: normal;
+        text-transform: none;
+        letter-spacing: normal;
       }
     </style>
   </head>

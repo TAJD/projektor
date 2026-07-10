@@ -31,6 +31,33 @@ if (typeof window.ResizeObserver === "undefined") {
 	} as unknown as typeof ResizeObserver;
 }
 
+// jsdom implements no canvas 2d context (getContext returns null) and no Path2D,
+// so uPlot's deferred draw — a microtask that outlives the test — throws
+// asynchronously even though every chart test passes. Stub a no-op context and
+// Path2D so any chart island can render/redraw under test without a live canvas.
+const noopCanvasCtx = new Proxy(
+	{
+		measureText: () => ({ width: 0 }),
+		createLinearGradient: () => ({ addColorStop() {} }),
+		getImageData: () => ({ data: [] }),
+		canvas: { width: 0, height: 0 },
+	},
+	{ get: (target, prop) => (prop in target ? Reflect.get(target, prop) : () => {}) }
+);
+HTMLCanvasElement.prototype.getContext = (() =>
+	noopCanvasCtx) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+if (typeof globalThis.Path2D === "undefined") {
+	globalThis.Path2D = class {
+		addPath() {}
+		moveTo() {}
+		lineTo() {}
+		arc() {}
+		rect() {}
+		closePath() {}
+	} as unknown as typeof Path2D;
+}
+
 beforeEach(() => {
 	vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) }));
 });

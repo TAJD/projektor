@@ -1106,6 +1106,86 @@ describe("Issues API", () => {
 		expect(typeof stamps.ready_at).toBe("number");
 		expect(typeof stamps.claimed_at).toBe("number");
 	});
+
+	// ─── PROJ-328: in_review_at + review_bounce_count ──────────────
+	async function reviewFieldsOf(
+		id: string
+	): Promise<{ in_review_at: number | null; review_bounce_count: number }> {
+		const row = await env.DB.prepare(
+			"SELECT in_review_at, review_bounce_count FROM issues WHERE id = ?"
+		)
+			.bind(id)
+			.first<{ in_review_at: number | null; review_bounce_count: number }>();
+		return row ?? { in_review_at: null, review_bounce_count: 0 };
+	}
+
+	it("stamps in_review_at once, on first entry, and counts bounces back to in_progress", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Reviewed and bounced",
+		});
+		const id = issue.id;
+
+		await patch(id, { status: "in_progress" });
+		expect(await reviewFieldsOf(id)).toEqual({ in_review_at: null, review_bounce_count: 0 });
+
+		await patch(id, { status: "in_review" });
+		const afterReview = await reviewFieldsOf(id);
+		expect(typeof afterReview.in_review_at).toBe("number");
+		expect(afterReview.review_bounce_count).toBe(0);
+
+		await patch(id, { status: "in_progress" });
+		const afterBounce = await reviewFieldsOf(id);
+		expect(afterBounce.in_review_at).toBe(afterReview.in_review_at);
+		expect(afterBounce.review_bounce_count).toBe(1);
+
+		await patch(id, { status: "in_review" });
+		const afterReReview = await reviewFieldsOf(id);
+		// Write-once: re-entering review does not restamp in_review_at.
+		expect(afterReReview.in_review_at).toBe(afterReview.in_review_at);
+		expect(afterReReview.review_bounce_count).toBe(1);
+
+		await patch(id, {
+			status: "done",
+			completionReport: { summary: "Done", verification: "pnpm test" },
+		});
+		const afterDone = await reviewFieldsOf(id);
+		// Going from review straight to done is not a bounce.
+		expect(afterDone.review_bounce_count).toBe(1);
+	});
+
+	// ─── PROJ-334: gate rejections (in_review -> in_progress specifically) ──────
+	async function gateRejectionCountOf(id: string): Promise<number> {
+		const row = await env.DB.prepare(
+			"SELECT COUNT(*) as n FROM issue_gate_rejections WHERE issue_id = ?"
+		)
+			.bind(id)
+			.first<{ n: number }>();
+		return row?.n ?? 0;
+	}
+
+	// Split into two tests (each gets a fresh token from beforeEach) — the test rate
+	// limiter allows only RATE_LIMIT_API_MAX (5) requests per token per window, and
+	// each case alone already needs 3 patches.
+	it("records a gate-rejection event for in_review -> in_progress", async () => {
+		const rejected = await seedIssue(workspaceId, projectId, userId, { title: "Sent back" });
+		await patch(rejected.id, { status: "in_progress" });
+		await patch(rejected.id, { status: "in_review" });
+		await patch(rejected.id, { status: "in_progress" });
+		expect(await gateRejectionCountOf(rejected.id)).toBe(1);
+		// review_bounce_count still counts it (PROJ-328's aggregate is unchanged).
+		expect((await reviewFieldsOf(rejected.id)).review_bounce_count).toBe(1);
+	});
+
+	it("does not record a gate-rejection event for in_review -> cancelled", async () => {
+		const killed = await seedIssue(workspaceId, projectId, userId, { title: "Killed in review" });
+		await patch(killed.id, { status: "in_progress" });
+		await patch(killed.id, { status: "in_review" });
+		await patch(killed.id, { status: "cancelled" });
+		// Not a gate rejection — the issue was cancelled, not sent back for rework —
+		// even though the aggregate reviewBounceCount still increments for it.
+		expect(await gateRejectionCountOf(killed.id)).toBe(0);
+		expect((await reviewFieldsOf(killed.id)).review_bounce_count).toBe(1);
+	});
 });
 
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style

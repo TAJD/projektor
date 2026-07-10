@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**79 tools across 18 domains.**
+**80 tools across 19 domains.**
 
 ## Coordination
 
@@ -184,6 +184,12 @@ running server.
 
 | Tool | Description |
 |------|-------------|
-| `get_flow_metrics` | Lead time (ready→done), cycle time (claimed→done), WIP over time, throughput over time, and agent-vs-human cycle time for a project, computed from indexed transition timestamps. Measure flow before tuning WIP limits. |
+| `get_flow_metrics` | Lead time (ready→done), cycle time (claimed→done), WIP over time, throughput over time, and collaboration-shape metrics for a project, computed from indexed transition timestamps. Collaboration-shape metrics measure human attention rather than agent-vs-human split: reviewLatency (in_review→done, the primary human choke point) with a reviewLatencyOverTime trend; humanInterventions (human-authored comments + status bounces out of review, per completed issue); and autonomyRatio (lease-held time ÷ cycle time, per completed issue). cfdOverTime is a cumulative flow diagram: per-bucket counts of issues currently in each stage (backlogTodo, inProgress, inReview, done), derived from the same transition timestamps — done is cumulative (never decreases) and a widening band is a choke point. timeInProgress (claimed→next stage) pairs with reviewLatency as the time-in-state breakdown. arrivalVsCompletionOverTime is created vs completed issues per bucket plus net (created - completed), answering whether the backlog is growing or burning. flowEfficiency is lease-held time / lead time (lead time = done - ready) for issues completed in the window, with a flowEfficiencyOverTime trend - distinct from autonomyRatio, which divides by cycle time (done - claimed) instead and so excludes queueing time between ready and claimed. agingWip lists every currently open (in_progress/in_review) issue with its age since claim, a present-state snapshot not scoped to since/until, meant to be read against this response's cycleTime p50/p90 as reference lines - makes stuck items visible before they finish and skew the percentiles. bugShareOverTime is the bug share of completed throughput per bucket (total completed, bugCount, bugSharePercent) - untyped issues count toward total but never bugCount; a rising trend signals the factory shipping more defects, not just more work. factoryHealth is fault signals for the factory itself, not the work, windowed by since/until: leaseExpiries (issue leases reclaimed because the holder stopped heartbeating), abandonedClaims (file claims released because the agent's session ended rather than deliberately), and gateRejections (in_review→in_progress bounces specifically - narrower than humanInterventions' bounce count, which also counts review→cancelled). Measure flow before tuning WIP limits. Throughput/review-latency/CFD/arrival/bug-share bucketing defaults to weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' for daily buckets. |
+
+### Code heatmap
+
+| Tool | Description |
+|------|-------------|
+| `get_code_heatmap` | Where work lands in the codebase, from file-claim history (issue_file_claims) — no git integration needed. Aggregates claims one path segment below `prefix` (omit for the top level), sized by distinctIssueCount (distinct issues that claimed a path under that segment, claimedAt within [since, until]) plus claimCount (raw claim count, including released ones). Each entry's `path` is the drill-down cursor: re-call with `prefix` set to it to see what's under a directory; `isLeaf` marks an entry that is itself a claimed file path, not a directory. Defaults to the current ISO week plus the preceding 5 weeks, matching get_flow_metrics. |
 
 <!-- gen-mcp-catalog:end -->

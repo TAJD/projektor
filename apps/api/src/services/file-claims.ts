@@ -93,9 +93,9 @@ async function overrideConflictingClaims(
 			});
 			await orm
 				.update(schema.issueFileClaims)
-				.set({ releasedAt: now })
+				.set({ releasedAt: now, releaseReason: "overridden" })
 				.where(eq(schema.issueFileClaims.id, existing.id));
-			overridden.push({ ...existing, releasedAt: now });
+			overridden.push({ ...existing, releasedAt: now, releaseReason: "overridden" });
 		}
 	}
 	return overridden;
@@ -211,7 +211,7 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	await inChunks(releaseIds, async (chunk) => {
 		await orm
 			.update(schema.issueFileClaims)
-			.set({ releasedAt: now })
+			.set({ releasedAt: now, releaseReason: "released" })
 			.where(
 				and(
 					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
@@ -265,13 +265,17 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	return { items };
 }
 
+// PROJ-334: "abandoned claim" for the factory-health tile — released because the
+// agent's session ended, not because the work was released deliberately. There's no
+// separate expiry sweep for file claims (unlike issue_leases), so agent-end is the
+// only abandonment path today.
 export async function releaseClaimsForAgent(ctx: ServiceCtx, agentId: string) {
 	const orm = drizzle(ctx.db, { schema });
 	const now = Math.floor(Date.now() / 1000);
 
 	await orm
 		.update(schema.issueFileClaims)
-		.set({ releasedAt: now })
+		.set({ releasedAt: now, releaseReason: "agent_ended" })
 		.where(
 			and(
 				eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),

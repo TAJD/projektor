@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
@@ -65,6 +65,24 @@ describe("Comments REST API", () => {
 		expect(res.status).toBe(201);
 		const data = (await res.json()) as { id: string };
 		expect(data.id).toBeTruthy();
+	});
+
+	// PROJ-328: author_kind is stamped from the authenticated principal type, not a
+	// caller-supplied field. Tests authenticate over Bearer tokens (see authHeaders),
+	// same as agents — see middleware/auth.ts / conventions.md for the human/agent split.
+	it("stamps author_kind from the auth transport, not a caller-supplied field", async () => {
+		const res = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ body: "Hello world", authorKind: "human" }),
+		});
+		expect(res.status).toBe(201);
+		const data = (await res.json()) as { id: string };
+
+		const row = await env.DB.prepare("SELECT author_kind FROM issue_comments WHERE id = ?")
+			.bind(data.id)
+			.first<{ author_kind: string | null }>();
+		expect(row?.author_kind).toBe("agent");
 	});
 
 	it("GET after POST returns the comment", async () => {

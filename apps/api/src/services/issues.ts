@@ -661,6 +661,8 @@ type ExistingIssue = {
 	claimedAt: number | null;
 	doneAt: number | null;
 	completionReportAt: number | null;
+	inReviewAt: number | null;
+	reviewBounceCount: number;
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
@@ -740,6 +742,40 @@ function applyFlowTimestampTransitions(
 	const wasDone = isDoneState(existing.statusCategory, existing.status);
 	const isDone = isDoneState(newStatusCategory, resolvedStatusKey);
 	if (isDone && !wasDone && existing.doneAt == null) setValues.doneAt = now();
+}
+
+// PROJ-328 (collaboration-shape metrics): stamp in_review_at the first time an issue
+// enters a review status (write-once, same rule as applyFlowTimestampTransitions), and
+// count a bounce every time it leaves review back to non-review, non-done — the "a human
+// sent it back for more work" signal for the human-interventions metric. "Entering
+// review" is detected the same way the review gate (PROJ-292) detects it: isReviewStatusKey,
+// not status_category (there is no dedicated in_review category).
+//
+// PROJ-334: also reports whether this specific transition is a "gate rejection" —
+// in_review -> in_progress, narrower than reviewBounceCount above (which also counts
+// review -> cancelled as a bounce). The factory-health tile wants the literal rework
+// signal the ticket names ("in_review -> in_progress bounces"), not "left review for any
+// reason", so review -> cancelled (the issue was killed, not sent back for more work)
+// must not count here even though it still increments the aggregate.
+function applyReviewTransitions(
+	setValues: SetValues,
+	existing: ExistingIssue,
+	resolvedStatusKey: string,
+	newStatusCategory: string | undefined,
+	enteringInReview: boolean,
+	enteringDone: boolean
+): boolean {
+	if (enteringInReview && existing.inReviewAt == null) setValues.inReviewAt = now();
+
+	const wasInReview = isReviewStatusKey(existing.status);
+	const leavingReviewNotDone =
+		wasInReview && !isReviewStatusKey(resolvedStatusKey) && !enteringDone;
+	if (leavingReviewNotDone) setValues.reviewBounceCount = existing.reviewBounceCount + 1;
+
+	return (
+		leavingReviewNotDone &&
+		(newStatusCategory === "in_progress" || resolvedStatusKey === "in_progress")
+	);
 }
 
 function assertCompletionReportPresent(data: UpdateIssueData): void {
@@ -843,6 +879,26 @@ async function applyStatusFields(
 
 	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
 	applyFlowTimestampTransitions(setValues, existing, resolvedStatusKey, newStatusCategory);
+	const isGateRejection = applyReviewTransitions(
+		setValues,
+		existing,
+		resolvedStatusKey,
+		newStatusCategory,
+		transition.enteringInReview,
+		transition.enteringDone
+	);
+	// PROJ-334: recorded as its own event (not batched into the setValues UPDATE below)
+	// so it carries its own occurred_at, the same reasoning file-claims.ts insertClaims
+	// uses for D1's lack of interactive transactions — a stray extra row on a later
+	// failure is harmless, an unrecorded rejection is not.
+	if (isGateRejection) {
+		await ctx.db
+			.prepare(
+				"INSERT INTO issue_gate_rejections (id, workspace_id, issue_id, occurred_at) VALUES (?, ?, ?, ?)"
+			)
+			.bind(crypto.randomUUID(), ctx.workspaceId, existing.id, now())
+			.run();
+	}
 
 	return transition.enteringInReview || transition.enteringDone;
 }
@@ -984,6 +1040,8 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 			claimedAt: schema.issues.claimedAt,
 			doneAt: schema.issues.doneAt,
 			completionReportAt: schema.issues.completionReportAt,
+			inReviewAt: schema.issues.inReviewAt,
+			reviewBounceCount: schema.issues.reviewBounceCount,
 		})
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))

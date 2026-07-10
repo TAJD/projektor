@@ -29,10 +29,9 @@ describe("Agents API", () => {
 
 		const res = await registerAgent({ name: "test-agent", issueId: issue.id });
 		expect(res.status).toBe(201);
-		const session = (await res.json()) as { id: string; status: string; kind: string };
+		const session = (await res.json()) as { id: string; status: string };
 		expect(session.id).toBeTruthy();
 		expect(session.status).toBe("active");
-		expect(session.kind).toBe("agent");
 
 		const listRes = await SELF.fetch(`http://localhost/api/agents?issueId=${issue.id}`, {
 			headers: authHeaders(token, slug),
@@ -95,25 +94,25 @@ describe("Agents API", () => {
 		expect(listBody.items.some((s) => s.id === session.id)).toBe(false);
 	});
 
-	// A4: default kind is 'agent'; kind='human' is distinguishable in list output
-	it("A4: default kind is agent; human kind is distinguishable in list", async () => {
+	// A4 (PROJ-336): kind is deprecated — still accepted for MCP compatibility but
+	// ignored, and no longer present in register/list responses as a trust signal.
+	it("A4: caller-supplied kind is accepted but ignored, and absent from responses", async () => {
 		const agentRes = await registerAgent({ name: "bot" });
-		const agentSession = (await agentRes.json()) as { id: string; kind: string };
-		expect(agentSession.kind).toBe("agent");
+		const agentSession = (await agentRes.json()) as Record<string, unknown>;
+		expect(agentSession.kind).toBeUndefined();
 
 		const humanRes = await registerAgent({ name: "human-user", kind: "human" });
 		expect(humanRes.status).toBe(201);
-		const humanSession = (await humanRes.json()) as { id: string; kind: string };
-		expect(humanSession.kind).toBe("human");
+		const humanSession = (await humanRes.json()) as { id: string } & Record<string, unknown>;
+		expect(humanSession.kind).toBeUndefined();
 
 		const listRes = await SELF.fetch("http://localhost/api/agents", {
 			headers: authHeaders(token, slug),
 		});
-		const listBody = (await listRes.json()) as { items: Array<{ id: string; kind: string }> };
-		const agentItem = listBody.items.find((s) => s.id === agentSession.id);
+		const listBody = (await listRes.json()) as { items: Array<Record<string, unknown>> };
 		const humanItem = listBody.items.find((s) => s.id === humanSession.id);
-		expect(agentItem?.kind).toBe("agent");
-		expect(humanItem?.kind).toBe("human");
+		expect(humanItem).toBeDefined();
+		expect(humanItem?.kind).toBeUndefined();
 	});
 
 	// A5: tenant isolation

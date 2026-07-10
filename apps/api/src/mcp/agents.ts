@@ -15,7 +15,8 @@ export const agentsTools: MCPTool[] = [
 				kind: {
 					type: "string",
 					enum: ["agent", "human"],
-					description: "Session kind (default: agent)",
+					description:
+						"Deprecated, ignored (PROJ-336): self-declared session kind drives no behavior and is not returned.",
 				},
 			},
 		},
