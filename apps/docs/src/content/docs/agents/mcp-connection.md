@@ -84,19 +84,22 @@ curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
 
 The Claude app (desktop and web, at claude.ai) doesn't use the `claude mcp add` CLI command - it connects to remote MCP servers through **Connectors** in Settings.
 
-<!-- VERIFY: exact navigation path/labels below, against the current live Claude app -->
-1. Open **Settings → Connectors** in the Claude app.
-2. Choose **Add custom connector** (sometimes labeled "Add more").
-3. **Server URL:** paste `https://<your-worker>.workers.dev/mcp/<workspace-uuid>` - the same URL shape used in §3, with the workspace UUID (not the slug) in the path.
-4. **Headers:** the connector form lets you add custom HTTP headers sent with every request. Add:
-   - `Authorization: Bearer pk_<64 hex chars>`
-   - `X-Workspace-Slug: <slug>`
-   - If the instance is behind Cloudflare Access, also add the `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers described in [§7](#7-cloudflare-access-note).
-5. Save the connector. The Claude app will call `initialize` against the URL to confirm the connection before making tools available in a conversation.
+1. **Free / Pro / Max plans:** go to **Settings → Connectors** and click **"Add custom connector."**
+   **Team / Enterprise plans:** an owner adds it once for the org via **Admin settings → Connectors → Add custom connector**; members then connect to it from **Settings → Connectors**.
+2. **Server URL:** paste `https://<your-worker>.workers.dev/mcp/<workspace-uuid>` - the same URL shape used in §3, with the workspace UUID (not the slug) in the path.
+3. **Headers:** open the **Request headers** section of the dialog and add:
+   - `Authorization` → `Bearer pk_<64 hex chars>` (enter the scheme yourself - Claude sends the value verbatim, it does not prepend `Bearer`).
+   - `X-Workspace-Slug` → `<slug>`
+   - If the instance is behind Cloudflare Access, also add `CF-Access-Client-Id` / `CF-Access-Client-Secret` as described in [§7](#7-cloudflare-access-note).
+4. Click **Add**. Claude calls `initialize` against the URL to confirm the connection before tools become available in a conversation.
 
 For minting the `pk_...` token itself, use the same Settings → Tokens → "New token" flow described in [§1](#1-prerequisites) / [§3](#3-manual-connect-production) - there's nothing app-specific about token creation.
 
-<!-- VERIFY: whether the Claude app's custom-connector form currently supports arbitrary custom headers (as described above) or is limited to OAuth-based remote MCP servers. If custom headers aren't supported for your Claude app version, the CLI path (§2/§3) is the reliable option for header-based auth. -->
+:::caution
+**Request headers are a beta feature**, rolled out gradually - if you don't see a **Request headers** section in the dialog, contact Anthropic to request access.
+
+Header *names* are also restricted to an allowlist (`authorization`, `x-api-key`, `x-auth-token`, and similar standard names) - Claude rejects arbitrary custom header names for security reasons. `Authorization` is allowlisted, but **`X-Workspace-Slug` and the `CF-Access-Client-*` headers are non-standard names and may be rejected** unless Anthropic has added them to the allowlist for your organization. If the connector fails with an authorization error after adding these headers, ask your Anthropic representative to allowlist them, or use the Claude Code CLI path (§2/§3) instead, which sends arbitrary headers with no such restriction.
+:::
 
 ---
 
