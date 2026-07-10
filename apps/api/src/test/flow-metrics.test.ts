@@ -261,6 +261,82 @@ describe("Flow metrics (PROJ-252)", () => {
 		}
 	});
 
+	it("daily buckets sum to the same total as weekly buckets for the same window", async () => {
+		const WEEK = 7 * 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const since = now - 2 * WEEK;
+		const until = now;
+
+		const issueA = await seedIssue(workspaceId, projectId, userId, { title: "A" });
+		await stampFlowTimestamps(issueA.id, {
+			readyAt: now - WEEK - 100,
+			claimedAt: now - WEEK - 50,
+			doneAt: now - WEEK,
+		});
+		const issueB = await seedIssue(workspaceId, projectId, userId, { title: "B" });
+		await stampFlowTimestamps(issueB.id, {
+			readyAt: now - 100,
+			claimedAt: now - 50,
+			doneAt: now,
+		});
+
+		const weeklyRes = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}&granularity=week`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const dailyRes = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}&granularity=day`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(weeklyRes.status).toBe(200);
+		expect(dailyRes.status).toBe(200);
+		const weekly = (await weeklyRes.json()) as FlowMetrics;
+		const daily = (await dailyRes.json()) as FlowMetrics;
+
+		const weeklyTotal = weekly.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
+		const dailyTotal = daily.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
+		expect(dailyTotal).toBe(weeklyTotal);
+		expect(dailyTotal).toBe(2);
+	});
+
+	it("defaults the throughput window to Monday-of-current-week minus 5 weeks", async () => {
+		const WEEK = 7 * 86400;
+		const DAY = 86400;
+		const now = Math.floor(Date.now() / 1000);
+
+		const oldIssue = await seedIssue(workspaceId, projectId, userId, { title: "Old" });
+		await stampFlowTimestamps(oldIssue.id, {
+			readyAt: now - 7 * WEEK,
+			claimedAt: now - 7 * WEEK + 100,
+			doneAt: now - 7 * WEEK + 200,
+		});
+		const recentIssue = await seedIssue(workspaceId, projectId, userId, { title: "Recent" });
+		await stampFlowTimestamps(recentIssue.id, {
+			readyAt: now - 100,
+			claimedAt: now - 50,
+			doneAt: now,
+		});
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		const total = metrics.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
+		expect(total).toBe(1);
+
+		const earliestBucket = metrics.throughputOverTime[0]?.weekStart;
+		expect(earliestBucket).toBeDefined();
+		const dayIndex = Math.floor(new Date(`${earliestBucket}T00:00:00Z`).getTime() / 1000 / DAY);
+		const daysSinceMonday = ((dayIndex % 7) + 7 - 4) % 7;
+		const mondayIndex = dayIndex - daysSinceMonday;
+		const nowDayIndex = Math.floor(now / DAY);
+		const nowDaysSinceMonday = ((nowDayIndex % 7) + 7 - 4) % 7;
+		const currentMondayIndex = nowDayIndex - nowDaysSinceMonday;
+		expect(mondayIndex).toBe(currentMondayIndex - 5 * 7);
+	});
+
 	it("returns an empty throughput series for a project with no completed issues", async () => {
 		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
 			headers: authHeaders(token, slug),

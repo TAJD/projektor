@@ -70,13 +70,16 @@ function mondayAtOrBefore(t: number): number {
 function buildThroughputOverTime(
 	issues: FlowIssueRow[],
 	since: number,
-	until: number
+	until: number,
+	granularity: "day" | "week"
 ): Array<{ weekStart: string; count: number }> {
-	const WEEK = 7 * 86400;
+	const DAY = 86400;
+	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
+	const bucketStart = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
 	const buckets: Array<{ weekStart: string; count: number }> = [];
-	for (let t = mondayAtOrBefore(since); t <= until; t += WEEK) {
-		const bucketEnd = t + WEEK;
-		// Clamp each bucket to the requested window so edge weeks don't pull in
+	for (let t = bucketStart; t <= until; t += bucketSize) {
+		const bucketEnd = t + bucketSize;
+		// Clamp each bucket to the requested window so edge buckets don't pull in
 		// completions from just outside [since, until], matching leadTime/cycleTime.
 		const clampedStart = Math.max(t, since);
 		const clampedEnd = Math.min(bucketEnd, until + 1);
@@ -91,7 +94,7 @@ function buildThroughputOverTime(
 export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const result = GetFlowMetricsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { projectId, since, until } = result.data;
+	const { projectId, since, until, granularity } = result.data;
 
 	await assertProjectExists(ctx, projectId);
 
@@ -129,9 +132,15 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const wipUntil = until ?? now;
 	const wipOverTime = buildWipOverTime(issues, wipSince, wipUntil);
 
-	const throughputSince = since ?? now - 12 * 7 * 86400;
+	// Default window = the current ISO week plus the preceding 5 weeks (6 weeks total).
+	const throughputSince = since ?? mondayAtOrBefore(now) - 5 * 7 * 86400;
 	const throughputUntil = until ?? now;
-	const throughputOverTime = buildThroughputOverTime(issues, throughputSince, throughputUntil);
+	const throughputOverTime = buildThroughputOverTime(
+		issues,
+		throughputSince,
+		throughputUntil,
+		granularity
+	);
 
 	return {
 		leadTime: summarize(leadTimes),

@@ -2,7 +2,7 @@
 //
 // Follows the SprintManager.test.tsx pattern: reads ?projectId= from the URL, then fetches
 // /api/projects/:id/flow-metrics via raw fetch + buildHeaders. loading starts as true.
-import { render, screen } from "@testing-library/preact";
+import { fireEvent, render, screen } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MetricsDashboard from "./MetricsDashboard";
 
@@ -42,16 +42,15 @@ const FULL_METRICS = {
 };
 
 function mockFetchMetrics(metrics: unknown) {
-	vi.stubGlobal(
-		"fetch",
-		vi.fn().mockImplementation((url: string) => {
-			const u = String(url);
-			if (u.includes("/flow-metrics")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve(metrics) });
-			}
-			return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-		})
-	);
+	const fetchMock = vi.fn().mockImplementation((url: string) => {
+		const u = String(url);
+		if (u.includes("/flow-metrics")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(metrics) });
+		}
+		return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+	});
+	vi.stubGlobal("fetch", fetchMock);
+	return fetchMock;
 }
 
 beforeEach(() => {
@@ -107,5 +106,63 @@ describe("MetricsDashboard", () => {
 	it("shows a message when no project is specified", async () => {
 		render(<MetricsDashboard />);
 		expect(await screen.findByText(/No project specified/i)).toBeTruthy();
+	});
+
+	it("renders range controls and defaults to a 6-week weekly window", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		const fetchMock = mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+		await screen.findByText("Throughput");
+
+		expect(screen.getByLabelText("From date")).toBeTruthy();
+		expect(screen.getByLabelText("To date")).toBeTruthy();
+		expect(screen.getByLabelText("Chart granularity")).toBeTruthy();
+
+		const lastCall = fetchMock.mock.calls.at(-1);
+		const requestedUrl = new URL(String(lastCall?.[0]), "http://localhost");
+		const since = Number(requestedUrl.searchParams.get("since"));
+		const until = Number(requestedUrl.searchParams.get("until"));
+		expect(requestedUrl.searchParams.get("granularity")).toBe("week");
+		// Window spans from Monday of 5 weeks ago through today: between 5 and 6 weeks.
+		expect(until - since).toBeGreaterThanOrEqual(5 * 7 * 86400);
+		expect(until - since).toBeLessThanOrEqual(6 * 7 * 86400 + 86400);
+
+		const params = new URLSearchParams(window.location.search);
+		expect(params.get("granularity")).toBe("week");
+		expect(params.get("since")).toBeTruthy();
+		expect(params.get("until")).toBeTruthy();
+	});
+
+	it("refetches with granularity=day and updates the URL when the toggle changes", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		const fetchMock = mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+		await screen.findByText("Throughput");
+
+		fireEvent.click(screen.getByLabelText("Chart granularity"));
+		fireEvent.click(await screen.findByRole("option", { name: "Daily" }));
+
+		await screen.findByText("Throughput");
+		const lastCall = fetchMock.mock.calls.at(-1);
+		const requestedUrl = new URL(String(lastCall?.[0]), "http://localhost");
+		expect(requestedUrl.searchParams.get("granularity")).toBe("day");
+		expect(new URLSearchParams(window.location.search).get("granularity")).toBe("day");
+	});
+
+	it("refetches with the updated date when the From input changes", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		const fetchMock = mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+		await screen.findByText("Throughput");
+
+		fireEvent.input(screen.getByLabelText("From date"), { target: { value: "2026-01-01" } });
+
+		await screen.findByText("Throughput");
+		const lastCall = fetchMock.mock.calls.at(-1);
+		const requestedUrl = new URL(String(lastCall?.[0]), "http://localhost");
+		expect(requestedUrl.searchParams.get("since")).toBe(
+			String(Date.parse("2026-01-01T00:00:00Z") / 1000)
+		);
+		expect(new URLSearchParams(window.location.search).get("since")).toBe("2026-01-01");
 	});
 });

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import uPlot from "uplot";
 import { apiFetch } from "../utils/api-client";
 import UplotChart, { createTooltipPlugin } from "./charts/UplotChart";
+import Select, { type SelectOption } from "./Select";
 
 interface Distribution {
 	count: number;
@@ -19,6 +20,77 @@ interface FlowMetrics {
 
 interface Props {
 	workspaceSlug?: string;
+}
+
+type Granularity = "day" | "week";
+
+interface RangeState {
+	since: string; // yyyy-mm-dd
+	until: string; // yyyy-mm-dd
+	granularity: Granularity;
+}
+
+const GRANULARITY_OPTIONS: SelectOption[] = [
+	{ value: "week", label: "Weekly" },
+	{ value: "day", label: "Daily" },
+];
+
+function mondayOfWeek(d: Date): Date {
+	const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+	const daysSinceMonday = (monday.getUTCDay() + 6) % 7;
+	monday.setUTCDate(monday.getUTCDate() - daysSinceMonday);
+	return monday;
+}
+
+function toDateStr(d: Date): string {
+	return d.toISOString().slice(0, 10);
+}
+
+// Default view = the current ISO week plus the preceding 5 weeks (6 weeks total), weekly (PROJ-326).
+function defaultRange(): RangeState {
+	const today = new Date();
+	const monday = mondayOfWeek(today);
+	monday.setUTCDate(monday.getUTCDate() - 5 * 7);
+	return { since: toDateStr(monday), until: toDateStr(today), granularity: "week" };
+}
+
+function parseGranularity(v: string | null): Granularity {
+	return v === "day" ? "day" : "week";
+}
+
+function dateStrToEpochStart(s: string): number {
+	return Math.floor(Date.parse(`${s}T00:00:00Z`) / 1000);
+}
+
+function dateStrToEpochEnd(s: string): number {
+	return dateStrToEpochStart(s) + 86399;
+}
+
+/** Reads since/until/granularity from the URL on mount, then keeps the URL in sync (PROJ-326). */
+function useRangeUrlSync() {
+	const [range, setRange] = useState<RangeState>(defaultRange);
+
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		const since = params.get("since");
+		const until = params.get("until");
+		const granularity = params.get("granularity");
+		setRange((prev) => ({
+			since: since ?? prev.since,
+			until: until ?? prev.until,
+			granularity: parseGranularity(granularity ?? prev.granularity),
+		}));
+	}, []);
+
+	useEffect(() => {
+		const params = new URLSearchParams(window.location.search);
+		params.set("since", range.since);
+		params.set("until", range.until);
+		params.set("granularity", range.granularity);
+		history.replaceState(null, "", `?${params.toString()}`);
+	}, [range.since, range.until, range.granularity]);
+
+	return [range, setRange] as const;
 }
 
 function formatDuration(seconds: number | null): string {
@@ -61,7 +133,7 @@ function formatFullDate(iso: string): string {
 	});
 }
 
-function useFlowMetrics(workspaceSlug: string | undefined) {
+function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
 	const [projectId, setProjectId] = useState<string | null>(null);
 	const [metrics, setMetrics] = useState<FlowMetrics | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -79,15 +151,74 @@ function useFlowMetrics(workspaceSlug: string | undefined) {
 		}
 		setLoading(true);
 		setError(null);
-		apiFetch<FlowMetrics>(`/api/projects/${encodeURIComponent(projectId)}/flow-metrics`, {
+		const query = new URLSearchParams({
+			since: String(dateStrToEpochStart(range.since)),
+			until: String(dateStrToEpochEnd(range.until)),
+			granularity: range.granularity,
+		});
+		apiFetch<FlowMetrics>(`/api/projects/${encodeURIComponent(projectId)}/flow-metrics?${query}`, {
 			workspaceSlug,
 		})
 			.then((data) => setMetrics(data))
 			.catch((e) => setError(String(e)))
 			.finally(() => setLoading(false));
-	}, [projectId, workspaceSlug]);
+	}, [projectId, workspaceSlug, range.since, range.until, range.granularity]);
 
 	return { projectId, metrics, loading, error };
+}
+
+function RangeControls({
+	range,
+	setRange,
+}: {
+	range: RangeState;
+	setRange: (fn: (prev: RangeState) => RangeState) => void;
+}) {
+	return (
+		<div class="flex flex-wrap items-end gap-4 mb-6">
+			<label class="text-[0.7rem] text-text-muted">
+				From
+				<input
+					type="date"
+					aria-label="From date"
+					value={range.since}
+					max={range.until}
+					onInput={(e) => {
+						const value = (e.target as HTMLInputElement).value;
+						if (value) setRange((prev) => ({ ...prev, since: value }));
+					}}
+					class="block px-2 py-[0.3rem] border border-border rounded text-sm bg-bg text-text-base mt-[0.2rem]"
+				/>
+			</label>
+			<label class="text-[0.7rem] text-text-muted">
+				To
+				<input
+					type="date"
+					aria-label="To date"
+					value={range.until}
+					min={range.since}
+					onInput={(e) => {
+						const value = (e.target as HTMLInputElement).value;
+						if (value) setRange((prev) => ({ ...prev, until: value }));
+					}}
+					class="block px-2 py-[0.3rem] border border-border rounded text-sm bg-bg text-text-base mt-[0.2rem]"
+				/>
+			</label>
+			<div class="text-[0.7rem] text-text-muted">
+				Granularity
+				<div class="mt-[0.2rem]">
+					<Select
+						value={range.granularity}
+						options={GRANULARITY_OPTIONS}
+						ariaLabel="Chart granularity"
+						onChange={(value) =>
+							setRange((prev) => ({ ...prev, granularity: value as Granularity }))
+						}
+					/>
+				</div>
+			</div>
+		</div>
+	);
 }
 
 function StatTile({ label, value }: { label: string; value: string }) {
@@ -231,41 +362,45 @@ function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 }
 
 export default function MetricsDashboard({ workspaceSlug }: Props) {
-	const { projectId, metrics, loading, error } = useFlowMetrics(workspaceSlug);
+	const [range, setRange] = useRangeUrlSync();
+	const { projectId, metrics, loading, error } = useFlowMetrics(workspaceSlug, range);
 
 	if (!projectId && !loading) {
 		return <p class="text-text-muted">No project specified. Add ?projectId= to the URL.</p>;
 	}
 
-	if (loading) return <p aria-live="polite">Loading metrics…</p>;
-	if (error)
-		return (
-			<p role="alert" class="text-[var(--danger-text)]">
-				{error}
-			</p>
-		);
-	if (!metrics) return null;
-
 	return (
 		<div>
 			<h1 class="m-0 mb-5 text-2xl font-bold text-text-base">Metrics</h1>
 
-			<div class="mb-8">
-				<h2 class="m-0 mb-3 text-base font-semibold text-text-base">Throughput</h2>
-				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-					<ThroughputChart data={metrics.throughputOverTime} />
-				</div>
-			</div>
+			<RangeControls range={range} setRange={setRange} />
 
-			<DistributionTiles title="Lead time" dist={metrics.leadTime} />
-			<DistributionTiles title="Cycle time" dist={metrics.cycleTime} />
+			{loading && <p aria-live="polite">Loading metrics…</p>}
+			{!loading && error && (
+				<p role="alert" class="text-[var(--danger-text)]">
+					{error}
+				</p>
+			)}
+			{!loading && !error && metrics && (
+				<>
+					<div class="mb-8">
+						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">Throughput</h2>
+						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+							<ThroughputChart data={metrics.throughputOverTime} />
+						</div>
+					</div>
 
-			<div class="mb-8">
-				<h2 class="m-0 mb-3 text-base font-semibold text-text-base">WIP over time</h2>
-				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-					<WipChart data={metrics.wipOverTime} />
-				</div>
-			</div>
+					<DistributionTiles title="Lead time" dist={metrics.leadTime} />
+					<DistributionTiles title="Cycle time" dist={metrics.cycleTime} />
+
+					<div class="mb-8">
+						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">WIP over time</h2>
+						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+							<WipChart data={metrics.wipOverTime} />
+						</div>
+					</div>
+				</>
+			)}
 		</div>
 	);
 }

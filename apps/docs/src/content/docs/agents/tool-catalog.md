@@ -184,6 +184,6 @@ running server.
 
 | Tool | Description |
 |------|-------------|
-| `get_flow_metrics` | Lead time (ready→done), cycle time (claimed→done), WIP over time, and throughput over time for a project, computed from indexed transition timestamps. Measure flow before tuning WIP limits. |
+| `get_flow_metrics` | Lead time (ready→done), cycle time (claimed→done), WIP over time, and throughput over time for a project, computed from indexed transition timestamps. Measure flow before tuning WIP limits. Throughput bucketing defaults to weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' for daily buckets. |
 
 <!-- gen-mcp-catalog:end -->
