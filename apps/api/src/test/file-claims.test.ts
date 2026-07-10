@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedFixture, seedIssue, seedIssueFixture } from "./helpers";
 
@@ -226,5 +226,63 @@ describe("File Claims API", () => {
 		expect(otherListRes.status).toBe(200);
 		const otherBody = (await otherListRes.json()) as { items: Array<{ issueId: string }> };
 		expect(otherBody.items.some((i) => i.issueId === issueId)).toBe(false);
+	});
+
+	// PROJ-337: rejecting a conflicting claim inserts a claim_conflicts row (forced=0)
+	// 1 request (claim) + setup claim already counted below — within limit
+	it("PROJ-337: rejecting a conflicting claim inserts a claim_conflicts row with forced=0", async () => {
+		await claimFiles({ issueId, paths: ["src/conflict-log.ts"] });
+
+		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Rejected issue" });
+		const res = await claimFiles({ issueId: issue2.id, paths: ["src/conflict-log.ts"] });
+		expect(res.status).toBe(409);
+
+		const rows = await env.DB.prepare(
+			"SELECT * FROM claim_conflicts WHERE workspace_id = ? AND path = ?"
+		)
+			.bind(workspaceId, "src/conflict-log.ts")
+			.all();
+		expect(rows.results).toHaveLength(1);
+		const row = rows.results[0] as Record<string, unknown>;
+		expect(row.forced).toBe(0);
+		expect(row.rejected_issue_id).toBe(issue2.id);
+		expect(row.holding_issue_id).toBe(issueId);
+	});
+
+	// PROJ-337: force:true override inserts a claim_conflicts row (forced=1)
+	it("PROJ-337: force:true override inserts a claim_conflicts row with forced=1", async () => {
+		await claimFiles({ issueId, paths: ["src/force-log.ts"] });
+
+		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Forcing issue" });
+		const res = await claimFiles({
+			issueId: issue2.id,
+			paths: ["src/force-log.ts"],
+			force: true,
+		});
+		expect(res.status).toBe(201);
+
+		const rows = await env.DB.prepare(
+			"SELECT * FROM claim_conflicts WHERE workspace_id = ? AND path = ?"
+		)
+			.bind(workspaceId, "src/force-log.ts")
+			.all();
+		expect(rows.results).toHaveLength(1);
+		const row = rows.results[0] as Record<string, unknown>;
+		expect(row.forced).toBe(1);
+		expect(row.rejected_issue_id).toBe(issue2.id);
+		expect(row.holding_issue_id).toBe(issueId);
+	});
+
+	// PROJ-337: a non-conflicting claim inserts no claim_conflicts rows
+	it("PROJ-337: a non-conflicting claim inserts no claim_conflicts rows", async () => {
+		const res = await claimFiles({ issueId, paths: ["src/no-conflict.ts"] });
+		expect(res.status).toBe(201);
+
+		const rows = await env.DB.prepare(
+			"SELECT * FROM claim_conflicts WHERE workspace_id = ? AND path = ?"
+		)
+			.bind(workspaceId, "src/no-conflict.ts")
+			.all();
+		expect(rows.results).toHaveLength(0);
 	});
 });
