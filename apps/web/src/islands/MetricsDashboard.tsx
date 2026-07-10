@@ -448,10 +448,36 @@ function CfdChart({ data }: { data: FlowMetrics["cfdOverTime"] }) {
 				legend: { show: true },
 				series: [
 					{},
-					{ label: "Backlog/todo", stroke: CFD_COLORS.backlogTodo, fill: CFD_COLORS.backlogTodo },
-					{ label: "In progress", stroke: CFD_COLORS.inProgress, fill: CFD_COLORS.inProgress },
-					{ label: "In review", stroke: CFD_COLORS.inReview, fill: CFD_COLORS.inReview },
-					{ label: "Done", stroke: CFD_COLORS.done, fill: CFD_COLORS.done },
+					// Series carry cumulative sums (for the stacked-area geometry), so the legend
+					// `value` de-cumulates each back to its own band count — otherwise the legend
+					// would report the running total, not the band's actual size.
+					{
+						label: "Backlog/todo",
+						stroke: CFD_COLORS.backlogTodo,
+						fill: CFD_COLORS.backlogTodo,
+						value: (u, _v, _si, i) =>
+							i == null ? "" : (u.data[1][i] as number) - (u.data[2][i] as number),
+					},
+					{
+						label: "In progress",
+						stroke: CFD_COLORS.inProgress,
+						fill: CFD_COLORS.inProgress,
+						value: (u, _v, _si, i) =>
+							i == null ? "" : (u.data[2][i] as number) - (u.data[3][i] as number),
+					},
+					{
+						label: "In review",
+						stroke: CFD_COLORS.inReview,
+						fill: CFD_COLORS.inReview,
+						value: (u, _v, _si, i) =>
+							i == null ? "" : (u.data[3][i] as number) - (u.data[4][i] as number),
+					},
+					{
+						label: "Done",
+						stroke: CFD_COLORS.done,
+						fill: CFD_COLORS.done,
+						value: (_u, v) => v ?? "",
+					},
 				],
 				axes: [
 					{
