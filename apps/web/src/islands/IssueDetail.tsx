@@ -445,7 +445,7 @@ function IssueDetailView(props: {
 			{/* Two-column body */}
 			<div class="flex gap-8 items-start max-sm:flex-col">
 				{/* ── Main column ── */}
-				<div class="flex-1 min-w-0">
+				<div class="flex-1 min-w-0 max-sm:w-full">
 					<BodySection
 						issue={issue}
 						issueId={issueId}

@@ -1,6 +1,19 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import IssueDetail from "./IssueDetail";
+
+// PROJ-344: on mobile the two-column body collapses to a column (items-start),
+// so the main column must be pinned to full width — otherwise it grows to its
+// widest child (a wide table / long code line) and the whole page overflows,
+// leaving BodySection's own overflow-x-auto with nothing to scroll against.
+describe("IssueDetail — mobile main-column width", () => {
+	it("pins the main column to full width on mobile so wide body content can't widen the page", () => {
+		const source = readFileSync(join(__dirname, "IssueDetail.tsx"), "utf-8");
+		expect(source).toMatch(/class="flex-1 min-w-0 max-sm:w-full"/);
+	});
+});
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 

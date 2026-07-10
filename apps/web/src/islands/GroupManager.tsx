@@ -1,4 +1,3 @@
-import type { JSX } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { resolveWorkspaceSlug } from "../utils/workspace";
@@ -554,7 +553,7 @@ export default function GroupManager({ workspaceSlug }: Props) {
 
 	// WAI-ARIA tabs pattern: arrow keys move focus AND activate (automatic
 	// activation), Home/End jump to the first/last tab.
-	function onTabKeyDown(e: JSX.TargetedKeyboardEvent<HTMLDivElement>) {
+	function onTabKeyDown(e: KeyboardEvent) {
 		const idx = tabs.indexOf(activeTab);
 		let nextId: TabId | null = null;
 		if (e.key === "ArrowRight") nextId = tabs[(idx + 1) % tabs.length];
