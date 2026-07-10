@@ -228,6 +228,67 @@ describe("MetricsDashboard", () => {
 		expect(await screen.findByText(/No project specified/i)).toBeTruthy();
 	});
 
+	it("renders a help icon per stat/chart section and shows the definitions-map popover on click", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+		await screen.findByText("Throughput");
+
+		// Every StatTile/DistributionTiles/chart-header group on the dashboard renders an
+		// "About <label>" trigger backed by the shared metric-definitions.ts map.
+		const trigger = screen.getByRole("button", { name: "About Cycle time" });
+		expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+		fireEvent.click(trigger);
+
+		const popover = screen.getByRole("dialog", { name: "Cycle time definition" });
+		expect(popover).toBeTruthy();
+		expect(popover.textContent).toMatch(/done − claimed/i);
+		// aria-describedby on the trigger associates it with the now-open popover.
+		expect(trigger.getAttribute("aria-expanded")).toBe("true");
+		expect(trigger.getAttribute("aria-describedby")).toBe(popover.id);
+		expect(popover.getAttribute("aria-modal")).toBe("false");
+
+		// A large sample of the dashboard's other tiles/charts also get a trigger, not just
+		// one — spot-check a few spanning different sections (factory health, a chart-only
+		// header, a formatted-percent distribution).
+		expect(screen.getByRole("button", { name: "About Lease expiries" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "About Bug share" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "About Autonomy ratio" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "About Aging WIP" })).toBeTruthy();
+	});
+
+	it("dismisses the help popover on Escape and returns to a closed state", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+		await screen.findByText("Throughput");
+
+		const trigger = screen.getByRole("button", { name: "About Lead time" });
+		fireEvent.click(trigger);
+		expect(screen.getByRole("dialog", { name: "Lead time definition" })).toBeTruthy();
+
+		fireEvent.keyDown(document, { key: "Escape" });
+
+		expect(screen.queryByRole("dialog", { name: "Lead time definition" })).toBeNull();
+		expect(trigger.getAttribute("aria-expanded")).toBe("false");
+	});
+
+	it("dismisses the help popover on an outside click", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+		await screen.findByText("Throughput");
+
+		const trigger = screen.getByRole("button", { name: "About Throughput" });
+		fireEvent.click(trigger);
+		expect(screen.getByRole("dialog", { name: "Throughput definition" })).toBeTruthy();
+
+		fireEvent.mouseDown(document.body);
+
+		expect(screen.queryByRole("dialog", { name: "Throughput definition" })).toBeNull();
+	});
+
 	it("renders range controls and defaults to a 6-week weekly window", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		const fetchMock = mockFetchMetrics(FULL_METRICS);

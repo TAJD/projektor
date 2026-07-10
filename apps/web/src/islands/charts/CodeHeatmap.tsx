@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../../utils/api-client";
+import { SectionHeading } from "../MetricHelp";
 
 interface CodeHeatmapEntry {
 	path: string;
@@ -188,15 +189,10 @@ export default function CodeHeatmap({ workspaceSlug, projectId, since, until }: 
 
 	return (
 		<div class="mb-8">
-			<h2
-				class="m-0 mb-1 text-base font-semibold text-text-base"
-				title="Directories/paths sized by distinct issues that claimed files there — where in the codebase work has actually landed, from file-claim history"
-			>
-				Where work lands
-			</h2>
-			<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-				Directories sized by distinct issues claiming files there — click a row to drill in
-			</p>
+			<SectionHeading
+				metricId="code-heatmap"
+				caption="Directories sized by distinct issues claiming files there — click a row to drill in"
+			/>
 			<div class="p-4 bg-surface border border-border rounded-lg">
 				{loading && <p aria-live="polite">Loading…</p>}
 				{!loading && error && (

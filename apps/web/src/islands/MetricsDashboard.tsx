@@ -3,6 +3,8 @@ import uPlot from "uplot";
 import { apiFetch } from "../utils/api-client";
 import CodeHeatmap from "./charts/CodeHeatmap";
 import UplotChart, { createTooltipPlugin } from "./charts/UplotChart";
+import { MetricHelp, SectionHeading } from "./MetricHelp";
+import { METRIC_DEFINITIONS, type MetricId } from "./metric-definitions";
 import Select, { type SelectOption } from "./Select";
 
 interface Distribution {
@@ -280,26 +282,30 @@ function formatPercent(n: number | null): string {
 	return n === null ? "—" : `${Math.round(n * 100)}%`;
 }
 
-// `help` is a one-line accessible explanation (rendered as a native tooltip via title=)
-// for metrics whose meaning isn't obvious from the label alone — a dedicated help-icon
-// system is PROJ-335, later in this epic; this is the interim, no-build-required version.
+// title/caption are optional overrides for when the group's on-screen heading differs
+// from the definitions-map label (e.g. "Human interventions per issue" vs. the map's
+// "Human interventions"); the MetricHelp popover always uses the map copy.
 function DistributionTiles({
+	metricId,
 	title,
+	caption,
 	dist,
-	help,
 	format = formatDuration,
 }: {
-	title: string;
+	metricId: MetricId;
+	title?: string;
+	caption?: string;
 	dist: Distribution;
-	help?: string;
 	format?: (v: number | null) => string;
 }) {
+	const def = METRIC_DEFINITIONS[metricId];
 	return (
 		<div class="mb-8">
-			<h2 class="m-0 mb-1 text-base font-semibold text-text-base" title={help}>
-				{title}
+			<h2 class="m-0 mb-1 text-base font-semibold text-text-base inline-flex items-center gap-1.5">
+				{title ?? def.label}
+				<MetricHelp id={metricId} />
 			</h2>
-			{help && <p class="m-0 mb-3 text-[0.72rem] text-text-muted">{help}</p>}
+			{caption && <p class="m-0 mb-3 text-[0.72rem] text-text-muted">{caption}</p>}
 			<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
 				<StatTile label="Count" value={String(dist.count)} />
 				<StatTile label="Avg" value={format(dist.avg)} />
@@ -314,7 +320,8 @@ function DistributionTiles({
 // distinct from the neutral StatTile (amber accent, reusing the existing
 // --priority-high tokens) but only when nonzero — a healthy low background rate of
 // expiries/bounces stays neutral so the row doesn't read as alarmist by default.
-function HealthTile({ label, value, help }: { label: string; value: number; help: string }) {
+function HealthTile({ metricId, value }: { metricId: MetricId; value: number }) {
+	const def = METRIC_DEFINITIONS[metricId];
 	const flagged = value > 0;
 	return (
 		<div
@@ -324,10 +331,10 @@ function HealthTile({ label, value, help }: { label: string; value: number; help
 					? { borderColor: "var(--priority-high-text)", background: "var(--priority-high-bg)" }
 					: undefined
 			}
-			title={help}
 		>
-			<p class="m-0 mb-1 text-[0.72rem] font-semibold text-text-muted uppercase tracking-[0.04em]">
-				{label}
+			<p class="m-0 mb-1 text-[0.72rem] font-semibold text-text-muted uppercase tracking-[0.04em] inline-flex items-center gap-1">
+				{def.label}
+				<MetricHelp id={metricId} />
 			</p>
 			<p
 				class={`m-0 text-lg font-semibold ${flagged ? "" : "text-text-base"}`}
@@ -335,7 +342,6 @@ function HealthTile({ label, value, help }: { label: string; value: number; help
 			>
 				{value}
 			</p>
-			<p class="m-0 mt-1 text-[0.68rem] text-text-muted">{help}</p>
 		</div>
 	);
 }
@@ -894,32 +900,18 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 			{!loading && !error && metrics && (
 				<>
 					<div class="mb-8">
-						<h2
-							class="m-0 mb-1 text-base font-semibold text-text-base"
-							title="Fault signals for the factory itself, not the work — is the machinery running clean?"
-						>
-							Factory health
-						</h2>
+						<h2 class="m-0 mb-1 text-base font-semibold text-text-base">Factory health</h2>
 						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
 							Fault signals for the factory itself, for the selected window — a low background rate
 							is normal; watch the trend, not any single nonzero tile
 						</p>
 						<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+							<HealthTile metricId="lease-expiries" value={metrics.factoryHealth.leaseExpiries} />
 							<HealthTile
-								label="Lease expiries"
-								value={metrics.factoryHealth.leaseExpiries}
-								help="Issue leases reclaimed because the holding agent stopped heartbeating — an agent died mid-work"
-							/>
-							<HealthTile
-								label="Abandoned claims"
+								metricId="abandoned-claims"
 								value={metrics.factoryHealth.abandonedClaims}
-								help="File claims released because the agent's session ended, not because the work was released deliberately"
 							/>
-							<HealthTile
-								label="Gate rejections"
-								value={metrics.factoryHealth.gateRejections}
-								help="Issues sent back from review to in progress — rework a human requested"
-							/>
+							<HealthTile metricId="gate-rejections" value={metrics.factoryHealth.gateRejections} />
 						</div>
 						<p class="m-0 mt-2 text-[0.68rem] text-text-muted">
 							WIP-cap pressure (claims denied for exceeding the project's agent WIP limit) isn't
@@ -928,85 +920,55 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 					</div>
 
 					<div class="mb-8">
-						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">Throughput</h2>
+						<SectionHeading metricId="throughput" />
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 							<ThroughputChart data={metrics.throughputOverTime} />
 						</div>
 					</div>
 
 					<div class="mb-8">
-						<h2
-							class="m-0 mb-1 text-base font-semibold text-text-base"
-							title="Bugs as a share of completed throughput per bucket — a rising trend signals the factory shipping more defects, not just more work"
-						>
-							Bug share
-						</h2>
-						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-							Bugs as a share of completed throughput — a rising trend is a quality signal, not just
-							a volume one
-						</p>
+						<SectionHeading
+							metricId="bug-share"
+							caption="Bugs as a share of completed throughput — a rising trend is a quality signal, not just a volume one"
+						/>
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 							<BugShareChart data={metrics.bugShareOverTime} />
 						</div>
 					</div>
 
 					<div class="mb-8">
-						<h2
-							class="m-0 mb-1 text-base font-semibold text-text-base"
-							title="Issues created vs completed per bucket, with the net — is the backlog growing or burning?"
-						>
-							Arrival vs completion
-						</h2>
-						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-							Issues created vs completed per bucket, with the net — is the backlog growing or
-							burning?
-						</p>
+						<SectionHeading
+							metricId="arrival-vs-completion"
+							caption="Issues created vs completed per bucket, with the net — is the backlog growing or burning?"
+						/>
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 							<ArrivalVsCompletionChart data={metrics.arrivalVsCompletionOverTime} />
 						</div>
 					</div>
 
-					<DistributionTiles title="Lead time" dist={metrics.leadTime} />
-					<DistributionTiles title="Cycle time" dist={metrics.cycleTime} />
+					<DistributionTiles metricId="lead-time" dist={metrics.leadTime} />
+					<DistributionTiles metricId="cycle-time" dist={metrics.cycleTime} />
 
 					<div class="mb-8">
-						<h2
-							class="m-0 mb-1 text-base font-semibold text-text-base"
-							title="Issue counts per status category over time — a widening band is where the factory is choking"
-						>
-							Cumulative flow
-						</h2>
-						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-							Issue counts per status category over time — a widening band is where the factory is
-							choking
-						</p>
+						<SectionHeading
+							metricId="cumulative-flow"
+							caption="Issue counts per status category over time — a widening band is where the factory is choking"
+						/>
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
 							<CfdChart data={metrics.cfdOverTime} />
 						</div>
 						<div class="grid grid-cols-2 gap-3">
+							<DistributionTiles metricId="time-in-progress" dist={metrics.timeInProgress} />
 							<DistributionTiles
-								title="Time in progress"
-								dist={metrics.timeInProgress}
-								help="Claimed to entering review (or done, if review was skipped), for issues completing in the window"
-							/>
-							<DistributionTiles
+								metricId="review-latency"
 								title="Time in review"
 								dist={metrics.reviewLatency}
-								help="Entering review to done, for issues completing in the window"
 							/>
 						</div>
 					</div>
 
 					<div class="mb-8">
-						<h2
-							class="m-0 mb-1 text-base font-semibold text-text-base"
-							title="Time from entering review to done — the primary human choke point"
-						>
-							Review latency
-						</h2>
-						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-							Time from entering review to done — the primary human choke point
-						</p>
+						<SectionHeading metricId="review-latency" />
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
 							<ReviewLatencyChart data={metrics.reviewLatencyOverTime} />
 						</div>
@@ -1019,30 +981,23 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 					</div>
 
 					<DistributionTiles
+						metricId="human-interventions"
 						title="Human interventions per issue"
 						dist={metrics.humanInterventions}
-						help="Human-authored comments plus status bounces (review → in progress), per completed issue"
 						format={formatCount}
 					/>
 
 					<DistributionTiles
-						title="Autonomy ratio"
+						metricId="autonomy-ratio"
 						dist={metrics.autonomyRatio}
-						help="Lease-held time ÷ total cycle time, per completed issue — how much of the work an agent did unattended"
 						format={formatPercent}
 					/>
 
 					<div class="mb-8">
-						<h2
-							class="m-0 mb-1 text-base font-semibold text-text-base"
-							title="Lease-held time ÷ lead time (ready→done), for issues completed in the window — unlike autonomy ratio, this also counts queue time before claim as non-agent time"
-						>
-							Flow efficiency
-						</h2>
-						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-							Lease-held time ÷ lead time — how much of the wait, not just the work, was
-							agent-driven
-						</p>
+						<SectionHeading
+							metricId="flow-efficiency"
+							caption="Lease-held time ÷ lead time — how much of the wait, not just the work, was agent-driven"
+						/>
 						<div class="p-4 bg-surface border border-border rounded-lg">
 							<div class="flex items-end gap-4">
 								<p class="m-0 text-3xl font-semibold text-text-base">
@@ -1056,7 +1011,7 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 					</div>
 
 					<div class="mb-8">
-						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">WIP over time</h2>
+						<SectionHeading metricId="wip" />
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 							<WipChart data={metrics.wipOverTime} />
 						</div>
@@ -1072,16 +1027,10 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 					)}
 
 					<div class="mb-8">
-						<h2
-							class="m-0 mb-1 text-base font-semibold text-text-base"
-							title="Age since claim for every currently open in_progress/in_review issue, against this window's cycle-time p50/p90 — stuck items show up before they finish and skew the percentiles"
-						>
-							Aging WIP
-						</h2>
-						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-							Age since claim for every currently open issue, against this window's cycle-time
-							p50/p90 — stuck items show up before they finish and skew the percentiles
-						</p>
+						<SectionHeading
+							metricId="aging-wip"
+							caption="Age since claim for every currently open issue, against this window's cycle-time p50/p90 — stuck items show up before they finish and skew the percentiles"
+						/>
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 							<AgingWipScatter
 								data={metrics.agingWip}
