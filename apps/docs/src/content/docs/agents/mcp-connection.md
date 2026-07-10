@@ -16,6 +16,8 @@ Connect Claude Code (or any MCP-compatible agent) to your projektor instance.
   - **Development** - use the bootstrap endpoint (see §2 below). No login required; needs `BOOTSTRAP_SECRET`.
   - **Production** - log in through the UI → Settings → Tokens → "New token"; or mint one via the REST API (see §3).
 
+Using the Claude Code CLI? Continue to §2/§3 below. Using the Claude app (desktop or web) instead? Skip to [§3b. Connect the Claude app](#3b-connect-the-claude-app).
+
 ---
 
 ## 2. One-shot connect (dev / bootstrap)
@@ -75,6 +77,26 @@ curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
 ```
 
 `scopes` must be `["read"]`, `["write"]`, or `["read", "write"]`. `expiresAt` is optional (unix seconds).
+
+---
+
+## 3b. Connect the Claude app
+
+The Claude app (desktop and web, at claude.ai) doesn't use the `claude mcp add` CLI command - it connects to remote MCP servers through **Connectors** in Settings.
+
+<!-- VERIFY: exact navigation path/labels below, against the current live Claude app -->
+1. Open **Settings → Connectors** in the Claude app.
+2. Choose **Add custom connector** (sometimes labeled "Add more").
+3. **Server URL:** paste `https://<your-worker>.workers.dev/mcp/<workspace-uuid>` - the same URL shape used in §3, with the workspace UUID (not the slug) in the path.
+4. **Headers:** the connector form lets you add custom HTTP headers sent with every request. Add:
+   - `Authorization: Bearer pk_<64 hex chars>`
+   - `X-Workspace-Slug: <slug>`
+   - If the instance is behind Cloudflare Access, also add the `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers described in [§7](#7-cloudflare-access-note).
+5. Save the connector. The Claude app will call `initialize` against the URL to confirm the connection before making tools available in a conversation.
+
+For minting the `pk_...` token itself, use the same Settings → Tokens → "New token" flow described in [§1](#1-prerequisites) / [§3](#3-manual-connect-production) - there's nothing app-specific about token creation.
+
+<!-- VERIFY: whether the Claude app's custom-connector form currently supports arbitrary custom headers (as described above) or is limited to OAuth-based remote MCP servers. If custom headers aren't supported for your Claude app version, the CLI path (§2/§3) is the reliable option for header-based auth. -->
 
 ---
 
