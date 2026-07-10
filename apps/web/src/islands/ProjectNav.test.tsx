@@ -63,4 +63,23 @@ describe("ProjectNav", () => {
 		await screen.findByText("Projektor");
 		expect(document.title).toBe("unchanged");
 	});
+
+	// jsdom doesn't compute layout, so this only proves the compacting classes are
+	// present at render time — not that they actually shrink the nav in a real
+	// viewport. See PROJ-346; real-viewport confirmation happens separately.
+	it("applies compact-mobile and horizontal-scroll classes to the header and tab row", async () => {
+		window.history.pushState({}, "", "/issues?id=p1");
+		mockFetchProject(PROJECT);
+		render(<ProjectNav />);
+		await screen.findByText("Projektor");
+
+		const nav = screen.getByRole("navigation", { name: "Project sections" });
+		expect(nav.className).toContain("max-sm:overflow-x-auto");
+
+		const issuesTab = screen.getByRole("link", { name: "Issues" });
+		expect(issuesTab.className).toContain("max-sm:px-2.5");
+
+		const heading = screen.getByText("Projektor");
+		expect(heading.className).toContain("max-sm:text-[0.8125rem]");
+	});
 });
