@@ -615,5 +615,5 @@ describe("PROJ-197: batchLoadCustomFields is workspace-scoped", () => {
 			expect(loaded[issueIds[i]]).toHaveLength(1);
 			expect(loaded[issueIds[i]][0].value).toBe(String(i));
 		}
-	});
+	}, 15000); // seeds 95 issues sequentially; coverage instrumentation pushes this past the 5s default
 });
