@@ -6,15 +6,19 @@
 	"types": "./src/index.ts",
 	"scripts": {
 		"generate": "drizzle-kit generate",
-		"type-check": "tsc --noEmit"
+		"type-check": "tsc --noEmit",
+		"test": "cross-env NODE_OPTIONS=--experimental-sqlite vitest run"
 	},
 	"dependencies": {
-		"drizzle-orm": "^0.33.0",
-		"@projektor/types": "workspace:*"
+		"@projektor/types": "workspace:*",
+		"drizzle-orm": "^0.33.0"
 	},
 	"devDependencies": {
 		"@cloudflare/workers-types": "^4.20240924.0",
+		"@types/node": "^22.10.0",
+		"cross-env": "^10.1.0",
 		"drizzle-kit": "^0.24.0",
-		"typescript": "^5.5.0"
+		"typescript": "^5.5.0",
+		"vitest": "^4.1.9"
 	}
 }

@@ -9,6 +9,7 @@
     "deploy": "wrangler deploy",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "type-check": "tsc --noEmit",
     "gen:catalog": "tsx scripts/gen-mcp-catalog.ts",
     "gen:workflow-spec": "tsx scripts/gen-workflow-spec.ts"
@@ -24,6 +25,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.20",
     "@cloudflare/workers-types": "^4.20240924.0",
+    "@vitest/coverage-istanbul": "^4.1.9",
     "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "vitest": "^4.1.9",

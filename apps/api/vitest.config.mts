@@ -39,6 +39,23 @@ export default defineConfig({
   ],
   test: {
     setupFiles: ['./src/test/setup.ts'],
+    // workerd has no node:inspector, so the v8 coverage provider can't attach —
+    // use istanbul (source instrumentation) instead, per @cloudflare/vitest-pool-workers.
+    coverage: {
+      provider: 'istanbul',
+      reporter: ['text', 'html'],
+      include: ['src/**/*.ts'],
+      exclude: ['src/test/**'],
+      // Ratchet target, not a ceiling — set a bit below the measured baseline
+      // (~89% stmts, ~79% branches, ~91% functions, ~92% lines as of PROJ-223)
+      // so this gates regressions without blocking on day one.
+      thresholds: {
+        statements: 85,
+        branches: 75,
+        functions: 85,
+        lines: 88,
+      },
+    },
     // workerd's unhandled-rejection detector spuriously flags the domain
     // ServiceErrors that MCP tool handlers throw and routes/mcp.ts catches: the
     // `async handler()` wrapper adds a promise-adoption hop the detector races.

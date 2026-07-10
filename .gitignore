@@ -14,3 +14,4 @@ dist/
 .playwright-mcp/
 dev-server.log
 .cofferdam/cache/
+coverage/
