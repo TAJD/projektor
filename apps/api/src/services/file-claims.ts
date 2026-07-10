@@ -68,6 +68,9 @@ async function assertNoConflicts(
 	}
 ) {
 	const { workspaceId, issueId, agentId, paths, claimsByPath, now } = params;
+	// Record every contended path (rejection is all-or-nothing, but each simultaneously
+	// held path is its own contention signal for the heat map), then throw naming the first.
+	let firstConflict: { path: string; issueId: string; agentId: string | null } | undefined;
 	for (const path of paths) {
 		const existing = claimsByPath.get(path);
 		if (existing) {
@@ -82,10 +85,13 @@ async function assertNoConflicts(
 				forced: 0,
 				occurredAt: now,
 			});
-			throw new ConflictError(
-				`Path "${path}" is held by issue ${existing.issueId}${existing.agentId ? ` (agent ${existing.agentId})` : ""}`
-			);
+			if (!firstConflict) firstConflict = { path, ...existing };
 		}
+	}
+	if (firstConflict) {
+		throw new ConflictError(
+			`Path "${firstConflict.path}" is held by issue ${firstConflict.issueId}${firstConflict.agentId ? ` (agent ${firstConflict.agentId})` : ""}`
+		);
 	}
 }
 

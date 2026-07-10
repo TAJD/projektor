@@ -249,6 +249,27 @@ describe("File Claims API", () => {
 		expect(row.holding_issue_id).toBe(issueId);
 	});
 
+	// PROJ-337: rejecting a call where multiple paths are held records one row per contended path
+	it("PROJ-337: rejecting a multi-path claim records one row per contended path", async () => {
+		await claimFiles({ issueId, paths: ["src/multi-a.ts", "src/multi-b.ts"] });
+
+		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Multi rejected" });
+		const res = await claimFiles({
+			issueId: issue2.id,
+			paths: ["src/multi-a.ts", "src/multi-b.ts"],
+		});
+		expect(res.status).toBe(409);
+
+		const rows = await env.DB.prepare(
+			"SELECT path FROM claim_conflicts WHERE workspace_id = ? AND rejected_issue_id = ? AND forced = 0"
+		)
+			.bind(workspaceId, issue2.id)
+			.all();
+		expect(rows.results).toHaveLength(2);
+		const paths = rows.results.map((r) => (r as Record<string, unknown>).path).sort();
+		expect(paths).toEqual(["src/multi-a.ts", "src/multi-b.ts"]);
+	});
+
 	// PROJ-337: force:true override inserts a claim_conflicts row (forced=1)
 	it("PROJ-337: force:true override inserts a claim_conflicts row with forced=1", async () => {
 		await claimFiles({ issueId, paths: ["src/force-log.ts"] });
