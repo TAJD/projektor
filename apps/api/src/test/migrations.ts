@@ -33,6 +33,7 @@ import m0029 from "../../../../packages/db/migrations/0029_issue_review_timestam
 import m0030 from "../../../../packages/db/migrations/0030_backfill_review_timestamp.sql?raw";
 import m0031 from "../../../../packages/db/migrations/0031_factory_health.sql?raw";
 import m0032 from "../../../../packages/db/migrations/0032_claim_conflicts.sql?raw";
+import m0033 from "../../../../packages/db/migrations/0033_custom_field_is_internal.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -68,4 +69,5 @@ export const MIGRATIONS = [
 	m0030,
 	m0031,
 	m0032,
+	m0033,
 ];

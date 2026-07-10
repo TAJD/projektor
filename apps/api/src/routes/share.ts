@@ -1,10 +1,10 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
-import { createShareToken, getSharedIssue } from "../services/share";
+import { createShareToken, getSharedIssue, revokeShareToken } from "../services/share";
 import { ctxFromHono } from "../services/types";
 
-// Authenticated router — POST /api/issues/:id/share
+// Authenticated router — POST/DELETE /api/issues/:id/share
 const authedRouter = new Hono<HonoEnv>();
 
 authedRouter.post("/:id/share", async (c) => {
@@ -13,6 +13,17 @@ authedRouter.post("/:id/share", async (c) => {
 	try {
 		const result = await createShareToken(ctx, issueId);
 		return c.json(result, 201);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+authedRouter.delete("/:id/share", async (c) => {
+	const ctx = ctxFromHono(c);
+	const issueId = c.req.param("id");
+	try {
+		await revokeShareToken(ctx, issueId);
+		return c.json({ ok: true });
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
