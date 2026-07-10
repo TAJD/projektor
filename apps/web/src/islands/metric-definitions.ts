@@ -20,7 +20,8 @@ export type MetricId =
 	| "lease-expiries"
 	| "abandoned-claims"
 	| "gate-rejections"
-	| "code-heatmap";
+	| "code-heatmap"
+	| "code-heatmap-contention";
 
 export interface MetricDefinition {
 	label: string;
@@ -129,5 +130,12 @@ export const METRIC_DEFINITIONS: Record<MetricId, MetricDefinition> = {
 		definition: "Which parts of the codebase are seeing the most work, by file claims.",
 		computation:
 			"Directories/paths sized by distinct issues that claimed files there, from file-claim history in the window.",
+	},
+	"code-heatmap-contention": {
+		label: "Where the fleet queues up",
+		definition:
+			"Which parts of the codebase cause agents to collide over file claims, blocking parallelism.",
+		computation:
+			"Directories/paths sized by distinct issues whose claim_files attempt was rejected or overridden there, in the window.",
 	},
 };

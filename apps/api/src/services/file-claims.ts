@@ -56,17 +56,42 @@ async function loadActiveClaimsByPath(
 	return new Map(activeClaims.map((c) => [c.path, c]));
 }
 
-function assertNoConflicts(
-	paths: string[],
-	claimsByPath: Map<string, { issueId: string; agentId: string | null }>
+async function assertNoConflicts(
+	orm: ReturnType<typeof drizzle>,
+	params: {
+		workspaceId: string;
+		issueId: string;
+		agentId: string | undefined;
+		paths: string[];
+		claimsByPath: Map<string, { issueId: string; agentId: string | null }>;
+		now: number;
+	}
 ) {
+	const { workspaceId, issueId, agentId, paths, claimsByPath, now } = params;
+	// Record every contended path (rejection is all-or-nothing, but each simultaneously
+	// held path is its own contention signal for the heat map), then throw naming the first.
+	let firstConflict: { path: string; issueId: string; agentId: string | null } | undefined;
 	for (const path of paths) {
 		const existing = claimsByPath.get(path);
 		if (existing) {
-			throw new ConflictError(
-				`Path "${path}" is held by issue ${existing.issueId}${existing.agentId ? ` (agent ${existing.agentId})` : ""}`
-			);
+			await orm.insert(schema.claimConflicts).values({
+				id: crypto.randomUUID(),
+				workspaceId,
+				path,
+				rejectedIssueId: issueId,
+				rejectedAgentId: agentId ?? null,
+				holdingIssueId: existing.issueId,
+				holdingAgentId: existing.agentId,
+				forced: 0,
+				occurredAt: now,
+			});
+			if (!firstConflict) firstConflict = { path, ...existing };
 		}
+	}
+	if (firstConflict) {
+		throw new ConflictError(
+			`Path "${firstConflict.path}" is held by issue ${firstConflict.issueId}${firstConflict.agentId ? ` (agent ${firstConflict.agentId})` : ""}`
+		);
 	}
 }
 
@@ -74,6 +99,7 @@ async function overrideConflictingClaims(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
 	params: {
+		workspaceId: string;
 		issueId: string;
 		agentId: string | undefined;
 		paths: string[];
@@ -81,7 +107,7 @@ async function overrideConflictingClaims(
 		now: number;
 	}
 ) {
-	const { issueId, agentId, paths, claimsByPath, now } = params;
+	const { workspaceId, issueId, agentId, paths, claimsByPath, now } = params;
 	const overridden: (typeof schema.issueFileClaims.$inferSelect)[] = [];
 	for (const path of paths) {
 		const existing = claimsByPath.get(path);
@@ -95,6 +121,17 @@ async function overrideConflictingClaims(
 				.update(schema.issueFileClaims)
 				.set({ releasedAt: now, releaseReason: "overridden" })
 				.where(eq(schema.issueFileClaims.id, existing.id));
+			await orm.insert(schema.claimConflicts).values({
+				id: crypto.randomUUID(),
+				workspaceId,
+				path,
+				rejectedIssueId: issueId,
+				rejectedAgentId: agentId ?? null,
+				holdingIssueId: existing.issueId,
+				holdingAgentId: existing.agentId,
+				forced: 1,
+				occurredAt: now,
+			});
 			overridden.push({ ...existing, releasedAt: now, releaseReason: "overridden" });
 		}
 	}
@@ -150,14 +187,22 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	// Pre-check all paths for active claims — all-or-nothing on conflict.
 	const claimsByPath = await loadActiveClaimsByPath(orm, ctx.workspaceId, paths);
 
-	if (!force) {
-		assertNoConflicts(paths, claimsByPath);
-	}
-
 	const now = Math.floor(Date.now() / 1000);
+
+	if (!force) {
+		await assertNoConflicts(orm, {
+			workspaceId: ctx.workspaceId,
+			issueId,
+			agentId: agentId ?? undefined,
+			paths,
+			claimsByPath,
+			now,
+		});
+	}
 
 	// Release conflicting claims when force is true, then insert new ones
 	const overridden = await overrideConflictingClaims(ctx, orm, {
+		workspaceId: ctx.workspaceId,
 		issueId,
 		agentId: agentId ?? undefined,
 		paths,

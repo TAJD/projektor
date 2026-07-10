@@ -12,7 +12,8 @@ export const codeHeatmapTools: MCPTool[] = [
 			"released ones). Each entry's `path` is the drill-down cursor: re-call with `prefix` set " +
 			"to it to see what's under a directory; `isLeaf` marks an entry that is itself a claimed " +
 			"file path, not a directory. Defaults to the current ISO week plus the preceding 5 weeks, " +
-			"matching get_flow_metrics.",
+			"matching get_flow_metrics. `mode` switches sizing between claim volume and claim " +
+			"contention (claim_conflicts).",
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],
@@ -29,6 +30,14 @@ export const codeHeatmapTools: MCPTool[] = [
 				prefix: {
 					type: "string",
 					description: "Directory path to drill into; omit for the top-level segments",
+				},
+				mode: {
+					type: "string",
+					enum: ["claims", "contention"],
+					description:
+						'"claims" (default) sizes by file-claim volume; "contention" sizes by ' +
+						"claim_conflicts — rejected/overridden claimFiles attempts, i.e. where the fleet " +
+						"queued up.",
 				},
 			},
 		},

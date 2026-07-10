@@ -12,12 +12,14 @@ router.get("/:id/code-heatmap", async (c) => {
 		const since = c.req.query("since");
 		const until = c.req.query("until");
 		const prefix = c.req.query("prefix");
+		const mode = c.req.query("mode");
 		return c.json(
 			await getCodeHeatmap(ctx, {
 				projectId: c.req.param("id"),
 				since: since ? Number(since) : undefined,
 				until: until ? Number(until) : undefined,
 				prefix,
+				mode,
 			})
 		);
 	} catch (e) {

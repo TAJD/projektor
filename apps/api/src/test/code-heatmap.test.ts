@@ -16,6 +16,20 @@ interface CodeHeatmapResponse {
 	entries: CodeHeatmapEntry[];
 }
 
+interface ContentionHeatmapEntry {
+	path: string;
+	segment: string;
+	isLeaf: boolean;
+	distinctRejectedIssueCount: number;
+	conflictCount: number;
+}
+
+interface ContentionHeatmapResponse {
+	prefix: string;
+	totalDistinctIssues: number;
+	entries: ContentionHeatmapEntry[];
+}
+
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
 describe("Code heatmap (PROJ-332)", () => {
 	let token: string;
@@ -37,6 +51,28 @@ describe("Code heatmap (PROJ-332)", () => {
 			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, released_at) VALUES (?, ?, ?, NULL, ?, ?, ?)"
 		)
 			.bind(crypto.randomUUID(), workspaceId, issueId, path, claimedAt, releasedAt ?? null)
+			.run();
+	}
+
+	async function seedConflict(
+		rejectedIssueId: string,
+		holdingIssueId: string,
+		path: string,
+		occurredAt: number,
+		forced = 0
+	) {
+		await env.DB.prepare(
+			"INSERT INTO claim_conflicts (id, workspace_id, path, rejected_issue_id, rejected_agent_id, holding_issue_id, holding_agent_id, forced, occurred_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)"
+		)
+			.bind(
+				crypto.randomUUID(),
+				workspaceId,
+				path,
+				rejectedIssueId,
+				holdingIssueId,
+				forced,
+				occurredAt
+			)
 			.run();
 	}
 
@@ -170,5 +206,123 @@ describe("Code heatmap (PROJ-332)", () => {
 		const mcpBody = JSON.parse(mcpJson.result.content[0].text);
 
 		expect(mcpBody).toEqual(restBody);
+	});
+
+	describe("contention mode (PROJ-338)", () => {
+		it("aggregates distinct rejected issues per top-level directory within the window", async () => {
+			const now = Math.floor(Date.now() / 1000);
+			const holdingIssue = await seedIssue(workspaceId, projectId, userId, { title: "Holder" });
+			const apiIssue = await seedIssue(workspaceId, projectId, userId, { title: "API rejected" });
+			const apiIssue2 = await seedIssue(workspaceId, projectId, userId, {
+				title: "More API rejected",
+			});
+			const webIssue = await seedIssue(workspaceId, projectId, userId, { title: "Web rejected" });
+			const oldIssue = await seedIssue(workspaceId, projectId, userId, { title: "Old rejected" });
+
+			await seedConflict(
+				apiIssue.id,
+				holdingIssue.id,
+				"apps/api/src/services/flow-metrics.ts",
+				now - 1000
+			);
+			await seedConflict(
+				apiIssue.id,
+				holdingIssue.id,
+				"apps/api/src/services/code-heatmap.ts",
+				now - 900
+			);
+			await seedConflict(
+				apiIssue2.id,
+				holdingIssue.id,
+				"apps/api/src/routes/code-heatmap.ts",
+				now - 800
+			);
+			await seedConflict(
+				webIssue.id,
+				holdingIssue.id,
+				"apps/web/src/islands/MetricsDashboard.tsx",
+				now - 700
+			);
+			// Outside the requested window — must not count.
+			await seedConflict(
+				oldIssue.id,
+				holdingIssue.id,
+				"apps/api/src/routes/old.ts",
+				now - 10 * 86400
+			);
+
+			const res = await getHeatmap({
+				since: String(now - 3600),
+				until: String(now),
+				mode: "contention",
+			});
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as ContentionHeatmapResponse;
+
+			expect(body.prefix).toBe("");
+			expect(body.totalDistinctIssues).toBe(3);
+
+			const apps = body.entries.find((e) => e.path === "apps");
+			expect(apps).toBeDefined();
+			expect(apps?.isLeaf).toBe(false);
+			expect(apps?.distinctRejectedIssueCount).toBe(3);
+			expect(apps?.conflictCount).toBe(4);
+		});
+
+		it("drills down via prefix, one segment at a time", async () => {
+			const now = Math.floor(Date.now() / 1000);
+			const holdingIssue = await seedIssue(workspaceId, projectId, userId, { title: "Holder" });
+			const issueA = await seedIssue(workspaceId, projectId, userId, { title: "A" });
+			const issueB = await seedIssue(workspaceId, projectId, userId, { title: "B" });
+
+			await seedConflict(
+				issueA.id,
+				holdingIssue.id,
+				"apps/api/src/services/flow-metrics.ts",
+				now - 100
+			);
+			await seedConflict(
+				issueB.id,
+				holdingIssue.id,
+				"apps/api/src/services/code-heatmap.ts",
+				now - 90
+			);
+			await seedConflict(
+				issueA.id,
+				holdingIssue.id,
+				"apps/web/src/islands/MetricsDashboard.tsx",
+				now - 80
+			);
+
+			const apiRes = await getHeatmap({
+				since: String(now - 3600),
+				until: String(now),
+				prefix: "apps/api/src/services",
+				mode: "contention",
+			});
+			expect(apiRes.status).toBe(200);
+			const apiBody = (await apiRes.json()) as ContentionHeatmapResponse;
+			expect(apiBody.prefix).toBe("apps/api/src/services");
+			const paths = apiBody.entries.map((e) => e.path).sort();
+			expect(paths).toEqual([
+				"apps/api/src/services/code-heatmap.ts",
+				"apps/api/src/services/flow-metrics.ts",
+			]);
+			expect(apiBody.entries.every((e) => e.isLeaf)).toBe(true);
+			expect(apiBody.entries.every((e) => e.distinctRejectedIssueCount === 1)).toBe(true);
+		});
+
+		it("returns an empty entries array when no conflicts exist in the workspace", async () => {
+			const now = Math.floor(Date.now() / 1000);
+			const res = await getHeatmap({
+				since: String(now - 3600),
+				until: String(now),
+				mode: "contention",
+			});
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as ContentionHeatmapResponse;
+			expect(body.entries).toEqual([]);
+			expect(body.totalDistinctIssues).toBe(0);
+		});
 	});
 });
