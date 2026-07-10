@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { ListIssuesSchema } from "../schemas/issues";
 import {
 	authHeaders,
 	seedCustomFieldDef,
@@ -1318,6 +1319,74 @@ describe("Issues MCP — typeId", () => {
 		};
 		expect(page.items).toHaveLength(1);
 		expect(page.items[0].title).toBe("Bug issue");
+	});
+});
+
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
+describe("Issues MCP — list_issues filter parity (PROJ-243)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture({ role: "owner" });
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+		const project = await seedProject(workspaceId);
+		projectId = project.id;
+	});
+
+	async function mcpCall(params: unknown) {
+		const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+			method: "POST",
+			headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }),
+		});
+		return res.json() as Promise<{
+			result?: { content: Array<{ text: string }> };
+			error?: { message: string };
+		}>;
+	}
+
+	it("advertises all ListIssuesSchema optional filter keys in its inputSchema", async () => {
+		const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+			method: "POST",
+			headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		const body = (await res.json()) as {
+			result: {
+				tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
+			};
+		};
+		const listIssuesTool = body.result.tools.find((t) => t.name === "list_issues");
+		expect(listIssuesTool).toBeDefined();
+		const advertised = Object.keys(listIssuesTool!.inputSchema.properties);
+		for (const key of Object.keys(ListIssuesSchema.shape)) {
+			expect(advertised).toContain(key);
+		}
+	});
+
+	it("respects the noParent filter", async () => {
+		const parentResp = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Parent issue" },
+		});
+		const { id: parentId } = JSON.parse(parentResp.result!.content[0].text) as { id: string };
+		await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Child issue", parentId },
+		});
+
+		const listResp = await mcpCall({ name: "list_issues", arguments: { noParent: true } });
+		expect(listResp.error).toBeUndefined();
+		const page = JSON.parse(listResp.result!.content[0].text) as {
+			items: Array<{ title: string }>;
+		};
+		expect(page.items).toHaveLength(1);
+		expect(page.items[0].title).toBe("Parent issue");
 	});
 });
 

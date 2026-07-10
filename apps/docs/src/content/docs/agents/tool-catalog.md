@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**80 tools across 19 domains.**
+**81 tools across 19 domains.**
 
 ## Coordination
 
@@ -62,6 +62,7 @@ running server.
 | `list_workspaces` | List all workspaces the authenticated user belongs to, with their role in each |
 | `create_workspace` | Create a new workspace and add the caller as owner. Seeds default task types, statuses, and custom fields. |
 | `delete_workspace` | Permanently delete a workspace. Owner-only. The default workspace cannot be deleted. All projects must be removed first. |
+| `update_workspace` | Rename the current workspace. Admin+ only. |
 | `list_members` | List all members of the current workspace with their roles |
 | `invite_member` | Invite a user to the workspace by email. Admin+ only. Creates the user record if they do not exist yet. |
 | `remove_member` | Remove a member from the workspace. Owner only. Cannot remove yourself. |

@@ -376,3 +376,59 @@ describe("list_project_activity MCP tool", () => {
 		}
 	});
 });
+
+// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
+describe("GET /api/projects/:id/activity (PROJ-245)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+	let userId: string;
+	let headers: Record<string, string>;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture());
+		headers = authHeaders(token, slug);
+	});
+
+	it("returns empty array when project has no activity", async () => {
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/activity`, {
+			headers,
+		});
+		expect(res.status).toBe(200);
+		const events = (await res.json()) as unknown[];
+		expect(events).toEqual([]);
+	});
+
+	it("returns issue_created events, matching the MCP tool's behavior", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "REST activity issue" });
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/activity`, {
+			headers,
+		});
+		expect(res.status).toBe(200);
+		const events = (await res.json()) as Array<{ type: string; summary: string }>;
+		const created = events.filter((e) => e.type === "issue_created");
+		expect(created).toHaveLength(1);
+		expect(created[0].summary).toBe("REST activity issue");
+	});
+
+	it("respects the limit query param", async () => {
+		for (let i = 0; i < 5; i++) {
+			await seedIssue(workspaceId, projectId, userId, { title: `Issue ${i}` });
+		}
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/activity?limit=2`, {
+			headers,
+		});
+		const events = (await res.json()) as unknown[];
+		expect(events).toHaveLength(2);
+	});
+
+	it("returns 404 for an unknown project", async () => {
+		const res = await SELF.fetch(`http://localhost/api/projects/${crypto.randomUUID()}/activity`, {
+			headers,
+		});
+		expect(res.status).toBe(404);
+	});
+});
