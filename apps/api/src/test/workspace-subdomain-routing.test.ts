@@ -34,16 +34,15 @@ describe("workspace subdomain routing (WORKSPACE_SUBDOMAIN_ROUTING)", () => {
 		expect(res.status).toBe(200);
 	});
 
+	// Uses a REST route: PROJ-348 gives the /mcp/<id> route a path-UUID fallback, so
+	// the "no header → 400" contract now only holds for non-MCP routes.
 	it("flag off + no header: clean 400 naming the missing header, Host subdomain is ignored", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch(`http://localhost/mcp/${fixture.workspace.id}`, {
-			method: "POST",
+		const res = await SELF.fetch("http://localhost/api/task-types", {
 			headers: {
 				Authorization: `Bearer ${fixture.token}`,
 				Host: `${fixture.workspace.slug}.example.com`,
-				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
 		});
 		expect(res.status).toBe(400);
 		const body = (await res.json()) as { error: string };
@@ -83,14 +82,11 @@ describe("workspace subdomain routing (WORKSPACE_SUBDOMAIN_ROUTING)", () => {
 	it("flag off + no header + a resolvable subdomain warns before the 400", async () => {
 		const fixture = await seedFixture();
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-		const res = await SELF.fetch(`http://localhost/mcp/${fixture.workspace.id}`, {
-			method: "POST",
+		const res = await SELF.fetch("http://localhost/api/task-types", {
 			headers: {
 				Authorization: `Bearer ${fixture.token}`,
 				Host: `${fixture.workspace.slug}.example.com`,
-				"Content-Type": "application/json",
 			},
-			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
 		});
 		expect(res.status).toBe(400);
 		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(fixture.workspace.slug));

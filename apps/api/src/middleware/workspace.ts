@@ -40,6 +40,14 @@ async function warnIfIgnoredSubdomain(
 	}
 }
 
+// PROJ-348: the MCP endpoint (POST /mcp/<workspaceId>) carries the workspace UUID
+// in its path, so it can resolve the workspace without an X-Workspace-Slug header.
+// The Claude app's Connectors UI restricts custom request headers to a fixed
+// allowlist that excludes X-Workspace-Slug, so header-only resolution blocks it.
+function mcpWorkspaceIdFromPath(path: string): string | undefined {
+	return /^\/mcp\/([^/]+)$/.exec(path)?.[1];
+}
+
 export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
 	// Workspace resolved from the X-Workspace-Slug header, or (opt-in) the Host header's
 	// subdomain. See WORKSPACE_SUBDOMAIN_ROUTING in packages/types/src/env.ts. (PROJ-267)
@@ -47,7 +55,12 @@ export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
 	const routingEnabled = subdomainRoutingEnabled(c.env.WORKSPACE_SUBDOMAIN_ROUTING);
 	const slug = headerSlug ?? (routingEnabled ? c.req.header("host")?.split(".")[0] : undefined);
 
-	if (!slug) {
+	// PROJ-348: fall back to the MCP path's workspace UUID when no slug was resolved.
+	// The token-workspace-scope check below is unchanged and remains the security
+	// boundary — a token minted for another workspace is still rejected here.
+	const mcpWorkspaceId = slug ? undefined : mcpWorkspaceIdFromPath(c.req.path);
+
+	if (!slug && !mcpWorkspaceId) {
 		await warnIfIgnoredSubdomain(c, headerSlug, routingEnabled);
 		return c.json(
 			{
@@ -59,9 +72,13 @@ export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
 		);
 	}
 
-	const workspace = await c.env.DB.prepare("SELECT id, name, slug FROM workspaces WHERE slug = ?")
-		.bind(slug)
-		.first<{ id: string; name: string; slug: string }>();
+	const workspace = mcpWorkspaceId
+		? await c.env.DB.prepare("SELECT id, name, slug FROM workspaces WHERE id = ?")
+				.bind(mcpWorkspaceId)
+				.first<{ id: string; name: string; slug: string }>()
+		: await c.env.DB.prepare("SELECT id, name, slug FROM workspaces WHERE slug = ?")
+				.bind(slug)
+				.first<{ id: string; name: string; slug: string }>();
 
 	if (!workspace) return c.json({ error: "Workspace not found" }, 404);
 

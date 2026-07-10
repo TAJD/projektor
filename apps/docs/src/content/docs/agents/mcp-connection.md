@@ -89,7 +89,7 @@ The Claude app (desktop and web, at claude.ai) doesn't use the `claude mcp add` 
 2. **Server URL:** paste `https://<your-worker>.workers.dev/mcp/<workspace-uuid>` - the same URL shape used in §3, with the workspace UUID (not the slug) in the path.
 3. **Headers:** open the **Request headers** section of the dialog and add:
    - `Authorization` → `Bearer pk_<64 hex chars>` (enter the scheme yourself - Claude sends the value verbatim, it does not prepend `Bearer`).
-   - `X-Workspace-Slug` → `<slug>`
+   - **No `X-Workspace-Slug` needed.** The MCP endpoint resolves the workspace from the UUID already in the server URL's path, so the app connects with the `Authorization` header alone (PROJ-348). The token stays workspace-scoped - a token minted for another workspace is still rejected regardless of the path.
    - If the instance is behind Cloudflare Access, also add `CF-Access-Client-Id` / `CF-Access-Client-Secret` as described in [§7](#7-cloudflare-access-note).
 4. Click **Add**. Claude calls `initialize` against the URL to confirm the connection before tools become available in a conversation.
 
@@ -98,7 +98,7 @@ For minting the `pk_...` token itself, use the same Settings → Tokens → "New
 :::caution
 **Request headers are a beta feature**, rolled out gradually - if you don't see a **Request headers** section in the dialog, contact Anthropic to request access.
 
-Header *names* are also restricted to an allowlist (`authorization`, `x-api-key`, `x-auth-token`, and similar standard names) - Claude rejects arbitrary custom header names for security reasons. `Authorization` is allowlisted, but **`X-Workspace-Slug` and the `CF-Access-Client-*` headers are non-standard names and may be rejected** unless Anthropic has added them to the allowlist for your organization. If the connector fails with an authorization error after adding these headers, ask your Anthropic representative to allowlist them, or use the Claude Code CLI path (§2/§3) instead, which sends arbitrary headers with no such restriction.
+Header *names* are restricted to an allowlist (`authorization`, `x-api-key`, `x-auth-token`, and similar standard names) - Claude rejects arbitrary custom header names for security reasons. `Authorization` is allowlisted, so the standard connection works out of the box. The one exception is a Cloudflare Access-protected instance: the `CF-Access-Client-*` header names are non-standard and may be rejected unless Anthropic has added them to the allowlist for your organization. If the connector fails with a `403` on such an instance, ask your Anthropic representative to allowlist those two headers, or use the Claude Code CLI path (§2/§3) instead, which sends arbitrary headers with no such restriction.
 :::
 
 ---
@@ -203,9 +203,15 @@ Content-Type: application/json
 | Header | Value |
 |--------|-------|
 | `Authorization` | `Bearer pk_<64 hex chars>` |
-| `X-Workspace-Slug` | `<slug>` |
+| `X-Workspace-Slug` | `<slug>` (optional on the MCP route - see below) |
 
 The token is workspace-scoped - a token from workspace A is rejected for workspace B.
+
+`X-Workspace-Slug` is **optional for `POST /mcp/<workspaceId>`**: when it's absent, the
+workspace is resolved from the UUID in the path (PROJ-348, so the Claude app can connect
+with only the `Authorization` header). Every other endpoint still requires it. The
+token-workspace scope check is unchanged either way - it, not the header, is the security
+boundary.
 
 ### initialize
 
@@ -249,6 +255,6 @@ Error codes: `-32600` invalid request, `-32601` method/tool not found, `-32602` 
 These are the load-bearing shapes the Worker enforces - verified against the source:
 
 - **MCP URL shape:** `POST /mcp/<workspaceId>` - UUID in the path, slug only in the header.
-- **Required headers:** both `Authorization` and `X-Workspace-Slug` must be present on every call.
+- **Required headers:** `Authorization` is always required. `X-Workspace-Slug` is required on every non-MCP endpoint; on `POST /mcp/<workspaceId>` it is optional because the path UUID resolves the workspace (PROJ-348).
 - **Token prefix:** `pk_` (64 hex chars); verified via SHA-256 hash lookup against D1.
 - **CORS:** both headers are in the Worker's explicit `allowHeaders` list.
