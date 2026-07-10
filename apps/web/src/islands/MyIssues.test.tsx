@@ -123,7 +123,10 @@ describe("MyIssues — loading and error states", () => {
 			vi.fn().mockImplementation((url: string) => {
 				const u = String(url);
 				if (u.includes("/auth/me"))
-					return Promise.resolve({ ok: true, json: () => Promise.resolve({ user: { id: USER_ID } }) });
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve({ user: { id: USER_ID } }),
+					});
 				return Promise.reject(new Error("boom"));
 			})
 		);
@@ -162,7 +165,9 @@ describe("MyIssues — cross-project fetch and grouping", () => {
 		render(<MyIssues />);
 		await waitForLoaded();
 
-		await waitFor(() => expect(screen.getAllByText("Open issue in Alpha").length).toBeGreaterThan(0));
+		await waitFor(() =>
+			expect(screen.getAllByText("Open issue in Alpha").length).toBeGreaterThan(0)
+		);
 		expect(screen.queryAllByText("Done issue in Alpha")).toHaveLength(0);
 	});
 
