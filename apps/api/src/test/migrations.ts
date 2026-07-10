@@ -31,6 +31,7 @@ import m0027 from "../../../../packages/db/migrations/0027_user_groups.sql?raw";
 import m0028 from "../../../../packages/db/migrations/0028_downgrade_viewer_grants.sql?raw";
 import m0029 from "../../../../packages/db/migrations/0029_issue_review_timestamp.sql?raw";
 import m0030 from "../../../../packages/db/migrations/0030_backfill_review_timestamp.sql?raw";
+import m0031 from "../../../../packages/db/migrations/0031_factory_health.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -64,4 +65,5 @@ export const MIGRATIONS = [
 	m0028,
 	m0029,
 	m0030,
+	m0031,
 ];

@@ -200,3 +200,27 @@ export const activity = sqliteTable(
 		entityIdx: index("activity_entity_idx").on(t.entityType, t.entityId),
 	})
 );
+
+// PROJ-334: gate rejections — an event log of in_review -> in_progress bounces
+// specifically (narrower than the aggregate issues.review_bounce_count, which also
+// counts review -> cancelled). A timestamped event, unlike the aggregate counter, so
+// the factory-health tile can count rejections within an arbitrary date window.
+export const issueGateRejections = sqliteTable(
+	"issue_gate_rejections",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		issueId: text("issue_id")
+			.notNull()
+			.references(() => issues.id, { onDelete: "cascade" }),
+		occurredAt: integer("occurred_at").notNull(),
+	},
+	(t) => ({
+		wsOccurredIdx: index("idx_issue_gate_rejections_workspace_occurred").on(
+			t.workspaceId,
+			t.occurredAt
+		),
+	})
+);

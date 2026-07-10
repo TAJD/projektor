@@ -49,6 +49,13 @@ interface FlowMetrics {
 	flowEfficiency: Distribution;
 	flowEfficiencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
 	agingWip: Array<{ id: string; status: "in_progress" | "in_review"; ageSeconds: number }>;
+	// PROJ-334: factory health — fault signals for the machinery itself, for the
+	// selected window.
+	factoryHealth: {
+		leaseExpiries: number;
+		abandonedClaims: number;
+		gateRejections: number;
+	};
 }
 
 interface Props {
@@ -299,6 +306,36 @@ function DistributionTiles({
 				<StatTile label="p50" value={format(dist.p50)} />
 				<StatTile label="p90" value={format(dist.p90)} />
 			</div>
+		</div>
+	);
+}
+
+// PROJ-334: factory health tiles — fault signals for the machinery itself. Visually
+// distinct from the neutral StatTile (amber accent, reusing the existing
+// --priority-high tokens) but only when nonzero — a healthy low background rate of
+// expiries/bounces stays neutral so the row doesn't read as alarmist by default.
+function HealthTile({ label, value, help }: { label: string; value: number; help: string }) {
+	const flagged = value > 0;
+	return (
+		<div
+			class={`px-4 py-3 bg-surface border rounded-lg min-w-0 ${flagged ? "" : "border-border"}`}
+			style={
+				flagged
+					? { borderColor: "var(--priority-high-text)", background: "var(--priority-high-bg)" }
+					: undefined
+			}
+			title={help}
+		>
+			<p class="m-0 mb-1 text-[0.72rem] font-semibold text-text-muted uppercase tracking-[0.04em]">
+				{label}
+			</p>
+			<p
+				class={`m-0 text-lg font-semibold ${flagged ? "" : "text-text-base"}`}
+				style={flagged ? { color: "var(--priority-high-text)" } : undefined}
+			>
+				{value}
+			</p>
+			<p class="m-0 mt-1 text-[0.68rem] text-text-muted">{help}</p>
 		</div>
 	);
 }
@@ -856,6 +893,40 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 			)}
 			{!loading && !error && metrics && (
 				<>
+					<div class="mb-8">
+						<h2
+							class="m-0 mb-1 text-base font-semibold text-text-base"
+							title="Fault signals for the factory itself, not the work — is the machinery running clean?"
+						>
+							Factory health
+						</h2>
+						<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+							Fault signals for the factory itself, for the selected window — a low background rate
+							is normal; watch the trend, not any single nonzero tile
+						</p>
+						<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+							<HealthTile
+								label="Lease expiries"
+								value={metrics.factoryHealth.leaseExpiries}
+								help="Issue leases reclaimed because the holding agent stopped heartbeating — an agent died mid-work"
+							/>
+							<HealthTile
+								label="Abandoned claims"
+								value={metrics.factoryHealth.abandonedClaims}
+								help="File claims released because the agent's session ended, not because the work was released deliberately"
+							/>
+							<HealthTile
+								label="Gate rejections"
+								value={metrics.factoryHealth.gateRejections}
+								help="Issues sent back from review to in progress — rework a human requested"
+							/>
+						</div>
+						<p class="m-0 mt-2 text-[0.68rem] text-text-muted">
+							WIP-cap pressure (claims denied for exceeding the project's agent WIP limit) isn't
+							tracked yet — the denial site doesn't record an event today (PROJ-334 follow-up).
+						</p>
+					</div>
+
 					<div class="mb-8">
 						<h2 class="m-0 mb-3 text-base font-semibold text-text-base">Throughput</h2>
 						<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">

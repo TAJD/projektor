@@ -27,6 +27,11 @@ export const flowMetricsTools: MCPTool[] = [
 			"bugShareOverTime is the bug share of completed throughput per bucket (total completed, " +
 			"bugCount, bugSharePercent) - untyped issues count toward total but never bugCount; a " +
 			"rising trend signals the factory shipping more defects, not just more work. " +
+			"factoryHealth is fault signals for the factory itself, not the work, windowed by since/" +
+			"until: leaseExpiries (issue leases reclaimed because the holder stopped heartbeating), " +
+			"abandonedClaims (file claims released because the agent's session ended rather than " +
+			"deliberately), and gateRejections (in_review→in_progress bounces specifically - narrower " +
+			"than humanInterventions' bounce count, which also counts review→cancelled). " +
 			"Measure flow before tuning WIP limits. Throughput/review-latency/CFD/arrival/bug-share " +
 			"bucketing defaults to weekly (current ISO week plus the preceding 5 weeks); pass " +
 			"granularity: 'day' for daily buckets.",

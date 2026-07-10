@@ -1152,6 +1152,40 @@ describe("Issues API", () => {
 		// Going from review straight to done is not a bounce.
 		expect(afterDone.review_bounce_count).toBe(1);
 	});
+
+	// ─── PROJ-334: gate rejections (in_review -> in_progress specifically) ──────
+	async function gateRejectionCountOf(id: string): Promise<number> {
+		const row = await env.DB.prepare(
+			"SELECT COUNT(*) as n FROM issue_gate_rejections WHERE issue_id = ?"
+		)
+			.bind(id)
+			.first<{ n: number }>();
+		return row?.n ?? 0;
+	}
+
+	// Split into two tests (each gets a fresh token from beforeEach) — the test rate
+	// limiter allows only RATE_LIMIT_API_MAX (5) requests per token per window, and
+	// each case alone already needs 3 patches.
+	it("records a gate-rejection event for in_review -> in_progress", async () => {
+		const rejected = await seedIssue(workspaceId, projectId, userId, { title: "Sent back" });
+		await patch(rejected.id, { status: "in_progress" });
+		await patch(rejected.id, { status: "in_review" });
+		await patch(rejected.id, { status: "in_progress" });
+		expect(await gateRejectionCountOf(rejected.id)).toBe(1);
+		// review_bounce_count still counts it (PROJ-328's aggregate is unchanged).
+		expect((await reviewFieldsOf(rejected.id)).review_bounce_count).toBe(1);
+	});
+
+	it("does not record a gate-rejection event for in_review -> cancelled", async () => {
+		const killed = await seedIssue(workspaceId, projectId, userId, { title: "Killed in review" });
+		await patch(killed.id, { status: "in_progress" });
+		await patch(killed.id, { status: "in_review" });
+		await patch(killed.id, { status: "cancelled" });
+		// Not a gate rejection — the issue was cancelled, not sent back for rework —
+		// even though the aggregate reviewBounceCount still increments for it.
+		expect(await gateRejectionCountOf(killed.id)).toBe(0);
+		expect((await reviewFieldsOf(killed.id)).review_bounce_count).toBe(1);
+	});
 });
 
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style

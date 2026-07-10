@@ -2,7 +2,7 @@
 //
 // Follows the SprintManager.test.tsx pattern: reads ?projectId= from the URL, then fetches
 // /api/projects/:id/flow-metrics via raw fetch + buildHeaders. loading starts as true.
-import { fireEvent, render, screen } from "@testing-library/preact";
+import { fireEvent, render, screen, within } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MetricsDashboard from "./MetricsDashboard";
 
@@ -22,6 +22,7 @@ const EMPTY_METRICS = {
 	flowEfficiency: { count: 0, avg: null, p50: null, p90: null },
 	flowEfficiencyOverTime: [],
 	agingWip: [],
+	factoryHealth: { leaseExpiries: 0, abandonedClaims: 0, gateRejections: 0 },
 };
 
 // The real API always returns a fixed-size bucket window, even with zero completions —
@@ -63,6 +64,7 @@ const ZERO_BUCKET_METRICS = {
 		{ bucketStart: "2026-06-01", p50: null },
 	],
 	agingWip: [],
+	factoryHealth: { leaseExpiries: 0, abandonedClaims: 0, gateRejections: 0 },
 };
 
 const FULL_METRICS = {
@@ -105,6 +107,7 @@ const FULL_METRICS = {
 		{ id: "issue-1", status: "in_progress", ageSeconds: 86400 * 12 },
 		{ id: "issue-2", status: "in_review", ageSeconds: 86400 * 3 },
 	],
+	factoryHealth: { leaseExpiries: 2, abandonedClaims: 1, gateRejections: 3 },
 };
 
 const EMPTY_CODE_HEATMAP = { prefix: "", totalDistinctIssues: 0, entries: [] };
@@ -157,6 +160,32 @@ describe("MetricsDashboard", () => {
 		expect(screen.getByText("Flow efficiency")).toBeTruthy();
 		expect(screen.getByText("40%")).toBeTruthy();
 		expect(screen.getByText("Aging WIP")).toBeTruthy();
+	});
+
+	it("renders factory health tiles with nonzero counts", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+
+		const heading = await screen.findByText("Factory health");
+		const section = within(heading.closest("div") as HTMLElement);
+		expect(section.getByText("Lease expiries")).toBeTruthy();
+		expect(section.getByText("2")).toBeTruthy();
+		expect(section.getByText("Abandoned claims")).toBeTruthy();
+		expect(section.getByText("1")).toBeTruthy();
+		expect(section.getByText("Gate rejections")).toBeTruthy();
+		expect(section.getByText("3")).toBeTruthy();
+		expect(section.getByText(/WIP-cap pressure/i)).toBeTruthy();
+	});
+
+	it("shows a zero empty state for factory health when nothing has faulted", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchMetrics(ZERO_BUCKET_METRICS);
+		render(<MetricsDashboard />);
+
+		const heading = await screen.findByText("Factory health");
+		const section = within(heading.closest("div") as HTMLElement);
+		expect(section.getAllByText("0")).toHaveLength(3);
 	});
 
 	it("shows the code-heatmap empty state fed by claim_files", async () => {

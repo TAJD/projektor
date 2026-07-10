@@ -43,6 +43,11 @@ interface FlowMetrics {
 	flowEfficiency: Distribution;
 	flowEfficiencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
 	agingWip: Array<{ id: string; status: "in_progress" | "in_review"; ageSeconds: number }>;
+	factoryHealth: {
+		leaseExpiries: number;
+		abandonedClaims: number;
+		gateRejections: number;
+	};
 }
 
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
@@ -716,5 +721,162 @@ describe("Flow metrics (PROJ-252)", () => {
 
 		const emptyBucket = metrics.bugShareOverTime.find((b) => b.total === 0);
 		if (emptyBucket) expect(emptyBucket.bugSharePercent).toBeNull();
+	});
+});
+
+// PROJ-334: factory health tiles — fault signals for the machinery itself, windowed by
+// when the fault EVENT happened (released_at/occurred_at), not by issue doneAt like the
+// distribution tiles above.
+describe("Factory health tiles (PROJ-334)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+	let userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
+	});
+
+	// Bypasses the claim/release APIs so tests can place events at an arbitrary
+	// timestamp, inside or outside the window under test.
+	async function seedLease(
+		issueId: string,
+		releaseReason: string | null,
+		releasedAt: number | null
+	) {
+		const agentSessionId = crypto.randomUUID();
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			`INSERT INTO agent_sessions
+			   (id, workspace_id, issue_id, token_id, name, kind, status, started_at, last_heartbeat_at, ended_at)
+			 VALUES (?, ?, ?, NULL, 'seed-agent', 'agent', 'ended', ?, ?, ?)`
+		)
+			.bind(agentSessionId, workspaceId, issueId, now, now, now)
+			.run();
+		await env.DB.prepare(
+			`INSERT INTO issue_leases (id, workspace_id, issue_id, agent_session_id, claimed_at, released_at, release_reason)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)`
+		)
+			.bind(
+				crypto.randomUUID(),
+				workspaceId,
+				issueId,
+				agentSessionId,
+				now,
+				releasedAt,
+				releaseReason
+			)
+			.run();
+	}
+
+	async function seedFileClaim(
+		issueId: string,
+		releaseReason: string | null,
+		releasedAt: number | null
+	) {
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, released_at, release_reason) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)"
+		)
+			.bind(
+				crypto.randomUUID(),
+				workspaceId,
+				issueId,
+				`src/${crypto.randomUUID()}.ts`,
+				now,
+				releasedAt,
+				releaseReason
+			)
+			.run();
+	}
+
+	async function seedGateRejection(issueId: string, occurredAt: number) {
+		await env.DB.prepare(
+			"INSERT INTO issue_gate_rejections (id, workspace_id, issue_id, occurred_at) VALUES (?, ?, ?, ?)"
+		)
+			.bind(crypto.randomUUID(), workspaceId, issueId, occurredAt)
+			.run();
+	}
+
+	it("counts lease expiries, abandoned claims, and gate rejections within the window", async () => {
+		const DAY = 86400;
+		const now = Math.floor(Date.now() / 1000);
+		const since = now - 3 * DAY;
+		const until = now;
+
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Faulty" });
+
+		// In window: counts.
+		await seedLease(issue.id, "expired", now - 1 * DAY);
+		await seedFileClaim(issue.id, "agent_ended", now - 1 * DAY);
+		await seedGateRejection(issue.id, now - 1 * DAY);
+
+		// Out of window: excluded.
+		await seedLease(issue.id, "expired", now - 10 * DAY);
+		await seedFileClaim(issue.id, "agent_ended", now - 10 * DAY);
+		await seedGateRejection(issue.id, now - 10 * DAY);
+
+		// Right reason but not a fault (deliberate release / reclaim by another agent) —
+		// excluded regardless of window.
+		await seedLease(issue.id, "released", now - 1 * DAY);
+		await seedLease(issue.id, "agent_ended", now - 1 * DAY);
+		await seedFileClaim(issue.id, "released", now - 1 * DAY);
+		await seedFileClaim(issue.id, "overridden", now - 1 * DAY);
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		expect(metrics.factoryHealth).toEqual({
+			leaseExpiries: 1,
+			abandonedClaims: 1,
+			gateRejections: 1,
+		});
+	});
+
+	it("scopes factory health counts to the requested project", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const other = await seedProjectFixture({ role: "owner" });
+
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "This project" });
+		await seedLease(issue.id, "expired", now);
+
+		const otherIssue = await seedIssue(other.workspaceId, other.projectId, other.userId, {
+			title: "Other project",
+		});
+		await env.DB.prepare(
+			`INSERT INTO agent_sessions
+			   (id, workspace_id, issue_id, token_id, name, kind, status, started_at, last_heartbeat_at, ended_at)
+			 VALUES (?, ?, ?, NULL, 'seed-agent', 'agent', 'ended', ?, ?, ?)`
+		)
+			.bind(crypto.randomUUID(), other.workspaceId, otherIssue.id, now, now, now)
+			.run();
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${now - 100}&until=${now + 100}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const metrics = (await res.json()) as FlowMetrics;
+		expect(metrics.factoryHealth.leaseExpiries).toBe(1);
+	});
+
+	it("empty state: all counts are zero when nothing has faulted", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		await seedIssue(workspaceId, projectId, userId, { title: "Healthy" });
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${now - 86400}&until=${now}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const metrics = (await res.json()) as FlowMetrics;
+		expect(metrics.factoryHealth).toEqual({
+			leaseExpiries: 0,
+			abandonedClaims: 0,
+			gateRejections: 0,
+		});
 	});
 });

@@ -17,6 +17,10 @@ export const issueFileClaims = sqliteTable(
 		path: text("path").notNull(),
 		claimedAt: integer("claimed_at").notNull(),
 		releasedAt: integer("released_at"),
+		// PROJ-334: distinguishes a deliberate release (completion) from an abandoned
+		// claim (agent session ended without releasing). NULL for claims released
+		// before this column existed, and for still-active claims.
+		releaseReason: text("release_reason"),
 	},
 	(t) => ({
 		issueIdx: index("idx_file_claims_issue").on(t.workspaceId, t.issueId),

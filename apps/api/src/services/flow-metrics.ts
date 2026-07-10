@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { GetFlowMetricsSchema } from "../schemas/flow-metrics";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
@@ -410,6 +410,73 @@ function buildAgingWip(
 		}));
 }
 
+// PROJ-334: factory-health tiles — fault signals for the machinery itself, not the
+// work. Each count is windowed by when the fault EVENT happened (released_at /
+// occurred_at), not by an issue's doneAt like the distribution tiles above, since a
+// lease expiry or abandoned claim can happen on an issue that never completes in this
+// window (or ever). All three counts are project-scoped the same way the rest of this
+// endpoint is.
+interface FactoryHealth {
+	leaseExpiries: number;
+	abandonedClaims: number;
+	gateRejections: number;
+}
+
+async function fetchFactoryHealth(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	projectId: string,
+	since: number,
+	until: number
+): Promise<FactoryHealth> {
+	const leaseExpiries = await orm
+		.select({ id: schema.issueLeases.id })
+		.from(schema.issueLeases)
+		.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
+		.where(
+			and(
+				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+				eq(schema.issues.projectId, projectId),
+				eq(schema.issueLeases.releaseReason, "expired"),
+				gte(schema.issueLeases.releasedAt, since),
+				lte(schema.issueLeases.releasedAt, until)
+			)
+		);
+
+	const abandonedClaims = await orm
+		.select({ id: schema.issueFileClaims.id })
+		.from(schema.issueFileClaims)
+		.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
+		.where(
+			and(
+				eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+				eq(schema.issues.projectId, projectId),
+				eq(schema.issueFileClaims.releaseReason, "agent_ended"),
+				gte(schema.issueFileClaims.releasedAt, since),
+				lte(schema.issueFileClaims.releasedAt, until)
+			)
+		);
+
+	const gateRejections = await orm
+		.select({ id: schema.issueGateRejections.id })
+		.from(schema.issueGateRejections)
+		.innerJoin(schema.issues, eq(schema.issueGateRejections.issueId, schema.issues.id))
+		.where(
+			and(
+				eq(schema.issueGateRejections.workspaceId, ctx.workspaceId),
+				eq(schema.issues.projectId, projectId),
+				gte(schema.issueGateRejections.occurredAt, since),
+				lte(schema.issueGateRejections.occurredAt, until)
+			)
+		);
+
+	return {
+		leaseExpiries: leaseExpiries.length,
+		abandonedClaims: abandonedClaims.length,
+		gateRejections: gateRejections.length,
+	};
+}
+
 export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const result = GetFlowMetricsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -511,6 +578,16 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	);
 	const agingWip = buildAgingWip(issues, now);
 
+	// PROJ-334: same window as the throughput/CFD/etc. buckets above — the "selected
+	// window" the tile row is scoped to.
+	const factoryHealth = await fetchFactoryHealth(
+		orm,
+		ctx,
+		projectId,
+		throughputSince,
+		throughputUntil
+	);
+
 	return {
 		leadTime: summarize(leadTimes),
 		cycleTime: summarize(cycleTimes),
@@ -534,5 +611,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		flowEfficiency: summarize(flowEfficiencies),
 		flowEfficiencyOverTime,
 		agingWip,
+		// PROJ-334: factory health — fault signals for the machinery itself.
+		factoryHealth,
 	};
 }
