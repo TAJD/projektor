@@ -28,6 +28,7 @@ export default defineConfig({
 					label: "Start here",
 					items: [
 						{ label: "Overview", link: "/" },
+						{ label: "Live demo", slug: "guides/live-demo" },
 						{ label: "Self-hosting", slug: "guides/self-hosting" },
 						{ label: "Deploying & operating", slug: "guides/deploying" },
 						{ label: "Releases & changelog", link: "https://github.com/TAJD/projektor/releases" },

@@ -9,6 +9,9 @@ Projektor deploys to **your own Cloudflare account** from a small **config-only 
 downloads a pre-built release artifact - no source checkout and no build step. Pick the
 path that suits you; they're ordered easiest first.
 
+Want to see it running before you deploy your own? Check out the
+[live demo](https://projektor-demo.tajdickson.workers.dev).
+
 ## One click
 
 Use the **Deploy to Cloudflare** button in the
