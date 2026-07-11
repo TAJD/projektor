@@ -29,6 +29,13 @@ const ISSUE = {
 	updated_at: 1000,
 };
 
+const WIKI_PAGE = {
+	id: "w1",
+	slug: "getting-started",
+	title: "Getting Started",
+	updated_at: 1000,
+};
+
 function mockFetchProject(
 	issues: (typeof ISSUE)[] = [ISSUE],
 	wiki: unknown[] = [],
@@ -120,5 +127,13 @@ describe("ProjectLanding", () => {
 		expect(await screen.findByText(/Flow \(last 6 weeks\)/i)).toBeTruthy();
 		expect(screen.getByText("Throughput")).toBeTruthy();
 		expect(screen.getByText("Cumulative flow")).toBeTruthy();
+	});
+
+	it("recent-wiki links preserve projectId so the destination stays scoped (PROJ-352)", async () => {
+		history.replaceState(null, "", "?id=p1");
+		mockFetchProject([ISSUE], [WIKI_PAGE]);
+		render(<ProjectLanding />);
+		const link = (await screen.findByText("Getting Started")).closest("a");
+		expect(link?.getAttribute("href")).toBe("/wiki?slug=getting-started&projectId=p1");
 	});
 });

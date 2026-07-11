@@ -98,6 +98,52 @@ describe("WikiPage", () => {
 	});
 });
 
+describe("WikiPage — project scope control (PROJ-352)", () => {
+	function mockFetchWikiWithProjects(page: WikiPageData | null) {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/revisions")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				if (u.includes("/tree")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				if (u.includes("/api/projects")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([{ id: "p1", key: "PROJ", name: "Projektor" }]),
+					});
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(page) });
+			})
+		);
+	}
+
+	it("defaults to 'Workspace (all projects)' scope when no projectId is set", async () => {
+		history.replaceState(null, "", "?slug=my-page");
+		mockFetchWikiWithProjects(PAGE);
+		render(<WikiPage />);
+		await screen.findByText("My Page");
+		expect(screen.getByRole("combobox", { name: "Wiki project scope" }).textContent).toMatch(
+			/Workspace \(all projects\)/i
+		);
+	});
+
+	it("shows the project's scope when projectId is set via the URL", async () => {
+		history.replaceState(null, "", "?slug=my-page&projectId=p1");
+		mockFetchWikiWithProjects(PAGE);
+		render(<WikiPage />);
+		await screen.findByText("My Page");
+		await waitFor(() => {
+			expect(screen.getByRole("combobox", { name: "Wiki project scope" }).textContent).toMatch(
+				/PROJ — Projektor/i
+			);
+		});
+	});
+});
+
 async function startEditingWithTitleInput(): Promise<HTMLInputElement> {
 	history.replaceState(null, "", "?slug=my-page");
 	mockFetchWiki(PAGE);
