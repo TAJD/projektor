@@ -297,7 +297,7 @@ function RecentIssuesSection({ issues }: { issues: RecentIssue[] }) {
 	);
 }
 
-function RecentWikiSection({ pages }: { pages: RecentWikiPage[] }) {
+function RecentWikiSection({ pages, projectId }: { pages: RecentWikiPage[]; projectId: string }) {
 	return (
 		<section class="mb-8" aria-labelledby="recent-wiki-heading">
 			<h2 id="recent-wiki-heading" class={SECTION_HEADING_CLASS}>
@@ -311,7 +311,7 @@ function RecentWikiSection({ pages }: { pages: RecentWikiPage[] }) {
 						<div key={page.id} class="py-2 border-b border-border last:border-b-0">
 							<div class="flex justify-between items-baseline gap-2">
 								<a
-									href={`/wiki?slug=${encodeURIComponent(page.slug)}`}
+									href={`/wiki?slug=${encodeURIComponent(page.slug)}&projectId=${encodeURIComponent(projectId)}`}
 									class="text-text-base no-underline text-sm hover:underline focus:underline"
 								>
 									{page.title}
@@ -426,7 +426,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 			</header>
 
 			<RecentIssuesSection issues={recentIssues} />
-			<RecentWikiSection pages={recentWiki} />
+			<RecentWikiSection pages={recentWiki} projectId={project.id} />
 		</div>
 	);
 }
