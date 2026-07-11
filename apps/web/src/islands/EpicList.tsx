@@ -1,4 +1,3 @@
-import type { Dispatch, MutableRef, StateUpdater } from "preact/hooks";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
@@ -6,11 +5,14 @@ import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
 import {
 	CATEGORY_COLORS,
-	categoryColor,
 	type Issue,
 	type SortKey,
 	sortIssues,
+	type TaskStatus,
 } from "./board-utils";
+import { applyDateRangeParams } from "./IssueList-helpers";
+import type { DateField } from "./issue-list/FiltersPopover";
+import FiltersPopover from "./issue-list/FiltersPopover";
 import Select from "./Select";
 
 interface Props {
@@ -24,7 +26,6 @@ interface ProjectMeta {
 }
 
 type EpicRollup = { done: number; remaining: number; total: number };
-type DerivedStatus = { id: string; name: string; category: string };
 
 const PRIORITY_LABEL: Record<string, string> = {
 	urgent: "Urgent",
@@ -32,13 +33,6 @@ const PRIORITY_LABEL: Record<string, string> = {
 	medium: "Medium",
 	low: "Low",
 	none: "None",
-};
-
-const PILL_COLORS: Record<string, { bg: string; text: string }> = {
-	urgent: { bg: "#dc2626", text: "#fff" },
-	high: { bg: "#d97706", text: "#fff" },
-	medium: { bg: "#2563eb", text: "#fff" },
-	low: { bg: "#6b7280", text: "#fff" },
 };
 
 const TH_CLASS =
@@ -49,12 +43,25 @@ const MODAL_CLASS =
 	"bg-bg border border-border rounded-lg p-6 w-full max-w-[480px] mx-4 " +
 	"max-sm:rounded-t-lg max-sm:rounded-b-none max-sm:mx-0";
 
-function parseUrlFilters(params: URLSearchParams): { statuses: string[]; priorities: string[] } {
+function parseDateField(v: string | null): DateField {
+	return v === "completed" || v === "updated" ? v : "";
+}
+
+function parseUrlFilters(params: URLSearchParams): {
+	statuses: string[];
+	priorities: string[];
+	dateField: DateField;
+	dateFrom: string;
+	dateTo: string;
+} {
 	const s = params.get("status");
 	const p = params.get("priority");
 	return {
 		statuses: s ? s.split(",").filter(Boolean) : [],
 		priorities: p ? p.split(",").filter(Boolean) : [],
+		dateField: parseDateField(params.get("dateField")),
+		dateFrom: params.get("dateFrom") ?? "",
+		dateTo: params.get("dateTo") ?? "",
 	};
 }
 
@@ -114,16 +121,18 @@ function computeFilteredEpics(
 	});
 }
 
-function computeDerivedStatuses(epics: Issue[]): DerivedStatus[] {
-	const derived: DerivedStatus[] = [];
+function computeDerivedStatuses(epics: Issue[]): TaskStatus[] {
+	const derived: TaskStatus[] = [];
 	const seen = new Set<string>();
 	for (const ep of epics) {
 		if (ep.status_id && !seen.has(ep.status_id)) {
 			seen.add(ep.status_id);
 			derived.push({
 				id: ep.status_id,
+				key: ep.status_key ?? ep.status_id,
 				name: ep.status_name ?? ep.status_key ?? ep.status_id,
 				category: ep.status_category ?? "",
+				color: null,
 			});
 		}
 	}
@@ -135,12 +144,39 @@ function sortIndicator(key: SortKey, sortBy: SortKey, sortDir: "asc" | "desc") {
 	return <span class="ml-1 opacity-60">{sortDir === "asc" ? "↑" : "↓"}</span>;
 }
 
-function EpicListHeader(
-	props: FiltersPopoverProps & { epicTypeId: string | null; onOpenCreate: () => void }
-) {
+interface EpicListHeaderProps {
+	derivedStatuses: TaskStatus[];
+	filterStatuses: string[];
+	setFilterStatuses: (v: string[] | ((prev: string[]) => string[])) => void;
+	filterPriorities: string[];
+	setFilterPriorities: (v: string[] | ((prev: string[]) => string[])) => void;
+	filterDateField: DateField;
+	setFilterDateField: (v: DateField | ((prev: DateField) => DateField)) => void;
+	filterDateFrom: string;
+	setFilterDateFrom: (v: string | ((prev: string) => string)) => void;
+	filterDateTo: string;
+	setFilterDateTo: (v: string | ((prev: string) => string)) => void;
+	epicTypeId: string | null;
+	onOpenCreate: () => void;
+}
+
+function EpicListHeader(props: EpicListHeaderProps) {
 	return (
 		<div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
-			<FiltersPopover {...props} />
+			<FiltersPopover
+				derivedStatuses={props.derivedStatuses}
+				filterStatuses={props.filterStatuses}
+				setFilterStatuses={props.setFilterStatuses}
+				filterPriorities={props.filterPriorities}
+				setFilterPriorities={props.setFilterPriorities}
+				filterDateField={props.filterDateField}
+				setFilterDateField={props.setFilterDateField}
+				filterDateFrom={props.filterDateFrom}
+				setFilterDateFrom={props.setFilterDateFrom}
+				filterDateTo={props.filterDateTo}
+				setFilterDateTo={props.setFilterDateTo}
+				isSearchActive={false}
+			/>
 			{props.epicTypeId && (
 				<button type="button" onClick={props.onOpenCreate} class="btn btn-primary btn-sm">
 					+ New Epic
@@ -153,18 +189,18 @@ function EpicListHeader(
 function useEpicFilters() {
 	const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
 	const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
-	const [showFiltersPopover, setShowFiltersPopover] = useState(false);
-
-	const filtersContainerRef = useRef<HTMLDivElement>(null);
-	const filtersPopoverRef = useRef<HTMLDivElement>(null);
-	const filtersButtonRef = useRef<HTMLButtonElement>(null);
-	const filtersPopoverPos = useRef({ top: 0, left: 0 });
+	const [filterDateField, setFilterDateField] = useState<DateField>("");
+	const [filterDateFrom, setFilterDateFrom] = useState("");
+	const [filterDateTo, setFilterDateTo] = useState("");
 
 	useEffect(() => {
 		const params = new URLSearchParams(window.location.search);
-		const { statuses, priorities } = parseUrlFilters(params);
+		const { statuses, priorities, dateField, dateFrom, dateTo } = parseUrlFilters(params);
 		if (statuses.length > 0) setFilterStatuses(statuses);
 		if (priorities.length > 0) setFilterPriorities(priorities);
+		if (dateField) setFilterDateField(dateField);
+		if (dateFrom) setFilterDateFrom(dateFrom);
+		if (dateTo) setFilterDateTo(dateTo);
 	}, []);
 
 	// Sync filter state to URL without page reload
@@ -180,37 +216,35 @@ function useEpicFilters() {
 		} else {
 			params.delete("priority");
 		}
-		history.replaceState(null, "", `?${params.toString()}`);
-	}, [filterStatuses, filterPriorities]);
-
-	// Close filters popover on outside click
-	useEffect(() => {
-		if (!showFiltersPopover) return;
-		function onPointer(e: MouseEvent) {
-			const target = e.target as Node;
-			if (
-				!filtersContainerRef.current?.contains(target) &&
-				!filtersPopoverRef.current?.contains(target)
-			) {
-				setShowFiltersPopover(false);
-			}
+		if (filterDateField) {
+			params.set("dateField", filterDateField);
+		} else {
+			params.delete("dateField");
 		}
-		document.addEventListener("mousedown", onPointer);
-		return () => document.removeEventListener("mousedown", onPointer);
-	}, [showFiltersPopover]);
+		if (filterDateFrom) {
+			params.set("dateFrom", filterDateFrom);
+		} else {
+			params.delete("dateFrom");
+		}
+		if (filterDateTo) {
+			params.set("dateTo", filterDateTo);
+		} else {
+			params.delete("dateTo");
+		}
+		history.replaceState(null, "", `?${params.toString()}`);
+	}, [filterStatuses, filterPriorities, filterDateField, filterDateFrom, filterDateTo]);
 
 	return {
 		filterStatuses,
 		setFilterStatuses,
 		filterPriorities,
 		setFilterPriorities,
-		showFiltersPopover,
-		setShowFiltersPopover,
-		filtersContainerRef,
-		filtersPopoverRef,
-		filtersButtonRef,
-		filtersPopoverPos,
-		activeFilterCount: filterStatuses.length + filterPriorities.length,
+		filterDateField,
+		setFilterDateField,
+		filterDateFrom,
+		setFilterDateFrom,
+		filterDateTo,
+		setFilterDateTo,
 	};
 }
 
@@ -286,7 +320,10 @@ function useEpicsData(
 	projectId: string | null,
 	projectIdReady: boolean,
 	epicTypeId: string | null,
-	workspaceSlug: string | undefined
+	workspaceSlug: string | undefined,
+	filterDateField: DateField,
+	filterDateFrom: string,
+	filterDateTo: string
 ) {
 	const [epics, setEpics] = useState<Issue[]>([]);
 	const [epicRollups, setEpicRollups] = useState<Record<string, EpicRollup>>({});
@@ -302,10 +339,13 @@ function useEpicsData(
 		setLoading(true);
 		setError(null);
 		try {
-			const data = await apiFetch<{ items: Issue[] }>(
-				`/api/issues?project=${encodeURIComponent(projectId)}&typeId=${encodeURIComponent(epicTypeId)}&limit=100`,
-				{ workspaceSlug }
-			);
+			const qs = new URLSearchParams({
+				project: projectId,
+				typeId: epicTypeId,
+				limit: "100",
+			});
+			applyDateRangeParams(qs, filterDateField, filterDateFrom, filterDateTo);
+			const data = await apiFetch<{ items: Issue[] }>(`/api/issues?${qs}`, { workspaceSlug });
 			const epicItems = data.items ?? [];
 			setEpics(epicItems);
 			setEpicRollups({});
@@ -318,7 +358,7 @@ function useEpicsData(
 		} finally {
 			setLoading(false);
 		}
-	}, [projectId, epicTypeId, workspaceSlug]);
+	}, [projectId, epicTypeId, workspaceSlug, filterDateField, filterDateFrom, filterDateTo]);
 
 	useEffect(() => {
 		if (projectIdReady) fetchEpics();
@@ -396,13 +436,12 @@ export default function EpicList({ workspaceSlug }: Props) {
 		setFilterStatuses,
 		filterPriorities,
 		setFilterPriorities,
-		showFiltersPopover,
-		setShowFiltersPopover,
-		filtersContainerRef,
-		filtersPopoverRef,
-		filtersButtonRef,
-		filtersPopoverPos,
-		activeFilterCount,
+		filterDateField,
+		setFilterDateField,
+		filterDateFrom,
+		setFilterDateFrom,
+		filterDateTo,
+		setFilterDateTo,
 	} = useEpicFilters();
 
 	const { projectId, projectIdReady, epicTypeId, projects } = useProjectSelection(workspaceSlug);
@@ -414,7 +453,10 @@ export default function EpicList({ workspaceSlug }: Props) {
 		projectId,
 		projectIdReady,
 		epicTypeId,
-		workspaceSlug
+		workspaceSlug,
+		filterDateField,
+		filterDateFrom,
+		filterDateTo
 	);
 
 	const {
@@ -455,18 +497,17 @@ export default function EpicList({ workspaceSlug }: Props) {
 	return (
 		<div>
 			<EpicListHeader
-				filtersContainerRef={filtersContainerRef}
-				filtersPopoverRef={filtersPopoverRef}
-				filtersButtonRef={filtersButtonRef}
-				filtersPopoverPos={filtersPopoverPos}
-				showFiltersPopover={showFiltersPopover}
-				setShowFiltersPopover={setShowFiltersPopover}
-				activeFilterCount={activeFilterCount}
 				derivedStatuses={derivedStatuses}
 				filterStatuses={filterStatuses}
 				setFilterStatuses={setFilterStatuses}
 				filterPriorities={filterPriorities}
 				setFilterPriorities={setFilterPriorities}
+				filterDateField={filterDateField}
+				setFilterDateField={setFilterDateField}
+				filterDateFrom={filterDateFrom}
+				setFilterDateFrom={setFilterDateFrom}
+				filterDateTo={filterDateTo}
+				setFilterDateTo={setFilterDateTo}
 				epicTypeId={epicTypeId}
 				onOpenCreate={openCreate}
 			/>
@@ -494,202 +535,6 @@ export default function EpicList({ workspaceSlug }: Props) {
 				projects={projects}
 				submitCreate={submitCreate}
 			/>
-		</div>
-	);
-}
-
-interface FiltersPopoverProps {
-	filtersContainerRef: MutableRef<HTMLDivElement | null>;
-	filtersPopoverRef: MutableRef<HTMLDivElement | null>;
-	filtersButtonRef: MutableRef<HTMLButtonElement | null>;
-	filtersPopoverPos: MutableRef<{ top: number; left: number }>;
-	showFiltersPopover: boolean;
-	setShowFiltersPopover: (v: boolean) => void;
-	activeFilterCount: number;
-	derivedStatuses: DerivedStatus[];
-	filterStatuses: string[];
-	setFilterStatuses: Dispatch<StateUpdater<string[]>>;
-	filterPriorities: string[];
-	setFilterPriorities: Dispatch<StateUpdater<string[]>>;
-}
-
-function StatusFilterPills({
-	derivedStatuses,
-	filterStatuses,
-	setFilterStatuses,
-}: {
-	derivedStatuses: DerivedStatus[];
-	filterStatuses: string[];
-	setFilterStatuses: Dispatch<StateUpdater<string[]>>;
-}) {
-	if (derivedStatuses.length === 0) {
-		return <span class="text-[0.78rem] text-text-muted">No epics loaded</span>;
-	}
-	return (
-		<>
-			{derivedStatuses.map((s) => {
-				const active = filterStatuses.includes(s.id);
-				return (
-					<button
-						type="button"
-						key={s.id}
-						aria-pressed={active}
-						onClick={() =>
-							setFilterStatuses((prev) =>
-								active ? prev.filter((id) => id !== s.id) : [...prev, s.id]
-							)
-						}
-						style={{
-							padding: "0.25rem 0.625rem",
-							borderRadius: "9999px",
-							border: active ? "none" : "1px solid var(--border)",
-							background: active ? categoryColor(s.category) : "var(--bg)",
-							color: active ? "#fff" : "var(--text)",
-							cursor: "pointer",
-							fontSize: "0.8rem",
-							fontWeight: active ? 600 : 400,
-						}}
-					>
-						{s.name}
-					</button>
-				);
-			})}
-		</>
-	);
-}
-
-function PriorityFilterPills({
-	filterPriorities,
-	setFilterPriorities,
-}: {
-	filterPriorities: string[];
-	setFilterPriorities: Dispatch<StateUpdater<string[]>>;
-}) {
-	return (
-		<>
-			{(["urgent", "high", "medium", "low"] as const).map((pr) => {
-				const active = filterPriorities.includes(pr);
-				const col = PILL_COLORS[pr];
-				return (
-					<button
-						type="button"
-						key={pr}
-						aria-pressed={active}
-						onClick={() =>
-							setFilterPriorities((prev) => (active ? prev.filter((k) => k !== pr) : [...prev, pr]))
-						}
-						style={{
-							padding: "0.25rem 0.625rem",
-							borderRadius: "9999px",
-							border: active ? "none" : "1px solid var(--border)",
-							background: active ? col.bg : "var(--bg)",
-							color: active ? col.text : "var(--text)",
-							cursor: "pointer",
-							fontSize: "0.8rem",
-							fontWeight: active ? 600 : 400,
-							textTransform: "capitalize" as const,
-						}}
-					>
-						{pr}
-					</button>
-				);
-			})}
-		</>
-	);
-}
-
-function FiltersPopover({
-	filtersContainerRef,
-	filtersPopoverRef,
-	filtersButtonRef,
-	filtersPopoverPos,
-	showFiltersPopover,
-	setShowFiltersPopover,
-	activeFilterCount,
-	derivedStatuses,
-	filterStatuses,
-	setFilterStatuses,
-	filterPriorities,
-	setFilterPriorities,
-}: FiltersPopoverProps) {
-	return (
-		<div class="relative" ref={filtersContainerRef}>
-			<button
-				ref={filtersButtonRef}
-				type="button"
-				onClick={() => {
-					if (showFiltersPopover) {
-						setShowFiltersPopover(false);
-					} else {
-						const rect = filtersButtonRef.current?.getBoundingClientRect();
-						if (rect) filtersPopoverPos.current = { top: rect.bottom + 4, left: rect.left };
-						setShowFiltersPopover(true);
-					}
-				}}
-				style={{
-					padding: "0.25rem 0.625rem",
-					borderRadius: "9999px",
-					border: activeFilterCount > 0 ? "none" : "1px solid var(--border)",
-					background: activeFilterCount > 0 ? "var(--accent)" : "var(--bg)",
-					color: activeFilterCount > 0 ? "#fff" : "var(--text)",
-					cursor: "pointer",
-					fontSize: "0.8rem",
-					fontWeight: activeFilterCount > 0 ? 600 : 400,
-				}}
-			>
-				{activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
-			</button>
-			{showFiltersPopover && (
-				<div
-					ref={filtersPopoverRef}
-					style={{
-						position: "fixed",
-						top: `${filtersPopoverPos.current.top}px`,
-						left: `${filtersPopoverPos.current.left}px`,
-						zIndex: 100,
-						background: "var(--surface)",
-						border: "1px solid var(--border)",
-						borderRadius: "0.5rem",
-						padding: "0.75rem",
-						boxShadow: "var(--shadow-sm)",
-						minWidth: "16rem",
-					}}
-				>
-					<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
-						Status
-					</div>
-					<div class="flex flex-wrap gap-1 mb-3">
-						<StatusFilterPills
-							derivedStatuses={derivedStatuses}
-							filterStatuses={filterStatuses}
-							setFilterStatuses={setFilterStatuses}
-						/>
-					</div>
-					<div class="text-[0.7rem] font-semibold text-text-muted uppercase tracking-[0.04em] mb-2">
-						Priority
-					</div>
-					<div class="flex flex-wrap gap-1">
-						<PriorityFilterPills
-							filterPriorities={filterPriorities}
-							setFilterPriorities={setFilterPriorities}
-						/>
-					</div>
-					{activeFilterCount > 0 && (
-						<div class="border-t border-border pt-2 mt-3">
-							<button
-								type="button"
-								onClick={() => {
-									setFilterStatuses([]);
-									setFilterPriorities([]);
-								}}
-								class="bg-transparent border-none text-text-muted cursor-pointer text-[0.8rem] p-0"
-							>
-								✕ Clear all
-							</button>
-						</div>
-					)}
-				</div>
-			)}
 		</div>
 	);
 }

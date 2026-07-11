@@ -43,7 +43,7 @@ function applyEpicParams(
 
 // Date-range filter (PROJ-212) runs server-side against the chosen timestamp
 // column; bounds are inclusive (from = start of day, to = end).
-function applyDateRangeParams(
+export function applyDateRangeParams(
 	qs: URLSearchParams,
 	filterDateField: FilterQueryFilters["filterDateField"],
 	filterDateFrom: string,

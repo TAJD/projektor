@@ -186,6 +186,52 @@ describe("EpicList", () => {
 		expect(screen.getByRole("button", { name: /New Epic/i })).toBeTruthy();
 	});
 
+	it("sends completedAfter/completedBefore query params when a date-range filter is set via the URL", async () => {
+		history.replaceState(
+			null,
+			"",
+			"?projectId=p1&dateField=completed&dateFrom=2024-01-01&dateTo=2024-01-31"
+		);
+		const calledUrls: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				calledUrls.push(u);
+				if (u.includes("/api/task-types")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([{ id: "tt1", key: "epic", name: "Epic" }]),
+					});
+				}
+				if (u.includes("/api/issues")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve({ items: [EPIC_ISSUE] }),
+					});
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			})
+		);
+		render(<EpicList />);
+		await screen.findByText("Big Epic");
+		const issuesCall = calledUrls.find((u) => u.includes("/api/issues?"));
+		expect(issuesCall).toContain("completedAfter=");
+		expect(issuesCall).toContain("completedBefore=");
+	});
+
+	it("shows the Filters button with an active count when a date-range filter is applied", async () => {
+		history.replaceState(
+			null,
+			"",
+			"?projectId=p1&dateField=completed&dateFrom=2024-01-01&dateTo=2024-01-31"
+		);
+		mockFetchEpics([EPIC_ISSUE]);
+		render(<EpicList />);
+		await screen.findByText("Big Epic");
+		expect(screen.getByRole("button", { name: /Filters \(1\)/i })).toBeTruthy();
+	});
+
 	it("shows an error message when the issues fetch fails", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		vi.stubGlobal(
