@@ -1,8 +1,18 @@
 import type { Env, HonoEnv } from "@projektor/types";
 import type { Context, Next } from "hono";
 import { capabilityForMethod, parseScopes, tokenAllows } from "../auth/scopes";
-import { provisionUserOnLogin } from "../services/provisioning";
+import { provisionPublicViewer, provisionUserOnLogin } from "../services/provisioning";
 import { bumpRateCounter } from "./rate-limit";
+
+// PROJ-373: the shared identity anonymous requests are provisioned as when
+// PUBLIC_READ_ONLY is on. Fixed and well-known — there's exactly one, since
+// anonymous callers share no session to distinguish them by.
+const PUBLIC_VIEWER_EMAIL = "public-viewer@projektor.local";
+
+// Matches the truthy-string convention used by WORKSPACE_SUBDOMAIN_ROUTING (PROJ-296).
+function isTruthy(v: string | undefined): boolean {
+	return ["true", "1", "yes"].includes(v?.trim().toLowerCase() ?? "");
+}
 
 // PROJ-198: bound bearer-token guessing per source IP. The request rate-limiter keys
 // authenticated traffic by token fingerprint, so a flood of *distinct* invalid tokens
@@ -140,8 +150,27 @@ async function tryDevBypassAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	return { kind: "allow" };
 }
 
+// 4. Public read-only viewer (PROJ-373) — opt-in fallback, only when nothing else matched
+async function tryPublicViewerAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
+	if (!isTruthy(c.env.PUBLIC_READ_ONLY)) return { kind: "skip" };
+
+	const user = await upsertUserByEmail(PUBLIC_VIEWER_EMAIL, c.env.DB, c.env.KV);
+	await provisionPublicViewer(c.env, user);
+	c.set("user", user);
+	c.set("authKind", "human");
+	return { kind: "allow" };
+}
+
 export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
-	for (const attempt of [tryCfAccessAuth, tryBearerTokenAuth, tryDevBypassAuth]) {
+	// tryPublicViewerAuth is last: a real CF Access session, bearer token, or dev
+	// bypass always wins so a logged-in user is never demoted to the anonymous
+	// viewer just because PUBLIC_READ_ONLY happens to be on too.
+	for (const attempt of [
+		tryCfAccessAuth,
+		tryBearerTokenAuth,
+		tryDevBypassAuth,
+		tryPublicViewerAuth,
+	]) {
 		const outcome = await attempt(c);
 		if (outcome.kind === "deny") return outcome.response;
 		if (outcome.kind === "allow") return next();
@@ -319,6 +348,14 @@ async function getCfAccessKeys(env: Env, opts?: { forceRefresh?: boolean }): Pro
 
 const inMemoryUserCache = new Map<string, { user: AuthUser; expiresAt: number }>();
 const USER_LOCAL_TTL_MS = 300 * 1000;
+
+// Test-only: clear the isolate-local caches above. Without this, a test that exercises a
+// second real CF Access JWT verification with a *different* keypair than an earlier test in
+// the same file would hit the still-warm cache and verify against the wrong keys.
+export function resetAuthCachesForTests(): void {
+	inMemoryCertsCache = null;
+	inMemoryUserCache.clear();
+}
 
 async function upsertUserByEmail(
 	email: string,

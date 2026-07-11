@@ -42,6 +42,14 @@ export interface Env {
 	// subdomains are actually provisioned in DNS. Honored truthy values (case-
 	// insensitive, whitespace-trimmed): "true", "1", "yes". (PROJ-267, PROJ-296)
 	WORKSPACE_SUBDOMAIN_ROUTING?: string;
+	// PROJ-373: explicit opt-in. When truthy, anonymous requests (no CF Access
+	// session, no bearer token) are treated as a shared read-only "viewer" of the
+	// default workspace, instead of 401ing. Off by default — an operator who
+	// hasn't configured CF_ACCESS_TEAM_DOMAIN yet must NOT have their instance
+	// silently become world-readable; this only applies when explicitly set.
+	// Independent of whether CF Access is configured. Honored truthy values
+	// (case-insensitive, whitespace-trimmed): "true", "1", "yes".
+	PUBLIC_READ_ONLY?: string;
 }
 
 export interface Variables {

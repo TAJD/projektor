@@ -9,8 +9,8 @@
  */
 
 import { env, SELF } from "cloudflare:test";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { verifyJwtPayload } from "../middleware/auth";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetAuthCachesForTests, verifyJwtPayload } from "../middleware/auth";
 import {
 	authHeaders,
 	hashToken,
@@ -546,6 +546,98 @@ describe("PROJ-274: read-scoped token is denied write on every request", () => {
 
 		const res = await SELF.fetch("http://localhost/api/issues", {
 			headers: authHeaders(fixture.token, otherWs.slug),
+		});
+		expect(res.status).toBe(403);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PROJ-373: opt-in anonymous public-viewer fallback
+// ---------------------------------------------------------------------------
+
+describe("PROJ-373: PUBLIC_READ_ONLY anonymous viewer", () => {
+	// Every test in this block flips PUBLIC_READ_ONLY/DEFAULT_WORKSPACE_SLUG on the shared
+	// worker env — reset them so later describe blocks (which assume the defaults) don't
+	// see an anonymous viewer where they expect a 401.
+	afterEach(() => {
+		env.PUBLIC_READ_ONLY = undefined;
+		env.DEFAULT_WORKSPACE_SLUG = "projektor";
+	});
+
+	it("anonymous request still 401s when PUBLIC_READ_ONLY is unset (default)", async () => {
+		env.PUBLIC_READ_ONLY = undefined;
+		const res = await SELF.fetch("http://localhost/auth/me");
+		expect(res.status).toBe(401);
+	});
+
+	it("anonymous request is provisioned as viewer of the default workspace when PUBLIC_READ_ONLY is on", async () => {
+		const slug = `proj-373-${crypto.randomUUID().slice(0, 8)}`;
+		await seedWorkspace(slug);
+		env.DEFAULT_WORKSPACE_SLUG = slug;
+		env.PUBLIC_READ_ONLY = "true";
+
+		const res = await SELF.fetch("http://localhost/auth/me");
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			user: { email: string };
+			workspaces: Array<{ slug: string; role: string }>;
+		};
+		expect(body.user.email).toBe("public-viewer@projektor.local");
+		const membership = body.workspaces.find((w) => w.slug === slug);
+		expect(membership?.role).toBe("viewer");
+	});
+
+	it("a real CF Access session is not demoted to anonymous viewer when PUBLIC_READ_ONLY is also on", async () => {
+		const keyPair = (await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"]
+		)) as CryptoKeyPair;
+		const publicJwk = (await crypto.subtle.exportKey("jwk", keyPair.publicKey)) as JsonWebKey;
+
+		const domain = `proj-373-cf.example.com`;
+		const audience = "proj-373-audience";
+		const email = `proj-373-real-${crypto.randomUUID().slice(0, 8)}@example.com`;
+
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		env.CF_ACCESS_AUDIENCE = audience;
+		env.PUBLIC_READ_ONLY = "true";
+		// The PROJ-354 test above already warmed the isolate-local certs cache with its own
+		// keypair; without a reset, getCfAccessKeys would serve those stale keys instead of
+		// fetching the ones seeded below, and this JWT would fail to verify.
+		resetAuthCachesForTests();
+		await env.KV.put("cf-access-certs", JSON.stringify([publicJwk]));
+
+		const jwt = await signTestJwt(keyPair.privateKey, {
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			aud: audience,
+			iss: `https://${domain}`,
+			email,
+		});
+
+		const res = await SELF.fetch("http://localhost/auth/me", {
+			headers: { "Cf-Access-Jwt-Assertion": jwt },
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { user: { email: string } };
+		expect(body.user.email).toBe(email);
+	});
+
+	it("anonymous viewer is blocked from writes (403), same as any viewer-role member", async () => {
+		const slug = `proj-373-write-${crypto.randomUUID().slice(0, 8)}`;
+		await seedWorkspace(slug);
+		env.DEFAULT_WORKSPACE_SLUG = slug;
+		env.PUBLIC_READ_ONLY = "true";
+
+		const res = await SELF.fetch("http://localhost/api/projects", {
+			method: "POST",
+			headers: { "X-Workspace-Slug": slug, "Content-Type": "application/json" },
+			body: JSON.stringify({ name: "Blocked", key: "BLK" }),
 		});
 		expect(res.status).toBe(403);
 	});

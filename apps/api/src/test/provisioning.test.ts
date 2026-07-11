@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import type { Env } from "@projektor/types";
 import { describe, expect, it } from "vitest";
-import { provisionUserOnLogin } from "../services/provisioning";
+import { provisionPublicViewer, provisionUserOnLogin } from "../services/provisioning";
 import { seedMember, seedUser, seedWorkspace } from "./helpers";
 
 // provisionUserOnLogin reads its config from the Env it's handed, so each test builds an
@@ -208,5 +208,45 @@ describe("login provisioning", () => {
 			.first<{ id: string }>();
 		expect(ws).not.toBeNull();
 		expect(await memberRole(ws!.id, user.id)).toBe("owner");
+	});
+});
+
+// PROJ-373: the anonymous public-viewer's workspace membership, provisioned by
+// middleware/auth.ts's PUBLIC_READ_ONLY path. HTTP-level behavior (auth fallback
+// order, 401 when off) is covered in auth.test.ts.
+describe("public viewer provisioning (PROJ-373)", () => {
+	it("joins the default workspace as viewer", async () => {
+		const slug = "prov-public-viewer";
+		const ws = await seedWorkspace(slug);
+		const user = await seedUser("public-viewer@projektor.local");
+
+		await provisionPublicViewer(envWith({ DEFAULT_WORKSPACE_SLUG: slug }), user);
+
+		expect(await memberRole(ws.id, user.id)).toBe("viewer");
+	});
+
+	it("is a no-op until the default workspace is bootstrapped", async () => {
+		const user = await seedUser("public-viewer-early@projektor.local");
+
+		await provisionPublicViewer(
+			envWith({ DEFAULT_WORKSPACE_SLUG: "prov-public-viewer-not-yet" }),
+			user
+		);
+
+		const ws = await env.DB.prepare("SELECT id FROM workspaces WHERE slug = ?")
+			.bind("prov-public-viewer-not-yet")
+			.first();
+		expect(ws).toBeNull();
+	});
+
+	it("never promotes an existing membership above viewer (idempotent, not privilege-escalating)", async () => {
+		const slug = "prov-public-viewer-existing-owner";
+		const ws = await seedWorkspace(slug);
+		const user = await seedUser("public-viewer-owner@projektor.local");
+		await seedMember(ws.id, user.id, "owner");
+
+		await provisionPublicViewer(envWith({ DEFAULT_WORKSPACE_SLUG: slug }), user);
+
+		expect(await memberRole(ws.id, user.id)).toBe("owner");
 	});
 });
