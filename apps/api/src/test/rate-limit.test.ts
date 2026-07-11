@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { authHeaders, seedFixture } from "./helpers";
 
 // Must match wrangler.test.toml values.
@@ -137,5 +137,60 @@ describe("PROJ-198: failed bearer-auth throttle (IP-keyed)", () => {
 		});
 		expect(res.status).not.toBe(429);
 		expect(res.status).not.toBe(401);
+	});
+});
+
+describe("PROJ-361: opportunistic rate_limit row pruning", () => {
+	const ENDPOINT = "http://localhost/api/workspaces";
+
+	it("prunes rows several windows stale while leaving the current window's row intact", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const staleWindowStart = now - WINDOW_SECS * 20; // well past the 10-window retention cutoff
+		await seedCounter("ip:stale-client", 1);
+		await env.DB.prepare("UPDATE rate_limit SET window_start = ? WHERE key = ?")
+			.bind(staleWindowStart, "ip:stale-client")
+			.run();
+
+		// PRUNE_PROBABILITY is 1% — force the opportunistic prune to run this request.
+		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+		try {
+			const res = await SELF.fetch(ENDPOINT);
+			expect(res.status).not.toBe(429);
+		} finally {
+			randomSpy.mockRestore();
+		}
+
+		const staleRow = await env.DB.prepare("SELECT key FROM rate_limit WHERE key = ?")
+			.bind("ip:stale-client")
+			.first();
+		expect(staleRow).toBeNull();
+
+		// The request above increments the current-window row for its own key (127.0.0.1) —
+		// pruning must not have deleted it too.
+		const currentRow = await env.DB.prepare("SELECT key FROM rate_limit WHERE key = ?")
+			.bind("ip:127.0.0.1")
+			.first();
+		expect(currentRow).not.toBeNull();
+	});
+
+	it("does not prune when the probability roll misses", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const staleWindowStart = now - WINDOW_SECS * 20;
+		await seedCounter("ip:stale-client-2", 1);
+		await env.DB.prepare("UPDATE rate_limit SET window_start = ? WHERE key = ?")
+			.bind(staleWindowStart, "ip:stale-client-2")
+			.run();
+
+		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // above PRUNE_PROBABILITY
+		try {
+			await SELF.fetch(ENDPOINT);
+		} finally {
+			randomSpy.mockRestore();
+		}
+
+		const staleRow = await env.DB.prepare("SELECT key FROM rate_limit WHERE key = ?")
+			.bind("ip:stale-client-2")
+			.first();
+		expect(staleRow).not.toBeNull();
 	});
 });

@@ -47,7 +47,7 @@ export async function rateLimitMiddleware(
 		limit = parseInt(c.env.RATE_LIMIT_AUTH_MAX ?? "300", 10);
 	}
 
-	const count = await incrementCounter(c.env.DB, key, slot);
+	const count = await incrementCounter(c.env.DB, key, slot, windowSecs);
 	if (count > limit) {
 		const windowRemaining = slot + windowSecs - now;
 		c.header("Retry-After", String(windowRemaining > 0 ? windowRemaining : windowSecs));
@@ -68,7 +68,7 @@ export async function bumpRateCounter(
 	windowSecs: number
 ): Promise<number> {
 	const slot = Math.floor(Math.floor(Date.now() / 1000) / windowSecs) * windowSecs;
-	return incrementCounter(db, key, slot);
+	return incrementCounter(db, key, slot, windowSecs);
 }
 
 async function sha256Prefix(input: string): Promise<string> {
@@ -78,7 +78,25 @@ async function sha256Prefix(input: string): Promise<string> {
 		.join("");
 }
 
-async function incrementCounter(db: D1Database, key: string, slot: number): Promise<number> {
+// PROJ-361: rate_limit gets one permanent row per distinct IP/token (scanners,
+// crawlers, one-off visitors never come back to roll their window over) with no
+// cleanup path. Rather than a scheduled job for what's small, low-priority
+// housekeeping, prune opportunistically from inside the hot path — rows several
+// windows old are never read again by the fixed-window logic above.
+const PRUNE_PROBABILITY = 0.01;
+const PRUNE_RETENTION_WINDOWS = 10;
+
+async function pruneStaleRateLimitRows(db: D1Database, windowSecs: number): Promise<void> {
+	const cutoff = Math.floor(Date.now() / 1000) - windowSecs * PRUNE_RETENTION_WINDOWS;
+	await db.prepare("DELETE FROM rate_limit WHERE window_start < ?").bind(cutoff).run();
+}
+
+async function incrementCounter(
+	db: D1Database,
+	key: string,
+	slot: number,
+	windowSecs: number
+): Promise<number> {
 	// Upsert: if same window slot, increment; if window has rolled over, reset to 1.
 	// We use a separate SELECT because D1's local runtime may not reliably return
 	// RETURNING values from DML statements.
@@ -91,6 +109,10 @@ async function incrementCounter(db: D1Database, key: string, slot: number): Prom
   `)
 		.bind(key, slot, slot, slot)
 		.run();
+
+	if (Math.random() < PRUNE_PROBABILITY) {
+		await pruneStaleRateLimitRows(db, windowSecs);
+	}
 
 	const row = await db
 		.prepare("SELECT count FROM rate_limit WHERE key = ?")

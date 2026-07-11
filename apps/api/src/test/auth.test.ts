@@ -9,10 +9,11 @@
  */
 
 import { env, SELF } from "cloudflare:test";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { verifyJwtPayload } from "../middleware/auth";
 import {
 	authHeaders,
+	hashToken,
 	seedFixture,
 	seedMember,
 	seedToken,
@@ -353,6 +354,142 @@ describe("PROJ-354: CF Access auth caches are isolate-local", () => {
 		const secondBody = (await second.json()) as { user: { id: string; email: string } };
 		expect(secondBody.user.email).toBe(email);
 		expect(secondBody.user.id).toBe(firstBody.user.id);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PROJ-358: a signature that doesn't match any cached JWKS key forces one
+// rate-limited refetch and retry, instead of failing every login until both
+// cache layers expire on their own.
+// ---------------------------------------------------------------------------
+
+describe("PROJ-358: JWKS force-refresh on signature verification failure", () => {
+	it("token signed by an uncached key authenticates via forced refresh; a further bad signature within the cooldown does not refetch again", async () => {
+		const genKeyPair = () =>
+			crypto.subtle.generateKey(
+				{
+					name: "RSASSA-PKCS1-v1_5",
+					modulusLength: 2048,
+					publicExponent: new Uint8Array([1, 0, 1]),
+					hash: "SHA-256",
+				},
+				true,
+				["sign", "verify"]
+			) as Promise<CryptoKeyPair>;
+
+		// `otherKeyPair` is never returned by the stub below, so a token signed
+		// with it never matches whatever the cache holds — used for the
+		// cooldown assertion without needing a second real refresh.
+		const currentKeyPair = await genKeyPair();
+		const otherKeyPair = await genKeyPair();
+		const currentPublicJwk = (await crypto.subtle.exportKey(
+			"jwk",
+			currentKeyPair.publicKey
+		)) as JsonWebKey;
+
+		const domain = `proj-358-${crypto.randomUUID().slice(0, 8)}.example.com`;
+		const audience = "proj-358-audience";
+		const email = `proj-358-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const now = Math.floor(Date.now() / 1000);
+
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		env.CF_ACCESS_AUDIENCE = audience;
+
+		let fetchCalls = 0;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				fetchCalls++;
+				return new Response(JSON.stringify({ keys: [currentPublicJwk] }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
+			})
+		);
+
+		try {
+			// Whatever's already cached (isolate-local from an earlier test, or
+			// nothing) certainly doesn't verify a brand-new key pair's signature —
+			// this forces getCfAccessKeys to refetch (via the stub) and retry.
+			const currentJwt = await signTestJwt(currentKeyPair.privateKey, {
+				exp: now + 3600,
+				aud: audience,
+				iss: `https://${domain}`,
+				email,
+			});
+			const rotated = await SELF.fetch("http://localhost/auth/me", {
+				headers: { "Cf-Access-Jwt-Assertion": currentJwt },
+			});
+			expect(rotated.status).toBe(200);
+			expect(fetchCalls).toBe(1);
+
+			// The cache now holds only currentPublicJwk, so a token signed by an
+			// unrelated key still doesn't verify — but the forced refresh above
+			// happened moments ago, so the cooldown should block a second fetch.
+			const badJwt = await signTestJwt(otherKeyPair.privateKey, {
+				exp: now + 3600,
+				aud: audience,
+				iss: `https://${domain}`,
+				email,
+			});
+			const stillBad = await SELF.fetch("http://localhost/auth/me", {
+				headers: { "Cf-Access-Jwt-Assertion": badJwt },
+			});
+			expect(stillBad.status).toBe(401);
+			expect(fetchCalls).toBe(1);
+		} finally {
+			vi.unstubAllGlobals();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// PROJ-360: last_used_at is a coarse audit field, throttled so bearer/agent
+// traffic (the hottest auth path) doesn't rewrite it on every single request.
+// ---------------------------------------------------------------------------
+
+describe("PROJ-360: api_tokens.last_used_at write throttling", () => {
+	it("a request within the throttle window does not rewrite a recent last_used_at", async () => {
+		const fixture = await seedFixture();
+		const hash = await hashToken(fixture.token);
+		const now = Math.floor(Date.now() / 1000);
+		const recentTimestamp = now - 30; // inside the 60s throttle window
+
+		await env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?")
+			.bind(recentTimestamp, hash)
+			.run();
+
+		const res = await SELF.fetch("http://localhost/auth/me", {
+			headers: { Authorization: `Bearer ${fixture.token}` },
+		});
+		expect(res.status).toBe(200);
+
+		const row = await env.DB.prepare("SELECT last_used_at FROM api_tokens WHERE token_hash = ?")
+			.bind(hash)
+			.first<{ last_used_at: number }>();
+		expect(row?.last_used_at).toBe(recentTimestamp);
+	});
+
+	it("a request outside the throttle window (or with no prior value) updates last_used_at", async () => {
+		const fixture = await seedFixture();
+		const hash = await hashToken(fixture.token);
+		const now = Math.floor(Date.now() / 1000);
+		const staleTimestamp = now - 120; // outside the 60s throttle window
+
+		await env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?")
+			.bind(staleTimestamp, hash)
+			.run();
+
+		const res = await SELF.fetch("http://localhost/auth/me", {
+			headers: { Authorization: `Bearer ${fixture.token}` },
+		});
+		expect(res.status).toBe(200);
+
+		const row = await env.DB.prepare("SELECT last_used_at FROM api_tokens WHERE token_hash = ?")
+			.bind(hash)
+			.first<{ last_used_at: number }>();
+		expect(row?.last_used_at).not.toBe(staleTimestamp);
+		expect(row?.last_used_at).toBeGreaterThanOrEqual(now);
 	});
 });
 

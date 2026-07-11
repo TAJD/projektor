@@ -1480,6 +1480,48 @@ describe("Issues KV cache", () => {
 		const issue = (await getRes.json()) as { title: string };
 		expect(issue.title).toBe("After update");
 	});
+
+	// PROJ-359: ref lookups ("PROJ-42", the primary MCP agent read path) resolve
+	// via fetchIssueByRef rather than the id-keyed cache check at the top of
+	// getIssue, so they never got any cache benefit before this fix.
+	it("getIssue by ref returns cached value on a second call (KV hit, D1 not re-read)", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"X-Workspace-Slug": slug,
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({ projectId, title: "Cache me by ref" }),
+		});
+		const { id, number } = (await createRes.json()) as { id: string; number: number };
+		const ref = `PROJ-${number}`;
+
+		// First GET by ref populates KV cache
+		const first = await SELF.fetch(`http://localhost/api/issues/${ref}`, {
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"X-Workspace-Slug": slug,
+				"Content-Type": "application/json",
+			},
+		});
+		const firstIssue = (await first.json()) as { title: string };
+		expect(firstIssue.title).toBe("Cache me by ref");
+
+		// Corrupt the D1 row directly — if the cache is skipped the title would change
+		await env.DB.prepare("UPDATE issues SET title = 'D1 was read' WHERE id = ?").bind(id).run();
+
+		// Second GET by ref should return the cached value, not the corrupted D1 row
+		const second = await SELF.fetch(`http://localhost/api/issues/${ref}`, {
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"X-Workspace-Slug": slug,
+				"Content-Type": "application/json",
+			},
+		});
+		const secondIssue = (await second.json()) as { title: string };
+		expect(secondIssue.title).toBe("Cache me by ref");
+	});
 });
 
 describe("Issues role guards", () => {

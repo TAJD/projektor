@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
@@ -208,6 +208,34 @@ describe("Sprints API", () => {
 		expect(issueData.sprint_id).toBeNull();
 	});
 
+	it("PROJ-356: move-issues invalidates the issue KV cache — an immediate GET reflects the new sprint_id", async () => {
+		const sprintRes = await createSprint({ projectId, name: "Cache Target Sprint" });
+		const { id: sprintId } = (await sprintRes.json()) as { id: string };
+
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Cache issue" });
+
+		// Warm the issue KV cache with the pre-move (sprint_id: null) shape.
+		const before = await SELF.fetch(`http://localhost/api/issues/${issue.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const beforeBody = (await before.json()) as { sprint_id: string | null };
+		expect(beforeBody.sprint_id).toBeNull();
+
+		const moveRes = await SELF.fetch(`http://localhost/api/sprints/${sprintId}/move-issues`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ issueIds: [issue.id] }),
+		});
+		expect(moveRes.status).toBe(200);
+
+		// Immediately after — must not be served from the pre-move cache entry.
+		const after = await SELF.fetch(`http://localhost/api/issues/${issue.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const afterBody = (await after.json()) as { sprint_id: string | null };
+		expect(afterBody.sprint_id).toBe(sprintId);
+	});
+
 	it("POST /api/sprints/:id/move-issues returns 404 for unknown sprint", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Orphan issue" });
 
@@ -334,6 +362,39 @@ describe("Sprints role guards", () => {
 			headers: authHeaders(roles.viewer.token, roles.workspace.slug),
 		});
 		expect(completeRes.status).toBe(403);
+	});
+
+	it("PROJ-357: a member with write access only on the sprint's project cannot move an issue from a project they have no grant on", async () => {
+		const roles = await seedWorkspaceRoles();
+		const projectA = await seedProject(roles.workspace.id, "PJA");
+		const projectB = await seedProject(roles.workspace.id, "PJB");
+		// Member has write access to project A only — no grant at all on project B.
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, projectA.id, "member");
+
+		const createRes = await SELF.fetch("http://localhost/api/sprints", {
+			method: "POST",
+			headers: authHeaders(roles.member.token, roles.workspace.slug),
+			body: JSON.stringify({ projectId: projectA.id, name: "Sprint A" }),
+		});
+		expect(createRes.status).toBe(201);
+		const { id: sprintId } = (await createRes.json()) as { id: string };
+
+		const foreignIssue = await seedIssue(roles.workspace.id, projectB.id, roles.owner.user.id, {
+			title: "Project B issue",
+		});
+
+		const moveRes = await SELF.fetch(`http://localhost/api/sprints/${sprintId}/move-issues`, {
+			method: "POST",
+			headers: authHeaders(roles.member.token, roles.workspace.slug),
+			body: JSON.stringify({ issueIds: [foreignIssue.id] }),
+		});
+		expect(moveRes.status).toBe(404);
+
+		// The issue must be untouched — no partial mutation.
+		const row = await env.DB.prepare("SELECT sprint_id FROM issues WHERE id = ?")
+			.bind(foreignIssue.id)
+			.first<{ sprint_id: string | null }>();
+		expect(row?.sprint_id).toBeNull();
 	});
 
 	it("viewer cannot move issues to a sprint (403)", async () => {

@@ -433,6 +433,19 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const issueId = (issue as Record<string, unknown>).id as string;
 
+	// PROJ-359: a ref lookup ("PROJ-42" — the primary MCP agent read path) resolves
+	// via fetchIssueByRef above rather than the id-keyed cache check at the top of
+	// this function, so it never got any cache benefit and paid for a KV write on
+	// every single call. Now that the id is known, check the cache before paying
+	// for the rollup/links/custom-fields queries below.
+	if (ref) {
+		const cached = await cache.get<Record<string, unknown>>(
+			ctx.kv,
+			`issue:${ctx.workspaceId}:${issueId}`
+		);
+		if (cached) return cached;
+	}
+
 	type ChildCount = { status: string; count: number };
 	const childRows = (await orm.all(
 		sql`SELECT status, COUNT(*) as count FROM issues
