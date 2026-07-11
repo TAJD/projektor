@@ -24,12 +24,19 @@ function mondayOfWeek(d: Date): Date {
 
 // Same 6-week weekly default window as MetricsDashboard's defaultRange, so a project's
 // overview and its full /metrics page agree on "recent" without a picker on this page.
+// `until` matches MetricsDashboard's dateStrToEpochEnd (end of today, UTC) rather than
+// `Date.now() + 86399`, which would reach ~24h into tomorrow.
 function defaultSinceUntil(): { since: number; until: number } {
 	const today = new Date();
 	const monday = mondayOfWeek(today);
 	monday.setUTCDate(monday.getUTCDate() - 5 * 7);
 	const since = Math.floor(monday.getTime() / 1000);
-	const until = Math.floor(today.getTime() / 1000) + 86399;
+	const todayUtcMidnight = Date.UTC(
+		today.getUTCFullYear(),
+		today.getUTCMonth(),
+		today.getUTCDate()
+	);
+	const until = Math.floor(todayUtcMidnight / 1000) + 86399;
 	return { since, until };
 }
 
@@ -82,11 +89,11 @@ export default function ProjectFlowCharts({
 			<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 					<p class="m-0 mb-2 text-[0.72rem] font-medium text-text-muted">Throughput</p>
-					<ThroughputChart data={metrics.throughputOverTime} />
+					<ThroughputChart data={metrics.throughputOverTime ?? []} />
 				</div>
 				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 					<p class="m-0 mb-2 text-[0.72rem] font-medium text-text-muted">Cumulative flow</p>
-					<CfdChart data={metrics.cfdOverTime} />
+					<CfdChart data={metrics.cfdOverTime ?? []} />
 				</div>
 			</div>
 		</section>

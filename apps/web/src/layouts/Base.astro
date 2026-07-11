@@ -30,13 +30,20 @@ const navItems = [
     <title>{title}</title>
     <ClientRouter />
     <!-- safe-ls: 'theme' is a cosmetic preference (dark/light). No API dependency - a
-         stale or missing value falls back to the system color-scheme media query. -->
+         stale or missing value falls back to the system color-scheme media query.
+         Astro's ClientRouter swaps <html>'s attributes to match the incoming (server-
+         rendered, theme-unaware) document on every client-side nav, wiping data-theme -
+         so this re-applies on astro:after-swap, not just on first load. -->
     <script is:inline>
       (function () {
-        try {
-          var t = localStorage.getItem('theme');
-          if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
-        } catch (e) {}
+        function applyTheme() {
+          try {
+            var t = localStorage.getItem('theme');
+            if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+          } catch (e) {}
+        }
+        applyTheme();
+        document.addEventListener('astro:after-swap', applyTheme);
       })();
     </script>
     <style is:global>
@@ -616,42 +623,56 @@ const navItems = [
         <slot />
       </div>
     </div>
+    <!-- Astro's ClientRouter replaces <body> wholesale on every client-side nav (the
+         sidebar is deliberately not transition:persist'ed - see PROJ-350), so the
+         hamburger/overlay/sidebar/theme-toggle nodes below are recreated each time and
+         need their listeners rebound via astro:page-load (fires on first load too).
+         The document-level keydown/matchMedia listeners are bound once and re-query
+         '.app-shell' at call time instead of closing over a node that gets replaced. -->
     <script is:inline>
       (function () {
-        var shell = document.querySelector('.app-shell');
-        var hamburger = document.querySelector('.hamburger');
-        var overlay = document.querySelector('.drawer-overlay');
-        var sidebar = document.getElementById('app-sidebar');
-        if (!shell || !hamburger) return;
-
-        function setOpen(open) {
+        function setShellOpen(open) {
+          var shell = document.querySelector('.app-shell');
+          var hamburger = document.querySelector('.hamburger');
+          if (!shell || !hamburger) return;
           shell.classList.toggle('drawer-open', open);
           hamburger.setAttribute('aria-expanded', open ? 'true' : 'false');
           hamburger.setAttribute('aria-label', open ? 'Close navigation menu' : 'Open navigation menu');
         }
-        hamburger.addEventListener('click', function () {
-          setOpen(!shell.classList.contains('drawer-open'));
-        });
-        if (overlay) overlay.addEventListener('click', function () { setOpen(false); });
-        // Tapping any nav link closes the drawer
-        if (sidebar) {
-          sidebar.addEventListener('click', function (e) {
-            if (e.target.closest('a')) setOpen(false);
+
+        function bindDrawerControls() {
+          var hamburger = document.querySelector('.hamburger');
+          var overlay = document.querySelector('.drawer-overlay');
+          var sidebar = document.getElementById('app-sidebar');
+          if (!hamburger) return;
+          hamburger.addEventListener('click', function () {
+            var shell = document.querySelector('.app-shell');
+            setShellOpen(!(shell && shell.classList.contains('drawer-open')));
           });
+          if (overlay) overlay.addEventListener('click', function () { setShellOpen(false); });
+          // Tapping any nav link closes the drawer
+          if (sidebar) {
+            sidebar.addEventListener('click', function (e) {
+              if (e.target.closest('a')) setShellOpen(false);
+            });
+          }
         }
+
+        document.addEventListener('astro:page-load', bindDrawerControls);
+
         document.addEventListener('keydown', function (e) {
-          if (e.key === 'Escape' && shell.classList.contains('drawer-open')) setOpen(false);
+          var shell = document.querySelector('.app-shell');
+          if (e.key === 'Escape' && shell && shell.classList.contains('drawer-open')) setShellOpen(false);
         });
         // Reset drawer state if the viewport grows past the mobile breakpoint
         window.matchMedia('(min-width: 641px)').addEventListener('change', function (e) {
-          if (e.matches) setOpen(false);
+          if (e.matches) setShellOpen(false);
         });
       })();
     </script>
     <script is:inline>
       (function () {
-        var themeBtn = document.querySelector('.theme-toggle');
-        function updateThemeIcon() {
+        function updateThemeIcon(themeBtn) {
           if (!themeBtn) return;
           var t = document.documentElement.getAttribute('data-theme');
           var isDark = t === 'dark' ||
@@ -659,8 +680,11 @@ const navItems = [
           themeBtn.textContent = isDark ? '☀️' : '🌙';
           themeBtn.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
         }
-        updateThemeIcon();
-        if (themeBtn) {
+
+        function bindThemeToggle() {
+          var themeBtn = document.querySelector('.theme-toggle');
+          if (!themeBtn) return;
+          updateThemeIcon(themeBtn);
           themeBtn.addEventListener('click', function () {
             var cur = document.documentElement.getAttribute('data-theme');
             var isDark = cur === 'dark' ||
@@ -668,9 +692,11 @@ const navItems = [
             var next = isDark ? 'light' : 'dark';
             document.documentElement.setAttribute('data-theme', next);
             try { localStorage.setItem('theme', next); } catch (e) {} // safe-ls: cosmetic only
-            updateThemeIcon();
+            updateThemeIcon(themeBtn);
           });
         }
+
+        document.addEventListener('astro:page-load', bindThemeToggle);
       })();
     </script>
   </body>
