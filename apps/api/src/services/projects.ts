@@ -9,6 +9,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
+const PROJECTS_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:projects`;
 
 export async function listProjects(ctx: ServiceCtx) {
 	const orm = drizzle(ctx.db, { schema });
@@ -19,7 +20,7 @@ export async function listProjects(ctx: ServiceCtx) {
 	// "effective on next request" guarantee — no stale project can linger.
 	const visible = visibleProjectPredicate(ctx, schema.projects.id);
 	if (!visible) {
-		const cacheKey = `ws-meta:${ctx.workspaceId}:projects`;
+		const cacheKey = PROJECTS_CACHE_KEY(ctx.workspaceId);
 		const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
 		if (cached) return cached;
 		const result = await orm
@@ -133,6 +134,7 @@ export async function createProject(ctx: ServiceCtx, input: unknown) {
 	});
 
 	await recordActivity(ctx, { entityType: "project", entityId: id, action: "created" });
+	await cache.invalidate(ctx.kv, PROJECTS_CACHE_KEY(ctx.workspaceId));
 	return { id, name, key };
 }
 
@@ -170,6 +172,7 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 	const diff: Record<string, unknown> = { ...setObj };
 	delete diff.updatedAt;
 	await recordActivity(ctx, { entityType: "project", entityId: id, action: "updated", diff });
+	await cache.invalidate(ctx.kv, PROJECTS_CACHE_KEY(ctx.workspaceId));
 
 	return { ok: true };
 }
@@ -186,5 +189,6 @@ export async function deleteProject(ctx: ServiceCtx, id: string) {
 		.where(and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId)));
 
 	await recordActivity(ctx, { entityType: "project", entityId: id, action: "deleted" });
+	await cache.invalidate(ctx.kv, PROJECTS_CACHE_KEY(ctx.workspaceId));
 	return { ok: true };
 }

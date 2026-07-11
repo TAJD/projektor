@@ -85,7 +85,7 @@ describe("KV caching", () => {
 		});
 	});
 
-	describe("workspace metadata cache (TTL 60s, no invalidation)", () => {
+	describe("workspace metadata cache (TTL 60s, write-through invalidation)", () => {
 		it("task statuses list is cached — second GET returns data even after D1 is cleared", async () => {
 			await seedTaskStatus(workspaceId, { key: "todo", name: "Todo", category: "todo" });
 			const url = "http://localhost/api/task-statuses";
@@ -157,6 +157,47 @@ describe("KV caching", () => {
 			// Second call — served from KV cache
 			const second = await mcpListProjects();
 			expect(second.length).toBeGreaterThan(0);
+		});
+
+		it("creating a task status invalidates the cache — subsequent list reflects it immediately", async () => {
+			const url = "http://localhost/api/task-statuses";
+			const hdrs = authHeaders(token, slug);
+
+			// GET to populate cache with the current (empty-ish) list
+			const before = await SELF.fetch(url, { headers: hdrs });
+			const beforeBody = (await before.json()) as unknown[];
+
+			const created = await SELF.fetch(url, {
+				method: "POST",
+				headers: hdrs,
+				body: JSON.stringify({ key: "blocked", name: "Blocked", category: "in_progress" }),
+			});
+			expect(created.status).toBe(201);
+
+			// GET immediately after — must not be served from the pre-create cache entry
+			const after = await SELF.fetch(url, { headers: hdrs });
+			const afterBody = (await after.json()) as Array<{ key: string }>;
+			expect(afterBody.length).toBe(beforeBody.length + 1);
+			expect(afterBody.some((s) => s.key === "blocked")).toBe(true);
+		});
+
+		it("deleting a task type invalidates the cache — subsequent list reflects it immediately", async () => {
+			const taskType = await seedTaskType(workspaceId, { key: "chore", name: "Chore" });
+			const url = "http://localhost/api/task-types";
+			const hdrs = authHeaders(token, slug);
+
+			// GET to populate cache including the seeded type
+			const before = await SELF.fetch(url, { headers: hdrs });
+			const beforeBody = (await before.json()) as Array<{ key: string }>;
+			expect(beforeBody.some((t) => t.key === "chore")).toBe(true);
+
+			const del = await SELF.fetch(`${url}/${taskType.id}`, { method: "DELETE", headers: hdrs });
+			expect(del.status).toBe(200);
+
+			// GET immediately after — must not be served from the pre-delete cache entry
+			const after = await SELF.fetch(url, { headers: hdrs });
+			const afterBody = (await after.json()) as Array<{ key: string }>;
+			expect(afterBody.some((t) => t.key === "chore")).toBe(false);
 		});
 	});
 });

@@ -293,6 +293,70 @@ describe("PROJ-79: CF Access JWT HTTP rejection paths", () => {
 });
 
 // ---------------------------------------------------------------------------
+// PROJ-354: isolate-local auth caches survive KV backing-store loss
+// (getCfAccessKeys / upsertUserByEmail are memoized per-isolate so most
+// requests never touch KV at all — this proves the local cache, not just KV,
+// is what's serving the second request).
+// ---------------------------------------------------------------------------
+
+describe("PROJ-354: CF Access auth caches are isolate-local", () => {
+	it("second CF Access login succeeds after both KV cache entries are deleted", async () => {
+		const keyPair = (await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"]
+		)) as CryptoKeyPair;
+		const publicJwk = (await crypto.subtle.exportKey("jwk", keyPair.publicKey)) as JsonWebKey;
+
+		const domain = "test-cf-access.example.com";
+		const audience = "proj-354-audience";
+		const email = `proj-354-${crypto.randomUUID().slice(0, 8)}@example.com`;
+
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		env.CF_ACCESS_AUDIENCE = audience;
+
+		// Pre-seed the JWKS cache directly in KV, bypassing the real network fetch
+		// that getCfAccessKeys would otherwise make on a cold cache.
+		await env.KV.put("cf-access-certs", JSON.stringify([publicJwk]));
+
+		const jwt = await signTestJwt(keyPair.privateKey, {
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			aud: audience,
+			iss: `https://${domain}`,
+			email,
+		});
+
+		const first = await SELF.fetch("http://localhost/auth/me", {
+			headers: { "Cf-Access-Jwt-Assertion": jwt },
+		});
+		expect(first.status).toBe(200);
+		const firstBody = (await first.json()) as { user: { id: string; email: string } };
+		expect(firstBody.user.email).toBe(email);
+
+		// Delete both KV entries the first request would have populated. If the
+		// second request only relied on KV, it would now have to re-fetch the
+		// JWKS over the network (which fails in this test env) and re-run the
+		// D1 upsert path from scratch — it should instead be served entirely
+		// from the isolate-local caches.
+		await env.KV.delete("cf-access-certs");
+		await env.KV.delete(`user-by-email:${email}`);
+
+		const second = await SELF.fetch("http://localhost/auth/me", {
+			headers: { "Cf-Access-Jwt-Assertion": jwt },
+		});
+		expect(second.status).toBe(200);
+		const secondBody = (await second.json()) as { user: { id: string; email: string } };
+		expect(secondBody.user.email).toBe(email);
+		expect(secondBody.user.id).toBe(firstBody.user.id);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // PROJ-274 (C1): no cached auth path can bypass scope enforcement
 // ---------------------------------------------------------------------------
 

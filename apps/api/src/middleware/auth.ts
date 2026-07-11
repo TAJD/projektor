@@ -242,26 +242,54 @@ async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | nu
 	return upsertUserByEmail(result.email, env.DB, env.KV);
 }
 
+// PROJ-354: both caches below are read on every authenticated CF Access request.
+// A Worker isolate serves many requests before Cloudflare recycles it, so an
+// isolate-local (module-scope) cache in front of the KV read cuts the vast
+// majority of that KV read volume — KV remains the cross-isolate/cold-start
+// fallback and the TTL source of truth; these local TTLs only bound staleness
+// within a single isolate's lifetime.
+let inMemoryCertsCache: { keys: JsonWebKey[]; expiresAt: number } | null = null;
+const CERTS_LOCAL_TTL_MS = 3600 * 1000;
+
 async function getCfAccessKeys(env: Env): Promise<JsonWebKey[]> {
+	if (inMemoryCertsCache && inMemoryCertsCache.expiresAt > Date.now()) {
+		return inMemoryCertsCache.keys;
+	}
+
 	const cached = await env.KV.get("cf-access-certs", "json");
-	if (cached) return cached as JsonWebKey[];
+	if (cached) {
+		const keys = cached as JsonWebKey[];
+		inMemoryCertsCache = { keys, expiresAt: Date.now() + CERTS_LOCAL_TTL_MS };
+		return keys;
+	}
 
 	const res = await fetch(`https://${env.CF_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`);
 	if (!res.ok) throw new Error("Failed to fetch CF Access certs");
 	const { keys } = await res.json<{ keys: JsonWebKey[] }>();
 
 	await env.KV.put("cf-access-certs", JSON.stringify(keys), { expirationTtl: 3600 });
+	inMemoryCertsCache = { keys, expiresAt: Date.now() + CERTS_LOCAL_TTL_MS };
 	return keys;
 }
+
+const inMemoryUserCache = new Map<string, { user: AuthUser; expiresAt: number }>();
+const USER_LOCAL_TTL_MS = 300 * 1000;
 
 async function upsertUserByEmail(
 	email: string,
 	db: D1Database,
 	kv?: KVNamespace
 ): Promise<AuthUser> {
+	const local = inMemoryUserCache.get(email);
+	if (local && local.expiresAt > Date.now()) return local.user;
+
 	if (kv) {
 		const cached = await kv.get(`user-by-email:${email}`, "json");
-		if (cached) return cached as AuthUser;
+		if (cached) {
+			const user = cached as AuthUser;
+			inMemoryUserCache.set(email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
+			return user;
+		}
 	}
 
 	const id = crypto.randomUUID();
@@ -287,6 +315,7 @@ async function upsertUserByEmail(
 	if (kv) {
 		await kv.put(`user-by-email:${email}`, JSON.stringify(user), { expirationTtl: 300 });
 	}
+	inMemoryUserCache.set(email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
 
 	return user;
 }
