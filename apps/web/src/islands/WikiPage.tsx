@@ -6,6 +6,13 @@ import { apiFetch } from "../utils/api-client";
 import { renderMdWithWikilinks, renderMermaidDiagrams } from "../utils/markdown";
 import AccessPending from "./AccessPending";
 import MarkdownEditor from "./MarkdownEditor";
+import Select, { type SelectOption } from "./Select";
+
+interface ProjectOption {
+	id: string;
+	key: string;
+	name: string;
+}
 
 interface SearchResult {
 	id: string;
@@ -203,7 +210,52 @@ function PageTreeList({
 	);
 }
 
+// Lets a user viewing the workspace-wide wiki (or one project's wiki) switch to another
+// scope explicitly, since the only other entry point is a project's nav tab. Switching
+// scope is a full navigation (fresh tree/search for the new scope), not an in-place swap.
+function useProjects(workspaceSlug: string | undefined) {
+	const [projects, setProjects] = useState<ProjectOption[]>([]);
+
+	useEffect(() => {
+		apiFetch<ProjectOption[]>("/api/projects", { workspaceSlug })
+			.then((list) => setProjects(Array.isArray(list) ? list : []))
+			.catch(() => {});
+	}, [workspaceSlug]);
+
+	return projects;
+}
+
+function ScopeControl({
+	workspaceSlug,
+	projectId,
+}: {
+	workspaceSlug: string | undefined;
+	projectId: string;
+}) {
+	const projects = useProjects(workspaceSlug);
+	const options: SelectOption[] = [
+		{ value: "", label: "Workspace (all projects)" },
+		...projects.map((p) => ({ value: p.id, label: `${p.key} — ${p.name}` })),
+	];
+
+	return (
+		<div class="mb-3">
+			<p class="m-0 mb-1 text-[0.7rem] text-text-muted">Scope</p>
+			<Select
+				value={projectId}
+				options={options}
+				ariaLabel="Wiki project scope"
+				onChange={(value) => {
+					window.location.href = value ? `/wiki?projectId=${encodeURIComponent(value)}` : "/wiki";
+				}}
+			/>
+		</div>
+	);
+}
+
 function WikiSidebar({
+	workspaceSlug,
+	projectId,
 	searchQuery,
 	onSearchQueryChange,
 	searchResults,
@@ -214,6 +266,8 @@ function WikiSidebar({
 	onNavigate,
 	onCreate,
 }: {
+	workspaceSlug: string | undefined;
+	projectId: string;
 	searchQuery: string;
 	onSearchQueryChange: (value: string) => void;
 	searchResults: SearchResult[];
@@ -230,6 +284,7 @@ function WikiSidebar({
 	].join(" ");
 	return (
 		<aside class={asideClass}>
+			<ScopeControl workspaceSlug={workspaceSlug} projectId={projectId} />
 			<button
 				type="button"
 				onClick={onCreate}
@@ -1576,6 +1631,8 @@ const WIKI_PAGE_STYLES = `
 `;
 
 function WikiPageShell(props: {
+	workspaceSlug: string | undefined;
+	projectId: string;
 	searchQuery: string;
 	onSearchQueryChange: (v: string) => void;
 	searchResults: SearchResult[];
@@ -1599,6 +1656,8 @@ function WikiPageShell(props: {
 		<div class="flex min-h-screen max-sm:flex-col">
 			<style>{WIKI_PAGE_STYLES}</style>
 			<WikiSidebar
+				workspaceSlug={props.workspaceSlug}
+				projectId={props.projectId}
 				searchQuery={props.searchQuery}
 				onSearchQueryChange={props.onSearchQueryChange}
 				searchResults={props.searchResults}
@@ -1821,6 +1880,8 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 
 	return (
 		<WikiPageShell
+			workspaceSlug={workspaceSlug}
+			projectId={projectId}
 			searchQuery={searchQuery}
 			onSearchQueryChange={setSearchQuery}
 			searchResults={searchResults}
