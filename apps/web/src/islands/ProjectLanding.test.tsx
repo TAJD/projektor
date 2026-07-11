@@ -29,7 +29,11 @@ const ISSUE = {
 	updated_at: 1000,
 };
 
-function mockFetchProject(issues: (typeof ISSUE)[] = [ISSUE], wiki: unknown[] = []) {
+function mockFetchProject(
+	issues: (typeof ISSUE)[] = [ISSUE],
+	wiki: unknown[] = [],
+	flowMetrics: unknown = { throughputOverTime: [], cfdOverTime: [] }
+) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {
@@ -39,6 +43,9 @@ function mockFetchProject(issues: (typeof ISSUE)[] = [ISSUE], wiki: unknown[] = 
 			}
 			if (u.includes("/api/wiki")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve(wiki) });
+			}
+			if (u.includes("/flow-metrics")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(flowMetrics) });
 			}
 			// project fetch
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(PROJECT) });
@@ -89,5 +96,29 @@ describe("ProjectLanding", () => {
 		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
 		render(<ProjectLanding />);
 		expect(await screen.findByRole("alert")).toBeTruthy();
+	});
+
+	it("shows an empty state for the flow charts on a project with no history", async () => {
+		history.replaceState(null, "", "?id=p1");
+		mockFetchProject([ISSUE], [], { throughputOverTime: [], cfdOverTime: [] });
+		render(<ProjectLanding />);
+		await screen.findByRole("heading", { name: "Projektor" });
+		expect(await screen.findByText(/Flow \(last 6 weeks\)/i)).toBeTruthy();
+		expect(screen.getAllByText(/No (completed issues|issues in this window)/i).length).toBe(2);
+	});
+
+	it("renders throughput and cumulative flow charts when the project has flow history", async () => {
+		history.replaceState(null, "", "?id=p1");
+		mockFetchProject([ISSUE], [], {
+			throughputOverTime: [{ bucketStart: "2024-01-01", count: 3 }],
+			cfdOverTime: [
+				{ bucketStart: "2024-01-01", backlogTodo: 2, inProgress: 1, inReview: 0, done: 3 },
+			],
+		});
+		render(<ProjectLanding />);
+		await screen.findByRole("heading", { name: "Projektor" });
+		expect(await screen.findByText(/Flow \(last 6 weeks\)/i)).toBeTruthy();
+		expect(screen.getByText("Throughput")).toBeTruthy();
+		expect(screen.getByText("Cumulative flow")).toBeTruthy();
 	});
 });

@@ -2,6 +2,7 @@ import type { RefObject } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
+import ProjectFlowCharts from "./ProjectFlowCharts";
 
 interface Project {
 	id: string;
@@ -425,6 +426,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 				</div>
 			</header>
 
+			<ProjectFlowCharts workspaceSlug={workspaceSlug} projectId={project.id} />
 			<RecentIssuesSection issues={recentIssues} />
 			<RecentWikiSection pages={recentWiki} />
 		</div>
