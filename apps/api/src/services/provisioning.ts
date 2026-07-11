@@ -224,3 +224,32 @@ export async function provisionUserOnLogin(
 		})
 		.onConflictDoNothing();
 }
+
+/**
+ * PROJ-373: idempotently join the shared anonymous "public viewer" user (see
+ * middleware/auth.ts's PUBLIC_READ_ONLY path) to the default workspace as
+ * `viewer`. Deliberately hardcoded to `viewer` — unlike AUTO_JOIN_ROLE, this
+ * has no configurable role; anonymous access is read-only or it doesn't exist.
+ * A no-op until an admin has bootstrapped the default workspace.
+ */
+export async function provisionPublicViewer(env: Env, user: { id: string }): Promise<void> {
+	const slug = env.DEFAULT_WORKSPACE_SLUG?.trim() || "projektor";
+	const orm = drizzle(env.DB, { schema });
+
+	const ws = await orm
+		.select({ id: schema.workspaces.id })
+		.from(schema.workspaces)
+		.where(eq(schema.workspaces.slug, slug))
+		.get();
+	if (!ws) return;
+
+	await orm
+		.insert(schema.workspaceMembers)
+		.values({
+			workspaceId: ws.id,
+			userId: user.id,
+			role: "viewer",
+			joinedAt: Math.floor(Date.now() / 1000),
+		})
+		.onConflictDoNothing();
+}
