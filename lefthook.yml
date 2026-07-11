@@ -7,6 +7,8 @@ pre-commit:
     island-api:
       run: pnpm --filter @projektor/cofferdam-island-api build && node scripts/check-island-api.mjs
 
+      # TODO: Check what the check island api script does, and then whether it should be extended or folded into cofferdam
+
 pre-push:
   commands:
     lint:

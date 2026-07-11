@@ -1,39 +1,22 @@
 ---
-title: "Where Projektor fits"
-description: "How Projektor sits in the agentic dev-tools stack: layers as concerns, the MCP narrow waist, and the empty middle between Jira and beads."
+title: "Projektor and the AI tooling landscape"
+description: "Projektor integrates across AI native workflows, enabling developers to pass context on task purpose, repo organisation and agent co-ordination."
 sidebar:
   order: 1
 ---
-Tools for agentic development split into three concerns: running the agents,
-coordinating them, and tracking the work. The mistake is to treat each concern
-as its own product. They are not products - they are concerns, and the real
-product boundary is the API. With MCP as the shared interface, one tool can cut
-a vertical slice through several concerns and stay coherent, because the
-interface stays coherent. That is what Projektor is: not one layer, but a slice
-across several.
 
-This page is the *why*. For the *how* - the multi-agent loop these concerns
-combine into - see [Agentic workflows](/projektor/agents/agent-workflows/).
+COMMENT: This doesn't necessarily frame the problem in the right way at the moment.
 
-## The three concerns
+- Human vs agent split
+- Developer processes -> how the developer or agent does this
+- Developer to implementation co-ordination -> defining what a task is and what files is needs to use
+- Product perspective and project management -> wikis, epics and task generation
 
-1. **Implementation - the runtime.** Spawning agents, worktrees, job objects.
-   Choosing which model runs (Opus plans, Sonnet builds, Haiku looks up). Tuning
-   prompts and context to keep tokens cheap. And the verification steps that move
-   work forward: running the tests, doing the human review.
-2. **Coordination - communication.** A message bus, agent presence, context
-   fetching, shared skills. For a fleet, most of this collapses into project
-   management: the issue graph **is** the shared memory, and status changes
-   **are** the events.
-3. **Project management - the source of truth.** The durable state: the issue,
-   epic, and sprint graph; machine-readable priorities; and the state-machine
-   nodes that record what verification decided.
+Tools break down how they help in various different ways depending on the opinion of the developer vision.
 
-Projektor is a single MCP surface spanning coordination and project management.
-Through file claims it also reaches into the runtime - deciding who may write
-which file. It owns the **nodes** of the work state machine; the implementation
-layer owns the **transitions**. Projektor never runs a test or judges a diff. It
-records the outcome.
+- Any tool has to be MCP first.
+- Traditional project management processes around wikis, tasks and sprints and epics are scalable and enable Agents to focus on product level concerns over meaningful timeframes. These still group increments of work usefully.
+- Cloudflare has insane free tiers, and I also thought it would be an interesting project to build my own tooling.
 
 ```mermaid
 flowchart TB
@@ -70,6 +53,8 @@ flowchart TB
     verify -->|pass / fail| state
     state -->|feedback / replan| human
 ```
+
+COMMENT: This should be removed or updated, the selling point of this tool is that it's AI native, free or cheap to host and has a very easy deployment process. It also is positions at the nexus of project management and agent orchestration without defining the models or how the agents are orchestrated.
 
 ## The empty middle
 

@@ -8,6 +8,9 @@
  *
  *   tsx scripts/gen-conventions-page.ts
  */
+
+// TODO: Should this be in the docs site at all? What is useful from it?
+
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,14 +19,14 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, ".."); // scripts -> repo root
 const sourcePath = join(repoRoot, "AGENTS.md");
 const outPath = join(
-	repoRoot,
-	"apps",
-	"docs",
-	"src",
-	"content",
-	"docs",
-	"contributing",
-	"conventions.md",
+  repoRoot,
+  "apps",
+  "docs",
+  "src",
+  "content",
+  "docs",
+  "contributing",
+  "conventions.md",
 );
 
 const FRONTMATTER = `---

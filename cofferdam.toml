@@ -48,5 +48,7 @@ severity = "medium"
 # [checks."Warning.TripleEquals"]
 # severity = "high"
 
+# TODO: Are these the best settings
 # [checks."Consistency.QuoteStyle"]
 # severity = "low"
+#

@@ -15,3 +15,8 @@ dist/
 dev-server.log
 .cofferdam/cache/
 coverage/
+
+# nested git worktrees created by agent tooling — must stay out of biome's
+# config-discovery walk (each worktree's own biome.json otherwise collides
+# with this root config)
+.claude/worktrees/
