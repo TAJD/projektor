@@ -8,6 +8,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
+const TASK_TYPES_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:task-types`;
 
 function buildTaskTypeUpdateSet(
 	data: z.infer<typeof UpdateTaskTypeSchema>
@@ -22,7 +23,7 @@ function buildTaskTypeUpdateSet(
 }
 
 export async function listTaskTypes(ctx: ServiceCtx) {
-	const cacheKey = `ws-meta:${ctx.workspaceId}:task-types`;
+	const cacheKey = TASK_TYPES_CACHE_KEY(ctx.workspaceId);
 	const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
 	if (cached) return cached;
 
@@ -75,6 +76,7 @@ export async function createTaskType(ctx: ServiceCtx, raw: unknown) {
 		isDefault: isDefault ? 1 : 0,
 	});
 
+	await cache.invalidate(ctx.kv, TASK_TYPES_CACHE_KEY(ctx.workspaceId));
 	return { id, key, name };
 }
 
@@ -106,6 +108,7 @@ export async function updateTaskType(ctx: ServiceCtx, id: string, raw: unknown) 
 		.set(setObj)
 		.where(and(eq(schema.taskTypes.id, id), eq(schema.taskTypes.workspaceId, ctx.workspaceId)));
 
+	await cache.invalidate(ctx.kv, TASK_TYPES_CACHE_KEY(ctx.workspaceId));
 	return { ok: true };
 }
 
@@ -134,6 +137,7 @@ export async function deleteTaskType(ctx: ServiceCtx, id: string) {
 		.delete(schema.taskTypes)
 		.where(and(eq(schema.taskTypes.id, id), eq(schema.taskTypes.workspaceId, ctx.workspaceId)));
 
+	await cache.invalidate(ctx.kv, TASK_TYPES_CACHE_KEY(ctx.workspaceId));
 	return { ok: true };
 }
 

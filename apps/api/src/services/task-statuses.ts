@@ -8,10 +8,11 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
+const TASK_STATUSES_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:task-statuses`;
 
 export async function listTaskStatuses(ctx: ServiceCtx) {
 	// cofferdam-ignore: Refactor.DuplicateBlock: mirrors task-types.ts's cache-read shape
-	const cacheKey = `ws-meta:${ctx.workspaceId}:task-statuses`;
+	const cacheKey = TASK_STATUSES_CACHE_KEY(ctx.workspaceId);
 	const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
 	if (cached) return cached;
 
@@ -67,6 +68,7 @@ export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
 		isDefault: isDefault ? 1 : 0,
 	});
 
+	await cache.invalidate(ctx.kv, TASK_STATUSES_CACHE_KEY(ctx.workspaceId));
 	return { id, key, name };
 }
 
@@ -115,6 +117,7 @@ export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown
 			and(eq(schema.taskStatuses.id, id), eq(schema.taskStatuses.workspaceId, ctx.workspaceId))
 		);
 
+	await cache.invalidate(ctx.kv, TASK_STATUSES_CACHE_KEY(ctx.workspaceId));
 	return { ok: true };
 }
 
@@ -148,6 +151,7 @@ export async function deleteTaskStatus(ctx: ServiceCtx, id: string) {
 			and(eq(schema.taskStatuses.id, id), eq(schema.taskStatuses.workspaceId, ctx.workspaceId))
 		);
 
+	await cache.invalidate(ctx.kv, TASK_STATUSES_CACHE_KEY(ctx.workspaceId));
 	return { ok: true };
 }
 

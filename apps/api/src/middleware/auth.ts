@@ -66,10 +66,16 @@ function checkTokenScope(
 	return null;
 }
 
+// PROJ-360: last_used_at is a coarse "when was this token last seen" audit field,
+// not something that needs per-request precision — only rewrite it once per
+// this window to cut D1 write volume on the hottest auth path (bearer/agent
+// traffic hits this on every request).
+const LAST_USED_AT_THROTTLE_SECS = 60;
+
 async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise<AuthOutcome> {
 	const hash = await hashToken(token);
 	const row = await c.env.DB.prepare(
-		`SELECT at.workspace_id, at.expires_at, at.scopes,
+		`SELECT at.workspace_id, at.expires_at, at.scopes, at.last_used_at,
               u.id as user_id, u.email, u.name
        FROM api_tokens at
        LEFT JOIN users u ON u.id = at.user_id
@@ -83,6 +89,7 @@ async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise
 			workspace_id: string | null;
 			expires_at: number | null;
 			scopes: string | null;
+			last_used_at: number | null;
 		}>();
 
 	if (!row) {
@@ -101,11 +108,14 @@ async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise
 	c.set("tokenScopes", scopes);
 	c.set("authKind", "agent");
 
-	c.executionCtx.waitUntil(
-		c.env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?")
-			.bind(Math.floor(Date.now() / 1000), hash)
-			.run()
-	);
+	const now = Math.floor(Date.now() / 1000);
+	if (!row.last_used_at || now - row.last_used_at >= LAST_USED_AT_THROTTLE_SECS) {
+		c.executionCtx.waitUntil(
+			c.env.DB.prepare("UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?")
+				.bind(now, hash)
+				.run()
+		);
+	}
 
 	return { kind: "allow" };
 }
@@ -232,36 +242,99 @@ async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | nu
 	}
 	// All field checks passed — now fetch keys and verify the signature.
 	const keys = await getCfAccessKeys(env);
-	const result = await verifyJwtPayload(
+	let result = await verifyJwtPayload(
 		jwt,
 		keys,
 		env.CF_ACCESS_AUDIENCE,
 		`https://${env.CF_ACCESS_TEAM_DOMAIN}`
 	);
+	if (!result) {
+		// PROJ-358: claims already passed the pre-screen above, so a null result
+		// here means the signature didn't match any cached key — most likely
+		// Cloudflare rotated its Access signing keys since we cached them. Force
+		// one rate-limited refetch and retry before giving up, instead of
+		// leaving every login failing until both cache layers expire.
+		const freshKeys = await getCfAccessKeys(env, { forceRefresh: true });
+		if (freshKeys !== keys) {
+			result = await verifyJwtPayload(
+				jwt,
+				freshKeys,
+				env.CF_ACCESS_AUDIENCE,
+				`https://${env.CF_ACCESS_TEAM_DOMAIN}`
+			);
+		}
+	}
 	if (!result) return null;
 	return upsertUserByEmail(result.email, env.DB, env.KV);
 }
 
-async function getCfAccessKeys(env: Env): Promise<JsonWebKey[]> {
-	const cached = await env.KV.get("cf-access-certs", "json");
-	if (cached) return cached as JsonWebKey[];
+// PROJ-354: both caches below are read on every authenticated CF Access request.
+// A Worker isolate serves many requests before Cloudflare recycles it, so an
+// isolate-local (module-scope) cache in front of the KV read cuts the vast
+// majority of that KV read volume — KV remains the cross-isolate/cold-start
+// fallback and the TTL source of truth; these local TTLs only bound staleness
+// within a single isolate's lifetime.
+let inMemoryCertsCache: { keys: JsonWebKey[]; expiresAt: number } | null = null;
+const CERTS_LOCAL_TTL_MS = 3600 * 1000;
 
+// PROJ-358: bounds how often a burst of stale-key-signed tokens can force a real
+// network fetch of the JWKS endpoint.
+let lastForcedRefreshAt = 0;
+const FORCE_REFRESH_COOLDOWN_MS = 60 * 1000;
+
+async function fetchAndCacheCfAccessKeys(env: Env): Promise<JsonWebKey[]> {
 	const res = await fetch(`https://${env.CF_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`);
 	if (!res.ok) throw new Error("Failed to fetch CF Access certs");
 	const { keys } = await res.json<{ keys: JsonWebKey[] }>();
 
 	await env.KV.put("cf-access-certs", JSON.stringify(keys), { expirationTtl: 3600 });
+	inMemoryCertsCache = { keys, expiresAt: Date.now() + CERTS_LOCAL_TTL_MS };
 	return keys;
 }
+
+async function getCfAccessKeys(env: Env, opts?: { forceRefresh?: boolean }): Promise<JsonWebKey[]> {
+	if (opts?.forceRefresh) {
+		const now = Date.now();
+		if (now - lastForcedRefreshAt >= FORCE_REFRESH_COOLDOWN_MS) {
+			lastForcedRefreshAt = now;
+			return fetchAndCacheCfAccessKeys(env);
+		}
+		// Within cooldown — another request already forced a refresh recently;
+		// fall through to whatever's cached rather than hitting the network again.
+	}
+
+	if (inMemoryCertsCache && inMemoryCertsCache.expiresAt > Date.now()) {
+		return inMemoryCertsCache.keys;
+	}
+
+	const cached = await env.KV.get("cf-access-certs", "json");
+	if (cached) {
+		const keys = cached as JsonWebKey[];
+		inMemoryCertsCache = { keys, expiresAt: Date.now() + CERTS_LOCAL_TTL_MS };
+		return keys;
+	}
+
+	return fetchAndCacheCfAccessKeys(env);
+}
+
+const inMemoryUserCache = new Map<string, { user: AuthUser; expiresAt: number }>();
+const USER_LOCAL_TTL_MS = 300 * 1000;
 
 async function upsertUserByEmail(
 	email: string,
 	db: D1Database,
 	kv?: KVNamespace
 ): Promise<AuthUser> {
+	const local = inMemoryUserCache.get(email);
+	if (local && local.expiresAt > Date.now()) return local.user;
+
 	if (kv) {
 		const cached = await kv.get(`user-by-email:${email}`, "json");
-		if (cached) return cached as AuthUser;
+		if (cached) {
+			const user = cached as AuthUser;
+			inMemoryUserCache.set(email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
+			return user;
+		}
 	}
 
 	const id = crypto.randomUUID();
@@ -287,6 +360,7 @@ async function upsertUserByEmail(
 	if (kv) {
 		await kv.put(`user-by-email:${email}`, JSON.stringify(user), { expirationTtl: 300 });
 	}
+	inMemoryUserCache.set(email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
 
 	return user;
 }

@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import type { z } from "zod";
 import { IdSchema } from "../schemas/common";
 import {
@@ -9,6 +9,7 @@ import {
 	UpdateSprintSchema,
 } from "../schemas/sprints";
 import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
+import * as cache from "./cache";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -206,6 +207,27 @@ export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 	if (!sprint) throw new NotFoundError("Sprint not found");
 	await requireSprintProjectWrite(ctx, sprint.projectId);
 
+	// PROJ-357: requireSprintProjectWrite only checked the *sprint's* project.
+	// Reject any caller-supplied issue that doesn't belong to that project —
+	// otherwise a write grant on the sprint's project alone would let a caller
+	// move issues from a project they have no access to (and sprints are
+	// project-scoped, so cross-project membership would also be a data bug).
+	const foreignIssues = await inChunks(issueIds, async (chunk) =>
+		orm
+			.select({ id: schema.issues.id })
+			.from(schema.issues)
+			.where(
+				and(
+					inArray(schema.issues.id, chunk),
+					eq(schema.issues.workspaceId, ctx.workspaceId),
+					ne(schema.issues.projectId, sprint.projectId)
+				)
+			)
+	);
+	if (foreignIssues.length > 0) {
+		throw new NotFoundError(`Issue not found: ${foreignIssues[0].id}`);
+	}
+
 	const now = Math.floor(Date.now() / 1000);
 	// inChunks: issueIds is a caller-supplied batch, so keep each UPDATE under D1's
 	// 100-bound-parameter cap. See services/sql.ts.
@@ -216,6 +238,12 @@ export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 			.where(and(inArray(schema.issues.id, chunk), eq(schema.issues.workspaceId, ctx.workspaceId)));
 		return [];
 	});
+
+	// PROJ-356: invalidate the per-issue KV cache so a subsequent getIssue reflects
+	// the new sprint_id instead of serving a stale cached issue for up to ISSUE_TTL.
+	await Promise.all(
+		issueIds.map((id) => cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${id}`))
+	);
 
 	return { ok: true, count: issueIds.length };
 }
