@@ -1,4 +1,5 @@
 ---
+import { ClientRouter } from 'astro:transitions';
 import pkg from '../../package.json';
 
 interface Props {
@@ -27,6 +28,7 @@ const navItems = [
     <meta name="theme-color" content="#6366f1" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>{title}</title>
+    <ClientRouter />
     <!-- safe-ls: 'theme' is a cosmetic preference (dark/light). No API dependency - a
          stale or missing value falls back to the system color-scheme media query. -->
     <script is:inline>
