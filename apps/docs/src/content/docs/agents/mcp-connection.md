@@ -168,7 +168,7 @@ Once connected, give Claude Code natural-language instructions:
 
 ## 7. Cloudflare Access note
 
-If your projektor instance is behind Cloudflare Access (which it should be in production), headless agents need a **service token** rather than a user JWT. See the CF Access docs for minting service tokens.
+If your projektor instance is behind Cloudflare Access (which it should be in production), headless agents need a **service token** rather than a user JWT. See the [Cloudflare Access docs on service tokens](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) for minting one.
 
 Pass the service token credentials alongside the API token:
 

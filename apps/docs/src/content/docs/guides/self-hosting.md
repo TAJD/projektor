@@ -25,7 +25,7 @@ Clone the deploy repo and run the zero-config script; wrangler auto-provisions t
 resources, applies migrations, and deploys:
 
 ```bash
-PROJEKTOR_REPO=you/projektor ADMIN_EMAILS=you@example.com ./deploy-auto.sh
+PROJEKTOR_REPO=TAJD/projektor ADMIN_EMAILS=you@example.com ./deploy-auto.sh
 ```
 
 Or hand the repo to an AI agent - *"deploy projektor to my Cloudflare account"* - and

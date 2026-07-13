@@ -5,6 +5,8 @@
 **Documentation:** <https://tajd.github.io/projektor/> - self-hosting, connecting an
 agent, architecture, and the full MCP tool catalog.
 
+**Live demo:** <https://projektor-demo.tajdickson.workers.dev> - see it running before you deploy your own (no login configured; see the [live demo guide](https://tajd.github.io/projektor/guides/live-demo/) for why).
+
 ## What it is
 
 ![Projektor issue backlog - list view with projects sidebar, issue refs, status, priority, and assignees](docs/images/backlog.png)

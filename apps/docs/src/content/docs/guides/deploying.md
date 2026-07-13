@@ -89,7 +89,8 @@ Pin a version and run the deploy script once - it downloads the release and
 scaffolds your `wrangler.toml` from the template:
 
 ```bash
-echo "v1.0.0" > projektor.version          # a published release tag
+gh release list -R TAJD/projektor          # find a real tag - releases are all v0.x so far
+echo "v0.3.7" > projektor.version          # pin whichever tag you picked
 ./deploy.sh                                 # creates wrangler.toml, then asks you to fill it
 ```
 
