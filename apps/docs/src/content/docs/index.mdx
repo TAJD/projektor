@@ -12,6 +12,9 @@ hero:
     - text: Self-host in 5 minutes
       link: /projektor/guides/self-hosting/
       icon: rocket
+    - text: See the live demo
+      link: /projektor/guides/live-demo/
+      icon: open-book
     - text: GitHub
       link: https://github.com/TAJD/projektor
       icon: github
@@ -45,7 +48,7 @@ Clone the [deploy repo](https://github.com/TAJD/projektor-deploy-example) and ru
 zero-config script - wrangler auto-provisions D1, KV, and R2, applies migrations, and deploys:
 
 ```bash
-PROJEKTOR_REPO=you/projektor ADMIN_EMAILS=you@example.com ./deploy-auto.sh
+PROJEKTOR_REPO=TAJD/projektor ADMIN_EMAILS=you@example.com ./deploy-auto.sh
 ```
 
 Or hand the repo to an AI agent - *"deploy projektor to my Cloudflare account"* - and let it
