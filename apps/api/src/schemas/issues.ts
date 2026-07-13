@@ -63,6 +63,9 @@ export const ListIssuesSchema = z.object({
 	completedBefore: z.coerce.number().optional(),
 	updatedAfter: z.coerce.number().optional(),
 	updatedBefore: z.coerce.number().optional(),
+	// PROJ-375: surface agent-initiated done-closures whose evidence wasn't
+	// externally checkable, for periodic human audit.
+	needsAudit: z.coerce.boolean().optional(),
 	cursor: z.coerce.number().optional(),
 	limit: z.coerce.number().min(1).max(100).default(30),
 });

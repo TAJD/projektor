@@ -8,13 +8,14 @@ import {
 	seedTaskStatus,
 } from "./helpers";
 
-// PROJ-254 gate, hardened by PROJ-287/289/292/293: the review/done gate is bound to
-// the issue's LIVE AGENT LEASE (an agent can't spoof it by omitting agentSessionId or
-// self-declaring kind:"human"), the done-report requirement is scoped to agent-worked
-// issues, review is keyed on any review-like status, and the report is only stamped on
-// a real transition.
+// PROJ-254 gate, hardened by PROJ-287/289/292/293: the in_review report requirement is
+// bound to the issue's LIVE AGENT LEASE (an agent can't spoof it by omitting
+// agentSessionId or self-declaring kind:"human"); the done-report requirement is scoped
+// to agent-worked issues; review is keyed on any review-like status; the report is only
+// stamped on a real transition. PROJ-375 removed the old block on an agent (live lease)
+// transitioning to done — agents can close freely now; see the needsAudit tests below.
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
-describe("Review gating (PROJ-254/287/289/292/293)", () => {
+describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
@@ -38,6 +39,13 @@ describe("Review gating (PROJ-254/287/289/292/293)", () => {
 			.bind(id)
 			.first<{ completion_report_at: number | null }>();
 		return row?.completion_report_at ?? null;
+	}
+
+	async function needsAuditOf(id: string): Promise<boolean> {
+		const row = await env.DB.prepare("SELECT needs_audit FROM issues WHERE id = ?")
+			.bind(id)
+			.first<{ needs_audit: number }>();
+		return Boolean(row?.needs_audit);
 	}
 
 	async function commentBodies(id: string): Promise<string[]> {
@@ -70,71 +78,74 @@ describe("Review gating (PROJ-254/287/289/292/293)", () => {
 		expect((await commentBodies(issue.id)).some((b) => b.includes("Did the thing"))).toBe(true);
 	});
 
-	it("never lets an agent (live lease) transition an issue to done, report or not", async () => {
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Agent tries done" });
-		await seedAgentLease(workspaceId, issue.id);
+	// --- PROJ-375: agents close to done directly, no block ---
 
-		const res = await patch(issue.id, { status: "done", completionReport: report });
-		expect(res.status).toBe(403);
+	it("lets an agent (live lease) transition an issue directly to done", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Agent closes" });
+		const { agentSessionId } = await seedAgentLease(workspaceId, issue.id);
+
+		const res = await patch(issue.id, { status: "done", agentSessionId, completionReport: report });
+		expect(res.status).toBe(200);
 	});
 
-	// --- Regression: the closed bypasses (PROJ-287) ---
+	it("flags an agent-initiated done closure with freeform verification as needsAudit", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Freeform close" });
+		const { agentSessionId } = await seedAgentLease(workspaceId, issue.id);
 
-	it("REGRESSION: omitting agentSessionId does not let an agent-leased issue skip the done gate", async () => {
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Omit bypass" });
-		await seedAgentLease(workspaceId, issue.id);
-
-		// No agentSessionId at all — previously treated as human and allowed straight to done.
-		const res = await patch(issue.id, { status: "done", completionReport: report });
-		expect(res.status).toBe(403);
+		await patch(issue.id, { status: "done", agentSessionId, completionReport: report });
+		expect(await needsAuditOf(issue.id)).toBe(true);
 	});
 
-	it("REGRESSION: a self-declared kind:human session cannot escape a live agent lease", async () => {
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Human spoof" });
-		await seedAgentLease(workspaceId, issue.id, { kind: "agent" });
-		// Attach a human-kind session too; it must not downgrade the live agent lease.
-		const human = await seedAgentLease(workspaceId, issue.id, { kind: "human", live: false });
+	it("does not flag an agent-initiated done closure with an externally-checkable link", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Verifiable close" });
+		const { agentSessionId } = await seedAgentLease(workspaceId, issue.id);
 
-		const res = await patch(issue.id, {
+		await patch(issue.id, {
 			status: "done",
-			agentSessionId: human.agentSessionId,
+			agentSessionId,
+			completionReport: {
+				summary: "Did the thing",
+				verification: "https://github.com/TAJD/projektor/pull/93 — CI green",
+			},
+		});
+		expect(await needsAuditOf(issue.id)).toBe(false);
+	});
+
+	it("does not flag a human-initiated done closure (no agentSessionId) even with freeform evidence", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Human closes" });
+		await seedAgentLease(workspaceId, issue.id, { live: false });
+
+		await patch(issue.id, { status: "done", completionReport: report });
+		expect(await needsAuditOf(issue.id)).toBe(false);
+	});
+
+	it("does not flag when the agentSessionId given is not a live session (accepted limitation)", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Stale session close" });
+		await seedAgentLease(workspaceId, issue.id, { live: false });
+
+		await patch(issue.id, {
+			status: "done",
+			agentSessionId: crypto.randomUUID(), // never existed — can't resolve to a live session
 			completionReport: report,
 		});
-		expect(res.status).toBe(403);
+		expect(await needsAuditOf(issue.id)).toBe(false);
 	});
 
-	it("REGRESSION: a lease held ONLY by a self-declared kind:human session still gates the done transition", async () => {
+	it("flags needsAudit even once the agent's lease has been released before closing", async () => {
+		// The exact scenario PROJ-375 was filed for: release_issue then update_issue done.
 		const issue = await seedIssue(workspaceId, projectId, userId, {
-			title: "Human-kind-only lease",
+			title: "Released then closed",
 		});
-		// No agent-kind lease at all — the issue's only lease holder declared kind:"human"
-		// at register_agent time (unprivileged, no role check on that field).
-		await seedAgentLease(workspaceId, issue.id, { kind: "human" });
-
-		const res = await patch(issue.id, { status: "done", completionReport: report });
-		expect(res.status).toBe(403);
-	});
-
-	it("REGRESSION: a released kind:human-only lease still requires a completion report to close", async () => {
-		const issue = await seedIssue(workspaceId, projectId, userId, {
-			title: "Released human lease",
+		const { agentSessionId } = await seedAgentLease(workspaceId, issue.id);
+		await SELF.fetch(`http://localhost/api/issues/${issue.id}/release`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ agentId: agentSessionId }),
 		});
-		// The lease is no longer live, so this exercises issueEverHadAgentLease rather
-		// than issueHasLiveAgentLease — it must still count as agent-worked.
-		await seedAgentLease(workspaceId, issue.id, { kind: "human", live: false });
 
-		expect((await patch(issue.id, { status: "done" })).status).toBe(400);
-		expect((await patch(issue.id, { status: "done", completionReport: report })).status).toBe(200);
-	});
-
-	it("REGRESSION: a stale/ended agentSessionId no longer hard-404s a valid update", async () => {
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Stale session" });
-
-		const res = await patch(issue.id, {
-			status: "todo",
-			agentSessionId: crypto.randomUUID(), // never existed
-		});
+		const res = await patch(issue.id, { status: "done", agentSessionId, completionReport: report });
 		expect(res.status).toBe(200);
+		expect(await needsAuditOf(issue.id)).toBe(true);
 	});
 
 	// --- Human path scoped to agent-worked issues (PROJ-289) ---
@@ -171,11 +182,11 @@ describe("Review gating (PROJ-254/287/289/292/293)", () => {
 		);
 	});
 
-	// --- REST/MCP parity (PROJ-301) ---
+	// --- REST/MCP parity (PROJ-301/375) ---
 
-	it("MCP parity: update_issue enforces the done gate on an agent-leased issue", async () => {
+	it("MCP parity: update_issue lets an agent close directly to done and flags weak evidence", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "MCP done" });
-		await seedAgentLease(workspaceId, issue.id);
+		const { agentSessionId } = await seedAgentLease(workspaceId, issue.id);
 
 		const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
 			method: "POST",
@@ -186,12 +197,46 @@ describe("Review gating (PROJ-254/287/289/292/293)", () => {
 				method: "tools/call",
 				params: {
 					name: "update_issue",
-					arguments: { id: issue.id, status: "done", completionReport: report },
+					arguments: { id: issue.id, status: "done", agentSessionId, completionReport: report },
 				},
 			}),
 		});
-		// Agent holds a live lease → an agent cannot mark done; surfaced as a tool error.
-		expect(JSON.stringify(await res.json())).toMatch(/agent cannot mark/i);
+		const body = (await res.json()) as { result?: unknown; error?: unknown };
+		expect(body.error).toBeUndefined();
+		expect(body.result).toBeDefined();
+		expect(await needsAuditOf(issue.id)).toBe(true);
+	});
+
+	// --- Audit query filter (PROJ-375) ---
+
+	it("list_issues({ needsAudit: true }) surfaces flagged closures only", async () => {
+		const flagged = await seedIssue(workspaceId, projectId, userId, { title: "Flagged" });
+		const clean = await seedIssue(workspaceId, projectId, userId, { title: "Clean" });
+		const { agentSessionId: flaggedAgent } = await seedAgentLease(workspaceId, flagged.id);
+		const { agentSessionId: cleanAgent } = await seedAgentLease(workspaceId, clean.id);
+
+		await patch(flagged.id, {
+			status: "done",
+			agentSessionId: flaggedAgent,
+			completionReport: report,
+		});
+		await patch(clean.id, {
+			status: "done",
+			agentSessionId: cleanAgent,
+			completionReport: {
+				summary: "Did the thing",
+				verification: "https://github.com/TAJD/projektor/pull/93",
+			},
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/issues?projectId=${projectId}&needsAudit=true`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const { items } = (await res.json()) as { items: Array<{ id: string }> };
+		const ids = items.map((i) => i.id);
+		expect(ids).toContain(flagged.id);
+		expect(ids).not.toContain(clean.id);
 	});
 
 	// --- Report stamped only on a real transition (PROJ-293) ---

@@ -163,6 +163,55 @@ An LLM-judge pre-check (single call, pass/fail score against the spec's DoR/gati
 rubric) is real but out of scope here — call it out as a follow-up ticket if pursued,
 not bundled into Phase 4.
 
+## Phase 5 — Agent-initiated done transitions, audit-after-the-fact (PROJ-375)
+
+### What broke
+
+Phase 4 shipped the done-gate bound to `issueHasLiveAgentLease` (a live-lease check,
+not the self-declared `agentSessionId`/`kind`, for the spoof-resistance reasons in that
+function's docstring). In practice, agents call `release_issue` before their own
+final `update_issue({status:"done"})` — a normal part of finishing review, not an
+attempt to evade the gate — so by the time the done call lands, the lease is no
+longer live and the block never fires. The **spec said** "an agent session can never
+move to done"; the **code** only blocked it while the lease was still held. Observed
+live during an SL-30 session: the agent's own done-transition succeeded, contradicting
+`get_workflow`'s prose.
+
+### Design decision: stop gating, start auditing
+
+Building a trustworthy pre-close gate means verifying the completion report is
+actually true — which means calling out to GitHub Actions/Cloudflare CI status or
+ingesting CI webhooks. That's a real feature, explicitly deferred (see below), not
+something to half-do here. Given that, blocking the transition up front bought
+correctness theater: the "human must approve" promise was already not holding in the
+one case (released lease) that mattered most, and closing that specific loophole
+without real verification would just relocate the false confidence, not remove it.
+
+So Phase 5 embraces what was already happening: **agents can close to `done`
+directly**, full stop — the `ForbiddenError` block is removed. In its place, every
+agent-initiated done-transition (an `agentSessionId` that resolves to a real, live
+agent session — `isLiveAgentSessionId`, deliberately *not* keyed on the released-or-not
+lease that caused the original bug) gets its `completionReport.verification` text
+classified by `evidence-classification.ts`: does it contain a resolvable link (PR,
+CI run, commit URL) or a bare commit SHA, or is it freeform prose? Freeform closures
+still succeed — unchanged from actual (buggy) behavior — but get stamped
+`issues.needs_audit = true`, indexed and filterable via `list_issues({ needsAudit:
+true })`, so a human doing periodic review can pull every weakly-evidenced
+agent-closure without re-reading every closure's timeline.
+
+The completion-report *presence* requirement for agent-worked issues (Phase 4,
+`issueEverHadAgentLease`) is unchanged — this only removes the who's-allowed-to-close
+block and adds the evidence-quality flag on top.
+
+### Deliberately deferred (still)
+
+Real verification — the server spot-checking a PR/CI link against the GitHub API
+before honoring `needsAudit: false`, or ingesting CI webhooks directly — remains a
+follow-up. Evidence classification here is pattern-matching only; a fabricated PR URL
+in freeform text would currently read as "verifiable" with no check that it resolves
+or that its checks are green. Acceptable for an audit signal (a human still opens the
+link), not acceptable as a hard gate.
+
 ## Explicitly out of scope for this epic
 
 Autonomous triage/grooming/status-rollup agents. Revisit once Phase 2 (flow metrics)
