@@ -334,6 +334,38 @@ export async function issueEverHadAgentLease(ctx: ServiceCtx, issueId: string): 
 }
 
 /**
+ * Is `agentSessionId` a currently-live agent session (registered, status
+ * "active", heartbeated within the TTL)? Unlike issueHasLiveAgentLease this
+ * isn't about holding a lease on a specific issue — it's used by the PROJ-375
+ * evidence-audit flag to tell an agent-initiated `done` transition from a
+ * human one, so a caller can't get flagged/unflagged by a lease it released.
+ * Still resistant to the "declare kind:human" spoof (issueHasLiveAgentLease's
+ * docstring) because it doesn't look at kind at all — only that the session
+ * is real and live. A caller can dodge the audit flag by omitting
+ * agentSessionId entirely, same limitation the ticket accepts (PROJ-375: no
+ * trusted CI/webhook verification here, audit-after-the-fact only).
+ */
+export async function isLiveAgentSessionId(
+	ctx: ServiceCtx,
+	agentSessionId: string
+): Promise<boolean> {
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ id: schema.agentSessions.id })
+		.from(schema.agentSessions)
+		.where(
+			and(
+				eq(schema.agentSessions.id, agentSessionId),
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+				eq(schema.agentSessions.status, "active"),
+				gt(schema.agentSessions.lastHeartbeatAt, liveCutoff())
+			)
+		)
+		.get();
+	return row != null;
+}
+
+/**
  * List active leases (released_at IS NULL) in the workspace, optionally scoped
  * to an issue or agent. Each row carries a `live` flag (false = the holder
  * stopped heartbeating and the lease is reclaimable).

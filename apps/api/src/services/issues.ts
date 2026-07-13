@@ -40,7 +40,13 @@ import {
 } from "./custom-fields";
 import { checkDefinitionOfReady } from "./definition-of-ready";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
-import { issueEverHadAgentLease, issueHasLiveAgentLease, liveLeasedIssueIds } from "./issue-leases";
+import { isExternallyVerifiableEvidence } from "./evidence-classification";
+import {
+	isLiveAgentSessionId,
+	issueEverHadAgentLease,
+	issueHasLiveAgentLease,
+	liveLeasedIssueIds,
+} from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
 import { inChunks } from "./sql";
 import { resolveStatus } from "./task-statuses";
@@ -127,6 +133,9 @@ function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): 
 		if (ids.length) conditions.push(inArray(schema.issues.statusId, ids));
 	}
 	if (category) conditions.push(eq(schema.issues.statusCategory, category));
+	if (filters.needsAudit !== undefined) {
+		conditions.push(eq(schema.issues.needsAudit, filters.needsAudit));
+	}
 	if (priority)
 		conditions.push(
 			eq(schema.issues.priority, priority as "urgent" | "high" | "medium" | "low" | "none")
@@ -276,6 +285,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			created_at: schema.issues.createdAt,
 			updated_at: schema.issues.updatedAt,
 			completed_at: schema.issues.completedAt,
+			needs_audit: schema.issues.needsAudit,
 			assignee_name: schema.users.name,
 			project_key: schema.projects.key,
 			project_name: schema.projects.name,
@@ -333,6 +343,7 @@ const issueColumns = {
 	created_at: schema.issues.createdAt,
 	updated_at: schema.issues.updatedAt,
 	completed_at: schema.issues.completedAt,
+	needs_audit: schema.issues.needsAudit,
 	project_key: schema.projects.key,
 	project_name: schema.projects.name,
 	type_key: schema.taskTypes.key,
@@ -828,12 +839,12 @@ function classifyStatusTransition(
 	return { enteringInReview, enteringDone };
 }
 
-// PROJ-254/287/289/292: the gate is bound to the issue's LIVE AGENT LEASE — the one
-// signal an agent can't spoof by omitting agentSessionId or self-declaring
-// kind:"human". Entering review while an agent holds a live lease requires a
-// completion report; an agent (live lease) can never mark done; and the done-report
-// requirement applies only to issues an agent has actually worked, so ordinary human
-// closes (duplicates, won't-fix, chores) aren't blocked.
+// PROJ-254/287/289/292, relaxed by PROJ-375: entering review while an agent holds a
+// live lease requires a completion report; the done-report requirement applies only
+// to issues an agent has actually worked, so ordinary human closes (duplicates,
+// won't-fix, chores) aren't blocked. PROJ-375 removed the old hard block on an agent
+// (live lease) transitioning to done — agents can close freely now; see
+// computeNeedsAudit below for the audit-after-the-fact replacement.
 async function assertReviewGate(
 	ctx: ServiceCtx,
 	data: UpdateIssueData,
@@ -843,18 +854,14 @@ async function assertReviewGate(
 	const { enteringInReview, enteringDone } = transition;
 	if (!enteringInReview && !enteringDone) return;
 
-	const hasLiveAgentLease = await issueHasLiveAgentLease(ctx, existing.id);
-
-	if (enteringInReview && hasLiveAgentLease) {
-		assertCompletionReportPresent(data);
+	if (enteringInReview) {
+		const hasLiveAgentLease = await issueHasLiveAgentLease(ctx, existing.id);
+		if (hasLiveAgentLease) {
+			assertCompletionReportPresent(data);
+		}
 	}
 
 	if (enteringDone) {
-		if (hasLiveAgentLease) {
-			throw new ForbiddenError(
-				"An agent cannot mark an issue done — a human must approve (PROJ-254)"
-			);
-		}
 		const everAgentWorked = await issueEverHadAgentLease(ctx, existing.id);
 		if (everAgentWorked && existing.completionReportAt == null && !data.completionReport) {
 			throw new ValidationError({
@@ -865,6 +872,20 @@ async function assertReviewGate(
 			});
 		}
 	}
+}
+
+// PROJ-375: audit-after-the-fact replacement for the removed done-gate block. Only
+// flags a call that's actually agent-initiated — `isLiveAgentSessionId` checks the
+// session is real and live, not just a self-declared string, so a caller can't get
+// flagged/unflagged by lease state (the bug that started this ticket: an agent that
+// released its lease before closing slipped the old gate unintentionally). A caller
+// can still dodge the flag by omitting agentSessionId entirely — accepted limitation,
+// see the module doc on evidence-classification.ts.
+async function computeNeedsAudit(ctx: ServiceCtx, data: UpdateIssueData): Promise<boolean> {
+	if (!data.agentSessionId) return false;
+	if (!(await isLiveAgentSessionId(ctx, data.agentSessionId))) return false;
+	if (!data.completionReport) return true;
+	return !isExternallyVerifiableEvidence(data.completionReport.verification);
 }
 
 async function applyStatusFields(
@@ -885,6 +906,10 @@ async function applyStatusFields(
 	const newStatusCategory = await fetchStatusCategory(orm, resolvedStatusId);
 	const transition = classifyStatusTransition(existing, resolvedStatusKey, newStatusCategory);
 	await assertReviewGate(ctx, data, existing, transition);
+
+	if (transition.enteringDone) {
+		setValues.needsAudit = await computeNeedsAudit(ctx, data);
+	}
 
 	setValues.status = resolvedStatusKey;
 	setValues.statusId = resolvedStatusId;

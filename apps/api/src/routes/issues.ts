@@ -37,6 +37,7 @@ router.get("/", async (c) => {
 		completedBefore,
 		updatedAfter,
 		updatedBefore,
+		needsAudit,
 		cursor,
 		limit,
 	} = c.req.query();
@@ -63,6 +64,7 @@ router.get("/", async (c) => {
 				completedBefore,
 				updatedAfter,
 				updatedBefore,
+				needsAudit,
 				cursor,
 				limit,
 			})

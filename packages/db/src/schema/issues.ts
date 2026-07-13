@@ -112,6 +112,10 @@ export const issues = sqliteTable(
 		// review back to in-progress (never cleared, never re-derived from history).
 		inReviewAt: integer("in_review_at"),
 		reviewBounceCount: integer("review_bounce_count").notNull().default(0),
+		// PROJ-375: agents can close issues to done directly (no gate blocks it); this
+		// flags agent-initiated closures whose completion-report verification wasn't
+		// externally checkable (no CI run/PR/commit link) for after-the-fact human review.
+		needsAudit: integer("needs_audit", { mode: "boolean" }).notNull().default(false),
 	},
 	(t) => ({
 		projectIdx: index("issues_project_idx").on(t.projectId),
@@ -130,6 +134,7 @@ export const issues = sqliteTable(
 		wsClaimedIdx: index("idx_issues_workspace_claimed_at").on(t.workspaceId, t.claimedAt),
 		wsDoneIdx: index("idx_issues_workspace_done_at").on(t.workspaceId, t.doneAt),
 		wsInReviewIdx: index("idx_issues_workspace_in_review_at").on(t.workspaceId, t.inReviewAt),
+		wsNeedsAuditIdx: index("idx_issues_workspace_needs_audit").on(t.workspaceId, t.needsAudit),
 	})
 );
 

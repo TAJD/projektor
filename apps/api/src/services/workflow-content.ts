@@ -50,16 +50,16 @@ picking up autonomous work.
 
 - **Ready → Claimed**: may be fully autonomous. Any live agent session can call
   \`claim_issue\` without a human in the loop, subject to the WIP limit below.
-- **In Review → Done**: **always requires a human.** An agent session can never move
-  its own (or any) issue to \`done\` — attempting it is rejected outright, regardless of
-  whether a completion report is attached. A human reviews the report and the diff,
-  then makes the transition themselves (browser, or any session not holding a live
-  lease on the issue).
+- **In Review → Done**: may also be fully autonomous (PROJ-375). An agent session can
+  close its own (or any) issue to \`done\` directly — there's no pre-close block waiting
+  on a human. A completion report is still required before an agent-worked issue can
+  close (see below). Instead of gating the transition, projektor classifies the
+  report's evidence and flags weak closures for **audit after the fact** — see below.
 
 ## Completion reports
 
-Before an agent-held issue can move into \`In Review\`, it must submit a completion
-report with:
+Before an agent-held issue can move into \`In Review\` or \`Done\`, it must submit a
+completion report with:
 
 - **\`summary\`** — what changed, in plain language.
 - **\`verification\`** — the command(s) run and their outcome (the same ones named in
@@ -69,6 +69,22 @@ report with:
 \`summary\` and \`verification\` are required; the transition is rejected with the specific
 missing field(s) named if either is absent. The report is recorded as a normal issue
 comment, so it's visible in the same timeline as everything else.
+
+## Evidence audit (PROJ-375)
+
+Every agent-initiated \`done\` transition — one that passes \`agentSessionId\` for a
+live agent session — has its \`completionReport.verification\` text classified:
+
+- **Externally-verifiable** — contains a resolvable link or reference (a PR URL, a CI
+  run URL, a commit URL, or a bare commit SHA) that a human (or a future automated
+  check) could independently open and check. Not flagged.
+- **Freeform/unverifiable** — plain prose ("manually tested", "confirmed visually")
+  with nothing external to check. Flagged \`needsAudit: true\` on the issue.
+
+This doesn't block the closure — it's audit-after-the-fact, not a gate. Pull flagged
+issues for periodic review with \`list_issues({ needsAudit: true })\`. There's no
+outbound verification call to GitHub or CI here (classification is pattern-based
+only) — treat a resolvable link as "checkable," not "already checked."
 
 ## WIP limits
 

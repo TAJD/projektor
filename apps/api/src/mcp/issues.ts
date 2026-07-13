@@ -79,6 +79,11 @@ export const issuesTools: MCPTool[] = [
 					type: "number",
 					description: "Only issues last edited at or before this epoch-seconds time",
 				},
+				needsAudit: {
+					type: "boolean",
+					description:
+						"Filter to agent-initiated done-closures flagged for human audit (PROJ-375) — true for unverifiable evidence, false for externally-checkable evidence",
+				},
 				cursor: { type: "number", description: "Pagination cursor (created_at of last item)" },
 				limit: { type: "number", default: 50, description: "Max 100" },
 			},
@@ -134,8 +139,10 @@ export const issuesTools: MCPTool[] = [
 		name: "update_issue",
 		description:
 			"Update an issue - status, priority, title, body, assignee, or labels. Review gating " +
-			"(PROJ-254): pass agentSessionId to identify yourself as an agent; entering in_review as an " +
-			"agent requires completionReport, and only a human can transition to done.",
+			"(PROJ-254/375): pass agentSessionId to identify yourself as an agent; entering in_review as " +
+			"an agent requires completionReport. Agents CAN transition directly to done (no human " +
+			"approval gate) — but if the completionReport.verification isn't externally checkable (no " +
+			"CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review.",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
