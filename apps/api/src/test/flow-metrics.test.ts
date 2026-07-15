@@ -592,9 +592,12 @@ describe("Flow metrics (PROJ-252)", () => {
 			expect(metrics.cfdOverTime[i].done).toBeGreaterThanOrEqual(metrics.cfdOverTime[i - 1].done);
 		}
 
+		// PROJ-377: buckets are now sampled at their *end* (clamped to until/now), not
+		// their start — the "Done" issue's claimedAt (since + 10s) already falls before
+		// the first bucket's end, so it reads as in_progress rather than backlog/todo.
 		const firstBucket = metrics.cfdOverTime[0];
-		expect(firstBucket.backlogTodo).toBe(3);
-		expect(firstBucket.inProgress).toBe(0);
+		expect(firstBucket.backlogTodo).toBe(2);
+		expect(firstBucket.inProgress).toBe(1);
 		expect(firstBucket.inReview).toBe(0);
 		expect(firstBucket.done).toBe(0);
 
@@ -602,6 +605,34 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(lastBucket.backlogTodo).toBe(1);
 		expect(lastBucket.inProgress).toBe(1);
 		expect(lastBucket.done).toBe(1);
+	});
+
+	// PROJ-377: the current (still-partial) bucket must reflect state as of "now", not
+	// as of the bucket's start — previously an issue created and completed entirely
+	// within the current week's bucket read as all-zero because the sample instant (the
+	// bucket's start) predated the activity.
+	it("reflects a same-bucket create+complete burst in the current (partial) bucket", async () => {
+		const now = Math.floor(Date.now() / 1000);
+
+		const burstIssue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Created and finished this week",
+			createdAt: now - 100,
+		});
+		await stampFlowTimestamps(burstIssue.id, {
+			readyAt: now - 90,
+			claimedAt: now - 60,
+			doneAt: now - 10,
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?granularity=week`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+
+		const currentBucket = metrics.cfdOverTime[metrics.cfdOverTime.length - 1];
+		expect(currentBucket.done).toBe(1);
 	});
 
 	it("computes time in progress (claimed -> next stage) for issues completing in the window", async () => {

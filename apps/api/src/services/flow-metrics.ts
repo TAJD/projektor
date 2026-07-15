@@ -203,16 +203,25 @@ function buildArrivalVsCompletion(
 	return buckets;
 }
 
-// PROJ-329: cumulative flow diagram bands, sampled at each bucket start from the
-// write-once transition timestamps. An issue's band at time t is the furthest stage
-// it has reached by t (done > in_review > in_progress > backlog/todo); the done band
-// is therefore monotonic non-decreasing (an issue never leaves it), which is what
-// makes CFD bands readable as a choke-point signal.
+// PROJ-329: cumulative flow diagram bands, sampled at each bucket's end (clamped to
+// `until`/`now`) from the write-once transition timestamps. An issue's band at the
+// sample instant is the furthest stage it has reached by then (done > in_review >
+// in_progress > backlog/todo); the done band is therefore monotonic non-decreasing
+// (an issue never leaves it), which is what makes CFD bands readable as a choke-point
+// signal.
+//
+// PROJ-377: sampling at the bucket's *end* (not its start) matters for the always-
+// partial current bucket — a bucket-start sample lands before any activity in that
+// bucket has happened, so a bucket-worth of newly created/completed issues reads as
+// all zeros even though `arrivalVsCompletionOverTime` (which counts events across the
+// whole bucket range) shows them. `now` additionally clamps so we never sample into
+// the future when `until` extends past the present.
 function buildCfdOverTime(
 	issues: FlowIssueRow[],
 	since: number,
 	until: number,
-	granularity: "day" | "week"
+	granularity: "day" | "week",
+	now: number
 ): Array<{
 	bucketStart: string;
 	backlogTodo: number;
@@ -231,15 +240,16 @@ function buildCfdOverTime(
 		done: number;
 	}> = [];
 	for (let t = firstBucket; t <= until; t += bucketSize) {
+		const sampleAt = Math.min(t + bucketSize - 1, until, now);
 		let backlogTodo = 0;
 		let inProgress = 0;
 		let inReview = 0;
 		let done = 0;
 		for (const i of issues) {
-			if (i.createdAt > t) continue;
-			if (i.doneAt !== null && i.doneAt <= t) done++;
-			else if (i.inReviewAt !== null && i.inReviewAt <= t) inReview++;
-			else if (i.claimedAt !== null && i.claimedAt <= t) inProgress++;
+			if (i.createdAt > sampleAt) continue;
+			if (i.doneAt !== null && i.doneAt <= sampleAt) done++;
+			else if (i.inReviewAt !== null && i.inReviewAt <= sampleAt) inReview++;
+			else if (i.claimedAt !== null && i.claimedAt <= sampleAt) inProgress++;
 			else backlogTodo++;
 		}
 		buckets.push({
@@ -555,7 +565,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		throughputUntil,
 		granularity
 	);
-	const cfdOverTime = buildCfdOverTime(issues, throughputSince, throughputUntil, granularity);
+	const cfdOverTime = buildCfdOverTime(issues, throughputSince, throughputUntil, granularity, now);
 	const bugShareOverTime = buildBugShareOverTime(
 		issues,
 		throughputSince,
