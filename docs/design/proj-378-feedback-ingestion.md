@@ -120,6 +120,19 @@ Two controls, both reusing existing primitives:
    bucket; IP-only keying alone would let a legitimate high-traffic site's shared
    egress IP get throttled unfairly. Dual-keying, same rationale as the existing
    auth-failure throttle, covers both.
+
+   Limits are configured via **dedicated** env vars — `RATE_LIMIT_FEEDBACK_MAX`
+   (per-token-hash limit, default 30) and `RATE_LIMIT_FEEDBACK_IP_MAX` (per-IP
+   limit, default 100) — reusing only the existing `RATE_LIMIT_WINDOW_SECS` for the
+   window, the same way `tooManyAuthFailures` reuses that same var rather than
+   defining its own. These are deliberately **separate** from
+   `RATE_LIMIT_API_MAX`/`RATE_LIMIT_AUTH_MAX`, which govern authenticated API/auth
+   traffic: this route runs outside the global `app.use("/api/*",
+   rateLimitMiddleware)` chain entirely (see "implementation shape" below), so it
+   was always going to need its own rate-limiting logic — and reusing the
+   authenticated-traffic limits would let anonymous feedback-spam share a budget
+   with legitimate authenticated callers, which is exactly the failure mode
+   per-token/per-IP dual-keying above is trying to avoid.
 2. **Per-source CORS allow-list** (`allowed_origins`, see Schema) — a source minted
    with an explicit origin list only returns `Access-Control-Allow-Origin` for a
    matching `Origin` header (including `OPTIONS` preflight handling); a source minted
@@ -130,6 +143,18 @@ Two controls, both reusing existing primitives:
    protects the authenticated app surface for the projektor SPA's own origin; a
    third-party site embedding a feedback source's token is never going to be in that
    list, by design.
+
+   This CORS check is **browser-enforced only, not a server-side gate** — it is
+   intentionally not a rejection path. A `POST` from an `Origin` outside
+   `allowed_origins` still authenticates against the token exactly as any other
+   request would and **still inserts the `feedback` row**; the server simply omits
+   `Access-Control-Allow-Origin` from the response, which only stops a *browser*
+   from letting its calling script read that response. A non-browser caller (curl,
+   a backend, a browser extension ignoring CORS) is unaffected either way. This is
+   consistent with — not a compromise of — "the source's token is the trust
+   boundary, not the origin" above: origin restriction is a courtesy signal for
+   legitimate browser embeds, not an access-control mechanism, so there is no
+   corresponding entry for it in the "Submit-time rejection codes" table below.
 
 **Cloudflare Turnstile** (bot-check challenge) was discussed and explicitly deferred
 for v1 — see "Out of scope" below.
@@ -298,10 +323,34 @@ The distinction is intentional: 401 says "this token isn't a thing anymore," 403
 Mirrors `routes/share.ts`'s two-router split (`shareIssuesRouter` authenticated,
 `sharePublicRouter` not) and `getSharedIssue`'s inline-verification pattern:
 
-1. Mounted in `index.ts` **before** the `authMiddleware`/`workspaceMiddleware` wiring,
-   the same way `app.route("/api/share", sharePublicRouter)` is mounted ahead of the
-   authenticated block (see `index.ts:161-162`) — with a comment flagging it as public
-   and CF-Access-excluded.
+1. Mounted in `index.ts` as the **very first route registration** — before
+   `app.use("*", logger())`, before the global `app.use("*", cors({...}))`, and
+   before the `authMiddleware`/`workspaceMiddleware` wiring, not merely ahead of the
+   auth block the way `app.route("/api/share", sharePublicRouter)` is (see
+   `index.ts:161-162`). Skipping auth alone isn't enough here: the route also needs
+   to skip the *global* `cors()` allowlist so it can own its own per-source CORS
+   (see "v1 abuse controls" above), and Hono only applies a `.use("*", ...)` call to
+   routes registered *after* it in source order — a route registered earlier never
+   sees that middleware at all.
+
+   This is the same "register the route before the `.use()` you need it to skip"
+   technique this codebase already relies on for `/api/health` (`index.ts:62`,
+   registered before `app.use("/api/*", rateLimitMiddleware)` at `index.ts:67`
+   specifically so health checks stay unrate-limited) — this isn't a novel or
+   isolated workaround, it's the established precedent for exactly this ordering
+   trick. The global `cors()` is a workspace-configured allowlist
+   (`CORS_ALLOWED_ORIGINS`) meant for projektor's own SPA/clients; routing the
+   public submit endpoint through it would subject third-party product origins to
+   that allowlist — and, because a failed preflight blocks the real request, would
+   effectively block them — making the per-source `allowed_origins` control above
+   meaningless.
+
+   One consequence of mounting ahead of the global `logger()` is that the route
+   also loses that request logging. The route file compensates with its own
+   router-scoped `feedbackPublicRouter.use("*", logger())` (the same
+   `import { logger } from "hono/logger"` `index.ts` already uses), so submit
+   requests are still logged for observability even though they never reach the
+   global logger call.
 2. Reads `Authorization: Bearer <feedback-token>`, hashes it (same
    `sha256(token)` → `feedback_sources.token_hash` lookup share tokens use), and looks
    up the row directly by hash — no `ctxFromHono`, no `ServiceCtx`.
@@ -310,8 +359,9 @@ Mirrors `routes/share.ts`'s two-router split (`shareIssuesRouter` authenticated,
    from request input, closing off any cross-project injection via the body.
 5. Applies the per-source CORS response header (see "v1 abuse controls" above),
    including responding to `OPTIONS` preflight.
-6. Rate-limits via dual-keyed `bumpRateCounter` (token hash + `CF-Connecting-IP`);
-   429s over the limit.
+6. Rate-limits via dual-keyed `bumpRateCounter` (token hash against
+   `RATE_LIMIT_FEEDBACK_MAX`, `CF-Connecting-IP` against
+   `RATE_LIMIT_FEEDBACK_IP_MAX`); 429s if either trips.
 7. Validates the body against `SubmitFeedbackSchema` (`schemas/feedback.ts`);
    400s with the Zod validation error on failure (matching how every other route
    surfaces `ValidationError` via `serviceErrToResponse`).
@@ -628,15 +678,20 @@ Body:
 >   admin/owner-gated via `isWorkspaceAdmin`.
 > - `routes/feedback.ts` (public submit router + authenticated list/patch router) and
 >   `routes/feedback-sources.ts`, mounted in `index.ts` per the design doc's mounting
->   notes (public submit router before the auth block, like `sharePublicRouter`).
-> - Dual-keyed rate limiting via `bumpRateCounter` on the submit route.
+>   notes (public submit router registered before `logger()`/`cors()`/the auth block —
+>   see "implementation shape" — with its own scoped `logger()` call).
+> - Dual-keyed rate limiting via `bumpRateCounter` on the submit route, using the new
+>   dedicated `RATE_LIMIT_FEEDBACK_MAX` (token-keyed) / `RATE_LIMIT_FEEDBACK_IP_MAX`
+>   (IP-keyed) env vars added to `packages/types/src/env.ts` (not the existing
+>   `RATE_LIMIT_API_MAX`/`RATE_LIMIT_AUTH_MAX`, which are for authenticated traffic).
 > - Tests per the "Testing plan" section above, in `test/feedback.test.ts`.
 >
 > **Scope / files:** `packages/db/migrations/00XX_feedback.sql`,
 > `apps/api/src/test/migrations.ts`, `apps/api/src/schemas/feedback.ts`,
 > `apps/api/src/services/feedback.ts`, `apps/api/src/services/feedback-sources.ts`,
 > `apps/api/src/routes/feedback.ts`, `apps/api/src/routes/feedback-sources.ts`,
-> `apps/api/src/index.ts`, `apps/api/src/test/feedback.test.ts`.
+> `apps/api/src/index.ts`, `apps/api/src/test/feedback.test.ts`,
+> `packages/types/src/env.ts`, `apps/api/wrangler.test.toml`.
 >
 > **Verification:** `pnpm --filter @projektor/api test feedback`; manual `curl` to
 > `POST /api/feedback/submit` with a minted token against local dev confirms the
