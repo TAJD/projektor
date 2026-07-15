@@ -39,8 +39,10 @@ Copied from `AGENTS.md` and `docs/design/proj-378-feedback-ingestion.md` — eve
 | `routes/feedback.ts` | Create | Public submit router (+OPTIONS) and authed triage router |
 | `mcp/feedback.ts` | Create | Five source-management MCP tools |
 | `routes/mcp.ts` | Modify | Compose `feedbackTools` |
-| `index.ts` | Modify | Mount public submit router (before global cors), source + triage routers (authed block) |
+| `index.ts` | Modify | Mount public submit router (before global logger/cors), source + triage routers (authed block) |
 | `test/feedback.test.ts` | Create | REST + MCP integration tests |
+| `packages/types/src/env.ts` | Modify | Add `RATE_LIMIT_FEEDBACK_MAX` / `RATE_LIMIT_FEEDBACK_IP_MAX` |
+| `apps/api/wrangler.test.toml` | Modify | Low test values for the two new rate-limit env vars |
 
 **Web (`apps/web/src/`)**
 
@@ -778,11 +780,13 @@ git commit -m "feat(feedback): source management service + REST routes (PROJ-378
 **Files:**
 - Create: `apps/api/src/services/feedback.ts`
 - Create: `apps/api/src/routes/feedback.ts`
-- Modify: `apps/api/src/index.ts` (mount public router before the global `cors()` middleware)
+- Modify: `apps/api/src/index.ts` (mount public router before the global `logger()`/`cors()` middleware)
+- Modify: `packages/types/src/env.ts` (add `RATE_LIMIT_FEEDBACK_MAX` / `RATE_LIMIT_FEEDBACK_IP_MAX`)
+- Modify: `apps/api/wrangler.test.toml` (test values for the new env vars)
 - Test: `apps/api/src/test/feedback.test.ts`
 
 **Interfaces:**
-- Consumes: schemas from Task 2; `ValidationError`/`NotFoundError`/`ForbiddenError`; `feedback_sources` table (Task 1); `bumpRateCounter` (`middleware/rate-limit.ts`).
+- Consumes: schemas from Task 2; `ValidationError`/`NotFoundError`/`ForbiddenError`; `feedback_sources` table (Task 1); `bumpRateCounter` (`middleware/rate-limit.ts`); `RATE_LIMIT_FEEDBACK_MAX`/`RATE_LIMIT_FEEDBACK_IP_MAX` (`packages/types/src/env.ts`, added by this task).
 - Produces (exported from `services/feedback.ts`):
   - `hashFeedbackToken(token: string): Promise<string>`
   - `submitFeedback(db: D1Database, token: string, rawBody: unknown, requestOrigin: string | null): Promise<{ id: string; corsAllowOrigin: string | null }>` — throws `NotFoundError` (unknown/revoked → route maps to 401), `ForbiddenError` (inactive → 403), `ValidationError` (bad body → 400).
@@ -791,12 +795,16 @@ git commit -m "feat(feedback): source management service + REST routes (PROJ-378
 **Design notes (read before implementing):**
 - Rejection codes: unknown token → 401, revoked → 401, inactive → 403, rate-limit → 429, bad body → 400. The service throws `NotFoundError` for unknown/revoked; the submit route's local adapter maps `NotFoundError` → **401** for this endpoint specifically (all other endpoints keep 404).
 - CORS is browser-enforced, not a server-side block: the POST always inserts when the token is valid + active; it sets `Access-Control-Allow-Origin` **only** when the request `Origin` is in the source's `allowed_origins` list. A `null` `allowed_origins` never yields the header. Origin-mismatch is NOT a rejection — it just omits the header (per the design doc).
-- The public router is mounted **before** the global `app.use("*", cors())` in `index.ts`. This is required: the global cors is an allowlist that by design excludes third-party feedback origins, and Hono's cors middleware short-circuits the `OPTIONS` preflight — so if feedback sat behind it, no third-party browser preflight could succeed. Mounting first lets the route own its per-source CORS.
-- Rate-limit dual-keying reuses the existing `RATE_LIMIT_API_MAX` (default 600, token key) and `RATE_LIMIT_AUTH_MAX` (default 300, IP key) env vars and `RATE_LIMIT_WINDOW_SECS` (default 60) — no new env/type changes.
+- The public router is mounted **before** the global `app.use("*", logger())` and `app.use("*", cors())` in `index.ts` (not merely before auth). This is required: the global cors is an allowlist that by design excludes third-party feedback origins, and Hono's cors middleware short-circuits the `OPTIONS` preflight — so if feedback sat behind it, no third-party browser preflight could succeed. Mounting first lets the route own its per-source CORS. This is the same "register the route before the `.use()` you need it to skip" technique already used for `/api/health` (`index.ts:62`, registered before `app.use("/api/*", rateLimitMiddleware)` at `index.ts:67` specifically so health checks stay unrate-limited) — not a novel or isolated workaround, but the established precedent for this exact ordering trick. Because mounting ahead of the global `logger()` also drops that request logging, the route file adds its own router-scoped `feedbackPublicRouter.use("*", logger())` so submit requests are still logged.
+- Rate-limit dual-keying uses **dedicated** env vars — `RATE_LIMIT_FEEDBACK_MAX` (default 30, token-hash key) and `RATE_LIMIT_FEEDBACK_IP_MAX` (default 100, IP key) — reusing only the existing `RATE_LIMIT_WINDOW_SECS` (default 60). These are new fields added to `packages/types/src/env.ts` in this task. They are deliberately separate from `RATE_LIMIT_API_MAX`/`RATE_LIMIT_AUTH_MAX`: this route runs outside the global `rateLimitMiddleware` chain entirely (mounted before it, same as above), so reusing those authenticated-traffic limits would let anonymous feedback-spam share a budget with legitimate authenticated callers.
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `apps/api/src/test/feedback.test.ts`:
+Append to `apps/api/src/test/feedback.test.ts` (add this import at the top of the file, keeping the existing imports):
+
+```ts
+import { hashFeedbackToken } from "../services/feedback";
+```
 
 ```ts
 async function mintSource(
@@ -944,15 +952,78 @@ describe("Feedback submit (public)", () => {
 		expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://acme.test");
 		expect(res.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
 	});
+
+	it("429s once the per-token limit (RATE_LIMIT_FEEDBACK_MAX) is exceeded", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const tokenHash = await hashFeedbackToken(token);
+		const slot = Math.floor(Date.now() / 1000 / 60) * 60; // RATE_LIMIT_WINDOW_SECS=60
+		// RATE_LIMIT_FEEDBACK_MAX=5 in wrangler.test.toml — seed straight to the limit.
+		await env.DB.prepare(
+			"INSERT OR REPLACE INTO rate_limit (key, count, window_start) VALUES (?, 5, ?)"
+		)
+			.bind(`feedback:${tokenHash}`, slot)
+			.run();
+
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(res.status).toBe(429);
+	});
+
+	it("429s once the per-IP limit (RATE_LIMIT_FEEDBACK_IP_MAX) is exceeded", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const slot = Math.floor(Date.now() / 1000 / 60) * 60; // RATE_LIMIT_WINDOW_SECS=60
+		// RATE_LIMIT_FEEDBACK_IP_MAX=5 in wrangler.test.toml — no CF-Connecting-IP
+		// header in tests, so the middleware falls back to the fixed '127.0.0.1' key.
+		await env.DB.prepare(
+			"INSERT OR REPLACE INTO rate_limit (key, count, window_start) VALUES (?, 5, ?)"
+		)
+			.bind("feedback-ip:127.0.0.1", slot)
+			.run();
+
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(res.status).toBe(429);
+	});
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pnpm --filter @projektor/api test feedback`
-Expected: FAIL — `/api/feedback/submit` unmounted (404/401 mismatches), no service module.
+Expected: FAIL — `/api/feedback/submit` unmounted (404/401 mismatches), no service module, `RATE_LIMIT_FEEDBACK_MAX`/`RATE_LIMIT_FEEDBACK_IP_MAX` unknown on `Env`.
 
-- [ ] **Step 3: Write the service**
+- [ ] **Step 3: Add the dedicated rate-limit env vars**
+
+In `packages/types/src/env.ts`, add two fields to the `Env` interface, next to the existing `RATE_LIMIT_*` fields:
+
+```ts
+	RATE_LIMIT_AUTH_FAIL_MAX?: string; // max failed bearer-token auths per IP per window before 429 (default 50)
+	// PROJ-378: public feedback-submit rate limiting. Dedicated from RATE_LIMIT_API_MAX/
+	// RATE_LIMIT_AUTH_MAX (which govern authenticated API/auth traffic) because the
+	// submit route runs outside the global rateLimitMiddleware chain entirely and
+	// anonymous feedback-spam must not share a budget with authenticated callers.
+	RATE_LIMIT_FEEDBACK_MAX?: string; // max submissions per source token per window (default 30)
+	RATE_LIMIT_FEEDBACK_IP_MAX?: string; // max submissions per IP per window (default 100)
+```
+
+In `apps/api/wrangler.test.toml`, add two low test values next to the existing rate-limit vars so the 429 tests above (which seed `rate_limit` directly to the limit) use the same fixed value the middleware reads:
+
+```toml
+RATE_LIMIT_AUTH_FAIL_MAX = "3"
+# PROJ-378 public feedback submit — low so the 429 tests can seed straight to the limit.
+RATE_LIMIT_FEEDBACK_MAX = "5"
+RATE_LIMIT_FEEDBACK_IP_MAX = "5"
+```
+
+- [ ] **Step 4: Write the service**
 
 Create `apps/api/src/services/feedback.ts`:
 
@@ -1033,18 +1104,24 @@ export async function submitFeedback(
 }
 ```
 
-- [ ] **Step 4: Write the public router**
+- [ ] **Step 5: Write the public router**
 
 Create `apps/api/src/routes/feedback.ts`:
 
 ```ts
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { logger } from "hono/logger";
 import { ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
 import { hashFeedbackToken, submitFeedback } from "../services/feedback";
 import { bumpRateCounter } from "../middleware/rate-limit";
 
 const publicRouter = new Hono<HonoEnv>();
+
+// PROJ-378: this router is mounted ahead of the global app.use("*", logger())
+// in index.ts (see Step 6 below), so it needs its own logging or submit
+// requests go unlogged entirely.
+publicRouter.use("*", logger());
 
 // Anonymous end-user feedback preflight. We cannot know the source (no token on a
 // preflight), so reflect the requesting Origin; the POST response is what actually
@@ -1067,9 +1144,12 @@ publicRouter.post("/submit", async (c) => {
 	const origin = c.req.header("Origin") ?? null;
 
 	// Dual-keyed rate limit (token hash + IP) — reject if either trips its bucket.
+	// Dedicated PROJ-378 env vars, not RATE_LIMIT_API_MAX/RATE_LIMIT_AUTH_MAX: this
+	// route runs outside the global rateLimitMiddleware chain (mounted before it),
+	// and anonymous feedback traffic must not share a budget with authenticated callers.
 	const windowSecs = parseInt(c.env.RATE_LIMIT_WINDOW_SECS ?? "60", 10);
-	const tokenLimit = parseInt(c.env.RATE_LIMIT_API_MAX ?? "600", 10);
-	const ipLimit = parseInt(c.env.RATE_LIMIT_AUTH_MAX ?? "300", 10);
+	const tokenLimit = parseInt(c.env.RATE_LIMIT_FEEDBACK_MAX ?? "30", 10);
+	const ipLimit = parseInt(c.env.RATE_LIMIT_FEEDBACK_IP_MAX ?? "100", 10);
 	const ip = c.req.header("CF-Connecting-IP") ?? "127.0.0.1";
 	const tokenHash = await hashFeedbackToken(token);
 	const tokenCount = await bumpRateCounter(c.env.DB, `feedback:${tokenHash}`, windowSecs);
@@ -1103,7 +1183,7 @@ publicRouter.post("/submit", async (c) => {
 export { publicRouter as feedbackPublicRouter };
 ```
 
-- [ ] **Step 5: Mount the public router before global cors**
+- [ ] **Step 6: Mount the public router before global logger/cors**
 
 In `apps/api/src/index.ts`, add the import (with the other route imports):
 
@@ -1116,25 +1196,30 @@ Then mount it as the **first** route registration, immediately after `const app 
 ```ts
 const app = new Hono<HonoEnv>();
 
-// PROJ-378: anonymous feedback ingestion. Mounted ahead of the global cors()
-// allowlist (which by design excludes third-party feedback origins and would
-// otherwise short-circuit the OPTIONS preflight) and ahead of auth — the route
-// verifies the source's own token inline and owns its per-source CORS.
+// PROJ-378: anonymous feedback ingestion. Mounted ahead of the global logger()
+// and cors() calls below — not merely ahead of auth — the same "register before
+// the .use() you need to skip" technique already used for /api/health (mounted
+// ahead of the /api/* rateLimitMiddleware .use() further down so health checks
+// stay unrate-limited). The global cors() is an allowlist that by design excludes
+// third-party feedback origins and would otherwise short-circuit the OPTIONS
+// preflight; the route verifies the source's own token inline and owns its
+// per-source CORS instead. It also loses the global logger() this way, so
+// feedbackPublicRouter applies its own scoped logger() (see routes/feedback.ts).
 app.route("/api/feedback", feedbackPublicRouter);
 
 app.use("*", logger());
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Step 7: Run test to verify it passes**
 
 Run: `pnpm --filter @projektor/api test feedback`
-Expected: PASS (the 8 "Feedback submit (public)" tests + prior tests).
+Expected: PASS (the 10 "Feedback submit (public)" tests + prior tests).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add apps/api/src/services/feedback.ts apps/api/src/routes/feedback.ts apps/api/src/index.ts apps/api/src/test/feedback.test.ts
-git commit -m "feat(feedback): public submit endpoint with per-source CORS + dual-key rate limit (PROJ-378)"
+git add packages/types/src/env.ts apps/api/wrangler.test.toml apps/api/src/services/feedback.ts apps/api/src/routes/feedback.ts apps/api/src/index.ts apps/api/src/test/feedback.test.ts
+git commit -m "feat(feedback): public submit endpoint with per-source CORS + dedicated dual-key rate limit (PROJ-378)"
 ```
 
 ---
@@ -2775,9 +2860,11 @@ All checks pass.
 
 ## Points a human should sanity-check before/during execution
 
-1. **Revoked=401 vs inactive=403** — chosen to match the pre-existing "revoked token → 401" behaviour in the original spec and to keep 401="no valid credential" / 403="valid credential, paused". Confirm this is the intended split.
-2. **Mounting the public submit router before global `cors()`** — a deliberate deviation from the spec's "mount like sharePublicRouter (after cors)" wording, required so per-source CORS/preflight works for third-party origins. Confirm this is acceptable (it does mean the submit path bypasses the global logger + rate-limit middleware; the route runs its own dual-key rate limit).
-3. **CORS is browser-enforced, not a server block** — a submission from a non-listed origin is still inserted (just without the ACAO header). This follows the design doc literally; confirm no hard server-side origin rejection is wanted.
-4. **`priority: "medium"` + 120-char title truncation + footer wording** in convert-to-issue — the design doc's flagged judgement-call defaults. Confirm `"medium"` is a valid `PriorityEnum` value and the wording is acceptable.
-5. **Rate-limit reuse of `RATE_LIMIT_API_MAX`/`RATE_LIMIT_AUTH_MAX`** rather than a dedicated feedback limit — avoids new env/type changes; confirm the shared defaults (600 token / 300 IP per 60s) are an acceptable v1 ceiling for anonymous feedback.
-6. **MCP `ForbiddenError` → `-32000`** (not a distinct code) for member/viewer — matches `toMcpError`'s existing mapping; tests assert `-32000`.
+Reviewed and resolved (spec + this plan updated accordingly):
+
+1. **Revoked=401 vs inactive=403** — confirmed as intended: 401="no valid credential" (unknown/revoked), 403="valid credential, paused" (`is_active=0`). No change.
+2. **Mounting the public submit router before global `logger()`/`cors()`** — confirmed necessary and legitimate: it's the same ordering technique already used for `/api/health` (mounted ahead of the `/api/*` rate-limit `.use()` so health checks stay unrate-limited), not an isolated workaround. Because this also drops the global `logger()`, Task 4 now adds a router-scoped `feedbackPublicRouter.use("*", logger())` so submit requests stay logged (Step 5).
+3. **CORS is browser-enforced, not a server block** — confirmed intentional: a submission from a non-listed origin is still inserted (just without the ACAO header), consistent with "the token is the trust boundary, not the origin." No server-side origin rejection added.
+4. **`priority: "medium"` + 120-char title truncation + footer wording** in convert-to-issue — confirmed: `"medium"` is a valid `PriorityEnum` value (`schemas/common.ts`). No change.
+5. **Rate-limit vars — CHANGED from the original plan.** Now uses **dedicated** `RATE_LIMIT_FEEDBACK_MAX` (default 30, token-keyed) / `RATE_LIMIT_FEEDBACK_IP_MAX` (default 100, IP-keyed) env vars, added to `packages/types/src/env.ts` in Task 4 Step 3, instead of reusing `RATE_LIMIT_API_MAX`/`RATE_LIMIT_AUTH_MAX` — those govern authenticated traffic, and the submit route runs outside that middleware chain entirely regardless, so sharing a budget with authenticated callers was never the right default.
+6. **MCP `ForbiddenError` → `-32000`** (not a distinct code) for member/viewer — confirmed correct, matches `toMcpError`'s existing mapping; tests assert `-32000`. No change.
