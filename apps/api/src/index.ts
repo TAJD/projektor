@@ -247,15 +247,19 @@ app.route("/api/workflow", workflowRouter);
 // Only active in production where the ASSETS binding is present.
 // Issue pretty-URL paths (/projects/KEY/issues/N/title-slug) get the issue-detail
 // page so its IssueDetail island can resolve the issue from the URL path client-side.
+// Project pretty-URL paths (/projects/view/<slug>, PROJ-376) get the project-view
+// page so its ProjectLanding/ProjectNav islands can resolve it the same way.
 // Everything else gets the homepage.
 app.get("*", async (c) => {
 	if (!c.env.ASSETS) return c.notFound();
 	const { pathname } = new URL(c.req.url);
 	const fallbackPath = /^\/projects\/[^/]+\/issues\/\d+\//.test(pathname)
 		? "/issues/view/index.html"
-		: /^\/share\//.test(pathname)
-			? "/share/view/index.html"
-			: "/index.html";
+		: /^\/projects\/view\/[^/]+/.test(pathname)
+			? "/projects/view/index.html"
+			: /^\/share\//.test(pathname)
+				? "/share/view/index.html"
+				: "/index.html";
 	return c.env.ASSETS.fetch(new Request(new URL(fallbackPath, c.req.url).toString()));
 });
 

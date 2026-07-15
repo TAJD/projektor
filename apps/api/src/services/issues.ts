@@ -1167,6 +1167,7 @@ type PrioritizedFilters = {
 	includeBacklog: boolean;
 	excludeClaimed: boolean;
 	includeNotReady: boolean;
+	projectId: string | undefined;
 };
 
 function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
@@ -1175,6 +1176,7 @@ function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
 		includeBacklog?: unknown;
 		excludeClaimed?: unknown;
 		includeNotReady?: unknown;
+		projectId?: unknown;
 	};
 	const limit =
 		typeof input.limit === "number" && input.limit > 0
@@ -1183,13 +1185,16 @@ function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
 	const includeBacklog = input.includeBacklog !== false;
 	const excludeClaimed = input.excludeClaimed === true;
 	const includeNotReady = input.includeNotReady === true;
-	return { limit, includeBacklog, excludeClaimed, includeNotReady };
+	const projectId =
+		typeof input.projectId === "string" && input.projectId ? input.projectId : undefined;
+	return { limit, includeBacklog, excludeClaimed, includeNotReady, projectId };
 }
 
 async function fetchOpenIssuesForPrioritization(
 	orm: ReturnType<typeof drizzle>,
 	ctx: ServiceCtx,
-	includeBacklog: boolean
+	includeBacklog: boolean,
+	projectId: string | undefined
 ) {
 	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
 	return orm
@@ -1211,6 +1216,7 @@ async function fetchOpenIssuesForPrioritization(
 				eq(schema.issues.workspaceId, ctx.workspaceId),
 				// PROJ-311: only prioritize issues in projects the user can see.
 				...(visible ? [visible as Condition] : []),
+				...(projectId ? [eq(schema.issues.projectId, projectId)] : []),
 				or(
 					and(
 						isNull(schema.issues.statusId),
@@ -1314,11 +1320,12 @@ function scoreOpenIssues(
 }
 
 export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
-	const { limit, includeBacklog, excludeClaimed, includeNotReady } = parsePrioritizedFilters(raw);
+	const { limit, includeBacklog, excludeClaimed, includeNotReady, projectId } =
+		parsePrioritizedFilters(raw);
 
 	const orm = drizzle(ctx.db, { schema });
 
-	const issues = await fetchOpenIssuesForPrioritization(orm, ctx, includeBacklog);
+	const issues = await fetchOpenIssuesForPrioritization(orm, ctx, includeBacklog, projectId);
 	if (issues.length === 0) return { issues: [] };
 
 	// excludeClaimed (PROJ-184): drop issues held by a live lease so "what should

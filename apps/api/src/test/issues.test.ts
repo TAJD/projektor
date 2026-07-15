@@ -1756,4 +1756,43 @@ describe("get_prioritized_issues MCP tool", () => {
 		const readyRow = data.issues.find((i) => i.title === "Ready");
 		expect(readyRow?.needsGrooming).toBeUndefined();
 	});
+
+	// ─── PROJ-324: projectId scoping ───────────────────────────────────────────
+	it("scopes ranking to projectId, and droppedNotReady reflects only that project", async () => {
+		const otherProject = await seedProject(workspaceId, "OTHER");
+		await seedIssue(workspaceId, projectId, userId, { title: "In target project" });
+		await seedIssue(workspaceId, otherProject.id, userId, { title: "In other project" });
+
+		const body = await callPrioritized({ projectId, includeNotReady: true });
+		expect(body.error).toBeUndefined();
+		const data = JSON.parse(body.result!.content[0].text) as { issues: Array<{ title: string }> };
+		const titles = data.issues.map((i) => i.title);
+		expect(titles).toContain("In target project");
+		expect(titles).not.toContain("In other project");
+	});
+
+	it("computes droppedNotReady scoped to projectId", async () => {
+		const otherProject = await seedProject(workspaceId, "OTHER");
+		// Neither issue has a body, so both fail the definition-of-ready check.
+		await seedIssue(workspaceId, projectId, userId, { title: "Not ready in target" });
+		await seedIssue(workspaceId, otherProject.id, userId, { title: "Not ready in other" });
+
+		const body = await callPrioritized({ projectId });
+		expect(body.error).toBeUndefined();
+		const data = JSON.parse(body.result!.content[0].text) as { droppedNotReady: number };
+		expect(data.droppedNotReady).toBe(1);
+	});
+
+	it("workspace-wide behavior (no projectId) is unchanged", async () => {
+		const otherProject = await seedProject(workspaceId, "OTHER");
+		await seedIssue(workspaceId, projectId, userId, { title: "In target project" });
+		await seedIssue(workspaceId, otherProject.id, userId, { title: "In other project" });
+
+		const body = await callPrioritized({ includeNotReady: true });
+		expect(body.error).toBeUndefined();
+		const data = JSON.parse(body.result!.content[0].text) as { issues: Array<{ title: string }> };
+		const titles = data.issues.map((i) => i.title);
+		expect(titles).toContain("In target project");
+		expect(titles).toContain("In other project");
+	});
 });

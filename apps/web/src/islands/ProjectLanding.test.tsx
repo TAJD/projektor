@@ -12,6 +12,7 @@ const PROJECT = {
 	id: "p1",
 	name: "Projektor",
 	key: "PROJ",
+	slug: "projektor",
 	description: "An issue tracker.",
 	workspaceId: "w1",
 	createdAt: 0,
@@ -135,5 +136,23 @@ describe("ProjectLanding", () => {
 		render(<ProjectLanding />);
 		const link = (await screen.findByText("Getting Started")).closest("a");
 		expect(link?.getAttribute("href")).toBe("/wiki?slug=getting-started&projectId=p1");
+	});
+
+	// PROJ-376: pretty project URLs (/projects/view/<slug>) resolve via the path,
+	// not just ?id=.
+	it("resolves the project from a /projects/view/<slug> path with no query param", async () => {
+		history.replaceState(null, "", "/projects/view/projektor");
+		mockFetchProject();
+		render(<ProjectLanding />);
+		expect(await screen.findByRole("heading", { name: "Projektor" })).toBeTruthy();
+	});
+
+	it("breadcrumb has no redundant 'Projektor /' prefix (PROJ-353)", async () => {
+		history.replaceState(null, "", "?id=p1");
+		mockFetchProject();
+		render(<ProjectLanding />);
+		await screen.findByRole("heading", { name: "Projektor" });
+		const nav = screen.getByRole("navigation");
+		expect(nav.textContent?.trim()).toBe("Projects/Projektor");
 	});
 });

@@ -5,6 +5,7 @@ interface Project {
 	id: string;
 	key: string;
 	name: string;
+	slug: string | null;
 }
 
 interface Props {
@@ -46,7 +47,11 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 		setActivePath(window.location.pathname);
 
 		const params = new URLSearchParams(window.location.search);
-		const rawId = params.get("id") || params.get("projectId");
+		// Pretty-URL route (/projects/view/<slug>) falls back to this same page
+		// (see the SPA fallback in apps/api/src/index.ts) — read the slug from the
+		// path when there's no query param.
+		const slugMatch = window.location.pathname.match(/^\/projects\/view\/([^/]+)\/?$/);
+		const rawId = params.get("id") || params.get("projectId") || slugMatch?.[1];
 		const rawProject = params.get("project");
 
 		const resolve = (p: Project) => {
@@ -94,11 +99,15 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 
 	if (!project) return null;
 
+	const overviewHref = project.slug
+		? `/projects/view/${encodeURIComponent(project.slug)}`
+		: `/projects/view?id=${encodeURIComponent(project.id)}`;
+
 	const tabs = TABS.map((t) => {
 		let href: string;
 		switch (t.path) {
 			case "/projects/view":
-				href = `/projects/view?id=${encodeURIComponent(project.id)}`;
+				href = overviewHref;
 				break;
 			case "/issues":
 				href = `/issues?project=${encodeURIComponent(project.key)}`;
@@ -112,7 +121,7 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 	return (
 		<div class="border-b border-border bg-[var(--nav-bg)]">
 			<div class="flex items-center gap-2 px-6 pt-3 pb-[0.375rem] max-sm:px-3 max-sm:pt-1.5 max-sm:pb-1">
-				<a href={`/projects/view?id=${encodeURIComponent(project.id)}`} class="no-underline">
+				<a href={overviewHref} class="no-underline">
 					<h2 class="m-0 text-[0.9375rem] max-sm:text-[0.8125rem] font-semibold text-text-base">
 						{project.name}
 					</h2>
@@ -124,7 +133,10 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 				aria-label="Project sections"
 			>
 				{tabs.map((tab) => {
-					const active = activePath === tab.path;
+					const active =
+						tab.path === "/projects/view"
+							? activePath === "/projects/view" || activePath.startsWith("/projects/view/")
+							: activePath === tab.path;
 					return (
 						<a
 							key={tab.path}

@@ -73,6 +73,7 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 	const { issueId, body } = parsed.data;
 
 	await assertIssueVisible(ctx, issueId);
+	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);

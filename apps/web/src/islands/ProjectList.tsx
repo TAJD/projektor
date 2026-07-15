@@ -7,6 +7,7 @@ interface Project {
 	id: string;
 	name: string;
 	key: string;
+	slug: string | null;
 	description: string | null;
 	workspace_id: string;
 	workspace_name: string;
@@ -216,16 +217,20 @@ function useProjectCreateForm(workspaceSlug: string | undefined, onCreated: (p: 
 		setSubmitting(true);
 
 		try {
-			const created = await apiFetch<{ id: string; name: string; key: string }>("/api/projects", {
-				method: "POST",
-				workspaceSlug,
-				body: { name, key, description },
-			});
+			const created = await apiFetch<{ id: string; name: string; key: string; slug: string }>(
+				"/api/projects",
+				{
+					method: "POST",
+					workspaceSlug,
+					body: { name, key, description },
+				}
+			);
 
 			onCreated({
 				id: created.id,
 				name: created.name,
 				key: created.key,
+				slug: created.slug,
 				description: description ?? null,
 				workspace_id: "",
 				workspace_name: "",
@@ -265,7 +270,14 @@ function ProjectCard({ project }: { project: Project }) {
 		count === 0 ? "No open issues" : `${count} open issue${count !== 1 ? "s" : ""}`;
 
 	return (
-		<a href={`/projects/view?id=${project.id}`} class={PROJECT_CARD_CLASS}>
+		<a
+			href={
+				project.slug
+					? `/projects/view/${encodeURIComponent(project.slug)}`
+					: `/projects/view?id=${project.id}`
+			}
+			class={PROJECT_CARD_CLASS}
+		>
 			<div class="flex items-center gap-2">
 				<span class="font-bold text-[var(--text)] text-base">{project.name}</span>
 				<span class={KEY_BADGE_CLASS}>{project.key}</span>

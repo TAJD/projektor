@@ -35,6 +35,7 @@ import m0031 from "../../../../packages/db/migrations/0031_factory_health.sql?ra
 import m0032 from "../../../../packages/db/migrations/0032_claim_conflicts.sql?raw";
 import m0033 from "../../../../packages/db/migrations/0033_custom_field_is_internal.sql?raw";
 import m0034 from "../../../../packages/db/migrations/0034_issue_needs_audit.sql?raw";
+import m0035 from "../../../../packages/db/migrations/0035_project_slug.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -72,4 +73,5 @@ export const MIGRATIONS = [
 	m0032,
 	m0033,
 	m0034,
+	m0035,
 ];
