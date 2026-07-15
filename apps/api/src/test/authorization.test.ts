@@ -6,10 +6,11 @@
  * domain tests ("rejects requests from non-members").
  *
  * Resources that enforce viewer/member restrictions:
- *   projects, task-types, task-statuses, custom-fields, wiki (DELETE only)
+ *   projects, task-types, task-statuses, custom-fields, wiki (DELETE only),
+ *   comments (create only — PROJ-374)
  *
- * Issues and comments do NOT enforce a viewer role — any member can write —
- * so they are intentionally excluded from the viewer-403 matrix below.
+ * Issues do NOT enforce a viewer role — any member can write — so they are
+ * intentionally excluded from the viewer-403 matrix below.
  */
 
 import { env, SELF } from "cloudflare:test";
@@ -18,7 +19,10 @@ import {
 	authHeaders,
 	seedCustomFieldDef,
 	seedFixture,
+	seedGroupGrant,
+	seedIssue,
 	seedMember,
+	seedProject,
 	seedTaskStatus,
 	seedTaskType,
 	seedToken,
@@ -67,6 +71,8 @@ describe("PROJ-78: same-workspace viewer role → 403 on mutating routes", () =>
 	let workspaceId: string;
 	let ownerHeaders: Record<string, string>;
 	let viewerHeaders: Record<string, string>;
+	let ownerId: string;
+	let viewerId: string;
 
 	beforeEach(async () => {
 		const roles = await seedWorkspaceRoles();
@@ -74,6 +80,8 @@ describe("PROJ-78: same-workspace viewer role → 403 on mutating routes", () =>
 		workspaceId = roles.workspace.id;
 		ownerHeaders = authHeaders(roles.owner.token, slug);
 		viewerHeaders = authHeaders(roles.viewer.token, slug);
+		ownerId = roles.owner.user.id;
+		viewerId = roles.viewer.user.id;
 	});
 
 	// -- Projects --
@@ -285,6 +293,25 @@ describe("PROJ-78: same-workspace viewer role → 403 on mutating routes", () =>
 		expect(res.status).toBe(200);
 		// Suppress unused variable warning from the extra seedWorkspaceRoles call above
 		void roles;
+	});
+
+	// -- Comments --
+	// PROJ-374: addComment now rejects viewers, mirroring the other
+	// mutating-route guards in this file.
+
+	it("viewer cannot POST /api/issues/:issueId/comments", async () => {
+		const project = await seedProject(workspaceId);
+		const issue = await seedIssue(workspaceId, project.id, ownerId);
+		// Grant the viewer visibility into the project (PROJ-311 default-deny)
+		// so the request reaches the viewer-role guard instead of a 404.
+		await seedGroupGrant(workspaceId, viewerId, project.id, "viewer");
+
+		const res = await SELF.fetch(`http://localhost/api/issues/${issue.id}/comments`, {
+			method: "POST",
+			headers: viewerHeaders,
+			body: JSON.stringify({ body: "a comment" }),
+		});
+		expect(res.status).toBe(403);
 	});
 });
 

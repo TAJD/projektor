@@ -15,9 +15,15 @@ export const projects = sqliteTable(
 		updatedAt: integer("updated_at").notNull(),
 		// Per-project agent WIP cap (PROJ-253). NULL = use the workspace default.
 		agentWipLimit: integer("agent_wip_limit"),
+		// Human-readable URL slug, e.g. "start-line" (PROJ-376). Nullable for
+		// pre-migration rows that failed backfill; unique per workspace, enforced
+		// by a partial index (see migrations/0035_project_slug.sql) so NULLs don't
+		// collide.
+		slug: text("slug"),
 	},
 	(t) => ({
 		wsIdx: index("projects_workspace_idx").on(t.workspaceId),
+		slugIdx: index("projects_workspace_slug_idx").on(t.workspaceId, t.slug),
 	})
 );
 

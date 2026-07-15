@@ -43,6 +43,7 @@ export interface ProjectSummary {
 	id: string;
 	name: string;
 	key: string;
+	slug: string | null;
 	description: string | null;
 	workspace_id: string;
 	workspace_name: string;
@@ -59,6 +60,7 @@ export async function listAllProjects(userId: string, db: D1Database): Promise<P
         p.id,
         p.name,
         p.key,
+        p.slug,
         p.description,
         p.created_at,
         p.updated_at,
@@ -78,7 +80,7 @@ export async function listAllProjects(userId: string, db: D1Database): Promise<P
               SELECT 1 FROM user_group_members ugm
               JOIN group_project_grants gpg ON gpg.group_id = ugm.group_id
               WHERE ugm.user_id = ? AND gpg.project_id = p.id)
-      GROUP BY p.id, p.name, p.key, p.description, p.created_at, p.updated_at,
+      GROUP BY p.id, p.name, p.key, p.slug, p.description, p.created_at, p.updated_at,
                w.id, w.name, w.slug
       ORDER BY w.slug, p.name`
 		)
@@ -103,6 +105,53 @@ export async function getProject(ctx: ServiceCtx, id: string) {
 	return project;
 }
 
+// PROJ-376: pretty project URLs (/projects/view/<slug>) resolve here instead of
+// the UUID route. Same visibility rules as getProject.
+export async function getProjectBySlug(ctx: ServiceCtx, slug: string) {
+	const orm = drizzle(ctx.db, { schema });
+	const project = await orm
+		.select()
+		.from(schema.projects)
+		.where(and(eq(schema.projects.slug, slug), eq(schema.projects.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!project) throw new NotFoundError("Project not found");
+
+	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, project.id)) === null) {
+		throw new NotFoundError("Project not found");
+	}
+	return project;
+}
+
+function slugify(name: string): string {
+	return (
+		name
+			.trim()
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "") || "project"
+	);
+}
+
+// Generates a workspace-unique slug from the project name, appending -2, -3, ...
+// on collision. Bounded query count: at most one SELECT per candidate tried.
+async function generateUniqueSlug(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	name: string
+): Promise<string> {
+	const base = slugify(name);
+	let candidate = base;
+	for (let n = 2; ; n++) {
+		const existing = await orm
+			.select({ id: schema.projects.id })
+			.from(schema.projects)
+			.where(and(eq(schema.projects.workspaceId, workspaceId), eq(schema.projects.slug, candidate)))
+			.get();
+		if (!existing) return candidate;
+		candidate = `${base}-${n}`;
+	}
+}
+
 export async function createProject(ctx: ServiceCtx, input: unknown) {
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 
@@ -121,12 +170,14 @@ export async function createProject(ctx: ServiceCtx, input: unknown) {
 
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
+	const slug = await generateUniqueSlug(orm, ctx.workspaceId, name);
 
 	await orm.insert(schema.projects).values({
 		id,
 		workspaceId: ctx.workspaceId,
 		name,
 		key,
+		slug,
 		description: description ?? null,
 		agentWipLimit: agentWipLimit ?? null,
 		createdAt: now,
@@ -135,7 +186,7 @@ export async function createProject(ctx: ServiceCtx, input: unknown) {
 
 	await recordActivity(ctx, { entityType: "project", entityId: id, action: "created" });
 	await cache.invalidate(ctx.kv, PROJECTS_CACHE_KEY(ctx.workspaceId));
-	return { id, name, key };
+	return { id, name, key, slug };
 }
 
 export async function updateProject(ctx: ServiceCtx, id: string, input: unknown) {

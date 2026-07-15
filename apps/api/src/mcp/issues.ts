@@ -256,6 +256,11 @@ export const issuesTools: MCPTool[] = [
 						"Include issues that fail the definition-of-ready check, annotated with " +
 						"needsGrooming and missingCriteria (default false)",
 				},
+				projectId: {
+					type: "string",
+					description:
+						"Scope ranking to a single project's issues (default: workspace-wide, all visible projects)",
+				},
 			},
 		},
 		handler(input, ctx) {

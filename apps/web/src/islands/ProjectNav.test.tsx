@@ -10,7 +10,7 @@ import { render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 import ProjectNav from "./ProjectNav";
 
-const PROJECT = { id: "p1", key: "PROJ", name: "Projektor" };
+const PROJECT = { id: "p1", key: "PROJ", name: "Projektor", slug: "projektor" };
 
 function mockFetchProject(project: typeof PROJECT | null) {
 	vi.stubGlobal(
@@ -81,5 +81,33 @@ describe("ProjectNav", () => {
 
 		const heading = screen.getByText("Projektor");
 		expect(heading.className).toContain("max-sm:text-[0.8125rem]");
+	});
+
+	// PROJ-376: pretty project URLs (/projects/view/<slug>).
+	it("resolves the project from a /projects/view/<slug> path with no query param", async () => {
+		window.history.pushState({}, "", "/projects/view/projektor");
+		mockFetchProject(PROJECT);
+		render(<ProjectNav />);
+		expect(await screen.findByText("Projektor")).toBeTruthy();
+	});
+
+	it("builds the Overview tab link and header link from the project's slug", async () => {
+		window.history.pushState({}, "", "/issues?id=p1");
+		mockFetchProject(PROJECT);
+		render(<ProjectNav />);
+		await screen.findByText("Projektor");
+		const overviewTab = screen.getByRole("link", { name: "Overview" });
+		expect(overviewTab.getAttribute("href")).toBe("/projects/view/projektor");
+		const headerLink = screen.getByText("Projektor").closest("a");
+		expect(headerLink?.getAttribute("href")).toBe("/projects/view/projektor");
+	});
+
+	it("marks Overview active when on its slug path, even without a matching plain-path tab", async () => {
+		window.history.pushState({}, "", "/projects/view/projektor");
+		mockFetchProject(PROJECT);
+		render(<ProjectNav />);
+		await screen.findByText("Projektor");
+		const overviewTab = screen.getByRole("link", { name: "Overview" });
+		expect(overviewTab.getAttribute("aria-current")).toBe("page");
 	});
 });

@@ -8,6 +8,7 @@ interface Project {
 	id: string;
 	name: string;
 	key: string;
+	slug: string | null;
 	description: string | null;
 	workspaceId: string;
 	createdAt: number;
@@ -65,7 +66,7 @@ function sortByRecency<T extends { updated_at: number }>(items: unknown, limit: 
 }
 
 async function loadProjectData(
-	id: string,
+	idOrSlug: string,
 	workspaceSlug: string | undefined,
 	setters: {
 		setProject: (p: Project) => void;
@@ -73,17 +74,22 @@ async function loadProjectData(
 		setRecentWiki: (v: RecentWikiPage[]) => void;
 	}
 ) {
-	const [proj, issuesData, wikiData] = await Promise.all([
-		apiFetch<Project>(`/api/projects/${id}`, { workspaceSlug }),
-		apiFetch<{ items: RecentIssue[] }>(`/api/issues?project=${id}`, { workspaceSlug }).catch(
+	// /api/projects/:id resolves either a UUID or a slug, but the issues/wiki
+	// endpoints below filter on the real project UUID — resolve the project first.
+	const proj = await apiFetch<Project>(`/api/projects/${encodeURIComponent(idOrSlug)}`, {
+		workspaceSlug,
+	});
+	setters.setProject(proj);
+
+	const [issuesData, wikiData] = await Promise.all([
+		apiFetch<{ items: RecentIssue[] }>(`/api/issues?project=${proj.id}`, { workspaceSlug }).catch(
 			() => null
 		),
-		apiFetch<RecentWikiPage[]>(`/api/wiki?projectId=${encodeURIComponent(id)}`, {
+		apiFetch<RecentWikiPage[]>(`/api/wiki?projectId=${encodeURIComponent(proj.id)}`, {
 			workspaceSlug,
 		}).catch(() => null),
 	]);
 
-	setters.setProject(proj);
 	if (issuesData) setters.setRecentIssues(sortByRecency<RecentIssue>(issuesData?.items, 5));
 	if (wikiData) setters.setRecentWiki(sortByRecency<RecentWikiPage>(wikiData, 5));
 }
@@ -332,7 +338,11 @@ function RecentWikiSection({ pages, projectId }: { pages: RecentWikiPage[]; proj
 export default function ProjectLanding({ workspaceSlug }: Props) {
 	const [projectId, setProjectId] = useState<string | null>(null);
 	useEffect(() => {
-		const id = new URLSearchParams(window.location.search).get("id");
+		// Pretty-URL route (/projects/view/<slug>) falls back to this same page
+		// (see the SPA fallback in apps/api/src/index.ts) — read the slug from the
+		// path when there's no ?id= query param.
+		const slugMatch = window.location.pathname.match(/^\/projects\/view\/([^/]+)\/?$/);
+		const id = new URLSearchParams(window.location.search).get("id") ?? slugMatch?.[1] ?? null;
 		setProjectId(id);
 	}, []);
 
@@ -394,10 +404,6 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 			<header class="mb-6">
 				<nav class="text-sm text-text-muted mb-2">
 					<a href="/" class="text-text-muted no-underline">
-						Projektor
-					</a>
-					<span class="mx-[0.375rem]">/</span>
-					<a href="/projects" class="text-text-muted no-underline">
 						Projects
 					</a>
 					<span class="mx-[0.375rem]">/</span>

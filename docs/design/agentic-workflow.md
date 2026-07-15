@@ -133,25 +133,24 @@ lower it.
 
 ### Identifying "an agent did this"
 
-`agent_sessions.kind` (`'agent' | 'human'`) already distinguishes the two — a human
-using the browser never has an `agentSessionId` to pass. Mutations that need the gate
-accept an optional `agentSessionId` (same shape as `claim_issue`/`release_issue`); when
-present, the service looks up the session's `kind`.
+PROJ-287 rebound this off the self-declared `agent_sessions.kind` to a live-lease
+check (`issueHasLiveAgentLease`) — spoof-resistant, since `kind` is just a string the
+caller chose when opening the session. PROJ-336 went further and deprecated `kind`
+entirely; the gate is keyed on lease/principal state, not session kind.
 
 ### The gate
 
-1. **Entering `in_review` with an `agentSessionId` whose session `kind = 'agent'`**
-   requires a completion report in the same call: `{ summary, verification, prLink? }`
-   (`summary`/`verification` required, non-empty). Missing fields throw a
-   `ValidationError` naming exactly which are missing. On success the service writes
-   the report as a formatted `issue_comments` row (visible in the normal comment
-   timeline) and stamps a new indexed `issues.completion_report_at` column.
-2. **Transitioning to `done`**: if the call carries an `agentSessionId` whose session
-   `kind = 'agent'`, reject with `ForbiddenError` — agents can never self-approve,
-   full stop, regardless of whether a report exists. If no `agentSessionId` is present
-   (a human, via browser or a human-kind session), the transition is allowed only if
-   `completion_report_at IS NOT NULL` on the issue; otherwise `ValidationError` naming
-   the missing `completionReport`.
+1. **Entering `in_review` while the issue has a live agent lease**
+   (`issueHasLiveAgentLease`) requires a completion report in the same call:
+   `{ summary, verification, prLink? }` (`summary`/`verification` required,
+   non-empty). Missing fields throw a `ValidationError` naming exactly which are
+   missing. On success the service writes the report as a formatted `issue_comments`
+   row (visible in the normal comment timeline) and stamps a new indexed
+   `issues.completion_report_at` column.
+2. **Transitioning to `done`**: originally, an agent-initiated call (live lease)
+   rejected with `ForbiddenError` — agents could never self-approve. Phase 5 below
+   removed this hard block; see that section for the current behavior
+   (audit-after-the-fact instead of a pre-close gate).
 
 This keeps the check inside `services/issues.ts::updateIssue` (single home for both
 REST and MCP, per the service-layer contract) rather than duplicating it in the two
