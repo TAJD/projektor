@@ -2,6 +2,7 @@
 import Base from '../layouts/Base.astro';
 import ProjectNav from '../islands/ProjectNav';
 import FeedbackSourceManager from '../islands/FeedbackSourceManager';
+import FeedbackList from '../islands/FeedbackList';
 
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
@@ -9,6 +10,6 @@ const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefine
   <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Feedback" />
   <div class="page-container">
     <FeedbackSourceManager client:load workspaceSlug={workspaceSlug} projectId={Astro.url.searchParams.get('projectId') ?? ''} />
-    <!-- FeedbackList (Task 10) mount added here -->
+    <FeedbackList client:load workspaceSlug={workspaceSlug} projectId={Astro.url.searchParams.get('projectId') ?? ''} />
   </div>
 </Base>

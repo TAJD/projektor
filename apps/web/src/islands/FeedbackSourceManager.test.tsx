@@ -54,9 +54,11 @@ describe("FeedbackSourceManager", () => {
 	it("renders an access-denied notice on a 403 list response", async () => {
 		vi.stubGlobal(
 			"fetch",
-			vi.fn().mockImplementation(() =>
-				Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) })
-			)
+			vi
+				.fn()
+				.mockImplementation(() =>
+					Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) })
+				)
 		);
 		render(<FeedbackSourceManager workspaceSlug="my-ws" projectId="p1" />);
 		expect(await screen.findByText(/Only workspace owners and admins/i)).toBeTruthy();

@@ -26,7 +26,8 @@ const INPUT_CLASS =
 	"px-[0.625rem] py-[0.4rem] border border-border rounded text-[0.875rem] bg-bg text-text-base " +
 	"font-[inherit] focus:outline-[2px] focus:outline-accent focus:outline-offset-1";
 const TD = "px-3 py-2 border-b border-border align-middle text-[0.875rem]";
-const TH = "text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap";
+const TH =
+	"text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap";
 
 function formatDate(ts: number): string {
 	return new Date(ts * 1000).toLocaleDateString();
@@ -59,10 +60,9 @@ export default function FeedbackSourceManager({ workspaceSlug, projectId }: Prop
 		setError(null);
 		setForbidden(false);
 		try {
-			const data = await apiFetch<FeedbackSource[]>(
-				`/api/projects/${projectId}/feedback-sources`,
-				{ workspaceSlug }
-			);
+			const data = await apiFetch<FeedbackSource[]>(`/api/projects/${projectId}/feedback-sources`, {
+				workspaceSlug,
+			});
 			setSources(Array.isArray(data) ? data : []);
 		} catch (e) {
 			if (String(e).includes(": 403")) setForbidden(true);
@@ -132,7 +132,8 @@ export default function FeedbackSourceManager({ workspaceSlug, projectId }: Prop
 	if (forbidden) {
 		return (
 			<div class="p-4 bg-surface border border-border rounded-md text-text-muted">
-				<strong>Access denied.</strong> Only workspace owners and admins can manage feedback sources.
+				<strong>Access denied.</strong> Only workspace owners and admins can manage feedback
+				sources.
 			</div>
 		);
 	}
@@ -174,7 +175,10 @@ export default function FeedbackSourceManager({ workspaceSlug, projectId }: Prop
 			)}
 
 			{showCreate && (
-				<form onSubmit={handleCreate} class="mb-5 px-4 py-4 bg-surface border border-border rounded-lg">
+				<form
+					onSubmit={handleCreate}
+					class="mb-5 px-4 py-4 bg-surface border border-border rounded-lg"
+				>
 					<div class="flex flex-col gap-1 mb-3">
 						<label class="text-[0.8rem] font-semibold text-text-muted" for="fs-name">
 							Name *
@@ -213,7 +217,11 @@ export default function FeedbackSourceManager({ workspaceSlug, projectId }: Prop
 						/>
 					</div>
 					<div class="flex gap-2">
-						<button type="submit" class="btn btn-primary btn-sm" disabled={creating || !name.trim()}>
+						<button
+							type="submit"
+							class="btn btn-primary btn-sm"
+							disabled={creating || !name.trim()}
+						>
 							{creating ? "Creating…" : "Create source"}
 						</button>
 						<button
