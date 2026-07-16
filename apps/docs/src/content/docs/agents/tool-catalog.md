@@ -169,6 +169,23 @@ running server.
 | `update_custom_field_def` | Update a custom field definition label or options (owner/admin only) |
 | `delete_custom_field_def` | Delete a custom field definition (owner/admin only). Fails if any issues have values for this field. |
 
+### Feedback
+
+Feedback *sources* are named, independently-credentialed collection points for
+anonymous end-user feedback (e.g. "Onboarding survey", "In-app NPS widget").
+Management has full REST+MCP parity; the public submission endpoint itself
+(`POST /api/feedback/submit`) is REST-only — since it's authenticated by a
+per-source bearer token, not a workspace session — see [Deliberate REST↔MCP
+parity exceptions](/contributing/conventions/).
+
+| Tool | Description |
+|------|-------------|
+| `create_feedback_source` | Create a feedback source for a project; returns a raw token (shown once) to embed in the external product's submit form/widget |
+| `list_feedback_sources` | List a project's feedback sources (name, active state, allowed origins, truncated token preview — never the raw token) |
+| `update_feedback_source` | Update a source's name, description, or active state; `isActive: false` is a reversible kill switch |
+| `rotate_feedback_source_token` | Generate a new token for a source (old token stops working immediately; source identity and history are preserved) |
+| `revoke_feedback_source` | Permanently revoke a source; its token stops working for good |
+
 ### Sprints
 
 | Tool | Description |
