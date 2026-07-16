@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**81 tools across 19 domains.**
+**86 tools across 20 domains.**
 
 ## Coordination
 
@@ -169,23 +169,6 @@ running server.
 | `update_custom_field_def` | Update a custom field definition label or options (owner/admin only) |
 | `delete_custom_field_def` | Delete a custom field definition (owner/admin only). Fails if any issues have values for this field. |
 
-### Feedback
-
-Feedback *sources* are named, independently-credentialed collection points for
-anonymous end-user feedback (e.g. "Onboarding survey", "In-app NPS widget").
-Management has full REST+MCP parity; the public submission endpoint itself
-(`POST /api/feedback/submit`) is REST-only — since it's authenticated by a
-per-source bearer token, not a workspace session — see [Deliberate REST↔MCP
-parity exceptions](/contributing/conventions/).
-
-| Tool | Description |
-|------|-------------|
-| `create_feedback_source` | Create a feedback source for a project; returns a raw token (shown once) to embed in the external product's submit form/widget |
-| `list_feedback_sources` | List a project's feedback sources (name, active state, allowed origins, truncated token preview — never the raw token) |
-| `update_feedback_source` | Update a source's name, description, or active state; `isActive: false` is a reversible kill switch |
-| `rotate_feedback_source_token` | Generate a new token for a source (old token stops working immediately; source identity and history are preserved) |
-| `revoke_feedback_source` | Permanently revoke a source; its token stops working for good |
-
 ### Sprints
 
 | Tool | Description |
@@ -197,6 +180,16 @@ parity exceptions](/contributing/conventions/).
 | `complete_sprint` | Mark an active sprint as completed |
 | `delete_sprint` | Delete a sprint (issues in the sprint will have their sprint_id cleared) |
 | `move_issues_to_sprint` | Bulk move issues into a sprint by setting their sprint_id |
+
+### Feedback
+
+| Tool | Description |
+|------|-------------|
+| `create_feedback_source` | Create a feedback source for a project. A source is a named, independently-credentialed feedback collection point (e.g. 'Onboarding survey', 'In-app NPS widget') that end-user feedback is submitted against. Returns a raw token that must be embedded in the user's own product code (a form or widget that POSTs to /api/feedback/submit with 'Authorization: Bearer <token>'). The raw token is shown exactly once and cannot be retrieved later — relay it to the user immediately. Admin/owner only. Optionally restrict browser callers with allowedOrigins (a list of allowed CORS origins); omit it for server-to-server callers. |
+| `list_feedback_sources` | List a project's feedback sources. Each entry includes id, name, description, whether it is active, its allowed origins, a truncated token preview (never the raw token), and created/revoked timestamps. Admin/owner only. |
+| `update_feedback_source` | Update a feedback source's name, description, or active state. Setting isActive to false is a kill switch: submissions against the source's token are immediately rejected (this is reversible — set it back to true to resume; contrast with revoke_feedback_source, which is permanent). Admin/owner only. |
+| `rotate_feedback_source_token` | Generate a new token for a feedback source. Returns the new raw token once; the old token stops working immediately. The source's identity (id), name, description, and all its historical feedback are preserved — use this when a token has leaked or needs periodic rotation. Relay the new token to the user so they can update their product code. Admin/owner only. |
+| `revoke_feedback_source` | Permanently revoke a feedback source. Its token stops working for good and it can never accept another submission (its historical feedback is retained for reference). To replace a revoked source, create a new one. Admin/owner only. |
 
 ### Flow metrics
 
