@@ -78,6 +78,19 @@ export default function FeedbackList({ workspaceSlug, projectId }: Props) {
 		}
 	}
 
+	async function markReviewed(id: string) {
+		try {
+			await apiFetch(`/api/projects/${projectId}/feedback/${id}`, {
+				method: "PATCH",
+				body: { status: "reviewed" },
+				workspaceSlug,
+			});
+			await fetchRows();
+		} catch (e) {
+			setError(String(e));
+		}
+	}
+
 	const sourceOptions = Array.from(
 		new Map(rows.filter((r) => r.sourceName).map((r) => [r.sourceId, r.sourceName])).entries()
 	);
@@ -161,17 +174,28 @@ export default function FeedbackList({ workspaceSlug, projectId }: Props) {
 									<td class={`${TD} text-text-muted`}>{r.status}</td>
 									<td class={`${TD} text-text-muted`}>{formatDate(r.createdAt)}</td>
 									<td class={`${TD} whitespace-nowrap`}>
-										{r.linkedIssueId ? (
-											<span class="text-[0.8rem] text-text-muted">Linked</span>
-										) : (
-											<button
-												type="button"
-												class="btn btn-outline btn-sm"
-												onClick={() => convert(r.id)}
-											>
-												Convert to issue
-											</button>
-										)}
+										<div class="flex gap-2">
+											{r.status === "new" && (
+												<button
+													type="button"
+													class="btn btn-outline btn-sm"
+													onClick={() => markReviewed(r.id)}
+												>
+													Mark reviewed
+												</button>
+											)}
+											{r.linkedIssueId ? (
+												<span class="text-[0.8rem] text-text-muted">Linked</span>
+											) : (
+												<button
+													type="button"
+													class="btn btn-outline btn-sm"
+													onClick={() => convert(r.id)}
+												>
+													Convert to issue
+												</button>
+											)}
+										</div>
 									</td>
 								</tr>
 							))}

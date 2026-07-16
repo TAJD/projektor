@@ -52,6 +52,25 @@ describe("FeedbackList", () => {
 		});
 	});
 
+	it("mark-reviewed PATCHes with status reviewed and refetches", async () => {
+		const fetchMock = stubFetch();
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		await screen.findByText("Great onboarding");
+		fireEvent.click(screen.getByRole("button", { name: /Mark reviewed/i }));
+		await waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some((call) => {
+					const body = call[1]?.body ? JSON.parse(String(call[1].body)) : null;
+					return (
+						String(call[0]).includes("/feedback/f1") &&
+						call[1]?.method === "PATCH" &&
+						body?.status === "reviewed"
+					);
+				})
+			).toBe(true);
+		});
+	});
+
 	it("convert-to-issue POSTs and refetches", async () => {
 		const fetchMock = stubFetch();
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
