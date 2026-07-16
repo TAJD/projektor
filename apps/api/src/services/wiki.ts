@@ -12,6 +12,7 @@ import {
 	canWriteProject,
 	effectiveProjectRole,
 	isWorkspaceAdmin,
+	requireProjectInWorkspace,
 	visibleProjectPredicate,
 	visibleProjectSqlFragment,
 } from "./access";
@@ -36,6 +37,9 @@ async function requireWikiWrite(ctx: ServiceCtx, projectId: string | null): Prom
 		if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 		return;
 	}
+	// PROJ-389: confirm projectId belongs to this workspace BEFORE the admin-bypass
+	// check below, so an owner/admin can't write into another workspace's project.
+	await requireProjectInWorkspace(ctx, projectId);
 	if (isWorkspaceAdmin(ctx.role)) return;
 	const role = await effectiveProjectRole(ctx, projectId);
 	if (role === null) throw new NotFoundError("Wiki page not found");

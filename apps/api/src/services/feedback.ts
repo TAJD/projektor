@@ -4,7 +4,7 @@ import {
 	SubmitFeedbackSchema,
 	UpdateFeedbackSchema,
 } from "../schemas/feedback";
-import { canWriteProject, requireProjectAccess } from "./access";
+import { canWriteProject, requireProjectAccess, requireProjectInWorkspace } from "./access";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { createIssue } from "./issues";
 import type { ServiceCtx } from "./types";
@@ -107,18 +107,6 @@ interface FeedbackJoinRow {
 	status: string;
 	linked_issue_id: string | null;
 	created_at: number;
-}
-
-// Mirrors feedback-sources.ts: requireProjectAccess alone doesn't confirm the
-// project belongs to ctx.workspaceId (workspace admins bypass group grants
-// entirely), so a cross-workspace owner/admin would otherwise pass. Confirm
-// workspace membership first.
-async function requireProjectInWorkspace(ctx: ServiceCtx, projectId: string): Promise<void> {
-	const project = await ctx.db
-		.prepare("SELECT id FROM projects WHERE id = ? AND workspace_id = ?")
-		.bind(projectId, ctx.workspaceId)
-		.first<{ id: string }>();
-	if (!project) throw new NotFoundError("Project not found");
 }
 
 export async function listFeedback(ctx: ServiceCtx, input: unknown): Promise<FeedbackView[]> {

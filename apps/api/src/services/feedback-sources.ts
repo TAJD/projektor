@@ -5,7 +5,7 @@ import {
 	RotateFeedbackSourceSchema,
 	UpdateFeedbackSourceSchema,
 } from "../schemas/feedback";
-import { isWorkspaceAdmin } from "./access";
+import { isWorkspaceAdmin, requireProjectInWorkspace } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
@@ -40,14 +40,6 @@ interface SourceRow {
 	allowed_origins: string | null;
 	created_at: number;
 	revoked_at: number | null;
-}
-
-async function requireProjectInWorkspace(ctx: ServiceCtx, projectId: string): Promise<void> {
-	const project = await ctx.db
-		.prepare("SELECT id FROM projects WHERE id = ? AND workspace_id = ?")
-		.bind(projectId, ctx.workspaceId)
-		.first<{ id: string }>();
-	if (!project) throw new NotFoundError("Project not found");
 }
 
 // Resolve a source scoped to the workspace (404 before any role check). Management
