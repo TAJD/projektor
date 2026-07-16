@@ -12,7 +12,7 @@ CREATE TABLE `feedback_sources` (
 	`description` text,
 	`is_active` integer DEFAULT 1 NOT NULL,
 	`allowed_origins` text,
-	`created_by` text NOT NULL REFERENCES `users`(`id`) ON DELETE CASCADE,
+	`created_by` text NOT NULL REFERENCES `users`(`id`) ON DELETE NO ACTION,
 	`created_at` integer NOT NULL,
 	`revoked_at` integer
 );
