@@ -1,10 +1,12 @@
 import {
+	ConvertFeedbackSchema,
 	ListFeedbackSchema,
 	SubmitFeedbackSchema,
 	UpdateFeedbackSchema,
 } from "../schemas/feedback";
 import { canWriteProject, requireProjectAccess } from "./access";
-import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { createIssue } from "./issues";
 import type { ServiceCtx } from "./types";
 
 export async function hashFeedbackToken(token: string): Promise<string> {
@@ -187,4 +189,67 @@ export async function updateFeedbackStatus(ctx: ServiceCtx, input: unknown): Pro
 		.run();
 
 	return { ok: true };
+}
+
+function ratingLabel(rating: number | null, scale: string | null): string {
+	if (rating === null) return "Rating";
+	if (scale === "thumbs") return rating > 0 ? "👍 Positive" : "👎 Negative";
+	return `${rating}★`;
+}
+
+interface ConvertFeedbackRow {
+	rating: number | null;
+	rating_scale: string | null;
+	body: string | null;
+	submitter_label: string | null;
+	status: string;
+	linked_issue_id: string | null;
+}
+
+export async function convertFeedbackToIssue(
+	ctx: ServiceCtx,
+	input: unknown
+): Promise<{ id: string; number?: number }> {
+	const parsed = ConvertFeedbackSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, feedbackId } = parsed.data;
+
+	await requireProjectInWorkspace(ctx, projectId);
+	const role = await requireProjectAccess(ctx, projectId);
+	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+
+	const fb = await ctx.db
+		.prepare(
+			`SELECT rating, rating_scale, body, submitter_label, status, linked_issue_id
+       FROM feedback WHERE id = ? AND project_id = ? AND workspace_id = ?`
+		)
+		.bind(feedbackId, projectId, ctx.workspaceId)
+		.first<ConvertFeedbackRow>();
+	if (!fb) throw new NotFoundError("Feedback not found");
+	// Already converted — reject re-conversion rather than silently creating a
+	// second issue or re-linking; the caller should follow the existing linked issue.
+	if (fb.linked_issue_id) throw new ConflictError("Feedback already converted to an issue");
+
+	const title = fb.body
+		? fb.body.slice(0, 120)
+		: `${ratingLabel(fb.rating, fb.rating_scale)} feedback`;
+	const footer =
+		`— submitted via feedback source${fb.submitter_label ? ` by ${fb.submitter_label}` : ""}` +
+		(fb.rating !== null ? `, rating: ${fb.rating} (${fb.rating_scale})` : "");
+
+	const issue = await createIssue(ctx, {
+		projectId,
+		title,
+		body: [fb.body ?? "", "", footer].join("\n"),
+		priority: "medium",
+	});
+
+	await ctx.db
+		.prepare(
+			"UPDATE feedback SET linked_issue_id = ?, status = 'actioned' WHERE id = ? AND workspace_id = ?"
+		)
+		.bind(issue.id, feedbackId, ctx.workspaceId)
+		.run();
+
+	return issue;
 }

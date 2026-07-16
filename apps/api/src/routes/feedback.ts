@@ -5,6 +5,7 @@ import { serviceErrToResponse } from "../http/error-adapter";
 import { bumpRateCounter } from "../middleware/rate-limit";
 import { ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
 import {
+	convertFeedbackToIssue,
 	hashFeedbackToken,
 	listFeedback,
 	submitFeedback,
@@ -99,6 +100,17 @@ authedRouter.patch("/:id/feedback/:feedbackId", async (c) => {
 	const raw = await c.req.json();
 	try {
 		return c.json(await updateFeedbackStatus(ctx, { projectId, feedbackId, ...raw }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+authedRouter.post("/:id/feedback/:feedbackId/convert-to-issue", async (c) => {
+	const ctx = ctxFromHono(c);
+	const projectId = c.req.param("id");
+	const feedbackId = c.req.param("feedbackId");
+	try {
+		return c.json(await convertFeedbackToIssue(ctx, { projectId, feedbackId }), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

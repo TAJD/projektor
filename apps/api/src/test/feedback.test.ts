@@ -459,3 +459,122 @@ describe("Feedback triage read/patch", () => {
 		expect(res.status).toBe(400);
 	});
 });
+
+describe("Feedback convert-to-issue", () => {
+	it("creates an issue, links it, marks feedback actioned (member+)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, f.workspaceId, f.projectId, {
+			body: "The export button is broken",
+		});
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback/${fbId}/convert-to-issue`,
+			{ method: "POST", headers: authHeaders(f.token, f.slug) }
+		);
+		expect(res.status).toBe(201);
+		const issue = (await res.json()) as { id: string };
+		expect(issue.id).toBeTruthy();
+
+		const row = await env.DB.prepare("SELECT status, linked_issue_id FROM feedback WHERE id = ?")
+			.bind(fbId)
+			.first<{ status: string; linked_issue_id: string | null }>();
+		expect(row?.status).toBe("actioned");
+		expect(row?.linked_issue_id).toBe(issue.id);
+	});
+
+	it("403s for a viewer", async () => {
+		const roles = await seedWorkspaceRoles();
+		const proj = await seedProject(roles.workspace.id, "CVT");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, proj.id, "viewer");
+		const create = await SELF.fetch(`http://localhost/api/projects/${proj.id}/feedback-sources`, {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ name: "S" }),
+		});
+		await create.json();
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(proj.id)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, roles.workspace.id, proj.id);
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${proj.id}/feedback/${fbId}/convert-to-issue`,
+			{ method: "POST", headers: authHeaders(roles.viewer.token, roles.workspace.slug) }
+		);
+		expect(res.status).toBe(403);
+	});
+
+	it("allows a member (write role, not just owner) to convert", async () => {
+		const roles = await seedWorkspaceRoles();
+		const proj = await seedProject(roles.workspace.id, "CVM");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, proj.id, "member");
+		const create = await SELF.fetch(`http://localhost/api/projects/${proj.id}/feedback-sources`, {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ name: "S" }),
+		});
+		await create.json();
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(proj.id)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, roles.workspace.id, proj.id, { body: "Fix this" });
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${proj.id}/feedback/${fbId}/convert-to-issue`,
+			{ method: "POST", headers: authHeaders(roles.member.token, roles.workspace.slug) }
+		);
+		expect(res.status).toBe(201);
+	});
+
+	it("falls back to a rating-based title when there is no body", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const id = crypto.randomUUID();
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			`INSERT INTO feedback (id, source_id, workspace_id, project_id, rating, rating_scale, body, status, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, NULL, 'new', ?)`
+		)
+			.bind(id, src!.id, f.workspaceId, f.projectId, 1, "thumbs", now)
+			.run();
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback/${id}/convert-to-issue`,
+			{ method: "POST", headers: authHeaders(f.token, f.slug) }
+		);
+		expect(res.status).toBe(201);
+		const issue = (await res.json()) as { id: string };
+		const issueRow = await env.DB.prepare("SELECT title FROM issues WHERE id = ?")
+			.bind(issue.id)
+			.first<{ title: string }>();
+		expect(issueRow?.title).toBe("👍 Positive feedback");
+	});
+
+	it("rejects re-conversion of an already-actioned feedback row (409)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, f.workspaceId, f.projectId, { body: "Repeat me" });
+
+		const first = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback/${fbId}/convert-to-issue`,
+			{ method: "POST", headers: authHeaders(f.token, f.slug) }
+		);
+		expect(first.status).toBe(201);
+
+		const second = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback/${fbId}/convert-to-issue`,
+			{ method: "POST", headers: authHeaders(f.token, f.slug) }
+		);
+		expect(second.status).toBe(409);
+	});
+});
