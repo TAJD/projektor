@@ -1,12 +1,14 @@
 ---
 import Base from '../layouts/Base.astro';
 import ProjectNav from '../islands/ProjectNav';
+import FeedbackSourceManager from '../islands/FeedbackSourceManager';
 
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
 <Base title="Feedback — Projektor">
   <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Feedback" />
   <div class="page-container">
-    <!-- FeedbackSourceManager (Task 9) and FeedbackList (Task 10) mounts added here -->
+    <FeedbackSourceManager client:load workspaceSlug={workspaceSlug} projectId={Astro.url.searchParams.get('projectId') ?? ''} />
+    <!-- FeedbackList (Task 10) mount added here -->
   </div>
 </Base>
