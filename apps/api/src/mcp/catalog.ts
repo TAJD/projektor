@@ -4,6 +4,7 @@ import { agentsTools } from "./agents";
 import { codeHeatmapTools } from "./code-heatmap";
 import { commentsTools } from "./comments";
 import { customFieldsTools } from "./custom-fields";
+import { feedbackTools } from "./feedback";
 import { fileClaimsTools } from "./file-claims";
 import { flowMetricsTools } from "./flow-metrics";
 import { groupsTools } from "./groups";
@@ -71,6 +72,7 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 		tools: customFieldsTools,
 	},
 	{ domain: "sprints", title: "Sprints", group: "Project data", tools: sprintsTools },
+	{ domain: "feedback", title: "Feedback", group: "Project data", tools: feedbackTools },
 	{ domain: "agents", title: "Agent sessions", group: "Coordination", tools: agentsTools },
 	{ domain: "file-claims", title: "File claims", group: "Coordination", tools: fileClaimsTools },
 	{ domain: "issue-leases", title: "Issue leases", group: "Coordination", tools: issueLeasesTools },

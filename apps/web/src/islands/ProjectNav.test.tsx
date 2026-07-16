@@ -110,4 +110,23 @@ describe("ProjectNav", () => {
 		const overviewTab = screen.getByRole("link", { name: "Overview" });
 		expect(overviewTab.getAttribute("aria-current")).toBe("page");
 	});
+
+	it("renders a Feedback tab linking to /feedback?projectId", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				if (String(url).includes("/api/projects/")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve({ id: "p1", key: "PROJ", name: "Proj", slug: null }),
+					});
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			})
+		);
+		window.history.pushState({}, "", "/metrics?projectId=p1");
+		render(<ProjectNav workspaceSlug="my-ws" />);
+		const link = (await screen.findByText("Feedback")) as HTMLAnchorElement;
+		expect(link.getAttribute("href")).toBe("/feedback?projectId=p1");
+	});
 });

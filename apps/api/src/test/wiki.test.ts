@@ -92,6 +92,17 @@ describe("Wiki API", () => {
 		});
 	});
 
+	it("PROJ-389: another workspace's owner cannot create a wiki page in this project", async () => {
+		const project = await seedProject(workspaceId);
+		const otherOwner = await seedFixture({ role: "owner" });
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(otherOwner.token, otherOwner.workspace.slug),
+			body: JSON.stringify({ title: "Cross ws page", content: "x", projectId: project.id }),
+		});
+		expect(res.status).toBe(404);
+	});
+
 	it("GET /api/wiki/:slug retrieves a page by slug", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",

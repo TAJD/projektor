@@ -27,6 +27,7 @@ import {
 	canWriteProject,
 	effectiveProjectRole,
 	isWorkspaceAdmin,
+	requireProjectInWorkspace,
 	visibleProjectPredicate,
 	visibleProjectSqlFragment,
 } from "./access";
@@ -637,6 +638,10 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const data = result.data;
 	const { projectId, title, body, priority, assigneeId, labels, parentId } = data;
+
+	// PROJ-389: confirm projectId belongs to this workspace BEFORE the admin-bypass
+	// check below, so an owner/admin can't write into another workspace's project.
+	await requireProjectInWorkspace(ctx, projectId);
 
 	// PROJ-311: writing requires a member/admin grant on this project (owner/admin
 	// bypass). No grant → the project is invisible → 404; a viewer grant is read-only.

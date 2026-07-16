@@ -12,6 +12,8 @@ import { authRouter } from "./routes/auth";
 import { codeHeatmapRouter } from "./routes/code-heatmap";
 import { commentsRouter } from "./routes/comments";
 import { customFieldsRouter } from "./routes/custom-fields";
+import { feedbackPublicRouter, feedbackRouter } from "./routes/feedback";
+import { feedbackSourcesRouter } from "./routes/feedback-sources";
 import { fileClaimsRouter } from "./routes/file-claims";
 import { filesRouter } from "./routes/files";
 import { flowMetricsRouter } from "./routes/flow-metrics";
@@ -35,6 +37,17 @@ import { seedDefaultTaskTypes } from "./services/task-types";
 import { createWorkspace, listUserWorkspaces } from "./services/workspaces";
 
 const app = new Hono<HonoEnv>();
+
+// PROJ-378: anonymous feedback ingestion. Mounted ahead of the global logger()
+// and cors() calls below — not merely ahead of auth — the same "register before
+// the .use() you need to skip" technique already used for /api/health (mounted
+// ahead of the /api/* rateLimitMiddleware .use() further down so health checks
+// stay unrate-limited). The global cors() is an allowlist that by design excludes
+// third-party feedback origins and would otherwise short-circuit the OPTIONS
+// preflight; the route verifies the source's own token inline and owns its
+// per-source CORS instead. It also loses the global logger() this way, so
+// feedbackPublicRouter applies its own scoped logger() (see routes/feedback.ts).
+app.route("/api/feedback", feedbackPublicRouter);
 
 app.use("*", logger());
 // CORS is an allowlist, not "*" (PROJ-203). The served SPA is same-origin, so it
@@ -227,6 +240,8 @@ app.route("/api/projects", projectsRouter);
 app.route("/api/projects", flowMetricsRouter);
 app.route("/api/projects", codeHeatmapRouter);
 app.route("/api/projects", projectActivityRouter);
+app.route("/api/projects", feedbackSourcesRouter);
+app.route("/api/projects", feedbackRouter);
 app.route("/api/issues", issuesRouter);
 app.route("/api/issues", issueLinksRouter);
 app.route("/api/issues", commentsRouter);

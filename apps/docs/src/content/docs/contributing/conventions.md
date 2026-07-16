@@ -74,6 +74,12 @@ drift — don't re-flag them in future audits:
   endpoint is intentionally unauthenticated by token).
 - **`get_prioritized_issues`** — MCP-only. An agent-productivity tool ("what should I
   work on next") with no natural REST/browser analog.
+- **Public feedback submission (`POST /api/feedback/submit`, PROJ-378)** — REST-only.
+  Anonymous end-user feedback from a third-party product, authenticated by a per-source
+  bearer token, not a session — there's no ServiceCtx user/role for an MCP tool to act as.
+  Feedback *source management* (create/list/update/rotate/revoke) has full REST+MCP
+  parity, same as every other admin-facing domain; only the anonymous submit endpoint
+  itself is the exception.
 
 ### The security invariant: always scope by workspace
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked - e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.

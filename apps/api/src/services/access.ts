@@ -84,6 +84,26 @@ export function canWriteProject(role: Role): boolean {
 }
 
 /**
+ * Confirm `projectId` belongs to `ctx.workspaceId`, throwing `NotFoundError` otherwise.
+ *
+ * Unlike `effectiveProjectRole`/`requireProjectAccess` (which assume the
+ * project-in-workspace check already happened and only resolve the caller's role
+ * within it), this IS that check. It exists for admin-bypass codepaths — such as
+ * issue/wiki creation — where owner/admin short-circuit past `effectiveProjectRole`
+ * entirely, so nothing else confirms the caller-supplied `projectId` actually
+ * belongs to their workspace before it gets stamped onto a new row.
+ */
+export async function requireProjectInWorkspace(ctx: ServiceCtx, projectId: string): Promise<void> {
+	const orm = drizzle(ctx.db, { schema });
+	const project = await orm
+		.select({ id: schema.projects.id })
+		.from(schema.projects)
+		.where(and(eq(schema.projects.id, projectId), eq(schema.projects.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!project) throw new NotFoundError("Project not found");
+}
+
+/**
  * A drizzle `EXISTS(...)` predicate that keeps only projects visible to the user,
  * for use in a list query's WHERE clause. Returns `undefined` for workspace
  * owner/admin (they see everything, so no filter is applied).

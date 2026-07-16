@@ -867,6 +867,17 @@ describe("Issues API", () => {
 		});
 		expect(res.status).toBe(404);
 	});
+
+	it("PROJ-389: another workspace's owner cannot create an issue in this project", async () => {
+		const other = await seedFixture({ role: "owner" });
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(other.token, other.workspace.slug),
+			body: JSON.stringify({ projectId, title: "Cross-workspace write" }),
+		});
+		expect(res.status).toBe(404);
+	});
+
 	it("filters by multiple statusIds (OR)", async () => {
 		const s1 = await seedTaskStatus(workspaceId, { key: "todo", name: "Todo", category: "todo" });
 		const s2 = await seedTaskStatus(workspaceId, { key: "done", name: "Done", category: "done" });
