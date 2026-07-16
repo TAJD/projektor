@@ -1,7 +1,13 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { hashFeedbackToken } from "../services/feedback";
-import { authHeaders, seedProject, seedProjectFixture, seedWorkspaceRoles } from "./helpers";
+import {
+	authHeaders,
+	seedGroupGrant,
+	seedProject,
+	seedProjectFixture,
+	seedWorkspaceRoles,
+} from "./helpers";
 
 describe("feedback migration", () => {
 	it("creates feedback_sources and feedback tables", async () => {
@@ -309,5 +315,147 @@ describe("Feedback submit (public)", () => {
 			body: JSON.stringify({ body: "x" }),
 		});
 		expect(res.status).toBe(429);
+	});
+});
+
+async function seedFeedbackRow(
+	sourceId: string,
+	workspaceId: string,
+	projectId: string,
+	opts: { body?: string; status?: string } = {}
+): Promise<string> {
+	const id = crypto.randomUUID();
+	const now = Math.floor(Date.now() / 1000);
+	await env.DB.prepare(
+		`INSERT INTO feedback (id, source_id, workspace_id, project_id, body, status, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+	)
+		.bind(id, sourceId, workspaceId, projectId, opts.body ?? "seed", opts.status ?? "new", now)
+		.run();
+	return id;
+}
+
+describe("Feedback triage read/patch", () => {
+	it("GET lists feedback with the source name, filtered by status", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f, { name: "Onboarding" });
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		await seedFeedbackRow(src!.id, f.workspaceId, f.projectId, { status: "new", body: "a" });
+		await seedFeedbackRow(src!.id, f.workspaceId, f.projectId, { status: "reviewed", body: "b" });
+
+		const all = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback`, {
+			headers: authHeaders(f.token, f.slug),
+		});
+		const allRows = (await all.json()) as Array<{ sourceName: string; status: string }>;
+		expect(allRows).toHaveLength(2);
+		expect(allRows[0].sourceName).toBe("Onboarding");
+
+		const filtered = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback?status=new`,
+			{ headers: authHeaders(f.token, f.slug) }
+		);
+		const rows = (await filtered.json()) as Array<{ status: string }>;
+		expect(rows).toHaveLength(1);
+		expect(rows[0].status).toBe("new");
+	});
+
+	it("GET 404s for a caller with no project access", async () => {
+		const owner = await seedProjectFixture({ role: "owner" });
+		await mintSource(owner);
+		const stranger = await seedProjectFixture({ role: "owner" }); // different workspace
+		const res = await SELF.fetch(`http://localhost/api/projects/${owner.projectId}/feedback`, {
+			headers: authHeaders(stranger.token, stranger.slug),
+		});
+		expect(res.status).toBe(404);
+	});
+
+	it("PATCH updates status for member+, 403 for viewer", async () => {
+		const roles = await seedWorkspaceRoles();
+		const proj = await seedProject(roles.workspace.id, "TRI");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, proj.id, "member");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, proj.id, "viewer");
+		const create = await SELF.fetch(`http://localhost/api/projects/${proj.id}/feedback-sources`, {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ name: "S" }),
+		});
+		await create.json();
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(proj.id)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, roles.workspace.id, proj.id);
+
+		const viewerRes = await SELF.fetch(
+			`http://localhost/api/projects/${proj.id}/feedback/${fbId}`,
+			{
+				method: "PATCH",
+				headers: authHeaders(roles.viewer.token, roles.workspace.slug),
+				body: JSON.stringify({ status: "reviewed" }),
+			}
+		);
+		expect(viewerRes.status).toBe(403);
+
+		const memberRes = await SELF.fetch(
+			`http://localhost/api/projects/${proj.id}/feedback/${fbId}`,
+			{
+				method: "PATCH",
+				headers: authHeaders(roles.member.token, roles.workspace.slug),
+				body: JSON.stringify({ status: "reviewed" }),
+			}
+		);
+		expect(memberRes.status).toBe(200);
+		const row = await env.DB.prepare("SELECT status FROM feedback WHERE id = ?")
+			.bind(fbId)
+			.first<{ status: string }>();
+		expect(row?.status).toBe("reviewed");
+	});
+
+	it("GET is readable by a viewer (read visibility, not a write action)", async () => {
+		const f = await seedProjectFixture({ role: "viewer" });
+		await mintSource(f);
+		const res = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback`, {
+			headers: authHeaders(f.token, f.slug),
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("filters by sourceId", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f, { name: "A" });
+		await mintSource(f, { name: "B" });
+		const sources = await env.DB.prepare(
+			"SELECT id, name FROM feedback_sources WHERE project_id = ? ORDER BY name"
+		)
+			.bind(f.projectId)
+			.all<{ id: string; name: string }>();
+		const [srcA, srcB] = sources.results!;
+		await seedFeedbackRow(srcA.id, f.workspaceId, f.projectId, { body: "from a" });
+		await seedFeedbackRow(srcB.id, f.workspaceId, f.projectId, { body: "from b" });
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback?sourceId=${srcA.id}`,
+			{ headers: authHeaders(f.token, f.slug) }
+		);
+		const rows = (await res.json()) as Array<{ sourceId: string }>;
+		expect(rows).toHaveLength(1);
+		expect(rows[0].sourceId).toBe(srcA.id);
+	});
+
+	it("PATCH rejects an invalid status value", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, f.workspaceId, f.projectId);
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback/${fbId}`, {
+			method: "PATCH",
+			headers: authHeaders(f.token, f.slug),
+			body: JSON.stringify({ status: "bogus" }),
+		});
+		expect(res.status).toBe(400);
 	});
 });

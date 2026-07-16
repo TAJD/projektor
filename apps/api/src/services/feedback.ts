@@ -1,5 +1,11 @@
-import { SubmitFeedbackSchema } from "../schemas/feedback";
+import {
+	ListFeedbackSchema,
+	SubmitFeedbackSchema,
+	UpdateFeedbackSchema,
+} from "../schemas/feedback";
+import { canWriteProject, requireProjectAccess } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import type { ServiceCtx } from "./types";
 
 export async function hashFeedbackToken(token: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
@@ -69,4 +75,116 @@ export async function submitFeedback(
 		allowed && requestOrigin && allowed.includes(requestOrigin) ? requestOrigin : null;
 
 	return { id, corsAllowOrigin };
+}
+
+export interface FeedbackView {
+	id: string;
+	sourceId: string;
+	sourceName: string | null;
+	rating: number | null;
+	ratingScale: string | null;
+	body: string | null;
+	submitterLabel: string | null;
+	sourceUrl: string | null;
+	appVersion: string | null;
+	status: string;
+	linkedIssueId: string | null;
+	createdAt: number;
+}
+
+interface FeedbackJoinRow {
+	id: string;
+	source_id: string;
+	source_name: string | null;
+	rating: number | null;
+	rating_scale: string | null;
+	body: string | null;
+	submitter_label: string | null;
+	source_url: string | null;
+	app_version: string | null;
+	status: string;
+	linked_issue_id: string | null;
+	created_at: number;
+}
+
+// Mirrors feedback-sources.ts: requireProjectAccess alone doesn't confirm the
+// project belongs to ctx.workspaceId (workspace admins bypass group grants
+// entirely), so a cross-workspace owner/admin would otherwise pass. Confirm
+// workspace membership first.
+async function requireProjectInWorkspace(ctx: ServiceCtx, projectId: string): Promise<void> {
+	const project = await ctx.db
+		.prepare("SELECT id FROM projects WHERE id = ? AND workspace_id = ?")
+		.bind(projectId, ctx.workspaceId)
+		.first<{ id: string }>();
+	if (!project) throw new NotFoundError("Project not found");
+}
+
+export async function listFeedback(ctx: ServiceCtx, input: unknown): Promise<FeedbackView[]> {
+	const parsed = ListFeedbackSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, status, sourceId } = parsed.data;
+
+	await requireProjectInWorkspace(ctx, projectId);
+	await requireProjectAccess(ctx, projectId);
+
+	const clauses = ["f.project_id = ?", "f.workspace_id = ?"];
+	const binds: unknown[] = [projectId, ctx.workspaceId];
+	if (status) {
+		clauses.push("f.status = ?");
+		binds.push(status);
+	}
+	if (sourceId) {
+		clauses.push("f.source_id = ?");
+		binds.push(sourceId);
+	}
+
+	const { results } = await ctx.db
+		.prepare(
+			`SELECT f.id, f.source_id, s.name AS source_name, f.rating, f.rating_scale, f.body,
+            f.submitter_label, f.source_url, f.app_version, f.status, f.linked_issue_id, f.created_at
+       FROM feedback f
+       LEFT JOIN feedback_sources s ON s.id = f.source_id
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY f.created_at DESC`
+		)
+		.bind(...binds)
+		.all<FeedbackJoinRow>();
+
+	return (results ?? []).map((r) => ({
+		id: r.id,
+		sourceId: r.source_id,
+		sourceName: r.source_name,
+		rating: r.rating,
+		ratingScale: r.rating_scale,
+		body: r.body,
+		submitterLabel: r.submitter_label,
+		sourceUrl: r.source_url,
+		appVersion: r.app_version,
+		status: r.status,
+		linkedIssueId: r.linked_issue_id,
+		createdAt: r.created_at,
+	}));
+}
+
+export async function updateFeedbackStatus(ctx: ServiceCtx, input: unknown): Promise<{ ok: true }> {
+	const parsed = UpdateFeedbackSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, feedbackId, status } = parsed.data;
+
+	await requireProjectInWorkspace(ctx, projectId);
+	const role = await requireProjectAccess(ctx, projectId);
+	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+
+	const row = await ctx.db
+		.prepare("SELECT id FROM feedback WHERE id = ? AND project_id = ? AND workspace_id = ?")
+		.bind(feedbackId, projectId, ctx.workspaceId)
+		.first<{ id: string }>();
+	if (!row) throw new NotFoundError("Feedback not found");
+
+	await ctx.db
+		.prepare("UPDATE feedback SET status = ? WHERE id = ? AND workspace_id = ?")
+		.bind(status, feedbackId, ctx.workspaceId)
+		.run();
+
+	return { ok: true };
 }

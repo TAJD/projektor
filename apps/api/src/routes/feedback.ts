@@ -1,9 +1,16 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
+import { serviceErrToResponse } from "../http/error-adapter";
 import { bumpRateCounter } from "../middleware/rate-limit";
 import { ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
-import { hashFeedbackToken, submitFeedback } from "../services/feedback";
+import {
+	hashFeedbackToken,
+	listFeedback,
+	submitFeedback,
+	updateFeedbackStatus,
+} from "../services/feedback";
+import { ctxFromHono } from "../services/types";
 
 const publicRouter = new Hono<HonoEnv>();
 
@@ -70,3 +77,31 @@ publicRouter.post("/submit", async (c) => {
 });
 
 export { publicRouter as feedbackPublicRouter };
+
+const authedRouter = new Hono<HonoEnv>();
+
+authedRouter.get("/:id/feedback", async (c) => {
+	const ctx = ctxFromHono(c);
+	const projectId = c.req.param("id");
+	const status = c.req.query("status");
+	const sourceId = c.req.query("sourceId");
+	try {
+		return c.json(await listFeedback(ctx, { projectId, status, sourceId }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+authedRouter.patch("/:id/feedback/:feedbackId", async (c) => {
+	const ctx = ctxFromHono(c);
+	const projectId = c.req.param("id");
+	const feedbackId = c.req.param("feedbackId");
+	const raw = await c.req.json();
+	try {
+		return c.json(await updateFeedbackStatus(ctx, { projectId, feedbackId, ...raw }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+export { authedRouter as feedbackRouter };
