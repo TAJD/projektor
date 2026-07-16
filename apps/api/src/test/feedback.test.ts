@@ -460,6 +460,171 @@ describe("Feedback triage read/patch", () => {
 	});
 });
 
+type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
+type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
+
+async function mcpCall<T>(
+	workspaceId: string,
+	name: string,
+	args: unknown,
+	headers: Record<string, string>
+): Promise<JsonRpcResult<T> | JsonRpcError> {
+	const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "tools/call",
+			params: { name, arguments: args },
+		}),
+	});
+	return res.json();
+}
+
+function mcpText<T>(r: JsonRpcResult<{ content: Array<{ text: string }> }>): T {
+	return JSON.parse(r.result.content[0].text) as T;
+}
+
+describe("Feedback source MCP tools", () => {
+	it("create_feedback_source returns a one-time token (owner)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"create_feedback_source",
+			{ projectId: f.projectId, name: "Onboarding" },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const out = mcpText<{ id: string; token: string }>(res);
+		expect(out.id).toBeTruthy();
+		expect(out.token).toBeTruthy();
+	});
+
+	it("create_feedback_source is forbidden for a member (-32000)", async () => {
+		const f = await seedProjectFixture({ role: "member" });
+		const res = (await mcpCall(
+			f.workspaceId,
+			"create_feedback_source",
+			{ projectId: f.projectId, name: "X" },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcError;
+		expect(res.error).toBeDefined();
+		expect(res.error.code).toBe(-32000);
+	});
+
+	it("list_feedback_sources never leaks a raw token", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const created = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"create_feedback_source",
+			{ projectId: f.projectId, name: "NPS" },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const { token } = mcpText<{ id: string; token: string }>(created);
+
+		const listed = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"list_feedback_sources",
+			{ projectId: f.projectId },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		expect(listed.result.content[0].text).not.toContain(token);
+	});
+
+	it("update_feedback_source updates fields via MCP (owner)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const created = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"create_feedback_source",
+			{ projectId: f.projectId, name: "Old" },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const { id } = mcpText<{ id: string }>(created);
+
+		const res = (await mcpCall(
+			f.workspaceId,
+			"update_feedback_source",
+			{ sourceId: id, name: "New", isActive: false },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult;
+		expect(res.result).toBeDefined();
+
+		const row = await env.DB.prepare("SELECT name, is_active FROM feedback_sources WHERE id = ?")
+			.bind(id)
+			.first<{ name: string; is_active: number }>();
+		expect(row?.name).toBe("New");
+		expect(row?.is_active).toBe(0);
+	});
+
+	it("revoke_feedback_source stamps revoked_at via MCP (owner)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const created = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"create_feedback_source",
+			{ projectId: f.projectId, name: "S" },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const { id } = mcpText<{ id: string }>(created);
+
+		const res = (await mcpCall(
+			f.workspaceId,
+			"revoke_feedback_source",
+			{ sourceId: id },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult;
+		expect(res.result).toBeDefined();
+
+		const row = await env.DB.prepare("SELECT revoked_at FROM feedback_sources WHERE id = ?")
+			.bind(id)
+			.first<{ revoked_at: number | null }>();
+		expect(row?.revoked_at).not.toBeNull();
+	});
+
+	it("rotate_feedback_source_token invalidates the old token, keeps id + history", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const created = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"create_feedback_source",
+			{ projectId: f.projectId, name: "R" },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const { id, token: oldToken } = mcpText<{ id: string; token: string }>(created);
+		// Existing feedback under this source
+		const fbId = await seedFeedbackRow(id, f.workspaceId, f.projectId, { body: "keep me" });
+
+		const rotated = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"rotate_feedback_source_token",
+			{ sourceId: id },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const { token: newToken } = mcpText<{ token: string }>(rotated);
+		expect(newToken).not.toBe(oldToken);
+
+		// Old token now rejected
+		const oldRes = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${oldToken}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(oldRes.status).toBe(401);
+		// New token works
+		const newRes = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${newToken}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "y" }),
+		});
+		expect(newRes.status).toBe(201);
+		// id + history intact
+		const stillThere = await env.DB.prepare(
+			"SELECT id FROM feedback WHERE id = ? AND source_id = ?"
+		)
+			.bind(fbId, id)
+			.first<{ id: string }>();
+		expect(stillThere?.id).toBe(fbId);
+	});
+});
+
 describe("Feedback convert-to-issue", () => {
 	it("creates an issue, links it, marks feedback actioned (member+)", async () => {
 		const f = await seedProjectFixture({ role: "owner" });

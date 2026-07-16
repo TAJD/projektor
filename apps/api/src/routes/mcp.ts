@@ -7,6 +7,7 @@ import { codeHeatmapTools } from "../mcp/code-heatmap";
 import { commentsTools } from "../mcp/comments";
 import { customFieldsTools } from "../mcp/custom-fields";
 import { toMcpError } from "../mcp/error-adapter";
+import { feedbackTools } from "../mcp/feedback";
 import { fileClaimsTools } from "../mcp/file-claims";
 import { flowMetricsTools } from "../mcp/flow-metrics";
 import { groupsTools } from "../mcp/groups";
@@ -143,6 +144,7 @@ const coreMCPTools: MCPTool[] = [
 	...issuesTools,
 	...issueLinksTools,
 	...commentsTools,
+	...feedbackTools,
 	...wikiTools,
 	...taskTypesTools,
 	...taskStatusesTools,
