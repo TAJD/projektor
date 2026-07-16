@@ -30,3 +30,6 @@ RATE_LIMIT_WINDOW_SECS = "60"
 # failures. Safe for existing tests: setup.ts wipes rate_limit before each test, and no
 # single test makes >3 failed bearer-auth requests from the same IP.
 RATE_LIMIT_AUTH_FAIL_MAX = "3"
+# PROJ-378 public feedback submit — low so the 429 tests can seed straight to the limit.
+RATE_LIMIT_FEEDBACK_MAX = "5"
+RATE_LIMIT_FEEDBACK_IP_MAX = "5"

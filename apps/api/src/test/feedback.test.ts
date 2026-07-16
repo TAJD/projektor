@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { hashFeedbackToken } from "../services/feedback";
 import { authHeaders, seedProject, seedProjectFixture, seedWorkspaceRoles } from "./helpers";
 
 describe("feedback migration", () => {
@@ -121,5 +122,192 @@ describe("Feedback sources REST", () => {
 			.bind(id)
 			.first<{ revoked_at: number | null }>();
 		expect(row?.revoked_at).not.toBeNull();
+	});
+});
+
+async function mintSource(
+	f: { projectId: string; token: string; slug: string },
+	body: Record<string, unknown> = { name: "Widget" }
+): Promise<string> {
+	const res = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources`, {
+		method: "POST",
+		headers: authHeaders(f.token, f.slug),
+		body: JSON.stringify(body),
+	});
+	return ((await res.json()) as { token: string }).token;
+}
+
+describe("Feedback submit (public)", () => {
+	it("accepts a body-only submission and returns { id } only", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "Love it" }),
+		});
+		expect(res.status).toBe(201);
+		const data = (await res.json()) as Record<string, unknown>;
+		expect(Object.keys(data)).toEqual(["id"]);
+
+		const row = await env.DB.prepare(
+			"SELECT project_id, workspace_id, source_id, status FROM feedback WHERE id = ?"
+		)
+			.bind(data.id)
+			.first<{ project_id: string; workspace_id: string; source_id: string; status: string }>();
+		expect(row?.project_id).toBe(f.projectId);
+		expect(row?.status).toBe("new");
+	});
+
+	it("resolves project/workspace from the source, ignoring body-supplied ids", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x", projectId: "00000000-0000-0000-0000-000000000000" }),
+		});
+		expect(res.status).toBe(201);
+		const { id } = (await res.json()) as { id: string };
+		const row = await env.DB.prepare("SELECT project_id FROM feedback WHERE id = ?")
+			.bind(id)
+			.first<{ project_id: string }>();
+		expect(row?.project_id).toBe(f.projectId);
+	});
+
+	it("rejects an unknown token with 401", async () => {
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: "Bearer nope", "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(res.status).toBe(401);
+	});
+
+	it("rejects a revoked source with 401", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const list = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources`, {
+			headers: authHeaders(f.token, f.slug),
+		});
+		const [{ id }] = (await list.json()) as Array<{ id: string }>;
+		await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources/${id}`, {
+			method: "DELETE",
+			headers: authHeaders(f.token, f.slug),
+		});
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(res.status).toBe(401);
+	});
+
+	it("rejects an inactive source with 403", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const list = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources`, {
+			headers: authHeaders(f.token, f.slug),
+		});
+		const [{ id }] = (await list.json()) as Array<{ id: string }>;
+		await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources/${id}`, {
+			method: "PATCH",
+			headers: authHeaders(f.token, f.slug),
+			body: JSON.stringify({ isActive: false }),
+		});
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("400s an empty submission (neither rating nor body)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("sets Access-Control-Allow-Origin only for a listed origin", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f, { name: "W", allowedOrigins: ["https://acme.test"] });
+
+		const allowed = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+				Origin: "https://acme.test",
+			},
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("https://acme.test");
+
+		const other = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+				Origin: "https://evil.test",
+			},
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(other.headers.get("Access-Control-Allow-Origin")).toBeNull();
+	});
+
+	it("answers OPTIONS preflight with 204 and permissive CORS headers", async () => {
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "OPTIONS",
+			headers: { Origin: "https://acme.test", "Access-Control-Request-Method": "POST" },
+		});
+		expect(res.status).toBe(204);
+		expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://acme.test");
+		expect(res.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+	});
+
+	it("429s once the per-token limit (RATE_LIMIT_FEEDBACK_MAX) is exceeded", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const tokenHash = await hashFeedbackToken(token);
+		const slot = Math.floor(Date.now() / 1000 / 60) * 60; // RATE_LIMIT_WINDOW_SECS=60
+		// RATE_LIMIT_FEEDBACK_MAX=5 in wrangler.test.toml — seed straight to the limit.
+		await env.DB.prepare(
+			"INSERT OR REPLACE INTO rate_limit (key, count, window_start) VALUES (?, 5, ?)"
+		)
+			.bind(`feedback:${tokenHash}`, slot)
+			.run();
+
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(res.status).toBe(429);
+	});
+
+	it("429s once the per-IP limit (RATE_LIMIT_FEEDBACK_IP_MAX) is exceeded", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const slot = Math.floor(Date.now() / 1000 / 60) * 60; // RATE_LIMIT_WINDOW_SECS=60
+		// RATE_LIMIT_FEEDBACK_IP_MAX=5 in wrangler.test.toml — no CF-Connecting-IP
+		// header in tests, so the middleware falls back to the fixed '127.0.0.1' key.
+		await env.DB.prepare(
+			"INSERT OR REPLACE INTO rate_limit (key, count, window_start) VALUES (?, 5, ?)"
+		)
+			.bind("feedback-ip:127.0.0.1", slot)
+			.run();
+
+		const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(res.status).toBe(429);
 	});
 });
