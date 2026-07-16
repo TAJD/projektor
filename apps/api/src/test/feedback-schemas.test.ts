@@ -25,6 +25,39 @@ describe("SubmitFeedbackSchema", () => {
 			false
 		);
 	});
+
+	it("accepts thumbs rating of -1 or 1", () => {
+		expect(SubmitFeedbackSchema.safeParse({ rating: -1, ratingScale: "thumbs" }).success).toBe(
+			true
+		);
+		expect(SubmitFeedbackSchema.safeParse({ rating: 1, ratingScale: "thumbs" }).success).toBe(true);
+	});
+
+	it("rejects an out-of-range thumbs rating", () => {
+		expect(SubmitFeedbackSchema.safeParse({ rating: 0, ratingScale: "thumbs" }).success).toBe(
+			false
+		);
+		expect(SubmitFeedbackSchema.safeParse({ rating: 5, ratingScale: "thumbs" }).success).toBe(
+			false
+		);
+	});
+
+	it("accepts five_star ratings 1 through 5", () => {
+		for (const rating of [1, 2, 3, 4, 5]) {
+			expect(SubmitFeedbackSchema.safeParse({ rating, ratingScale: "five_star" }).success).toBe(
+				true
+			);
+		}
+	});
+
+	it("rejects an out-of-range five_star rating", () => {
+		expect(SubmitFeedbackSchema.safeParse({ rating: 0, ratingScale: "five_star" }).success).toBe(
+			false
+		);
+		expect(SubmitFeedbackSchema.safeParse({ rating: 6, ratingScale: "five_star" }).success).toBe(
+			false
+		);
+	});
 });
 
 describe("CreateFeedbackSourceSchema", () => {

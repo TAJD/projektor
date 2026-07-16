@@ -17,7 +17,15 @@ export const SubmitFeedbackSchema = z
 	})
 	.refine((d) => (d.rating === undefined) === (d.ratingScale === undefined), {
 		message: "ratingScale is required when rating is present, and forbidden otherwise",
-	});
+	})
+	.refine(
+		(d) => {
+			if (d.rating === undefined || d.ratingScale === undefined) return true;
+			if (d.ratingScale === "thumbs") return d.rating === -1 || d.rating === 1;
+			return d.rating >= 1 && d.rating <= 5;
+		},
+		{ message: "rating must be -1 or 1 for thumbs, or an integer 1-5 for five_star" }
+	);
 
 export const CreateFeedbackSourceSchema = z.object({
 	projectId: z.string().min(1, "projectId is required"),
@@ -33,6 +41,9 @@ export const ListFeedbackSourcesSchema = z.object({
 export const UpdateFeedbackSourceSchema = z
 	.object({
 		sourceId: z.string(),
+		// Optional: REST routes always pass the URL path's projectId (scoping the
+		// lookup to that project); MCP tools omit it and stay workspace-scoped.
+		projectId: z.string().min(1).optional(),
 		name: z.string().min(1).max(100).optional(),
 		description: z.string().max(500).nullable().optional(),
 		isActive: z.boolean().optional(),
@@ -41,8 +52,14 @@ export const UpdateFeedbackSourceSchema = z
 		message: "At least one of name, description, or isActive must be provided",
 	});
 
-export const RotateFeedbackSourceSchema = z.object({ sourceId: z.string() });
-export const RevokeFeedbackSourceSchema = z.object({ sourceId: z.string() });
+export const RotateFeedbackSourceSchema = z.object({
+	sourceId: z.string(),
+	projectId: z.string().min(1).optional(),
+});
+export const RevokeFeedbackSourceSchema = z.object({
+	sourceId: z.string(),
+	projectId: z.string().min(1).optional(),
+});
 
 export const ListFeedbackSchema = z.object({
 	projectId: z.string().min(1, "projectId is required"),

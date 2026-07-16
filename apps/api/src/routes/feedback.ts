@@ -99,7 +99,7 @@ authedRouter.patch("/:id/feedback/:feedbackId", async (c) => {
 	const feedbackId = c.req.param("feedbackId");
 	const raw = await c.req.json();
 	try {
-		return c.json(await updateFeedbackStatus(ctx, { projectId, feedbackId, ...raw }));
+		return c.json(await updateFeedbackStatus(ctx, { ...raw, projectId, feedbackId }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

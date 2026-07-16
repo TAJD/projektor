@@ -743,3 +743,170 @@ describe("Feedback convert-to-issue", () => {
 		expect(second.status).toBe(409);
 	});
 });
+
+describe("PROJ-390: path params win over body-supplied ids", () => {
+	it("PATCH feedback status ignores a body-supplied projectId/feedbackId", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, f.workspaceId, f.projectId);
+
+		const res = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback/${fbId}`, {
+			method: "PATCH",
+			headers: authHeaders(f.token, f.slug),
+			body: JSON.stringify({
+				status: "reviewed",
+				projectId: "00000000-0000-0000-0000-000000000000",
+				feedbackId: "00000000-0000-0000-0000-000000000000",
+			}),
+		});
+		expect(res.status).toBe(200);
+		const row = await env.DB.prepare("SELECT status FROM feedback WHERE id = ?")
+			.bind(fbId)
+			.first<{ status: string }>();
+		expect(row?.status).toBe("reviewed");
+	});
+
+	it("POST feedback-sources ignores a body-supplied projectId", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const res = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources`, {
+			method: "POST",
+			headers: authHeaders(f.token, f.slug),
+			body: JSON.stringify({ name: "X", projectId: "00000000-0000-0000-0000-000000000000" }),
+		});
+		expect(res.status).toBe(201);
+		const { id } = (await res.json()) as { id: string };
+		const row = await env.DB.prepare("SELECT project_id FROM feedback_sources WHERE id = ?")
+			.bind(id)
+			.first<{ project_id: string }>();
+		expect(row?.project_id).toBe(f.projectId);
+	});
+
+	it("PATCH feedback-sources ignores a body-supplied projectId/sourceId", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const source = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const id = source!.id;
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback-sources/${id}`,
+			{
+				method: "PATCH",
+				headers: authHeaders(f.token, f.slug),
+				body: JSON.stringify({
+					name: "Renamed",
+					projectId: "00000000-0000-0000-0000-000000000000",
+					sourceId: "00000000-0000-0000-0000-000000000000",
+				}),
+			}
+		);
+		expect(res.status).toBe(200);
+		const row = await env.DB.prepare("SELECT name FROM feedback_sources WHERE id = ?")
+			.bind(id)
+			.first<{ name: string }>();
+		expect(row?.name).toBe("Renamed");
+	});
+});
+
+describe("PROJ-390: cross-project feedback source mutation is rejected", () => {
+	async function seedTwoProjectsSameWorkspace() {
+		const roles = await seedWorkspaceRoles();
+		const projA = await seedProject(roles.workspace.id, "PA");
+		const projB = await seedProject(roles.workspace.id, "PB");
+		const created = await SELF.fetch(`http://localhost/api/projects/${projA.id}/feedback-sources`, {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ name: "A's source" }),
+		});
+		const { id: sourceId } = (await created.json()) as { id: string };
+		return { roles, projA, projB, sourceId };
+	}
+
+	it("PATCH via project B's path 404s on project A's source", async () => {
+		const { roles, projB, sourceId } = await seedTwoProjectsSameWorkspace();
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projB.id}/feedback-sources/${sourceId}`,
+			{
+				method: "PATCH",
+				headers: authHeaders(roles.owner.token, roles.workspace.slug),
+				body: JSON.stringify({ name: "Hijacked" }),
+			}
+		);
+		expect(res.status).toBe(404);
+	});
+
+	it("rotate via project B's path 404s on project A's source", async () => {
+		const { roles, projB, sourceId } = await seedTwoProjectsSameWorkspace();
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projB.id}/feedback-sources/${sourceId}/rotate`,
+			{ method: "POST", headers: authHeaders(roles.owner.token, roles.workspace.slug) }
+		);
+		expect(res.status).toBe(404);
+	});
+
+	it("revoke via project B's path 404s on project A's source", async () => {
+		const { roles, projB, sourceId } = await seedTwoProjectsSameWorkspace();
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projB.id}/feedback-sources/${sourceId}`,
+			{ method: "DELETE", headers: authHeaders(roles.owner.token, roles.workspace.slug) }
+		);
+		expect(res.status).toBe(404);
+	});
+});
+
+describe("PROJ-390: mutating a revoked feedback source", () => {
+	async function seedRevokedSource(f: { projectId: string; token: string; slug: string }) {
+		const created = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback-sources`,
+			{
+				method: "POST",
+				headers: authHeaders(f.token, f.slug),
+				body: JSON.stringify({ name: "Doomed" }),
+			}
+		);
+		const { id } = (await created.json()) as { id: string };
+		await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources/${id}`, {
+			method: "DELETE",
+			headers: authHeaders(f.token, f.slug),
+		});
+		return id;
+	}
+
+	it("PATCH on an already-revoked source 409s", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const id = await seedRevokedSource(f);
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback-sources/${id}`,
+			{
+				method: "PATCH",
+				headers: authHeaders(f.token, f.slug),
+				body: JSON.stringify({ name: "Resurrected" }),
+			}
+		);
+		expect(res.status).toBe(409);
+	});
+
+	it("rotate on an already-revoked source 409s", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const id = await seedRevokedSource(f);
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback-sources/${id}/rotate`,
+			{ method: "POST", headers: authHeaders(f.token, f.slug) }
+		);
+		expect(res.status).toBe(409);
+	});
+
+	it("revoke on an already-revoked source stays idempotent (200)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const id = await seedRevokedSource(f);
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${f.projectId}/feedback-sources/${id}`,
+			{ method: "DELETE", headers: authHeaders(f.token, f.slug) }
+		);
+		expect(res.status).toBe(200);
+	});
+});

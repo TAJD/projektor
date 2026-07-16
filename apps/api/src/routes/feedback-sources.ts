@@ -17,7 +17,7 @@ router.post("/:id/feedback-sources", async (c) => {
 	const projectId = c.req.param("id");
 	const raw = await c.req.json();
 	try {
-		return c.json(await createFeedbackSource(ctx, { projectId, ...raw }), 201);
+		return c.json(await createFeedbackSource(ctx, { ...raw, projectId }), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -35,10 +35,11 @@ router.get("/:id/feedback-sources", async (c) => {
 
 router.patch("/:id/feedback-sources/:sourceId", async (c) => {
 	const ctx = ctxFromHono(c);
+	const projectId = c.req.param("id");
 	const sourceId = c.req.param("sourceId");
 	const raw = await c.req.json();
 	try {
-		return c.json(await updateFeedbackSource(ctx, { sourceId, ...raw }));
+		return c.json(await updateFeedbackSource(ctx, { ...raw, projectId, sourceId }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -46,9 +47,10 @@ router.patch("/:id/feedback-sources/:sourceId", async (c) => {
 
 router.post("/:id/feedback-sources/:sourceId/rotate", async (c) => {
 	const ctx = ctxFromHono(c);
+	const projectId = c.req.param("id");
 	const sourceId = c.req.param("sourceId");
 	try {
-		return c.json(await rotateFeedbackSourceToken(ctx, { sourceId }));
+		return c.json(await rotateFeedbackSourceToken(ctx, { projectId, sourceId }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -56,9 +58,10 @@ router.post("/:id/feedback-sources/:sourceId/rotate", async (c) => {
 
 router.delete("/:id/feedback-sources/:sourceId", async (c) => {
 	const ctx = ctxFromHono(c);
+	const projectId = c.req.param("id");
 	const sourceId = c.req.param("sourceId");
 	try {
-		return c.json(await revokeFeedbackSource(ctx, { sourceId }));
+		return c.json(await revokeFeedbackSource(ctx, { projectId, sourceId }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

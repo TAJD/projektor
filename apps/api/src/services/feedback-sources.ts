@@ -6,7 +6,7 @@ import {
 	UpdateFeedbackSourceSchema,
 } from "../schemas/feedback";
 import { isWorkspaceAdmin, requireProjectInWorkspace } from "./access";
-import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
 export interface FeedbackSourceView {
@@ -33,6 +33,7 @@ function newRawToken(): string {
 
 interface SourceRow {
 	id: string;
+	project_id: string;
 	token_hash: string;
 	name: string;
 	description: string | null;
@@ -43,14 +44,27 @@ interface SourceRow {
 }
 
 // Resolve a source scoped to the workspace (404 before any role check). Management
-// ops take only a sourceId; the project is resolved from the source row.
-async function requireSource(ctx: ServiceCtx, sourceId: string): Promise<SourceRow> {
+// ops take a sourceId; when projectId is also given (REST routes always pass the
+// URL path's projectId) the source must belong to that project too, so a source
+// from project A can't be mutated via project B's path in the same workspace. MCP
+// tools omit projectId and stay workspace-scoped, matching their existing contract.
+async function requireSource(
+	ctx: ServiceCtx,
+	sourceId: string,
+	projectId?: string
+): Promise<SourceRow> {
+	const clauses = ["id = ?", "workspace_id = ?"];
+	const binds: unknown[] = [sourceId, ctx.workspaceId];
+	if (projectId !== undefined) {
+		clauses.push("project_id = ?");
+		binds.push(projectId);
+	}
 	const row = await ctx.db
 		.prepare(
-			`SELECT id, token_hash, name, description, is_active, allowed_origins, created_at, revoked_at
-       FROM feedback_sources WHERE id = ? AND workspace_id = ?`
+			`SELECT id, project_id, token_hash, name, description, is_active, allowed_origins, created_at, revoked_at
+       FROM feedback_sources WHERE ${clauses.join(" AND ")}`
 		)
-		.bind(sourceId, ctx.workspaceId)
+		.bind(...binds)
 		.first<SourceRow>();
 	if (!row) throw new NotFoundError("Feedback source not found");
 	return row;
@@ -128,10 +142,11 @@ export async function listFeedbackSources(
 export async function updateFeedbackSource(ctx: ServiceCtx, input: unknown): Promise<{ ok: true }> {
 	const parsed = UpdateFeedbackSourceSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { sourceId, name, description, isActive } = parsed.data;
+	const { sourceId, projectId, name, description, isActive } = parsed.data;
 
-	await requireSource(ctx, sourceId);
+	const source = await requireSource(ctx, sourceId, projectId);
 	if (!isWorkspaceAdmin(ctx.role)) throw new ForbiddenError("Insufficient permissions");
+	if (source.revoked_at !== null) throw new ConflictError("Feedback source is revoked");
 
 	const sets: string[] = [];
 	const binds: unknown[] = [];
@@ -163,10 +178,11 @@ export async function rotateFeedbackSourceToken(
 ): Promise<{ token: string }> {
 	const parsed = RotateFeedbackSourceSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { sourceId } = parsed.data;
+	const { sourceId, projectId } = parsed.data;
 
-	await requireSource(ctx, sourceId);
+	const source = await requireSource(ctx, sourceId, projectId);
 	if (!isWorkspaceAdmin(ctx.role)) throw new ForbiddenError("Insufficient permissions");
+	if (source.revoked_at !== null) throw new ConflictError("Feedback source is revoked");
 
 	const token = newRawToken();
 	const tokenHash = await sha256hex(token);
@@ -181,9 +197,9 @@ export async function rotateFeedbackSourceToken(
 export async function revokeFeedbackSource(ctx: ServiceCtx, input: unknown): Promise<{ ok: true }> {
 	const parsed = RevokeFeedbackSourceSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { sourceId } = parsed.data;
+	const { sourceId, projectId } = parsed.data;
 
-	await requireSource(ctx, sourceId);
+	await requireSource(ctx, sourceId, projectId);
 	if (!isWorkspaceAdmin(ctx.role)) throw new ForbiddenError("Insufficient permissions");
 
 	const now = Math.floor(Date.now() / 1000);
