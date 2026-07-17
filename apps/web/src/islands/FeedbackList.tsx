@@ -37,7 +37,7 @@ function formatDate(ts: number): string {
 
 export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }: Props) {
 	const [projectId] = useState(
-		() => projectIdProp || new URLSearchParams(window.location.search).get("projectId") || "",
+		() => projectIdProp || new URLSearchParams(window.location.search).get("projectId") || ""
 	);
 	const [rows, setRows] = useState<Feedback[]>([]);
 	const [status, setStatus] = useState("");

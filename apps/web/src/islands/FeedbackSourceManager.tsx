@@ -43,7 +43,7 @@ function parseOrigins(raw: string): string[] | undefined {
 
 export default function FeedbackSourceManager({ workspaceSlug, projectId: projectIdProp }: Props) {
 	const [projectId] = useState(
-		() => projectIdProp || new URLSearchParams(window.location.search).get("projectId") || "",
+		() => projectIdProp || new URLSearchParams(window.location.search).get("projectId") || ""
 	);
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [loading, setLoading] = useState(true);
