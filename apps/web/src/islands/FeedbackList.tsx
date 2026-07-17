@@ -18,7 +18,7 @@ interface Feedback {
 
 interface Props {
 	workspaceSlug?: string;
-	projectId: string;
+	projectId?: string;
 }
 
 const TD = "px-3 py-2 border-b border-border align-top text-[0.875rem]";
@@ -35,7 +35,10 @@ function formatDate(ts: number): string {
 	return new Date(ts * 1000).toLocaleDateString();
 }
 
-export default function FeedbackList({ workspaceSlug, projectId }: Props) {
+export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }: Props) {
+	const [projectId] = useState(
+		() => projectIdProp || new URLSearchParams(window.location.search).get("projectId") || "",
+	);
 	const [rows, setRows] = useState<Feedback[]>([]);
 	const [status, setStatus] = useState("");
 	const [sourceFilter, setSourceFilter] = useState("");

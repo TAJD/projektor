@@ -19,7 +19,7 @@ interface NewSourceResult {
 
 interface Props {
 	workspaceSlug?: string;
-	projectId: string;
+	projectId?: string;
 }
 
 const INPUT_CLASS =
@@ -41,7 +41,10 @@ function parseOrigins(raw: string): string[] | undefined {
 	return list.length > 0 ? list : undefined;
 }
 
-export default function FeedbackSourceManager({ workspaceSlug, projectId }: Props) {
+export default function FeedbackSourceManager({ workspaceSlug, projectId: projectIdProp }: Props) {
+	const [projectId] = useState(
+		() => projectIdProp || new URLSearchParams(window.location.search).get("projectId") || "",
+	);
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [forbidden, setForbidden] = useState(false);

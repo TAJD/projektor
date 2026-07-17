@@ -9,7 +9,7 @@ const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefine
 <Base title="Feedback — Projektor">
   <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Feedback" />
   <div class="page-container">
-    <FeedbackSourceManager client:load workspaceSlug={workspaceSlug} projectId={Astro.url.searchParams.get('projectId') ?? ''} />
-    <FeedbackList client:load workspaceSlug={workspaceSlug} projectId={Astro.url.searchParams.get('projectId') ?? ''} />
+    <FeedbackSourceManager client:load workspaceSlug={workspaceSlug} />
+    <FeedbackList client:load workspaceSlug={workspaceSlug} />
   </div>
 </Base>
