@@ -36,9 +36,12 @@ function formatDate(ts: number): string {
 }
 
 export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }: Props) {
-	const [projectId] = useState(
-		() => projectIdProp || new URLSearchParams(window.location.search).get("projectId") || ""
-	);
+	const [projectId, setProjectId] = useState(projectIdProp ?? "");
+	useEffect(() => {
+		if (projectIdProp) return;
+		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
+		if (fromUrl) setProjectId(fromUrl);
+	}, [projectIdProp]);
 	const [rows, setRows] = useState<Feedback[]>([]);
 	const [status, setStatus] = useState("");
 	const [sourceFilter, setSourceFilter] = useState("");
@@ -46,6 +49,7 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 	const [error, setError] = useState<string | null>(null);
 
 	const fetchRows = useCallback(async () => {
+		if (!projectId) return;
 		setLoading(true);
 		setError(null);
 		try {

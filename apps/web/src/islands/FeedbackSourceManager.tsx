@@ -42,9 +42,12 @@ function parseOrigins(raw: string): string[] | undefined {
 }
 
 export default function FeedbackSourceManager({ workspaceSlug, projectId: projectIdProp }: Props) {
-	const [projectId] = useState(
-		() => projectIdProp || new URLSearchParams(window.location.search).get("projectId") || ""
-	);
+	const [projectId, setProjectId] = useState(projectIdProp ?? "");
+	useEffect(() => {
+		if (projectIdProp) return;
+		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
+		if (fromUrl) setProjectId(fromUrl);
+	}, [projectIdProp]);
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [forbidden, setForbidden] = useState(false);
@@ -59,6 +62,7 @@ export default function FeedbackSourceManager({ workspaceSlug, projectId: projec
 	const [rotateId, setRotateId] = useState<string | null>(null);
 
 	const fetchSources = useCallback(async () => {
+		if (!projectId) return;
 		setLoading(true);
 		setError(null);
 		setForbidden(false);
