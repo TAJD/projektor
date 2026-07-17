@@ -63,4 +63,24 @@ describe("FeedbackSourceManager", () => {
 		render(<FeedbackSourceManager workspaceSlug="my-ws" projectId="p1" />);
 		expect(await screen.findByText(/Only workspace owners and admins/i)).toBeTruthy();
 	});
+
+	it("falls back to projectId from the URL when no prop is passed", async () => {
+		// Regression: feedback.astro is prerendered under `output: 'static'`, so
+		// Astro.url.searchParams is always empty and can't supply projectId as a
+		// prop. The island must resolve it from window.location.search itself.
+		const originalLocation = window.location;
+		Object.defineProperty(window, "location", {
+			value: { ...originalLocation, search: "?projectId=p1" },
+			writable: true,
+		});
+		stubFetch();
+		try {
+			render(<FeedbackSourceManager workspaceSlug="my-ws" />);
+			expect(await screen.findByText("Onboarding survey")).toBeTruthy();
+			const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+			expect(fetchMock.mock.calls[0][0]).toContain("/api/projects/p1/feedback-sources");
+		} finally {
+			Object.defineProperty(window, "location", { value: originalLocation, writable: true });
+		}
+	});
 });

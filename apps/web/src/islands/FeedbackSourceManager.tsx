@@ -19,7 +19,7 @@ interface NewSourceResult {
 
 interface Props {
 	workspaceSlug?: string;
-	projectId: string;
+	projectId?: string;
 }
 
 const INPUT_CLASS =
@@ -41,7 +41,13 @@ function parseOrigins(raw: string): string[] | undefined {
 	return list.length > 0 ? list : undefined;
 }
 
-export default function FeedbackSourceManager({ workspaceSlug, projectId }: Props) {
+export default function FeedbackSourceManager({ workspaceSlug, projectId: projectIdProp }: Props) {
+	const [projectId, setProjectId] = useState(projectIdProp ?? "");
+	useEffect(() => {
+		if (projectIdProp) return;
+		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
+		if (fromUrl) setProjectId(fromUrl);
+	}, [projectIdProp]);
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [forbidden, setForbidden] = useState(false);
@@ -56,6 +62,7 @@ export default function FeedbackSourceManager({ workspaceSlug, projectId }: Prop
 	const [rotateId, setRotateId] = useState<string | null>(null);
 
 	const fetchSources = useCallback(async () => {
+		if (!projectId) return;
 		setLoading(true);
 		setError(null);
 		setForbidden(false);

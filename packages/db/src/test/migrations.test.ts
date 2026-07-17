@@ -150,7 +150,7 @@ describe("schema constraints", () => {
 			.sort();
 		const preSlugFiles = migrationFiles.filter((f) => f < "0035");
 		const slugFile = migrationFiles.find((f) => f.startsWith("0035"));
-		expect(slugFile).toBeDefined();
+		if (!slugFile) throw new Error("expected a 0035 migration file");
 
 		const db = new DatabaseSync(":memory:");
 		db.exec("PRAGMA foreign_keys = ON;");
@@ -182,7 +182,7 @@ describe("schema constraints", () => {
 			"INSERT INTO projects (id, workspace_id, name, key, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
 		).run("p2", "w1", "Start_Line", "SL2", 1, 1);
 
-		const slugSql = readFileSync(join(MIGRATIONS_DIR, slugFile!), "utf8");
+		const slugSql = readFileSync(join(MIGRATIONS_DIR, slugFile), "utf8");
 		expect(() => {
 			for (const stmt of splitStatements(slugSql)) db.exec(stmt);
 		}).not.toThrow();
