@@ -42,10 +42,10 @@ export default function HeaderRow({
 			: countLabel(view, filtered, totalIssues);
 
 	return (
-		<div class="flex justify-between items-center mb-3">
+		<div class="flex justify-between items-center gap-2 mb-3 max-sm:flex-col max-sm:items-stretch">
 			<p class="text-sm text-text-muted m-0">{label}</p>
 
-			<div class="flex gap-2 items-center">
+			<div class="flex gap-2 items-center max-sm:justify-between">
 				{projectsCount > 0 && (
 					<button type="button" onClick={openCreateModal} class="btn btn-primary btn-sm">
 						+ New issue

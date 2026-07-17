@@ -1,5 +1,7 @@
 ---
 import { ClientRouter } from 'astro:transitions';
+import { GlossaryHelp } from '../islands/GlossaryHelp';
+import type { GlossaryTermId } from '../islands/glossary-definitions';
 import pkg from '../../package.json';
 
 interface Props {
@@ -12,12 +14,14 @@ const path = Astro.url.pathname;
 const isActive = (href: string): boolean =>
   href === '/' ? path === '/' : path === href || path.startsWith(`${href}/`);
 
-const navItems = [
+// PROJ-395: glossaryId flags nav items whose label is jargon a newcomer wouldn't
+// know (Groups, Tokens) — those get an inline GlossaryHelp toggletip.
+const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId }> = [
   { href: '/', label: 'Projects' },
   { href: '/my-issues', label: 'My Issues' },
-  { href: '/settings/groups', label: 'Groups' },
-  { href: '/settings/tokens', label: 'Tokens' },
-] as const;
+  { href: '/settings/groups', label: 'Groups', glossaryId: 'groups' },
+  { href: '/settings/tokens', label: 'Tokens', glossaryId: 'tokens' },
+];
 ---
 <!DOCTYPE html>
 <html lang="en">
@@ -330,6 +334,11 @@ const navItems = [
         flex-direction: column;
         gap: 0.125rem;
       }
+      .sidebar-link-row {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
       .sidebar-link {
         display: flex;
         align-items: center;
@@ -341,6 +350,8 @@ const navItems = [
         font-size: 0.875rem;
         font-weight: 500;
         line-height: 1.25;
+        flex: 1;
+        min-width: 0;
         transition: background 0.1s, color 0.1s;
       }
       .sidebar-link svg { flex-shrink: 0; }
@@ -464,6 +475,13 @@ const navItems = [
         input, textarea, select {
           font-size: 16px;
         }
+
+        /* PROJ-397: the hand-rolled Select (islands/Select.tsx) shrink-wraps to
+           its label by default, producing a ragged, uneven grid when several
+           sit in a wrapping toolbar. Full-width + stacked (each forces its own
+           line inside the toolbar's flex-wrap row) reads as a tidy list. */
+        .select { width: 100%; }
+        .select-button { width: 100%; justify-content: space-between; }
       }
 
       /* ── Custom Select (islands) ───────────────────────────────────── */
@@ -589,31 +607,35 @@ const navItems = [
 
         <nav class="sidebar-nav" aria-label="Primary">
           {navItems.map((item) => (
-            <a
-              href={item.href}
-              class:list={['sidebar-link', { active: isActive(item.href) }]}
-              aria-current={isActive(item.href) ? 'page' : undefined}
-            >
-              {item.label === 'Projects' && (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-              )}
-              {item.label === 'My Issues' && (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-              )}
-              {item.label === 'Groups' && (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              )}
-              {item.label === 'Tokens' && (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              )}
-              <span class="link-label">{item.label}</span>
-            </a>
+            <span class="sidebar-link-row">
+              <a
+                href={item.href}
+                class:list={['sidebar-link', { active: isActive(item.href) }]}
+                aria-current={isActive(item.href) ? 'page' : undefined}
+              >
+                {item.label === 'Projects' && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                )}
+                {item.label === 'My Issues' && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                )}
+                {item.label === 'Groups' && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                )}
+                {item.label === 'Tokens' && (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                )}
+                <span class="link-label">{item.label}</span>
+              </a>
+              {item.glossaryId && <GlossaryHelp client:load id={item.glossaryId} />}
+            </span>
           ))}
         </nav>
 
         <div class="sidebar-spacer"></div>
 
         <div class="sidebar-footer">
+          <a href="/help" class="theme-toggle" aria-label="Help — glossary of terms" title="Help">?</a>
           <button class="theme-toggle" aria-label="Toggle colour scheme">🌙</button>
         </div>
         <div class="sidebar-version">v{appVersion}</div>
@@ -682,7 +704,7 @@ const navItems = [
         }
 
         function bindThemeToggle() {
-          var themeBtn = document.querySelector('.theme-toggle');
+          var themeBtn = document.querySelector('button.theme-toggle');
           if (!themeBtn) return;
           updateThemeIcon(themeBtn);
           themeBtn.addEventListener('click', function () {

@@ -59,6 +59,24 @@ describe("Issues API", () => {
 		expect(body.id).toBeTruthy();
 	});
 
+	// PROJ-396: author_kind is stamped from the authenticated principal type, not a
+	// caller-supplied field — same convention as issue_comments.author_kind (PROJ-328).
+	// Tests authenticate over Bearer tokens (see authHeaders), same as agents.
+	it("stamps author_kind from the auth transport, not a caller-supplied field", async () => {
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Author kind test", authorKind: "human" }),
+		});
+		expect(res.status).toBe(201);
+		const body = (await res.json()) as { id: string };
+
+		const row = await env.DB.prepare("SELECT author_kind FROM issues WHERE id = ?")
+			.bind(body.id)
+			.first<{ author_kind: string | null }>();
+		expect(row?.author_kind).toBe("agent");
+	});
+
 	it("POST then GET returns the created issue", async () => {
 		await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",

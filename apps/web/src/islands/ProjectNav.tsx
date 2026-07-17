@@ -1,5 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { GlossaryHelp } from "./GlossaryHelp";
+import type { GlossaryTermId } from "./glossary-definitions";
 
 interface Project {
 	id: string;
@@ -13,12 +15,15 @@ interface Props {
 	pageLabel?: string;
 }
 
-const TABS = [
+// PROJ-395: glossaryId flags tabs whose label is SDLC jargon a newcomer wouldn't know
+// (Sprints, Epics) — those get an inline GlossaryHelp toggletip; self-explanatory tabs
+// don't, so the nav doesn't get cluttered with icons for power users/agents.
+const TABS: Array<{ label: string; path: string; glossaryId?: GlossaryTermId }> = [
 	{ label: "Overview", path: "/projects/view" },
 	{ label: "Issues", path: "/issues" },
 	{ label: "Wiki", path: "/wiki" },
-	{ label: "Sprints", path: "/sprints" },
-	{ label: "Epics", path: "/epics" },
+	{ label: "Sprints", path: "/sprints", glossaryId: "sprint" },
+	{ label: "Epics", path: "/epics", glossaryId: "epic" },
 	{ label: "Metrics", path: "/metrics" },
 	{ label: "Feedback", path: "/feedback" },
 ];
@@ -139,14 +144,16 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 							? activePath === "/projects/view" || activePath.startsWith("/projects/view/")
 							: activePath === tab.path;
 					return (
-						<a
-							key={tab.path}
-							href={tab.href}
-							class={tabClass(active)}
-							aria-current={active ? "page" : undefined}
-						>
-							{tab.label}
-						</a>
+						<span key={tab.path} class="inline-flex items-center shrink-0">
+							<a
+								href={tab.href}
+								class={tabClass(active)}
+								aria-current={active ? "page" : undefined}
+							>
+								{tab.label}
+							</a>
+							{tab.glossaryId && <GlossaryHelp id={tab.glossaryId} />}
+						</span>
 					);
 				})}
 			</nav>
