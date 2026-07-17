@@ -20,7 +20,6 @@ const EMPTY_METRICS = {
 	timeInProgress: { count: 0, avg: null, p50: null, p90: null },
 	arrivalVsCompletionOverTime: [],
 	flowEfficiency: { count: 0, avg: null, p50: null, p90: null },
-	flowEfficiencyOverTime: [],
 	agingWip: [],
 	factoryHealth: { leaseExpiries: 0, abandonedClaims: 0, gateRejections: 0 },
 };
@@ -59,10 +58,6 @@ const ZERO_BUCKET_METRICS = {
 		{ bucketStart: "2026-06-01", created: 0, completed: 0, net: 0 },
 	],
 	flowEfficiency: { count: 0, avg: null, p50: null, p90: null },
-	flowEfficiencyOverTime: [
-		{ bucketStart: "2026-05-25", p50: null },
-		{ bucketStart: "2026-06-01", p50: null },
-	],
 	agingWip: [],
 	factoryHealth: { leaseExpiries: 0, abandonedClaims: 0, gateRejections: 0 },
 };
@@ -99,10 +94,6 @@ const FULL_METRICS = {
 		{ bucketStart: "2026-06-01", created: 1, completed: 3, net: -2 },
 	],
 	flowEfficiency: { count: 4, avg: 0.4, p50: 0.35, p90: 0.7 },
-	flowEfficiencyOverTime: [
-		{ bucketStart: "2026-05-25", p50: 0.3 },
-		{ bucketStart: "2026-06-01", p50: 0.45 },
-	],
 	agingWip: [
 		{ id: "issue-1", status: "in_progress", ageSeconds: 86400 * 12 },
 		{ id: "issue-2", status: "in_review", ageSeconds: 86400 * 3 },
