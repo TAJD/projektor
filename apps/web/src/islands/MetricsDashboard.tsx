@@ -59,7 +59,6 @@ interface FlowMetrics {
 		net: number;
 	}>;
 	flowEfficiency: Distribution;
-	flowEfficiencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
 	agingWip: Array<{ id: string; status: "in_progress" | "in_review"; ageSeconds: number }>;
 	// PROJ-334: factory health — fault signals for the machinery itself, for the
 	// selected window.

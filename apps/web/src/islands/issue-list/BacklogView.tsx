@@ -130,9 +130,12 @@ function BacklogRow({
 				</span>
 			</td>
 			<td class="px-3 py-2 align-middle whitespace-nowrap">
-				<span class="text-text-muted font-mono text-[0.8rem]">
+				<a
+					href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
+					class="text-text-muted font-mono text-[0.8rem] no-underline hover:underline focus:underline"
+				>
 					{formatIssueRef(issue.project_key, issue.number)}
-				</span>
+				</a>
 			</td>
 			<td class="px-3 py-2 align-middle text-text-base">
 				<a
@@ -180,9 +183,12 @@ function BacklogMobileCards({
 		<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
 			{issues.map((issue) => (
 				<div key={issue.id} class="py-3 px-4 border border-border rounded-md bg-surface">
-					<div class="font-mono text-[0.8rem] text-text-muted mb-1">
+					<a
+						href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
+						class="inline-block font-mono text-[0.8rem] text-text-muted no-underline hover:underline focus:underline mb-1"
+					>
 						{formatIssueRef(issue.project_key, issue.number)}
-					</div>
+					</a>
 					<a
 						href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
 						class="no-underline"

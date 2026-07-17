@@ -368,36 +368,6 @@ function computeFlowEfficiencies(
 		});
 }
 
-// PROJ-330: flow efficiency bucketed the same way as reviewLatencyOverTime, reporting the
-// bucket's p50 as the "trend" the ticket asks for.
-function buildFlowEfficiencyOverTime(
-	issues: FlowIssueRow[],
-	leaseHeldSeconds: Map<string, number>,
-	since: number,
-	until: number,
-	granularity: "day" | "week"
-): Array<{ bucketStart: string; p50: number | null }> {
-	const DAY = 86400;
-	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
-	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
-	const buckets: Array<{ bucketStart: string; p50: number | null }> = [];
-	for (let t = firstBucket; t <= until; t += bucketSize) {
-		const bucketEnd = t + bucketSize;
-		const clampedStart = Math.max(t, since);
-		const clampedEnd = Math.min(bucketEnd, until + 1);
-		const ratios = computeFlowEfficiencies(
-			issues,
-			leaseHeldSeconds,
-			(t) => t >= clampedStart && t < clampedEnd
-		);
-		buckets.push({
-			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
-			p50: summarize(ratios).p50,
-		});
-	}
-	return buckets;
-}
-
 // PROJ-330: aging-WIP scatter — every currently open (in_progress/in_review) issue with
 // its age since claim. Not scoped to since/until (it's a present-state snapshot, not a
 // historical series); the p50/p90 reference lines the UI overlays come from the window-
@@ -579,13 +549,6 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		granularity
 	);
 	const flowEfficiencies = computeFlowEfficiencies(issues, leaseHeldSeconds, inWindow);
-	const flowEfficiencyOverTime = buildFlowEfficiencyOverTime(
-		issues,
-		leaseHeldSeconds,
-		throughputSince,
-		throughputUntil,
-		granularity
-	);
 	const agingWip = buildAgingWip(issues, now);
 
 	// PROJ-334: same window as the throughput/CFD/etc. buckets above — the "selected
@@ -619,7 +582,6 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		// PROJ-330: arrival vs completion, flow efficiency, aging-WIP scatter.
 		arrivalVsCompletionOverTime,
 		flowEfficiency: summarize(flowEfficiencies),
-		flowEfficiencyOverTime,
 		agingWip,
 		// PROJ-334: factory health — fault signals for the machinery itself.
 		factoryHealth,

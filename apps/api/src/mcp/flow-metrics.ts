@@ -18,7 +18,7 @@ export const flowMetricsTools: MCPTool[] = [
 			"breakdown. arrivalVsCompletionOverTime is created vs completed issues per bucket plus " +
 			"net (created - completed), answering whether the backlog is growing or burning. " +
 			"flowEfficiency is lease-held time / lead time (lead time = done - ready) for issues " +
-			"completed in the window, with a flowEfficiencyOverTime trend - distinct from " +
+			"completed in the window - distinct from " +
 			"autonomyRatio, which divides by cycle time (done - claimed) instead and so excludes " +
 			"queueing time between ready and claimed. agingWip lists every currently open " +
 			"(in_progress/in_review) issue with its age since claim, a present-state snapshot not " +

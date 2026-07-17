@@ -41,7 +41,6 @@ interface FlowMetrics {
 		net: number;
 	}>;
 	flowEfficiency: Distribution;
-	flowEfficiencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
 	agingWip: Array<{ id: string; status: "in_progress" | "in_review"; ageSeconds: number }>;
 	factoryHealth: {
 		leaseExpiries: number;
@@ -708,7 +707,6 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(metrics.flowEfficiency.avg).toBeCloseTo(150 / 500, 1); // held / lead time
 		expect(metrics.autonomyRatio.avg).toBeCloseTo(150 / 300, 1); // held / cycle time
 		expect(metrics.flowEfficiency.avg).toBeLessThan(metrics.autonomyRatio.avg ?? 0);
-		expect(Array.isArray(metrics.flowEfficiencyOverTime)).toBe(true);
 	});
 
 	it("includes an old still-open issue in the aging-WIP scatter", async () => {
