@@ -101,3 +101,35 @@ describe("BoardView — mobile viewport", () => {
 		expect(changeStatus).not.toHaveBeenCalled();
 	});
 });
+
+describe("BoardView — mobile status menu (PROJ-416)", () => {
+	it("renders a tap-to-open status menu on each card", () => {
+		const changeStatus = vi.fn();
+		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
+		expect(screen.getByRole("combobox", { name: "Change status for issue PROJ-1" })).toBeTruthy();
+	});
+
+	it("changes status when a different option is chosen from the menu", () => {
+		const changeStatus = vi.fn();
+		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
+
+		fireEvent.click(screen.getByRole("combobox", { name: "Change status for issue PROJ-1" }));
+		fireEvent.click(screen.getByRole("option", { name: "In Progress" }));
+
+		expect(changeStatus).toHaveBeenCalledWith("i1", "st-in-progress");
+	});
+
+	it("renders the status menu outside the card's link, not nested inside it", () => {
+		// The whole card body is a draggable <a> (desktop DnD target); nesting an
+		// interactive Select inside it would be invalid HTML (no interactive
+		// descendants in an <a>) and would risk taps on the menu also triggering
+		// navigation. The status menu must be a sibling of the <a>, not a child.
+		const changeStatus = vi.fn();
+		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
+
+		const link = screen.getByText("Move me").closest("a") as HTMLElement;
+		const trigger = screen.getByRole("combobox", { name: "Change status for issue PROJ-1" });
+
+		expect(link.contains(trigger)).toBe(false);
+	});
+});
