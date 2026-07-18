@@ -29,9 +29,9 @@ const SUMMARY = [
 ];
 
 function stubFetch(data: unknown = SUMMARY) {
-	const fetchMock = vi.fn().mockImplementation(() =>
-		Promise.resolve({ ok: true, json: () => Promise.resolve(data) })
-	);
+	const fetchMock = vi
+		.fn()
+		.mockImplementation(() => Promise.resolve({ ok: true, json: () => Promise.resolve(data) }));
 	vi.stubGlobal("fetch", fetchMock);
 	return fetchMock;
 }
