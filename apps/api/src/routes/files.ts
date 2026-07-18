@@ -2,6 +2,7 @@ import type { HonoEnv } from "@projektor/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
+import { wikiPagePath } from "../lib/urls";
 
 const router = new Hono<HonoEnv>();
 
@@ -48,29 +49,112 @@ router.get("/", async (c) => {
 	if (!entityId) return c.json({ error: "entityId is required" }, 400);
 
 	const rows = await c.env.DB.prepare(
-		`SELECT id, filename, content_type, size, created_at
-     FROM attachments
-     WHERE workspace_id = ? AND entity_type = ? AND entity_id = ?
-     ORDER BY created_at ASC`
+		`SELECT a.id, a.kind, a.filename, a.content_type, a.size, a.url, a.created_at,
+            w.id AS wiki_page_id, w.slug AS wiki_page_slug, w.title AS wiki_page_title,
+            w.project_id AS wiki_page_project_id
+     FROM attachments a
+     LEFT JOIN wiki_pages w ON w.id = a.linked_wiki_page_id
+     WHERE a.workspace_id = ? AND a.entity_type = ? AND a.entity_id = ?
+     ORDER BY a.created_at ASC`
 	)
 		.bind(workspace.id, parsed.data, entityId)
 		.all<{
 			id: string;
+			kind: "file" | "wiki_ref" | "url";
 			filename: string;
 			content_type: string;
 			size: number;
+			url: string | null;
 			created_at: number;
+			wiki_page_id: string | null;
+			wiki_page_slug: string | null;
+			wiki_page_title: string | null;
+			wiki_page_project_id: string | null;
 		}>();
 
 	return c.json(
 		(rows.results ?? []).map((r) => ({
 			id: r.id,
+			kind: r.kind,
 			filename: r.filename,
 			contentType: r.content_type,
 			size: r.size,
+			url: r.url,
 			createdAt: r.created_at,
+			wikiPage:
+				r.kind === "wiki_ref" && r.wiki_page_id
+					? {
+							id: r.wiki_page_id,
+							title: r.wiki_page_title,
+							url: wikiPagePath(r.wiki_page_slug ?? "", r.wiki_page_project_id),
+						}
+					: null,
 		}))
 	);
+});
+
+const CreateLinkAttachmentSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("wiki_ref"),
+		entityType: EntityTypeEnum,
+		entityId: z.string().min(1),
+		wikiPageId: z.string().min(1),
+	}),
+	z.object({
+		kind: z.literal("url"),
+		entityType: EntityTypeEnum,
+		entityId: z.string().min(1),
+		url: z
+			.string()
+			.url()
+			.refine((u) => /^https?:\/\//i.test(u), "URL must be http or https"),
+		label: z.string().trim().max(200).optional(),
+	}),
+]);
+
+router.post("/links", async (c) => {
+	const workspace = c.get("workspace") as { id: string };
+	const user = c.get("user") as { id: string };
+
+	const body = await c.req.json().catch(() => null);
+	const parsed = CreateLinkAttachmentSchema.safeParse(body);
+	if (!parsed.success)
+		return c.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, 400);
+	const input = parsed.data;
+
+	if (input.kind === "wiki_ref") {
+		const wikiPage = await c.env.DB.prepare(
+			"SELECT id FROM wiki_pages WHERE id = ? AND workspace_id = ?"
+		)
+			.bind(input.wikiPageId, workspace.id)
+			.first<{ id: string }>();
+		if (!wikiPage) return c.json({ error: "Wiki page not found" }, 404);
+	}
+
+	const id = crypto.randomUUID();
+	const now = Math.floor(Date.now() / 1000);
+
+	await c.env.DB.prepare(
+		`INSERT INTO attachments
+       (id, workspace_id, kind, r2_key, filename, content_type, size, url, linked_wiki_page_id,
+        entity_type, entity_id, created_by_id, created_at)
+     VALUES (?, ?, ?, '', ?, '', 0, ?, ?, ?, ?, ?, ?)`
+	)
+		.bind(
+			id,
+			workspace.id,
+			input.kind,
+			input.kind === "url" ? (input.label ?? "") : "",
+			input.kind === "url" ? input.url : null,
+			input.kind === "wiki_ref" ? input.wikiPageId : null,
+			input.entityType,
+			input.entityId,
+			user.id,
+			now
+		)
+		.run();
+
+	return c.json({ id, kind: input.kind }, 201);
 });
 
 async function parseUploadFormData(c: Context<HonoEnv>) {
@@ -235,7 +319,7 @@ router.delete("/:id", async (c) => {
 
 	if (!row) return c.json({ error: "Not found" }, 404);
 
-	await c.env.R2.delete(row.r2_key);
+	if (row.r2_key) await c.env.R2.delete(row.r2_key);
 	await c.env.DB.prepare("DELETE FROM attachments WHERE id = ?").bind(id).run();
 
 	return new Response(null, { status: 204 });
