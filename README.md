@@ -1,35 +1,43 @@
 # projektor
 
-> A self-hosted Jira + Notion hybrid that runs on serverless Cloudflare resources.
+> An issue tracker and wiki that an AI coding agent runs as a first-class client -
+> self-hosted, cross-project, and cheap enough to run serverless.
+
+Projektor fills a gap. Jira and Notion are mature but human-first: agent access is
+bolted on, and you can't cheaply self-host a slice of them. Git-file trackers like
+beads are agent-native but live inside a single repo. Projektor is agent-native
+like beads, deployed and cross-project like Jira, and runs on a single Cloudflare
+Worker. Every action a person can take in the browser, an agent can take over MCP -
+filing issues, moving tickets, planning sprints, searching the wiki - instead of
+asking you to.
 
 **Documentation:** <https://tajd.github.io/projektor/> - self-hosting, connecting an
 agent, architecture, and the full MCP tool catalog.
 
-**Live demo:** <https://projektor-demo.tajdickson.workers.dev> - see it running before you deploy your own (no login configured; see the [live demo guide](https://tajd.github.io/projektor/guides/live-demo/) for why).
+**Live demo:** <https://projektor-demo.tajdickson.workers.dev> - see it running before
+you deploy your own ([why there's no login](https://tajd.github.io/projektor/guides/live-demo/)).
 
 ## What it is
 
 ![Projektor issue backlog - list view with projects sidebar, issue refs, status, priority, and assignees](docs/images/backlog.png)
 
-- **Projects** - named with short keys (`PROJ`, `BE`, …); issues reference as `PROJ-42`
-- **Issues** - Jira-style tickets with status, priority, assignee, labels, parent/child hierarchy, and cross-issue links
-- **Wiki** - nested markdown pages with revision history and full-text search
-- **MCP server** - AI agents connect directly; every action available to the browser is available to an agent
-
-## Features
-
-A complete project tracker - issues, boards, sprints, a wiki - built so an AI agent can
-do everything a person can. The shape of the tool follows from that; see
+A complete project tracker - issues, boards, sprints, a wiki - built so an AI agent
+can do everything a person can. The shape of the tool follows from that; see
 [the philosophy](https://tajd.github.io/projektor/philosophy/where-projektor-fits/).
 
-- Issues with status, priority, assignee, labels, parent/child hierarchy, and issue links
-- Kanban board + list view + sprint planning
-- Wiki with nested pages, markdown, full-text search, and revision history
-- MCP server - AI-native; Claude Code connects via `claude mcp add`
-- File attachments (R2)
-- Workspace + project + member management with role-based access (`owner` / `admin` / `member` / `viewer`)
-- API tokens for agent access, workspace-scoped
-- PWA - installable, offline shell
+- **Issues** - Jira-style tickets: status, priority, assignee, labels, parent/child
+  hierarchy, cross-issue links. Referenced as `PROJ-42`.
+- **Boards and sprints** - kanban board, list view, sprint planning.
+- **Wiki** - nested markdown pages with full-text search and revision history.
+- **MCP server** - any MCP agent (Claude Code connects via `claude mcp add`) drives
+  the full tool catalog. This is the primary surface, not an add-on.
+- **Fleet coordination** - agent registry, file claims, and messages let parallel
+  agents work one repo without colliding.
+- **Ops** - file attachments (R2), workspace/project/member management with roles
+  (`owner`/`admin`/`member`/`viewer`), workspace-scoped API tokens, installable PWA.
+
+Runs on your own Cloudflare account: Hono on Workers, D1 for data, KV for cache,
+R2 for attachments. No servers, no containers.
 
 ## Self-hosting
 
