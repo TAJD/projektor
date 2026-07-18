@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
+import { MOBILE_WIDTH, setViewportWidth } from "../test/viewport";
 import FeedbackList from "./FeedbackList";
 
 const ROW = {
@@ -63,18 +64,26 @@ function stubFetch(rows: unknown[] = [ROW, ROW_2], bulkConvertStatus = 201) {
 	return fetchMock;
 }
 
+// Table interactions are scoped to the desktop table via `within`, since the
+// mobile-card fallback (PROJ-415) renders the same controls a second time —
+// both are always in the DOM, CSS picks which is visible per viewport (jsdom
+// doesn't evaluate CSS, see apps/web/src/test/viewport.ts).
+function table() {
+	return within(screen.getByRole("table"));
+}
+
 describe("FeedbackList", () => {
 	it("renders feedback rows with body and source name", async () => {
 		stubFetch([ROW]);
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		expect(await screen.findByText("Great onboarding")).toBeTruthy();
-		expect(screen.getByText(/Onboarding survey/)).toBeTruthy();
+		expect((await screen.findAllByText("Great onboarding")).length).toBeGreaterThan(0);
+		expect(screen.getAllByText(/Onboarding survey/).length).toBeGreaterThan(0);
 	});
 
 	it("changing the status filter refetches with the status query param", async () => {
 		const fetchMock = stubFetch();
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		await screen.findByText("Great onboarding");
+		await screen.findAllByText("Great onboarding");
 		fireEvent.change(screen.getByLabelText(/Status/i), { target: { value: "reviewed" } });
 		await waitFor(() => {
 			expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("status=reviewed"))).toBe(
@@ -86,8 +95,8 @@ describe("FeedbackList", () => {
 	it("mark-reviewed PATCHes with status reviewed and refetches", async () => {
 		const fetchMock = stubFetch([ROW]);
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		await screen.findByText("Great onboarding");
-		fireEvent.click(screen.getByRole("button", { name: /Mark reviewed/i }));
+		await screen.findAllByText("Great onboarding");
+		fireEvent.click(table().getByRole("button", { name: /Mark reviewed/i }));
 		await waitFor(() => {
 			expect(
 				fetchMock.mock.calls.some((call) => {
@@ -105,8 +114,8 @@ describe("FeedbackList", () => {
 	it("convert-to-issue POSTs and refetches", async () => {
 		const fetchMock = stubFetch([ROW]);
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		await screen.findByText("Great onboarding");
-		fireEvent.click(screen.getByRole("button", { name: /Convert to issue/i }));
+		await screen.findAllByText("Great onboarding");
+		fireEvent.click(table().getByRole("button", { name: /Convert to issue/i }));
 		await waitFor(() => {
 			expect(
 				fetchMock.mock.calls.some(
@@ -119,7 +128,7 @@ describe("FeedbackList", () => {
 	it("select-all then bulk mark-reviewed POSTs both ids and refetches", async () => {
 		const fetchMock = stubFetch();
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		await screen.findByText("Great onboarding");
+		await screen.findAllByText("Great onboarding");
 		fireEvent.click(screen.getByLabelText(/select all/i));
 		fireEvent.click(screen.getByRole("button", { name: /^Mark all reviewed$/i }));
 		await waitFor(() => {
@@ -136,7 +145,7 @@ describe("FeedbackList", () => {
 	it("select-all then bulk convert-to-issue POSTs both ids and refetches", async () => {
 		const fetchMock = stubFetch();
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		await screen.findByText("Great onboarding");
+		await screen.findAllByText("Great onboarding");
 		fireEvent.click(screen.getByLabelText(/select all/i));
 		fireEvent.click(screen.getByRole("button", { name: /^Convert all to issue$/i }));
 		await waitFor(() => {
@@ -153,11 +162,21 @@ describe("FeedbackList", () => {
 	it("shows an error and keeps the selection when bulk convert-to-issue conflicts", async () => {
 		stubFetch([ROW, ROW_2], 409);
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		await screen.findByText("Great onboarding");
+		await screen.findAllByText("Great onboarding");
 		fireEvent.click(screen.getByLabelText(/select all/i));
 		fireEvent.click(screen.getByRole("button", { name: /^Convert all to issue$/i }));
 		expect(await screen.findByRole("alert")).toBeTruthy();
 		expect(screen.getByText(/2 selected/i)).toBeTruthy();
+	});
+});
+
+describe("FeedbackList — mobile viewport", () => {
+	it("renders a mobile-card fallback alongside the desktop table", async () => {
+		setViewportWidth(MOBILE_WIDTH);
+		stubFetch([ROW]);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		// Desktop table + mobile card both render (CSS hides one per viewport).
+		expect((await screen.findAllByText("Great onboarding")).length).toBe(2);
 	});
 });
 
@@ -189,40 +208,42 @@ describe("FeedbackList structured context", () => {
 	it("shows a Context toggle with the param count and expands to reveal params + raw link", async () => {
 		stubFetch([ROW_WITH_CONTEXT]);
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		const toggle = await screen.findByRole("button", { name: /Context \(2\)/i });
+		await screen.findAllByText("Great onboarding");
+		const toggle = table().getByRole("button", { name: /Context \(2\)/i });
 		expect(screen.queryByText(/seed:/i)).toBeNull();
 		fireEvent.click(toggle);
-		expect(screen.getByText(/seed:\s*abc123/i)).toBeTruthy();
-		expect(screen.getByText(/focus:\s*strength/i)).toBeTruthy();
-		expect(screen.getByRole("link", { name: ROW_WITH_CONTEXT.sourceUrl })).toBeTruthy();
+		expect(table().getByText(/seed:\s*abc123/i)).toBeTruthy();
+		expect(table().getByText(/focus:\s*strength/i)).toBeTruthy();
+		expect(table().getByRole("link", { name: ROW_WITH_CONTEXT.sourceUrl })).toBeTruthy();
 	});
 
 	it("shows a Context (0) toggle for a sourceUrl with no query string, expanding to just the raw link", async () => {
 		stubFetch([ROW_BARE_URL]);
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		const toggle = await screen.findByRole("button", { name: /Context \(0\)/i });
+		await screen.findAllByText("Great onboarding");
+		const toggle = table().getByRole("button", { name: /Context \(0\)/i });
 		fireEvent.click(toggle);
-		expect(screen.getByRole("link", { name: ROW_BARE_URL.sourceUrl })).toBeTruthy();
+		expect(table().getByRole("link", { name: ROW_BARE_URL.sourceUrl })).toBeTruthy();
 	});
 
 	it("renders no Context toggle when sourceUrl is null", async () => {
 		stubFetch([ROW]);
 		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		await screen.findByText("Great onboarding");
-		expect(screen.queryByRole("button", { name: /Context/i })).toBeNull();
+		await screen.findAllByText("Great onboarding");
+		expect(table().queryByRole("button", { name: /Context/i })).toBeNull();
 	});
 
 	it("renders no Context toggle for a malformed sourceUrl, without throwing", async () => {
 		stubFetch([ROW_MALFORMED_URL]);
 		expect(() => render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />)).not.toThrow();
-		await screen.findByText("Great onboarding");
-		expect(screen.queryByRole("button", { name: /Context/i })).toBeNull();
+		await screen.findAllByText("Great onboarding");
+		expect(table().queryByRole("button", { name: /Context/i })).toBeNull();
 	});
 
 	it("renders no Context toggle for a javascript: sourceUrl, without throwing", async () => {
 		stubFetch([ROW_JS_URL]);
 		expect(() => render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />)).not.toThrow();
-		await screen.findByText("Great onboarding");
-		expect(screen.queryByRole("button", { name: /Context/i })).toBeNull();
+		await screen.findAllByText("Great onboarding");
+		expect(table().queryByRole("button", { name: /Context/i })).toBeNull();
 	});
 });

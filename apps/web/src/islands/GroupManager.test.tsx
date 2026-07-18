@@ -41,7 +41,9 @@ function mockFetch() {
 }
 
 async function openEditor() {
-	fireEvent.click(await screen.findByRole("button", { name: "Engineering" }));
+	await screen.findByRole("table");
+	const nameButtons = await screen.findAllByRole("button", { name: "Engineering" });
+	fireEvent.click(nameButtons[0]);
 	return (await screen.findByLabelText(/Group name/i)) as HTMLInputElement;
 }
 
@@ -123,7 +125,7 @@ describe("GroupManager tabs", () => {
 		expect(groupsTab.getAttribute("aria-selected")).toBe("true");
 		expect(membersTab.getAttribute("aria-selected")).toBe("false");
 
-		expect(screen.getByText("Engineering")).toBeTruthy();
+		expect(screen.getAllByText("Engineering").length).toBeGreaterThan(0);
 		expect(screen.queryByText("Mo Member")).toBeNull();
 	});
 
@@ -131,10 +133,10 @@ describe("GroupManager tabs", () => {
 		mockFetchForTabs({ role: "admin" });
 		render(<GroupManager workspaceSlug="my-ws" />);
 
-		await screen.findByText("Engineering");
+		await screen.findAllByText("Engineering");
 		fireEvent.click(screen.getByRole("tab", { name: "Members" }));
 
-		expect(await screen.findByText("Mo Member")).toBeTruthy();
+		expect((await screen.findAllByText("Mo Member")).length).toBeGreaterThan(0);
 		expect(screen.queryByPlaceholderText("New group name")).toBeNull();
 		expect(screen.getByRole("tab", { name: "Members" }).getAttribute("aria-selected")).toBe("true");
 	});
@@ -146,5 +148,20 @@ describe("GroupManager tabs", () => {
 		await screen.findByText("Your groups");
 		expect(screen.queryByRole("tab", { name: "Members" })).toBeNull();
 		expect(screen.queryByRole("tablist")).toBeNull();
+	});
+
+	it("renders a mobile-card fallback for the groups table", async () => {
+		mockFetchForTabs({ role: "admin" });
+		render(<GroupManager workspaceSlug="my-ws" />);
+		// Desktop table + mobile card both render (CSS hides one per viewport).
+		expect((await screen.findAllByText("Engineering")).length).toBe(2);
+	});
+
+	it("renders a mobile-card fallback for the members table", async () => {
+		mockFetchForTabs({ role: "admin" });
+		render(<GroupManager workspaceSlug="my-ws" />);
+		await screen.findAllByText("Engineering");
+		fireEvent.click(screen.getByRole("tab", { name: "Members" }));
+		expect((await screen.findAllByText("Mo Member")).length).toBe(2);
 	});
 });

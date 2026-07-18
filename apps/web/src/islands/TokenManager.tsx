@@ -477,38 +477,104 @@ function TokenTableRow({
 			</td>
 			<td class={TD_MUTED}>{formatDate(tok.lastUsedAt)}</td>
 			<td class={`${TD_BASE} whitespace-nowrap`}>
-				{revokeId === tok.id ? (
-					<span class="inline-flex gap-[0.375rem] items-center">
-						<span class="text-[0.8rem] text-text-muted">Revoke?</span>
-						<button
-							type="button"
-							class="btn btn-danger btn-sm"
-							disabled={revoking}
-							onClick={() => onConfirmRevoke(tok.id)}
-						>
-							{revoking ? "…" : "Yes"}
-						</button>
-						<button
-							type="button"
-							class="btn btn-outline btn-sm"
-							disabled={revoking}
-							onClick={onCancelRevoke}
-						>
-							No
-						</button>
-						{revokeError && <span class="text-[var(--danger-text)] text-xs">{revokeError}</span>}
-					</span>
-				) : (
-					<button
-						type="button"
-						class="btn btn-outline btn-sm text-[var(--danger-text)] border-[var(--danger-border)]"
-						onClick={() => onSelectRevoke(tok.id)}
-					>
-						Revoke
-					</button>
-				)}
+				<TokenRevokeControl
+					tok={tok}
+					revokeId={revokeId}
+					revoking={revoking}
+					revokeError={revokeError}
+					onSelectRevoke={onSelectRevoke}
+					onCancelRevoke={onCancelRevoke}
+					onConfirmRevoke={onConfirmRevoke}
+				/>
 			</td>
 		</tr>
+	);
+}
+
+function TokenRevokeControl({
+	tok,
+	revokeId,
+	revoking,
+	revokeError,
+	onSelectRevoke,
+	onCancelRevoke,
+	onConfirmRevoke,
+}: TokenTableRowProps) {
+	if (revokeId === tok.id) {
+		return (
+			<span class="inline-flex gap-[0.375rem] items-center flex-wrap">
+				<span class="text-[0.8rem] text-text-muted">Revoke?</span>
+				<button
+					type="button"
+					class="btn btn-danger btn-sm"
+					disabled={revoking}
+					onClick={() => onConfirmRevoke(tok.id)}
+				>
+					{revoking ? "…" : "Yes"}
+				</button>
+				<button
+					type="button"
+					class="btn btn-outline btn-sm"
+					disabled={revoking}
+					onClick={onCancelRevoke}
+				>
+					No
+				</button>
+				{revokeError && <span class="text-[var(--danger-text)] text-xs">{revokeError}</span>}
+			</span>
+		);
+	}
+	return (
+		<button
+			type="button"
+			class="btn btn-outline btn-sm text-[var(--danger-text)] border-[var(--danger-border)]"
+			onClick={() => onSelectRevoke(tok.id)}
+		>
+			Revoke
+		</button>
+	);
+}
+
+function TokenMobileCards({
+	tokens,
+	revokeId,
+	revoking,
+	revokeError,
+	onSelectRevoke,
+	onCancelRevoke,
+	onConfirmRevoke,
+}: TokenTableProps) {
+	return (
+		<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
+			{tokens.map((tok) => (
+				<div key={tok.id} class="py-3 px-4 border border-border rounded-md bg-surface">
+					<div class="text-[0.9rem] text-text-base font-medium mb-2">{tok.name}</div>
+					<dl class="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[0.8rem] text-text-muted mb-3">
+						<dt class="font-semibold">Scope</dt>
+						<dd class="m-0">{formatScopes(tok.scopes)}</dd>
+						<dt class="font-semibold">Created</dt>
+						<dd class="m-0">{formatDate(tok.createdAt)}</dd>
+						<dt class="font-semibold">Expires</dt>
+						<dd
+							class={`m-0 ${tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-[var(--danger-text)]" : ""}`}
+						>
+							{tok.expiresAt === null ? "No expiry" : formatDate(tok.expiresAt)}
+						</dd>
+						<dt class="font-semibold">Last used</dt>
+						<dd class="m-0">{formatDate(tok.lastUsedAt)}</dd>
+					</dl>
+					<TokenRevokeControl
+						tok={tok}
+						revokeId={revokeId}
+						revoking={revoking}
+						revokeError={revokeError}
+						onSelectRevoke={onSelectRevoke}
+						onCancelRevoke={onCancelRevoke}
+						onConfirmRevoke={onConfirmRevoke}
+					/>
+				</div>
+			))}
+		</div>
 	);
 }
 
@@ -540,34 +606,45 @@ function TokenTable({
 		);
 	}
 	return (
-		<div class="overflow-x-auto">
-			<table class="w-full border-collapse text-[0.9rem]">
-				<thead>
-					<tr>
-						<th class={TH_CLASS}>Name</th>
-						<th class={TH_CLASS}>Scope</th>
-						<th class={TH_CLASS}>Created</th>
-						<th class={TH_CLASS}>Expires</th>
-						<th class={TH_CLASS}>Last used</th>
-						<th class={TH_CLASS}></th>
-					</tr>
-				</thead>
-				<tbody>
-					{tokens.map((tok) => (
-						<TokenTableRow
-							key={tok.id}
-							tok={tok}
-							revokeId={revokeId}
-							revoking={revoking}
-							revokeError={revokeError}
-							onSelectRevoke={onSelectRevoke}
-							onCancelRevoke={onCancelRevoke}
-							onConfirmRevoke={onConfirmRevoke}
-						/>
-					))}
-				</tbody>
-			</table>
-		</div>
+		<>
+			<div class="overflow-x-auto max-sm:hidden">
+				<table class="w-full border-collapse text-[0.9rem]">
+					<thead>
+						<tr>
+							<th class={TH_CLASS}>Name</th>
+							<th class={TH_CLASS}>Scope</th>
+							<th class={TH_CLASS}>Created</th>
+							<th class={TH_CLASS}>Expires</th>
+							<th class={TH_CLASS}>Last used</th>
+							<th class={TH_CLASS}></th>
+						</tr>
+					</thead>
+					<tbody>
+						{tokens.map((tok) => (
+							<TokenTableRow
+								key={tok.id}
+								tok={tok}
+								revokeId={revokeId}
+								revoking={revoking}
+								revokeError={revokeError}
+								onSelectRevoke={onSelectRevoke}
+								onCancelRevoke={onCancelRevoke}
+								onConfirmRevoke={onConfirmRevoke}
+							/>
+						))}
+					</tbody>
+				</table>
+			</div>
+			<TokenMobileCards
+				tokens={tokens}
+				revokeId={revokeId}
+				revoking={revoking}
+				revokeError={revokeError}
+				onSelectRevoke={onSelectRevoke}
+				onCancelRevoke={onCancelRevoke}
+				onConfirmRevoke={onConfirmRevoke}
+			/>
+		</>
 	);
 }
 

@@ -52,8 +52,16 @@ describe("TokenManager", () => {
 	it("renders token names and scope after fetch resolves", async () => {
 		mockFetchTokens([TOKEN]);
 		render(<TokenManager workspaceSlug="my-ws" />);
-		expect(await screen.findByText("Claude agent")).toBeTruthy();
-		expect(screen.getByText("Read + Write")).toBeTruthy();
+		expect(await screen.findAllByText("Claude agent")).not.toHaveLength(0);
+		expect(screen.getAllByText("Read + Write").length).toBeGreaterThan(0);
+	});
+
+	it("renders a mobile-card fallback alongside the desktop table", async () => {
+		mockFetchTokens([TOKEN]);
+		render(<TokenManager workspaceSlug="my-ws" />);
+		// Desktop table + mobile card both render (CSS hides one per viewport;
+		// jsdom doesn't evaluate CSS, see apps/web/src/test/viewport.ts).
+		expect((await screen.findAllByText("Claude agent")).length).toBe(2);
 	});
 
 	it("shows empty state when no tokens exist", async () => {
