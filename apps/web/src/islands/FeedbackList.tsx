@@ -41,6 +41,7 @@ function parseContext(
 	if (!sourceUrl) return null;
 	try {
 		const parsed = new URL(sourceUrl);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
 		return { url: sourceUrl, params: Array.from(parsed.searchParams.entries()) };
 	} catch {
 		return null;

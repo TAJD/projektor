@@ -179,6 +179,12 @@ const ROW_MALFORMED_URL = {
 	sourceUrl: "not a url",
 };
 
+const ROW_JS_URL = {
+	...ROW,
+	id: "f6",
+	sourceUrl: "javascript:alert(1)",
+};
+
 describe("FeedbackList structured context", () => {
 	it("shows a Context toggle with the param count and expands to reveal params + raw link", async () => {
 		stubFetch([ROW_WITH_CONTEXT]);
@@ -208,6 +214,13 @@ describe("FeedbackList structured context", () => {
 
 	it("renders no Context toggle for a malformed sourceUrl, without throwing", async () => {
 		stubFetch([ROW_MALFORMED_URL]);
+		expect(() => render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />)).not.toThrow();
+		await screen.findByText("Great onboarding");
+		expect(screen.queryByRole("button", { name: /Context/i })).toBeNull();
+	});
+
+	it("renders no Context toggle for a javascript: sourceUrl, without throwing", async () => {
+		stubFetch([ROW_JS_URL]);
 		expect(() => render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />)).not.toThrow();
 		await screen.findByText("Great onboarding");
 		expect(screen.queryByRole("button", { name: /Context/i })).toBeNull();
