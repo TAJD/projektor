@@ -177,6 +177,12 @@ describe("POST /api/projects/:id/feedback/bulk-convert-to-issue", () => {
 			status: "actioned",
 		});
 
+		const issueCountBefore = await env.DB.prepare(
+			"SELECT COUNT(*) as count FROM issues WHERE project_id = ?"
+		)
+			.bind(f.projectId)
+			.first<{ count: number }>();
+
 		const res = await SELF.fetch(
 			`http://localhost/api/projects/${f.projectId}/feedback/bulk-convert-to-issue`,
 			{
@@ -192,6 +198,13 @@ describe("POST /api/projects/:id/feedback/bulk-convert-to-issue", () => {
 			.first<{ linked_issue_id: string | null; status: string }>();
 		expect(fresh!.linked_issue_id).toBeNull();
 		expect(fresh!.status).toBe("new");
+
+		const issueCountAfter = await env.DB.prepare(
+			"SELECT COUNT(*) as count FROM issues WHERE project_id = ?"
+		)
+			.bind(f.projectId)
+			.first<{ count: number }>();
+		expect(issueCountAfter!.count).toBe(issueCountBefore!.count);
 	});
 
 	it("404s if a feedbackId doesn't belong to the project", async () => {
