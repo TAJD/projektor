@@ -10,7 +10,7 @@ Email the maintainer directly at **tajdickson@protonmail.com** with:
 - steps to reproduce (a proof of concept if you have one),
 - the affected version or commit.
 
-You'll get an acknowledgement, and a fix or mitigation will be prioritised over
+You'll get an acknowledgement, and the fix or mitigation will take priority over
 other work. Please give a reasonable window to address the issue before any
 public disclosure.
 
