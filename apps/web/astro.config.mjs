@@ -14,6 +14,11 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: false,
+      // @vite-pwa/astro doesn't inject a registration <script> into Astro's
+      // built pages the way vite-plugin-pwa does for a plain Vite index.html
+      // (PROJ-418) — registration is wired up manually in Base.astro instead,
+      // via the `virtual:pwa-register` module.
+      injectRegister: null,
       workbox: {
         navigateFallback: '/index.html',
         globPatterns: ['**/*.{html,css,js,svg,png,ico,json}'],

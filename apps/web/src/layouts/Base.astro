@@ -35,6 +35,15 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
     <link rel="manifest" href="/manifest.json" />
     <title>{title}</title>
     <ClientRouter />
+    <!-- PROJ-418: @vite-pwa/astro's generateSW strategy builds dist/sw.js and
+         dist/registerSW.js but never references either from a rendered page -
+         unlike a plain Vite app's index.html, Astro's build has no injection
+         point for it. Registering here via the virtual module is the
+         documented workaround for meta-frameworks (see vite-pwa-org.netlify.app/frameworks/astro). -->
+    <script>
+      import { registerSW } from 'virtual:pwa-register';
+      registerSW({ immediate: true });
+    </script>
     <!-- safe-ls: 'theme' is a cosmetic preference (dark/light). No API dependency - a
          stale or missing value falls back to the system color-scheme media query.
          Astro's ClientRouter swaps <html>'s attributes to match the incoming (server-
