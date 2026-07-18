@@ -313,7 +313,9 @@ export async function bulkConvertToIssue(
 	}
 
 	const byId = new Map(rows.map((r) => [r.id, r]));
-	const orderedRows = feedbackIds.map((id) => byId.get(id)!);
+	const orderedRows = feedbackIds
+		.map((id) => byId.get(id))
+		.filter((r): r is BulkConvertFeedbackRow => r !== undefined);
 	const body = orderedRows
 		.map((fb, i) => {
 			const footer =
