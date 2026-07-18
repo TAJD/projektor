@@ -47,6 +47,7 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 	const [sourceFilter, setSourceFilter] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [selected, setSelected] = useState<Set<string>>(new Set());
 
 	const fetchRows = useCallback(async () => {
 		if (!projectId) return;
@@ -98,6 +99,47 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 		}
 	}
 
+	async function bulkMarkReviewed() {
+		try {
+			await apiFetch(`/api/projects/${projectId}/feedback/bulk-mark-reviewed`, {
+				method: "POST",
+				body: { feedbackIds: Array.from(selected) },
+				workspaceSlug,
+			});
+			setSelected(new Set());
+			await fetchRows();
+		} catch (e) {
+			setError(String(e));
+		}
+	}
+
+	async function bulkConvertToIssue() {
+		try {
+			await apiFetch(`/api/projects/${projectId}/feedback/bulk-convert-to-issue`, {
+				method: "POST",
+				body: { feedbackIds: Array.from(selected) },
+				workspaceSlug,
+			});
+			setSelected(new Set());
+			await fetchRows();
+		} catch (e) {
+			setError(String(e));
+		}
+	}
+
+	function toggleSelectAll() {
+		setSelected((prev) => (prev.size === rows.length ? new Set() : new Set(rows.map((r) => r.id))));
+	}
+
+	function toggleRow(id: string) {
+		setSelected((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	}
+
 	const sourceOptions = Array.from(
 		new Map(rows.filter((r) => r.sourceName).map((r) => [r.sourceId, r.sourceName])).entries()
 	);
@@ -113,7 +155,10 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 						id="fb-status"
 						class="px-2 py-1 border border-border rounded bg-bg text-text-base text-sm"
 						value={status}
-						onChange={(e) => setStatus((e.target as HTMLSelectElement).value)}
+						onChange={(e) => {
+							setStatus((e.target as HTMLSelectElement).value);
+							setSelected(new Set());
+						}}
 					>
 						<option value="">All</option>
 						<option value="new">New</option>
@@ -130,7 +175,10 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 							id="fb-source"
 							class="px-2 py-1 border border-border rounded bg-bg text-text-base text-sm"
 							value={sourceFilter}
-							onChange={(e) => setSourceFilter((e.target as HTMLSelectElement).value)}
+							onChange={(e) => {
+								setSourceFilter((e.target as HTMLSelectElement).value);
+								setSelected(new Set());
+							}}
 						>
 							<option value="">All sources</option>
 							{sourceOptions.map(([id, name]) => (
@@ -148,6 +196,17 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 					{error}
 				</p>
 			)}
+			{selected.size > 0 && (
+				<div class="flex gap-2 items-center mb-3 p-2 bg-surface border border-border rounded">
+					<span class="text-[0.85rem] text-text-muted">{selected.size} selected</span>
+					<button type="button" class="btn btn-outline btn-sm" onClick={bulkMarkReviewed}>
+						Mark all reviewed
+					</button>
+					<button type="button" class="btn btn-outline btn-sm" onClick={bulkConvertToIssue}>
+						Convert all to issue
+					</button>
+				</div>
+			)}
 			{loading ? (
 				<p aria-live="polite">Loading feedback…</p>
 			) : rows.length === 0 ? (
@@ -159,6 +218,14 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 					<table class="w-full border-collapse text-[0.9rem]">
 						<thead>
 							<tr>
+								<th class={TH}>
+									<input
+										type="checkbox"
+										aria-label="select all"
+										checked={rows.length > 0 && selected.size === rows.length}
+										onChange={toggleSelectAll}
+									/>
+								</th>
 								<th class={TH}>Rating</th>
 								<th class={TH}>Feedback</th>
 								<th class={TH}>Source</th>
@@ -170,6 +237,14 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 						<tbody>
 							{rows.map((r) => (
 								<tr key={r.id}>
+									<td class={TD}>
+										<input
+											type="checkbox"
+											aria-label={`select row ${r.id}`}
+											checked={selected.has(r.id)}
+											onChange={() => toggleRow(r.id)}
+										/>
+									</td>
 									<td class={TD}>{ratingDisplay(r.rating, r.ratingScale)}</td>
 									<td class={`${TD} text-text-base`}>
 										<div>{r.body ?? "—"}</div>
