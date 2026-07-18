@@ -92,8 +92,8 @@ await submitFeedback("https://your-projektor-instance/api/feedback/submit", toke
 ## 3. Triage feedback
 
 Submitted feedback shows up on the project's Feedback page
-(\`/feedback/?projectId=<projectId>\`) for workspace owners/admins, where it can be
-filtered by status/source, marked reviewed, or converted directly into an issue.
+(\`/feedback/?projectId=<projectId>\`), where workspace owners/admins can filter it by
+status/source, mark it reviewed, or convert it directly into an issue.
 
 ## See also
 

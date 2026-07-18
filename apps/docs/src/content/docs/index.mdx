@@ -1,9 +1,9 @@
 ---
 title: Projektor
-description: A self-hosted, MCP-native Jira + wiki that runs in a single Cloudflare Worker.
+description: A self-hosted issue tracker and wiki where AI agents are the primary client. Everything a person does in the browser, an agent does over MCP.
 template: splash
 hero:
-  tagline: A self-hosted Jira + wiki, MCP-native, running entirely on Cloudflare's edge. AI agents are a first-class client - not an afterthought.
+  tagline: An issue tracker and wiki your AI coding agent runs as a first-class client - agent-native like a git tracker, deployed and cross-project like Jira, on a single Cloudflare Worker.
   actions:
     - text: Connect an agent
       link: /projektor/agents/mcp-connection/
@@ -28,31 +28,34 @@ import backlogScreenshot from '../../assets/backlog.png';
 <Image src={backlogScreenshot} alt="Projektor issue backlog - list view with projects sidebar, issue refs, status, priority, and assignees" />
 
 <CardGrid stagger>
-  <Card title="MCP-native" icon="puzzle">
-    Every action available in the browser is available to an agent over JSON-RPC. The MCP server is the primary surface.
+  <Card title="Agents drive it" icon="puzzle">
+    Filing issues, moving tickets, planning sprints, searching the wiki - an agent
+    does it all over MCP, instead of asking you to. The MCP server is the primary
+    surface, not a bolt-on.
   </Card>
-  <Card title="Edge-native" icon="cloudflare">
-    Hono on Cloudflare Workers. D1 for data, KV for caching, R2 for attachments. No servers, no containers.
+  <Card title="Fills the gap" icon="approve-check">
+    Agent-native like a git-file tracker, but deployed and cross-project like Jira -
+    and cheap to self-host. When you outgrow it, you swap the database, not the tool.
   </Card>
   <Card title="Built for fleets" icon="seti:notebook">
-    Agent sessions, file claims, and coordination messages let parallel agents work the same repo without colliding.
+    An agent registry, file claims, and coordination messages let many agents work
+    the same repo in parallel without colliding.
   </Card>
-  <Card title="Dogfooded" icon="approve-check">
-    Projektor's own roadmap is tracked inside Projektor. The docs you're reading are generated from the same repo.
+  <Card title="Runs on the edge" icon="cloudflare">
+    One Cloudflare Worker: Hono, D1 for data, KV for cache, R2 for attachments.
+    No servers, no containers. Deploy to your own account in minutes.
   </Card>
 </CardGrid>
 
-## One-step deploy
+## Self-host in minutes
 
-Clone the [deploy repo](https://github.com/TAJD/projektor-deploy-example) and run the
-zero-config script - wrangler auto-provisions D1, KV, and R2, applies migrations, and deploys:
+Deploy to your own Cloudflare account from a config-only repo - wrangler
+auto-provisions D1, KV, and R2, applies migrations, and ships. One button, one
+command, or hand the repo to an agent and say *"deploy projektor to my Cloudflare
+account."*
 
-```bash
-PROJEKTOR_REPO=TAJD/projektor ADMIN_EMAILS=you@example.com ./deploy-auto.sh
-```
+[Self-hosting guide →](/projektor/guides/self-hosting/) ·
+[Why Projektor looks like this →](/projektor/philosophy/where-projektor-fits/)
 
-Or hand the repo to an AI agent - *"deploy projektor to my Cloudflare account"* - and let it
-run the same flow. Full walkthrough: [self-hosting guide](/projektor/guides/self-hosting/).
-
-Curious why Projektor looks like this? Read [where Projektor fits](/projektor/philosophy/where-projektor-fits/)
-in the agentic dev-tools stack.
+Projektor's own roadmap is tracked inside Projektor; these docs are generated from
+the same repo.

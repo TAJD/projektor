@@ -43,7 +43,7 @@ flowchart LR
     class provision,authz pkCls;
 ```
 
-A first-time login is admitted by Access, upserted, and auto-joined to the
+Access admits a first-time login, upserts them, and auto-joins them to the
 workspace as a `viewer` **with no groups**. With no grants, the default-deny rule
 means they see nothing — no projects, issues, or project wiki — until an admin
 adds them to a group. This is the "access pending" state, and it is the whole
@@ -153,7 +153,7 @@ service routes through it — there is no per-route ACL logic to keep in sync.
 The visibility check is deliberately an **indexed `EXISTS`** join
 (`user_group_members ⋈ group_project_grants`) rather than fetching a list of
 project ids and binding them — that keeps it a single query and avoids D1's
-100-bind-parameter ceiling on workspaces with many projects.
+100-bind-parameter ceiling on large workspaces.
 
 Coverage spans every project-scoped surface: projects, issues, sprints, wiki
 (project-scoped pages; workspace-level pages stay visible to all members),

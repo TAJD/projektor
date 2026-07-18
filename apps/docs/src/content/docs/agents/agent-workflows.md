@@ -6,9 +6,9 @@ sidebar:
 ---
 Projektor is **MCP-native**: AI agents are a first-class client, not an afterthought.
 Everything a browser user can do, an agent can do over a JSON-RPC MCP endpoint. This
-page is an overview of the different processes and methods agents can use to enable your work.
+page gives an overview of the layers agents use to do that work.
 
-It's possible to analyse agentic development through three different concerns. Projektor integrates across all of them.
+Agentic development breaks down into three concerns. Projektor integrates across all of them.
 
 
 | Layer | Runs where | What it does | Reference |

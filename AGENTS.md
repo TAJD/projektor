@@ -7,21 +7,25 @@ Read this before making changes - it captures conventions that aren't obvious fr
 
 ## What projektor is
 
-A project management tool deployed on Cloudflare. Bringing together AI native design and tried and tested principles.
+A project management tool deployed on Cloudflare, combining AI-native design with tried-and-tested principles.
 
 Design principles
 
 1. Fast and lightweight.
-2. Serverless using cloudflare resources.
+2. Serverless, built on Cloudflare resources.
 
 Implementation details:
 
-- When implementing features or fixing bugs you must always implement a test or tests to confirm the functionality is implemented.
+- When implementing a feature or fixing a bug, always add a test that confirms the behaviour.
 - **Runtime:** Hono on Cloudflare Workers
 - **Data:** D1 (SQLite) for relational data, KV for caching (Access certs, user-by-email), R2 for file attachments
 - **Schema:** Drizzle is the schema and primary query layer; raw `DB.prepare` remains in the auth/workspace middleware hot path, the dev bootstrap, and a handful of service queries (FTS, counters) where hand-written SQL is clearer.
 - **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets - see below), `packages/*` (db, types, plugin-sdk), `plugins/*`
 - **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-workspace`) downloads it and ships it with `wrangler` - no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
+
+## Planning and design docs live in the wiki, not the repo
+
+Design records, implementation plans, and specs belong in the projektor wiki (`create_wiki_page`/`update_wiki_page`), not in a repo `docs/` folder. Keeping them in the wiki makes them discoverable and searchable (`search_wiki`) instead of buried in git history. Root-level user-facing docs (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`) are the only docs that belong in the repo itself.
 
 ## Architecture: the service-layer contract (most important)
 

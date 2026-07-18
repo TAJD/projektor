@@ -52,7 +52,7 @@ picking up autonomous work.
   \`claim_issue\` without a human in the loop, subject to the WIP limit below.
 - **In Review → Done**: may also be fully autonomous (PROJ-375). An agent session can
   close its own (or any) issue to \`done\` directly — there's no pre-close block waiting
-  on a human. A completion report is still required before an agent-worked issue can
+  on a human. An agent-worked issue still needs a completion report before it can
   close (see below). Instead of gating the transition, projektor classifies the
   report's evidence and flags weak closures for **audit after the fact** — see below.
 
@@ -66,8 +66,8 @@ completion report with:
   the issue's Verification criteria).
 - **\`prLink\`** *(optional)* — link to the pull request, if one exists.
 
-\`summary\` and \`verification\` are required; the transition is rejected with the specific
-missing field(s) named if either is absent. The report is recorded as a normal issue
+\`summary\` and \`verification\` are required; if either is missing, projektor rejects the
+transition and names the missing field(s). The report is recorded as a normal issue
 comment, so it's visible in the same timeline as everything else.
 
 ## Evidence audit (PROJ-375)

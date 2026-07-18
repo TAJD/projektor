@@ -6,7 +6,7 @@ sidebar:
 ---
 The [contributor conventions](/projektor/contributing/conventions/) say islands must call
 the shared `apiFetch` wrapper instead of hand-rolling headers or calling `fetch()`
-directly. This page explains the mechanism that actually enforces that rule: a small
+directly. This page explains the mechanism that enforces that rule: a small
 [cofferdam](https://github.com/TAJD/cofferdam) plugin called `IslandApiConvention`, and
 how it replaced an older grep script (CD-69).
 
@@ -110,7 +110,7 @@ function describeRawFetchCallee(callee) {
 ```
 
 This is a deliberate *widening* over the original grep, which excluded any line
-containing a `.` before `fetch(` to avoid false-positiving on method calls like
+containing a `.` before `fetch(` to avoid false positives on method calls like
 `someClient.fetch(...)` — that also meant it missed `window.fetch()`. The AST version
 distinguishes "member access on a known global fetch object" from "member access on
 some other object" precisely, so it catches the bypass the grep couldn't while still
@@ -143,7 +143,7 @@ covers direct files too.
   `Warning.IslandApiConvention` and prints a pass/fail summary. Like any lefthook step,
   it can be bypassed locally with `--no-verify`.
 - **CI** (`.github/workflows/ci.yml`): runs the same `scripts/check-island-api.mjs` as an
-  unconditional job step. This is the check that actually can't be skipped — it gates
+  unconditional job step. This is the check that can't be skipped — it gates
   every PR regardless of what happened locally.
 
 ## Testing and extending the plugin
