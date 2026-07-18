@@ -160,3 +160,69 @@ describe("FeedbackList", () => {
 		expect(screen.getByText(/2 selected/i)).toBeTruthy();
 	});
 });
+
+const ROW_WITH_CONTEXT = {
+	...ROW,
+	id: "f3",
+	sourceUrl: "https://ironvolume.example.com/wod?seed=abc123&focus=strength",
+};
+
+const ROW_BARE_URL = {
+	...ROW,
+	id: "f4",
+	sourceUrl: "https://ironvolume.example.com/wod",
+};
+
+const ROW_MALFORMED_URL = {
+	...ROW,
+	id: "f5",
+	sourceUrl: "not a url",
+};
+
+const ROW_JS_URL = {
+	...ROW,
+	id: "f6",
+	sourceUrl: "javascript:alert(1)",
+};
+
+describe("FeedbackList structured context", () => {
+	it("shows a Context toggle with the param count and expands to reveal params + raw link", async () => {
+		stubFetch([ROW_WITH_CONTEXT]);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		const toggle = await screen.findByRole("button", { name: /Context \(2\)/i });
+		expect(screen.queryByText(/seed:/i)).toBeNull();
+		fireEvent.click(toggle);
+		expect(screen.getByText(/seed:\s*abc123/i)).toBeTruthy();
+		expect(screen.getByText(/focus:\s*strength/i)).toBeTruthy();
+		expect(screen.getByRole("link", { name: ROW_WITH_CONTEXT.sourceUrl })).toBeTruthy();
+	});
+
+	it("shows a Context (0) toggle for a sourceUrl with no query string, expanding to just the raw link", async () => {
+		stubFetch([ROW_BARE_URL]);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		const toggle = await screen.findByRole("button", { name: /Context \(0\)/i });
+		fireEvent.click(toggle);
+		expect(screen.getByRole("link", { name: ROW_BARE_URL.sourceUrl })).toBeTruthy();
+	});
+
+	it("renders no Context toggle when sourceUrl is null", async () => {
+		stubFetch([ROW]);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		await screen.findByText("Great onboarding");
+		expect(screen.queryByRole("button", { name: /Context/i })).toBeNull();
+	});
+
+	it("renders no Context toggle for a malformed sourceUrl, without throwing", async () => {
+		stubFetch([ROW_MALFORMED_URL]);
+		expect(() => render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />)).not.toThrow();
+		await screen.findByText("Great onboarding");
+		expect(screen.queryByRole("button", { name: /Context/i })).toBeNull();
+	});
+
+	it("renders no Context toggle for a javascript: sourceUrl, without throwing", async () => {
+		stubFetch([ROW_JS_URL]);
+		expect(() => render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />)).not.toThrow();
+		await screen.findByText("Great onboarding");
+		expect(screen.queryByRole("button", { name: /Context/i })).toBeNull();
+	});
+});

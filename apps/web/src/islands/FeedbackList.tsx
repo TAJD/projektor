@@ -35,6 +35,19 @@ function formatDate(ts: number): string {
 	return new Date(ts * 1000).toLocaleDateString();
 }
 
+function parseContext(
+	sourceUrl: string | null
+): { url: string; params: [string, string][] } | null {
+	if (!sourceUrl) return null;
+	try {
+		const parsed = new URL(sourceUrl);
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+		return { url: sourceUrl, params: Array.from(parsed.searchParams.entries()) };
+	} catch {
+		return null;
+	}
+}
+
 export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }: Props) {
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	useEffect(() => {
@@ -48,6 +61,7 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
+	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
 	const fetchRows = useCallback(async () => {
 		if (!projectId) return;
@@ -133,6 +147,15 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 
 	function toggleRow(id: string) {
 		setSelected((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	}
+
+	function toggleExpanded(id: string) {
+		setExpanded((prev) => {
 			const next = new Set(prev);
 			if (next.has(id)) next.delete(id);
 			else next.add(id);
@@ -251,6 +274,38 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 										{r.submitterLabel && (
 											<div class="text-[0.75rem] text-text-muted mt-1">{r.submitterLabel}</div>
 										)}
+										{(() => {
+											const context = parseContext(r.sourceUrl);
+											if (!context) return null;
+											return (
+												<div class="mt-1">
+													<button
+														type="button"
+														class="text-[0.75rem] text-text-muted underline"
+														onClick={() => toggleExpanded(r.id)}
+													>
+														Context ({context.params.length})
+													</button>
+													{expanded.has(r.id) && (
+														<div class="text-[0.75rem] text-text-muted mt-1 flex flex-col gap-0.5">
+															<a
+																href={context.url}
+																target="_blank"
+																rel="noopener noreferrer"
+																class="underline"
+															>
+																{context.url}
+															</a>
+															{context.params.map(([key, value]) => (
+																<div key={key}>
+																	{key}: {value}
+																</div>
+															))}
+														</div>
+													)}
+												</div>
+											);
+										})()}
 									</td>
 									<td class={`${TD} text-text-muted`}>{r.sourceName ?? "—"}</td>
 									<td class={`${TD} text-text-muted`}>{r.status}</td>
