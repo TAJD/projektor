@@ -241,3 +241,81 @@ export async function convertFeedbackToIssue(
 
 	return issue;
 }
+
+export interface FeedbackVersionSummary {
+	appVersion: string | null;
+	totalCount: number;
+	withCommentCount: number;
+	thumbsUpPct: number | null;
+	avgFiveStar: number | null;
+	lastSeenAt: number;
+}
+
+export interface FeedbackSourceSummary {
+	sourceId: string;
+	sourceName: string | null;
+	totalCount: number;
+	versions: FeedbackVersionSummary[];
+}
+
+interface FeedbackSummaryRow {
+	source_id: string;
+	source_name: string | null;
+	app_version: string | null;
+	total: number;
+	thumbs_up: number;
+	thumbs_total: number;
+	five_star_avg: number | null;
+	five_star_total: number;
+	with_comment_count: number;
+	last_seen_at: number;
+}
+
+export async function getFeedbackSummary(
+	ctx: ServiceCtx,
+	input: { projectId: string }
+): Promise<FeedbackSourceSummary[]> {
+	const { projectId } = input;
+
+	await requireProjectInWorkspace(ctx, projectId);
+	await requireProjectAccess(ctx, projectId);
+
+	const { results } = await ctx.db
+		.prepare(
+			`SELECT
+         f.source_id, s.name AS source_name, f.app_version,
+         COUNT(*) AS total,
+         SUM(CASE WHEN f.rating_scale = 'thumbs' AND f.rating > 0 THEN 1 ELSE 0 END) AS thumbs_up,
+         SUM(CASE WHEN f.rating_scale = 'thumbs' THEN 1 ELSE 0 END) AS thumbs_total,
+         AVG(CASE WHEN f.rating_scale = 'five_star' THEN f.rating END) AS five_star_avg,
+         SUM(CASE WHEN f.rating_scale = 'five_star' THEN 1 ELSE 0 END) AS five_star_total,
+         SUM(CASE WHEN f.body IS NOT NULL AND f.body != '' THEN 1 ELSE 0 END) AS with_comment_count,
+         MAX(f.created_at) AS last_seen_at
+       FROM feedback f
+       LEFT JOIN feedback_sources s ON s.id = f.source_id
+       WHERE f.project_id = ? AND f.workspace_id = ?
+       GROUP BY f.source_id, f.app_version
+       ORDER BY last_seen_at DESC`
+		)
+		.bind(projectId, ctx.workspaceId)
+		.all<FeedbackSummaryRow>();
+
+	const bySource = new Map<string, FeedbackSourceSummary>();
+	for (const r of results ?? []) {
+		let src = bySource.get(r.source_id);
+		if (!src) {
+			src = { sourceId: r.source_id, sourceName: r.source_name, totalCount: 0, versions: [] };
+			bySource.set(r.source_id, src);
+		}
+		src.totalCount += r.total;
+		src.versions.push({
+			appVersion: r.app_version,
+			totalCount: r.total,
+			withCommentCount: r.with_comment_count,
+			thumbsUpPct: r.thumbs_total > 0 ? Math.round((r.thumbs_up / r.thumbs_total) * 100) : null,
+			avgFiveStar: r.five_star_total > 0 ? r.five_star_avg : null,
+			lastSeenAt: r.last_seen_at,
+		});
+	}
+	return Array.from(bySource.values());
+}

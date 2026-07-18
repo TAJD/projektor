@@ -6,6 +6,7 @@ import { bumpRateCounter } from "../middleware/rate-limit";
 import { ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
 import {
 	convertFeedbackToIssue,
+	getFeedbackSummary,
 	hashFeedbackToken,
 	listFeedback,
 	submitFeedback,
@@ -88,6 +89,16 @@ authedRouter.get("/:id/feedback", async (c) => {
 	const sourceId = c.req.query("sourceId");
 	try {
 		return c.json(await listFeedback(ctx, { projectId, status, sourceId }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+authedRouter.get("/:id/feedback/summary", async (c) => {
+	const ctx = ctxFromHono(c);
+	const projectId = c.req.param("id");
+	try {
+		return c.json(await getFeedbackSummary(ctx, { projectId }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
