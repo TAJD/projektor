@@ -1,4 +1,5 @@
 import {
+	BulkFeedbackIdsSchema,
 	ConvertFeedbackSchema,
 	ListFeedbackSchema,
 	SubmitFeedbackSchema,
@@ -7,6 +8,7 @@ import {
 import { canWriteProject, requireProjectAccess, requireProjectInWorkspace } from "./access";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { createIssue } from "./issues";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 export async function hashFeedbackToken(token: string): Promise<string> {
@@ -240,6 +242,111 @@ export async function convertFeedbackToIssue(
 		.run();
 
 	return issue;
+}
+
+export async function bulkMarkReviewed(
+	ctx: ServiceCtx,
+	input: unknown
+): Promise<{ updated: number }> {
+	const parsed = BulkFeedbackIdsSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, feedbackIds } = parsed.data;
+
+	await requireProjectInWorkspace(ctx, projectId);
+	const role = await requireProjectAccess(ctx, projectId);
+	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+
+	let updated = 0;
+	await inChunks(feedbackIds, async (chunk) => {
+		const placeholders = chunk.map(() => "?").join(", ");
+		const result = await ctx.db
+			.prepare(
+				`UPDATE feedback SET status = 'reviewed'
+         WHERE id IN (${placeholders}) AND project_id = ? AND workspace_id = ?`
+			)
+			.bind(...chunk, projectId, ctx.workspaceId)
+			.run();
+		updated += result.meta.changes;
+		return [];
+	});
+
+	return { updated };
+}
+
+interface BulkConvertFeedbackRow {
+	id: string;
+	rating: number | null;
+	rating_scale: string | null;
+	body: string | null;
+	submitter_label: string | null;
+	linked_issue_id: string | null;
+}
+
+export async function bulkConvertToIssue(
+	ctx: ServiceCtx,
+	input: unknown
+): Promise<{ id: string; number?: number; convertedCount: number }> {
+	const parsed = BulkFeedbackIdsSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, feedbackIds } = parsed.data;
+
+	await requireProjectInWorkspace(ctx, projectId);
+	const role = await requireProjectAccess(ctx, projectId);
+	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+
+	const rows = await inChunks(feedbackIds, (chunk) => {
+		const placeholders = chunk.map(() => "?").join(", ");
+		return ctx.db
+			.prepare(
+				`SELECT id, rating, rating_scale, body, submitter_label, linked_issue_id
+         FROM feedback WHERE id IN (${placeholders}) AND project_id = ? AND workspace_id = ?`
+			)
+			.bind(...chunk, projectId, ctx.workspaceId)
+			.all<BulkConvertFeedbackRow>()
+			.then((r) => r.results);
+	});
+	if (rows.length !== feedbackIds.length) throw new NotFoundError("Feedback not found");
+	// All-or-nothing: any row already converted rejects the whole batch rather than
+	// partially converting or silently re-linking.
+	if (rows.some((r) => r.linked_issue_id)) {
+		throw new ConflictError("One or more selected items are already linked to an issue");
+	}
+
+	const byId = new Map(rows.map((r) => [r.id, r]));
+	const orderedRows = feedbackIds
+		.map((id) => byId.get(id))
+		.filter((r): r is BulkConvertFeedbackRow => r !== undefined);
+	const body = orderedRows
+		.map((fb, i) => {
+			const footer =
+				`— submitted via feedback source${fb.submitter_label ? ` by ${fb.submitter_label}` : ""}` +
+				(fb.rating !== null ? `, rating: ${fb.rating} (${fb.rating_scale})` : "");
+			return [`${i + 1}. ${ratingLabel(fb.rating, fb.rating_scale)}`, fb.body ?? "", footer].join(
+				"\n"
+			);
+		})
+		.join("\n\n");
+
+	const issue = await createIssue(ctx, {
+		projectId,
+		title: `${feedbackIds.length} feedback items`,
+		body,
+		priority: "medium",
+	});
+
+	await inChunks(feedbackIds, (chunk) => {
+		const placeholders = chunk.map(() => "?").join(", ");
+		return ctx.db
+			.prepare(
+				`UPDATE feedback SET linked_issue_id = ?, status = 'actioned'
+         WHERE id IN (${placeholders}) AND workspace_id = ?`
+			)
+			.bind(issue.id, ...chunk, ctx.workspaceId)
+			.run()
+			.then(() => []);
+	});
+
+	return { ...issue, convertedCount: feedbackIds.length };
 }
 
 export interface FeedbackVersionSummary {

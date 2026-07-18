@@ -77,3 +77,8 @@ export const ConvertFeedbackSchema = z.object({
 	projectId: z.string().min(1, "projectId is required"),
 	feedbackId: z.string(),
 });
+
+export const BulkFeedbackIdsSchema = z.object({
+	projectId: z.string().min(1, "projectId is required"),
+	feedbackIds: z.array(z.string().min(1)).min(1, "At least one feedbackId is required").max(500),
+});
