@@ -789,7 +789,7 @@ function AttachmentRow({
 	const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
 
 	let icon: preact.ComponentChildren;
-	let href: string;
+	let href: string | null;
 	let label: string;
 	let meta: string | null = null;
 	let external = false;
@@ -803,24 +803,34 @@ function AttachmentRow({
 		href = attachment.url;
 		label = attachment.filename || attachment.url;
 		external = true;
-	} else {
+	} else if (attachment.kind === "file") {
 		icon = <FileIcon />;
 		href = `/api/files/${attachment.id}${qs}`;
 		label = attachment.filename;
 		meta = formatBytes(attachment.size);
 		external = true;
+	} else {
+		// A wiki_ref whose target page was deleted, or is no longer visible to this
+		// user (project access revoked) — the join comes back empty either way.
+		icon = <WikiIcon />;
+		href = null;
+		label = "Wiki page unavailable";
 	}
 
 	return (
 		<div class="flex items-center gap-3 px-3 py-2 border border-border rounded-md bg-surface min-h-[44px]">
 			<span class="text-text-muted">{icon}</span>
-			<a
-				href={href}
-				{...(external ? { target: "_blank", rel: "noreferrer" } : {})}
-				class="text-accent text-sm no-underline hover:underline flex-1 min-w-0 truncate"
-			>
-				{label}
-			</a>
+			{href ? (
+				<a
+					href={href}
+					{...(external ? { target: "_blank", rel: "noreferrer" } : {})}
+					class="text-accent text-sm no-underline hover:underline flex-1 min-w-0 truncate"
+				>
+					{label}
+				</a>
+			) : (
+				<span class="text-text-muted text-sm italic flex-1 min-w-0 truncate">{label}</span>
+			)}
 			{meta && <span class="text-xs text-text-muted shrink-0">{meta}</span>}
 			<button
 				type="button"
@@ -982,7 +992,12 @@ function WikiPageLinkForm({
 				</ul>
 			)}
 			<div class="flex gap-2">
-				<button type="button" onClick={onCancel} disabled={linking} class="btn btn-outline btn-sm">
+				<button
+					type="button"
+					onClick={onCancel}
+					disabled={linking}
+					class="btn btn-outline btn-sm max-sm:flex-1 max-sm:min-h-[44px]"
+				>
 					Cancel
 				</button>
 			</div>

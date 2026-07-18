@@ -390,6 +390,9 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string) {
 			throw new ForbiddenError("Insufficient permissions");
 	}
 
+	// PROJ-407: mirror the migration's ON DELETE CASCADE at the app level too, since
+	// D1 does not guarantee FK enforcement is on for every connection.
+	await orm.delete(schema.attachments).where(eq(schema.attachments.linkedWikiPageId, page.id));
 	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: page.id, action: "deleted" });
 	return { ok: true };

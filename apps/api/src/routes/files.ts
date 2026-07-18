@@ -2,7 +2,12 @@ import type { HonoEnv } from "@projektor/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
+import { serviceErrToResponse } from "../http/error-adapter";
 import { wikiPagePath } from "../lib/urls";
+import { visibleProjectSqlFragment } from "../services/access";
+import { NotFoundError } from "../services/errors";
+import { ctxFromHono } from "../services/types";
+import * as wikiService from "../services/wiki";
 
 const router = new Hono<HonoEnv>();
 
@@ -48,16 +53,27 @@ router.get("/", async (c) => {
 	if (!parsed.success) return c.json({ error: "entityType must be issue or wiki_page" }, 400);
 	if (!entityId) return c.json({ error: "entityId is required" }, 400);
 
+	// PROJ-311/PROJ-407: only join in wiki page details the caller is actually allowed to
+	// see (workspace-level pages, or project-scoped pages they have a grant on). A row
+	// referencing a page outside the caller's visibility joins to nothing, same as a
+	// deleted page — the row still lists as an unavailable wiki_ref rather than leaking
+	// the restricted page's title.
+	const ctx = ctxFromHono(c);
+	const visible = visibleProjectSqlFragment(ctx, "w.project_id");
+	const joinCond = visible
+		? `w.id = a.linked_wiki_page_id AND (w.project_id IS NULL OR ${visible.sql})`
+		: "w.id = a.linked_wiki_page_id";
+
 	const rows = await c.env.DB.prepare(
 		`SELECT a.id, a.kind, a.filename, a.content_type, a.size, a.url, a.created_at,
             w.id AS wiki_page_id, w.slug AS wiki_page_slug, w.title AS wiki_page_title,
             w.project_id AS wiki_page_project_id
      FROM attachments a
-     LEFT JOIN wiki_pages w ON w.id = a.linked_wiki_page_id
+     LEFT JOIN wiki_pages w ON ${joinCond}
      WHERE a.workspace_id = ? AND a.entity_type = ? AND a.entity_id = ?
      ORDER BY a.created_at ASC`
 	)
-		.bind(workspace.id, parsed.data, entityId)
+		.bind(...(visible ? visible.params : []), workspace.id, parsed.data, entityId)
 		.all<{
 			id: string;
 			kind: "file" | "wiki_ref" | "url";
@@ -123,12 +139,14 @@ router.post("/links", async (c) => {
 	const input = parsed.data;
 
 	if (input.kind === "wiki_ref") {
-		const wikiPage = await c.env.DB.prepare(
-			"SELECT id FROM wiki_pages WHERE id = ? AND workspace_id = ?"
-		)
-			.bind(input.wikiPageId, workspace.id)
-			.first<{ id: string }>();
-		if (!wikiPage) return c.json({ error: "Wiki page not found" }, 404);
+		// PROJ-311: getWikiPage enforces project-grant visibility, not just existence —
+		// a page in a project the caller can't see 404s the same as a nonexistent one.
+		try {
+			await wikiService.getWikiPage(ctxFromHono(c), input.wikiPageId);
+		} catch (e) {
+			if (e instanceof NotFoundError) return serviceErrToResponse(c, e);
+			throw e;
+		}
 	}
 
 	const id = crypto.randomUUID();
