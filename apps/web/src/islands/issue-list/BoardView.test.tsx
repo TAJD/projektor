@@ -6,8 +6,8 @@
 // rather than relying on the `max-sm:` CSS classes alone.
 import { fireEvent, render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
-import type { Issue, TaskStatus } from "../board-utils";
 import { MOBILE_WIDTH, setViewportWidth } from "../../test/viewport";
+import type { Issue, TaskStatus } from "../board-utils";
 import BoardView from "./BoardView";
 
 const TODO_ISSUE: Issue = {
@@ -33,7 +33,13 @@ const TODO_ISSUE: Issue = {
 
 const STATUSES: TaskStatus[] = [
 	{ id: "st-todo", key: "todo", name: "Todo", category: "todo", color: null },
-	{ id: "st-in-progress", key: "in_progress", name: "In Progress", category: "in_progress", color: null },
+	{
+		id: "st-in-progress",
+		key: "in_progress",
+		name: "In Progress",
+		category: "in_progress",
+		color: null,
+	},
 ];
 
 function fakeDataTransfer() {
@@ -50,7 +56,7 @@ describe("BoardView — mobile viewport", () => {
 		setViewportWidth(MOBILE_WIDTH);
 		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
 
-		const card = screen.getByText("Move me").closest("a")!;
+		const card = screen.getByText("Move me").closest("a") as HTMLElement;
 		const dataTransfer = fakeDataTransfer();
 		fireEvent.dragStart(card, { dataTransfer });
 
@@ -65,7 +71,7 @@ describe("BoardView — mobile viewport", () => {
 		setViewportWidth(1024);
 		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
 
-		const card = screen.getByText("Move me").closest("a")!;
+		const card = screen.getByText("Move me").closest("a") as HTMLElement;
 		const dataTransfer = fakeDataTransfer();
 		fireEvent.dragStart(card, { dataTransfer });
 
@@ -84,7 +90,7 @@ describe("BoardView — mobile viewport", () => {
 		setViewportWidth(1024);
 		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
 
-		const card = screen.getByText("Move me").closest("a")!;
+		const card = screen.getByText("Move me").closest("a") as HTMLElement;
 		const dataTransfer = fakeDataTransfer();
 		fireEvent.dragStart(card, { dataTransfer });
 
