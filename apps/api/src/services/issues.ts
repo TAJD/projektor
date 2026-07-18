@@ -283,6 +283,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			status_category: schema.taskStatuses.category,
 			sprint_id: schema.issues.sprintId,
 			created_by_id: schema.issues.createdById,
+			author_kind: schema.issues.authorKind,
 			created_at: schema.issues.createdAt,
 			updated_at: schema.issues.updatedAt,
 			completed_at: schema.issues.completedAt,
@@ -341,6 +342,7 @@ const issueColumns = {
 	status_category: schema.taskStatuses.category,
 	sprint_id: schema.issues.sprintId,
 	created_by_id: schema.issues.createdById,
+	author_kind: schema.issues.authorKind,
 	created_at: schema.issues.createdAt,
 	updated_at: schema.issues.updatedAt,
 	completed_at: schema.issues.completedAt,
@@ -552,10 +554,10 @@ async function insertIssueRow(
 			`INSERT INTO issues
 			   (id, workspace_id, project_id, number, title, body, status, status_id,
 			    status_category, priority, assignee_id, labels, parent_id, type_id,
-			    created_by_id, created_at, updated_at)
+			    created_by_id, author_kind, created_at, updated_at)
 			 VALUES
 			   (?, ?, ?, (SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE project_id = ?),
-			    ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)`
+			    ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			params.id,
@@ -572,6 +574,9 @@ async function insertIssueRow(
 			params.parentId ?? null,
 			params.resolvedTypeId,
 			ctx.userId,
+			// PROJ-396: stamped from the authenticated principal type, not a caller-supplied
+			// field — see ServiceCtx.authKind and the issueComments.authorKind precedent (PROJ-328).
+			ctx.authKind ?? null,
 			params.now,
 			params.now
 		)

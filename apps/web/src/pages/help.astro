@@ -1,0 +1,84 @@
+---
+// PROJ-395: a low-priority, opt-in reference page (not a mandatory onboarding gate —
+// contextual help at the point of confusion, e.g. GlossaryHelp toggletips, does more of
+// the work; see the industry research cited in the PR). Purely static content, so no
+// workspaceSlug/API calls needed.
+import Base from '../layouts/Base.astro';
+
+const sections = [
+  {
+    term: 'Project',
+    body: "A named body of work (e.g. “Website Redesign”). Every issue lives inside a project.",
+  },
+  {
+    term: 'Issue',
+    body: 'A single piece of work — a bug to fix, a feature to build, a task to do. The basic unit everything else is organised around.',
+  },
+  {
+    term: 'Status',
+    body: 'Where an issue is in its life: Backlog (not started) → Todo (ready to start) → In Progress (being worked on) → In Review (done, being checked) → Done.',
+  },
+  {
+    term: 'Sprint',
+    body: 'A fixed time window (often 1–2 weeks) used to plan and track a batch of issues together.',
+  },
+  {
+    term: 'Epic',
+    body: 'A large body of work broken down into several smaller, related issues.',
+  },
+  {
+    term: 'Priority',
+    body: 'How urgent an issue is: Urgent, High, Medium, Low, or None.',
+  },
+  {
+    term: 'Groups',
+    body: 'Teams of members that share the same project access permissions.',
+  },
+  {
+    term: 'Tokens',
+    body: 'API keys that let external tools or AI agents act on your behalf.',
+  },
+  {
+    term: 'Comments',
+    body: 'Discussion and updates attached to an issue — including the completion report an agent or teammate leaves when their work is ready to check.',
+  },
+];
+---
+<Base title="Help — Projektor">
+  <div class="page-container" style="max-width: 42rem;">
+    <header style="margin-bottom: 1.5rem;">
+      <h1 style="margin: 0 0 0.5rem; font-size: 1.5rem; font-weight: 700; color: var(--text);">
+        Getting started
+      </h1>
+      <p style="margin: 0; color: var(--text-muted); font-size: 0.9375rem;">
+        A quick reference for the terms used around Projektor — useful if you're new to
+        this kind of team-planning tool.
+      </p>
+    </header>
+
+    <section style="margin-bottom: 2rem;">
+      <h2 style="font-size: 1.0625rem; margin: 0 0 0.75rem;">Key concepts</h2>
+      <dl style="margin: 0; display: grid; gap: 1rem;">
+        {sections.map((s) => (
+          <div>
+            <dt style="font-weight: 600; color: var(--text-strong);">{s.term}</dt>
+            <dd style="margin: 0.25rem 0 0; color: var(--text); font-size: 0.9375rem; line-height: 1.5;">
+              {s.body}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+
+    <section>
+      <h2 style="font-size: 1.0625rem; margin: 0 0 0.75rem;">Typical workflow</h2>
+      <ol style="margin: 0; padding-left: 1.25rem; color: var(--text); font-size: 0.9375rem; line-height: 1.7;">
+        <li>Someone creates an issue describing work to do.</li>
+        <li>Issues are triaged and moved out of the Backlog once they're ready to start.</li>
+        <li>Someone — or an AI agent — picks it up and works on it (In Progress).</li>
+        <li>When the work's done, it moves to In Review for a check.</li>
+        <li>Once accepted, it's marked Done.</li>
+      </ol>
+    </section>
+  </div>
+</Base>

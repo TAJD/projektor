@@ -101,6 +101,11 @@ export const issues = sqliteTable(
 		createdById: text("created_by_id")
 			.notNull()
 			.references(() => users.id),
+		// PROJ-396: the authenticated principal type at write time ("human" = Cloudflare
+		// Access JWT, "agent" = Bearer API token — see middleware/auth.ts), same convention
+		// as issueComments.authorKind (PROJ-328). NULL for issues created before this column
+		// existed — no reliable signal to backfill, so they're excluded rather than guessed.
+		authorKind: text("author_kind", { enum: ["human", "agent"] }),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
 		// Stamped when the issue enters a done-category status, cleared when it
