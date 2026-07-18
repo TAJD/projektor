@@ -1,4 +1,5 @@
 import {
+	BulkFeedbackIdsSchema,
 	ConvertFeedbackSchema,
 	ListFeedbackSchema,
 	SubmitFeedbackSchema,
@@ -7,6 +8,7 @@ import {
 import { canWriteProject, requireProjectAccess, requireProjectInWorkspace } from "./access";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { createIssue } from "./issues";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 export async function hashFeedbackToken(token: string): Promise<string> {
@@ -240,6 +242,35 @@ export async function convertFeedbackToIssue(
 		.run();
 
 	return issue;
+}
+
+export async function bulkMarkReviewed(
+	ctx: ServiceCtx,
+	input: unknown
+): Promise<{ updated: number }> {
+	const parsed = BulkFeedbackIdsSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, feedbackIds } = parsed.data;
+
+	await requireProjectInWorkspace(ctx, projectId);
+	const role = await requireProjectAccess(ctx, projectId);
+	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+
+	let updated = 0;
+	await inChunks(feedbackIds, async (chunk) => {
+		const placeholders = chunk.map(() => "?").join(", ");
+		const result = await ctx.db
+			.prepare(
+				`UPDATE feedback SET status = 'reviewed'
+         WHERE id IN (${placeholders}) AND project_id = ? AND workspace_id = ?`
+			)
+			.bind(...chunk, projectId, ctx.workspaceId)
+			.run();
+		updated += result.meta.changes;
+		return [];
+	});
+
+	return { updated };
 }
 
 export interface FeedbackVersionSummary {
