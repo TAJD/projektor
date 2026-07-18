@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { formatIssueRef, isValidIssueRef, normalizeIssueRef } from "../lib/issue-ref";
 import { parseStoryPoints } from "../lib/story-points";
 import { apiFetch } from "../utils/api-client";
@@ -723,6 +723,60 @@ export function RelationsSection({
 	);
 }
 
+const FileIcon = () => (
+	<svg
+		width="14"
+		height="14"
+		viewBox="0 0 24 24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="2"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		class="shrink-0"
+	>
+		<title>File</title>
+		<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+		<path d="M14 2v6h6" />
+	</svg>
+);
+
+const WikiIcon = () => (
+	<svg
+		width="14"
+		height="14"
+		viewBox="0 0 24 24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="2"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		class="shrink-0"
+	>
+		<title>Wiki page</title>
+		<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+		<path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+	</svg>
+);
+
+const LinkIcon = () => (
+	<svg
+		width="14"
+		height="14"
+		viewBox="0 0 24 24"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="2"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		class="shrink-0"
+	>
+		<title>External link</title>
+		<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+		<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+	</svg>
+);
+
 function AttachmentRow({
 	attachment,
 	workspaceSlug,
@@ -733,22 +787,56 @@ function AttachmentRow({
 	onDelete: () => void;
 }) {
 	const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
+
+	let icon: preact.ComponentChildren;
+	let href: string | null;
+	let label: string;
+	let meta: string | null = null;
+	let external = false;
+
+	if (attachment.kind === "wiki_ref" && attachment.wikiPage) {
+		icon = <WikiIcon />;
+		href = attachment.wikiPage.url;
+		label = attachment.wikiPage.title;
+	} else if (attachment.kind === "url" && attachment.url) {
+		icon = <LinkIcon />;
+		href = attachment.url;
+		label = attachment.filename || attachment.url;
+		external = true;
+	} else if (attachment.kind === "file") {
+		icon = <FileIcon />;
+		href = `/api/files/${attachment.id}${qs}`;
+		label = attachment.filename;
+		meta = formatBytes(attachment.size);
+		external = true;
+	} else {
+		// A wiki_ref whose target page was deleted, or is no longer visible to this
+		// user (project access revoked) — the join comes back empty either way.
+		icon = <WikiIcon />;
+		href = null;
+		label = "Wiki page unavailable";
+	}
+
 	return (
-		<div class="flex items-center gap-3 px-3 py-2 border border-border rounded-md bg-surface">
-			<a
-				href={`/api/files/${attachment.id}${qs}`}
-				target="_blank"
-				rel="noreferrer"
-				class="text-accent text-sm no-underline hover:underline flex-1 min-w-0 truncate"
-			>
-				{attachment.filename}
-			</a>
-			<span class="text-xs text-text-muted shrink-0">{formatBytes(attachment.size)}</span>
+		<div class="flex items-center gap-3 px-3 py-2 border border-border rounded-md bg-surface min-h-[44px]">
+			<span class="text-text-muted">{icon}</span>
+			{href ? (
+				<a
+					href={href}
+					{...(external ? { target: "_blank", rel: "noreferrer" } : {})}
+					class="text-accent text-sm no-underline hover:underline flex-1 min-w-0 truncate"
+				>
+					{label}
+				</a>
+			) : (
+				<span class="text-text-muted text-sm italic flex-1 min-w-0 truncate">{label}</span>
+			)}
+			{meta && <span class="text-xs text-text-muted shrink-0">{meta}</span>}
 			<button
 				type="button"
 				onClick={onDelete}
-				aria-label={`Delete ${attachment.filename}`}
-				class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
+				aria-label={`Remove ${label}`}
+				class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none min-h-[44px] min-w-[44px]"
 			>
 				×
 			</button>
@@ -774,8 +862,8 @@ function AttachmentUploadForm({
 	onCancel: () => void;
 }) {
 	return (
-		<div class="flex flex-wrap gap-2 items-center">
-			<label class="relative cursor-pointer">
+		<div class="flex flex-wrap gap-2 items-center max-sm:flex-col max-sm:items-stretch">
+			<label class="relative cursor-pointer max-sm:w-full">
 				<input
 					type="file"
 					class="sr-only"
@@ -785,19 +873,27 @@ function AttachmentUploadForm({
 						setUploadError(null);
 					}}
 				/>
-				<span class="btn btn-outline btn-sm">{uploadFile ? uploadFile.name : "Choose file"}</span>
+				<span class="btn btn-outline btn-sm max-sm:w-full max-sm:min-h-[44px] truncate block text-center">
+					{uploadFile ? uploadFile.name : "Choose file"}
+				</span>
 			</label>
-			<button
-				type="button"
-				onClick={onUpload}
-				disabled={!uploadFile || uploading}
-				class="btn btn-primary"
-			>
-				{uploading ? "Uploading…" : "Upload"}
-			</button>
-			<button type="button" onClick={onCancel} class="btn btn-outline">
-				Cancel
-			</button>
+			<div class="flex gap-2 max-sm:w-full">
+				<button
+					type="button"
+					onClick={onUpload}
+					disabled={!uploadFile || uploading}
+					class="btn btn-primary max-sm:flex-1 max-sm:min-h-[44px]"
+				>
+					{uploading ? "Uploading…" : "Upload"}
+				</button>
+				<button
+					type="button"
+					onClick={onCancel}
+					class="btn btn-outline max-sm:flex-1 max-sm:min-h-[44px]"
+				>
+					Cancel
+				</button>
+			</div>
 			{uploadError && (
 				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
 					{uploadError}
@@ -806,6 +902,196 @@ function AttachmentUploadForm({
 		</div>
 	);
 }
+
+interface WikiSearchResult {
+	id: string;
+	slug: string;
+	title: string;
+	project_id: string | null;
+}
+
+function WikiPageLinkForm({
+	workspaceSlug,
+	linking,
+	linkError,
+	setLinkError,
+	onLink,
+	onCancel,
+}: {
+	workspaceSlug?: string;
+	linking: boolean;
+	linkError: string | null;
+	setLinkError: (e: string | null) => void;
+	onLink: (wikiPageId: string) => void;
+	onCancel: () => void;
+}) {
+	const [query, setQuery] = useState("");
+	const [results, setResults] = useState<WikiSearchResult[]>([]);
+	const [searching, setSearching] = useState(false);
+
+	useEffect(() => {
+		if (!query.trim()) {
+			setResults([]);
+			return;
+		}
+		let cancelled = false;
+		setSearching(true);
+		const timer = setTimeout(async () => {
+			try {
+				const qs = new URLSearchParams({ q: query.trim() });
+				const data = await apiFetch<WikiSearchResult[]>(`/api/wiki/search?${qs}`, {
+					workspaceSlug,
+				});
+				if (!cancelled) setResults(Array.isArray(data) ? data : []);
+			} catch {
+				if (!cancelled) setResults([]);
+			} finally {
+				if (!cancelled) setSearching(false);
+			}
+		}, 250);
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+		};
+	}, [query, workspaceSlug]);
+
+	return (
+		<div class="flex flex-col gap-2 max-w-sm max-sm:max-w-none">
+			<input
+				type="text"
+				value={query}
+				onInput={(e) => {
+					setQuery((e.target as HTMLInputElement).value);
+					setLinkError(null);
+				}}
+				onKeyDown={(e) => {
+					if (e.key === "Escape") onCancel();
+				}}
+				placeholder="Search wiki pages…"
+				// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline picker opens
+				autoFocus
+				disabled={linking}
+				class="px-[0.625rem] py-[0.5rem] border border-border rounded text-sm bg-bg text-text-base min-h-[44px]"
+			/>
+			{searching && <p class="text-xs text-text-muted m-0">Searching…</p>}
+			{results.length > 0 && (
+				<ul class="list-none m-0 p-0 flex flex-col gap-1 max-h-56 overflow-y-auto">
+					{results.map((r) => (
+						<li key={r.id}>
+							<button
+								type="button"
+								disabled={linking}
+								onClick={() => onLink(r.id)}
+								class="w-full text-left px-[0.625rem] py-2 border border-border rounded text-sm
+									bg-surface hover:bg-bg transition-colors min-h-[44px]"
+							>
+								{r.title}
+							</button>
+						</li>
+					))}
+				</ul>
+			)}
+			<div class="flex gap-2">
+				<button
+					type="button"
+					onClick={onCancel}
+					disabled={linking}
+					class="btn btn-outline btn-sm max-sm:flex-1 max-sm:min-h-[44px]"
+				>
+					Cancel
+				</button>
+			</div>
+			{linkError && (
+				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)]">
+					{linkError}
+				</span>
+			)}
+		</div>
+	);
+}
+
+function UrlLinkForm({
+	urlValue,
+	setUrlValue,
+	labelValue,
+	setLabelValue,
+	linkError,
+	setLinkError,
+	linking,
+	onAdd,
+	onCancel,
+}: {
+	urlValue: string;
+	setUrlValue: (v: string) => void;
+	labelValue: string;
+	setLabelValue: (v: string) => void;
+	linkError: string | null;
+	setLinkError: (e: string | null) => void;
+	linking: boolean;
+	onAdd: () => void;
+	onCancel: () => void;
+}) {
+	return (
+		<div class="flex flex-wrap gap-2 items-start max-sm:flex-col">
+			<input
+				type="url"
+				value={urlValue}
+				onInput={(e) => {
+					setUrlValue((e.target as HTMLInputElement).value);
+					setLinkError(null);
+				}}
+				onKeyDown={(e) => {
+					if (e.key === "Enter") onAdd();
+					if (e.key === "Escape") onCancel();
+				}}
+				placeholder="https://example.com/…"
+				// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline editor opens
+				autoFocus
+				disabled={linking}
+				class="px-[0.625rem] py-[0.375rem] border border-border rounded text-sm flex-1 min-w-[10rem]
+					max-sm:w-full bg-bg text-text-base min-h-[44px]"
+			/>
+			<input
+				type="text"
+				value={labelValue}
+				onInput={(e) => setLabelValue((e.target as HTMLInputElement).value)}
+				onKeyDown={(e) => {
+					if (e.key === "Enter") onAdd();
+					if (e.key === "Escape") onCancel();
+				}}
+				placeholder="Label (optional)"
+				disabled={linking}
+				class="px-[0.625rem] py-[0.375rem] border border-border rounded text-sm w-40
+					max-sm:w-full bg-bg text-text-base min-h-[44px]"
+			/>
+			<div class="flex gap-2 max-sm:w-full">
+				<button
+					type="button"
+					onClick={onAdd}
+					disabled={linking || !urlValue.trim()}
+					class="btn btn-primary max-sm:flex-1 max-sm:min-h-[44px]"
+				>
+					{linking ? "Adding…" : "Add"}
+				</button>
+				<button
+					type="button"
+					onClick={onCancel}
+					disabled={linking}
+					class="btn btn-outline max-sm:flex-1 max-sm:min-h-[44px]"
+				>
+					Cancel
+				</button>
+			</div>
+			{linkError && (
+				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
+					{linkError}
+				</span>
+			)}
+		</div>
+	);
+}
+
+type AttachMode = "none" | "file" | "wiki" | "url";
 
 export function AttachmentsSection({
 	issueId,
@@ -818,10 +1104,25 @@ export function AttachmentsSection({
 	attachments: Attachment[];
 	fetchAttachments: () => Promise<void>;
 }) {
-	const [uploadFormOpen, setUploadFormOpen] = useState(false);
+	const [mode, setMode] = useState<AttachMode>("none");
+
 	const [uploadFile, setUploadFile] = useState<File | null>(null);
 	const [uploading, setUploading] = useState(false);
 	const [uploadError, setUploadError] = useState<string | null>(null);
+
+	const [linking, setLinking] = useState(false);
+	const [linkError, setLinkError] = useState<string | null>(null);
+	const [urlValue, setUrlValue] = useState("");
+	const [labelValue, setLabelValue] = useState("");
+
+	function resetForms() {
+		setMode("none");
+		setUploadFile(null);
+		setUploadError(null);
+		setLinkError(null);
+		setUrlValue("");
+		setLabelValue("");
+	}
 
 	async function uploadAttachment() {
 		if (!uploadFile) return;
@@ -833,13 +1134,55 @@ export function AttachmentsSection({
 			form.append("entityType", "issue");
 			form.append("entityId", issueId);
 			await apiFetch("/api/files", { workspaceSlug, method: "POST", body: form });
-			setUploadFile(null);
-			setUploadFormOpen(false);
+			resetForms();
 			await fetchAttachments();
 		} catch (e) {
 			setUploadError(String(e));
 		} finally {
 			setUploading(false);
+		}
+	}
+
+	async function linkWikiPage(wikiPageId: string) {
+		setLinking(true);
+		setLinkError(null);
+		try {
+			await apiFetch("/api/files/links", {
+				workspaceSlug,
+				method: "POST",
+				body: { kind: "wiki_ref", entityType: "issue", entityId: issueId, wikiPageId },
+			});
+			resetForms();
+			await fetchAttachments();
+		} catch (e) {
+			setLinkError(String(e));
+		} finally {
+			setLinking(false);
+		}
+	}
+
+	async function addUrl() {
+		if (!urlValue.trim()) return;
+		setLinking(true);
+		setLinkError(null);
+		try {
+			await apiFetch("/api/files/links", {
+				workspaceSlug,
+				method: "POST",
+				body: {
+					kind: "url",
+					entityType: "issue",
+					entityId: issueId,
+					url: urlValue.trim(),
+					label: labelValue.trim() || undefined,
+				},
+			});
+			resetForms();
+			await fetchAttachments();
+		} catch (e) {
+			setLinkError(String(e));
+		} finally {
+			setLinking(false);
 		}
 	}
 
@@ -871,7 +1214,7 @@ export function AttachmentsSection({
 				</div>
 			)}
 
-			{uploadFormOpen ? (
+			{mode === "file" && (
 				<AttachmentUploadForm
 					uploadFile={uploadFile}
 					setUploadFile={setUploadFile}
@@ -879,21 +1222,60 @@ export function AttachmentsSection({
 					setUploadError={setUploadError}
 					uploading={uploading}
 					onUpload={uploadAttachment}
-					onCancel={() => {
-						setUploadFormOpen(false);
-						setUploadFile(null);
-						setUploadError(null);
-					}}
+					onCancel={resetForms}
 				/>
-			) : (
-				<button
-					type="button"
-					onClick={() => setUploadFormOpen(true)}
-					class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1"
-				>
-					<span class="text-base leading-none">+</span>
-					<span>Attach file</span>
-				</button>
+			)}
+			{mode === "wiki" && (
+				<WikiPageLinkForm
+					workspaceSlug={workspaceSlug}
+					linking={linking}
+					linkError={linkError}
+					setLinkError={setLinkError}
+					onLink={linkWikiPage}
+					onCancel={resetForms}
+				/>
+			)}
+			{mode === "url" && (
+				<UrlLinkForm
+					urlValue={urlValue}
+					setUrlValue={setUrlValue}
+					labelValue={labelValue}
+					setLabelValue={setLabelValue}
+					linkError={linkError}
+					setLinkError={setLinkError}
+					linking={linking}
+					onAdd={addUrl}
+					onCancel={resetForms}
+				/>
+			)}
+
+			{mode === "none" && (
+				<div class="flex flex-wrap gap-x-4 gap-y-2 max-sm:flex-col max-sm:gap-2">
+					<button
+						type="button"
+						onClick={() => setMode("file")}
+						class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1 max-sm:min-h-[44px]"
+					>
+						<span class="text-base leading-none">+</span>
+						<span>Attach file</span>
+					</button>
+					<button
+						type="button"
+						onClick={() => setMode("wiki")}
+						class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1 max-sm:min-h-[44px]"
+					>
+						<span class="text-base leading-none">+</span>
+						<span>Link wiki page</span>
+					</button>
+					<button
+						type="button"
+						onClick={() => setMode("url")}
+						class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1 max-sm:min-h-[44px]"
+					>
+						<span class="text-base leading-none">+</span>
+						<span>Add URL</span>
+					</button>
+				</div>
 			)}
 		</section>
 	);

@@ -27,10 +27,13 @@ export interface IssueLink {
 
 export interface Attachment {
 	id: string;
+	kind: "file" | "wiki_ref" | "url";
 	filename: string;
 	contentType: string;
 	size: number;
+	url: string | null;
 	createdAt: number;
+	wikiPage: { id: string; title: string; url: string } | null;
 }
 
 export interface IssueData {

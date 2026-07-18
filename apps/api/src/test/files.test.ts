@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture } from "./helpers";
+import { authHeaders, seedFixture, seedMember, seedProject, seedToken, seedUser } from "./helpers";
 
 const ENTITY_ID = crypto.randomUUID();
 
@@ -310,5 +310,252 @@ describe("Files API", () => {
 		expect(res.status).toBe(413);
 		const body = (await res.json()) as { error: string };
 		expect(body.error).toBe("Workspace storage quota exceeded (1024 MB)");
+	});
+
+	describe("POST /api/files/links (wiki_ref and url attachment kinds)", () => {
+		async function createWikiPage(headers: Record<string, string>) {
+			const res = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: { ...headers, "Content-Type": "application/json" },
+				body: JSON.stringify({ title: "Linked page", content: "hello" }),
+			});
+			const body = (await res.json()) as { id: string };
+			return body.id;
+		}
+
+		it("attaches a wiki page reference and lists it with title/url", async () => {
+			const headers = { ...authHeaders(token, slug), "Content-Type": "application/json" };
+			const wikiPageId = await createWikiPage(headers);
+
+			const res = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					kind: "wiki_ref",
+					entityType: "issue",
+					entityId: ENTITY_ID,
+					wikiPageId,
+				}),
+			});
+			expect(res.status).toBe(201);
+
+			const listRes = await SELF.fetch(
+				`http://localhost/api/files?entityType=issue&entityId=${ENTITY_ID}`,
+				{ headers: authHeaders(token, slug) }
+			);
+			const list = (await listRes.json()) as Array<{
+				kind: string;
+				wikiPage: { id: string; title: string; url: string } | null;
+			}>;
+			const entry = list.find((l) => l.kind === "wiki_ref");
+			expect(entry?.wikiPage?.title).toBe("Linked page");
+			expect(entry?.wikiPage?.id).toBe(wikiPageId);
+		});
+
+		it("rejects a wiki_ref for a non-existent wiki page → 404", async () => {
+			const res = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+				body: JSON.stringify({
+					kind: "wiki_ref",
+					entityType: "issue",
+					entityId: ENTITY_ID,
+					wikiPageId: crypto.randomUUID(),
+				}),
+			});
+			expect(res.status).toBe(404);
+		});
+
+		it("attaches a URL with a label and lists it", async () => {
+			const res = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+				body: JSON.stringify({
+					kind: "url",
+					entityType: "issue",
+					entityId: ENTITY_ID,
+					url: "https://example.com/doc",
+					label: "Design doc",
+				}),
+			});
+			expect(res.status).toBe(201);
+
+			const listRes = await SELF.fetch(
+				`http://localhost/api/files?entityType=issue&entityId=${ENTITY_ID}`,
+				{ headers: authHeaders(token, slug) }
+			);
+			const list = (await listRes.json()) as Array<{
+				kind: string;
+				filename: string;
+				url: string | null;
+			}>;
+			const entry = list.find((l) => l.kind === "url");
+			expect(entry?.filename).toBe("Design doc");
+			expect(entry?.url).toBe("https://example.com/doc");
+		});
+
+		it("rejects a malformed URL → 400", async () => {
+			const res = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+				body: JSON.stringify({
+					kind: "url",
+					entityType: "issue",
+					entityId: ENTITY_ID,
+					url: "not-a-url",
+				}),
+			});
+			expect(res.status).toBe(400);
+		});
+
+		it("rejects a non-http(s) URL scheme → 400", async () => {
+			const res = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+				body: JSON.stringify({
+					kind: "url",
+					entityType: "issue",
+					entityId: ENTITY_ID,
+					url: "javascript:alert(1)",
+				}),
+			});
+			expect(res.status).toBe(400);
+		});
+
+		it("DELETE removes a link attachment without touching R2", async () => {
+			const headers = { ...authHeaders(token, slug), "Content-Type": "application/json" };
+			const createRes = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers,
+				body: JSON.stringify({
+					kind: "url",
+					entityType: "issue",
+					entityId: ENTITY_ID,
+					url: "https://example.com",
+				}),
+			});
+			const { id } = (await createRes.json()) as { id: string };
+
+			const delRes = await SELF.fetch(`http://localhost/api/files/${id}`, {
+				method: "DELETE",
+				headers: authHeaders(token, slug),
+			});
+			expect(delRes.status).toBe(204);
+		});
+
+		it("rejects attaching a project-scoped wiki page the caller cannot see → 404", async () => {
+			// The default fixture user is a plain member with no group grant, so a
+			// freshly created project-scoped page is invisible to them (PROJ-311
+			// default-deny). Bootstrap an admin in the same workspace to create it.
+			const adminUser = await seedUser(`admin-${crypto.randomUUID()}@example.com`);
+			await seedMember(workspaceId, adminUser.id, "admin");
+			const adminToken = await seedToken(workspaceId, adminUser.id);
+
+			const project = await seedProject(workspaceId);
+			const pageRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(adminToken, slug),
+				body: JSON.stringify({
+					title: "Restricted page",
+					content: "secret",
+					projectId: project.id,
+				}),
+			});
+			const { id: restrictedPageId } = (await pageRes.json()) as { id: string };
+
+			const res = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+				body: JSON.stringify({
+					kind: "wiki_ref",
+					entityType: "issue",
+					entityId: ENTITY_ID,
+					wikiPageId: restrictedPageId,
+				}),
+			});
+			expect(res.status).toBe(404);
+		});
+
+		it("does not leak a project-scoped wiki page's title to a caller without project access", async () => {
+			const adminUser = await seedUser(`admin-${crypto.randomUUID()}@example.com`);
+			await seedMember(workspaceId, adminUser.id, "admin");
+			const adminToken = await seedToken(workspaceId, adminUser.id);
+			const adminHeaders = { ...authHeaders(adminToken, slug), "Content-Type": "application/json" };
+
+			const project = await seedProject(workspaceId);
+			const pageRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: adminHeaders,
+				body: JSON.stringify({
+					title: "Secret project page",
+					content: "secret",
+					projectId: project.id,
+				}),
+			});
+			const { id: restrictedPageId } = (await pageRes.json()) as { id: string };
+
+			// Admin attaches it to an entity — the attachment itself is workspace-visible,
+			// only the joined wiki page details should be gated.
+			const entityId = crypto.randomUUID();
+			const linkRes = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers: adminHeaders,
+				body: JSON.stringify({
+					kind: "wiki_ref",
+					entityType: "issue",
+					entityId,
+					wikiPageId: restrictedPageId,
+				}),
+			});
+			expect(linkRes.status).toBe(201);
+
+			const listRes = await SELF.fetch(
+				`http://localhost/api/files?entityType=issue&entityId=${entityId}`,
+				{ headers: authHeaders(token, slug) }
+			);
+			const list = (await listRes.json()) as Array<{ kind: string; wikiPage: unknown }>;
+			const entry = list.find((l) => l.kind === "wiki_ref");
+			expect(entry?.wikiPage).toBeNull();
+		});
+
+		it("deleting the linked wiki page also removes the wiki_ref attachment", async () => {
+			// Deleting a workspace-level page requires admin/owner, so create+delete
+			// through a dedicated admin rather than the default member fixture.
+			const adminUser = await seedUser(`admin-${crypto.randomUUID()}@example.com`);
+			await seedMember(workspaceId, adminUser.id, "admin");
+			const adminToken = await seedToken(workspaceId, adminUser.id);
+			const adminHeaders = { ...authHeaders(adminToken, slug), "Content-Type": "application/json" };
+
+			const pageRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: adminHeaders,
+				body: JSON.stringify({ title: "Doomed page", content: "will be deleted" }),
+			});
+			const { id: wikiPageId, slug: wikiPageSlug } = (await pageRes.json()) as {
+				id: string;
+				slug: string;
+			};
+
+			const entityId = crypto.randomUUID();
+			const linkRes = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers: adminHeaders,
+				body: JSON.stringify({ kind: "wiki_ref", entityType: "issue", entityId, wikiPageId }),
+			});
+			expect(linkRes.status).toBe(201);
+
+			const delRes = await SELF.fetch(`http://localhost/api/wiki/${wikiPageSlug}`, {
+				method: "DELETE",
+				headers: adminHeaders,
+			});
+			expect(delRes.status).toBe(200);
+
+			const listRes = await SELF.fetch(
+				`http://localhost/api/files?entityType=issue&entityId=${entityId}`,
+				{ headers: adminHeaders }
+			);
+			const list = (await listRes.json()) as Array<{ kind: string }>;
+			expect(list.find((l) => l.kind === "wiki_ref")).toBeUndefined();
+		});
 	});
 });

@@ -2,6 +2,12 @@ import type { HonoEnv } from "@projektor/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
+import { serviceErrToResponse } from "../http/error-adapter";
+import { wikiPagePath } from "../lib/urls";
+import { visibleProjectSqlFragment } from "../services/access";
+import { NotFoundError } from "../services/errors";
+import { ctxFromHono } from "../services/types";
+import * as wikiService from "../services/wiki";
 
 const router = new Hono<HonoEnv>();
 
@@ -47,30 +53,126 @@ router.get("/", async (c) => {
 	if (!parsed.success) return c.json({ error: "entityType must be issue or wiki_page" }, 400);
 	if (!entityId) return c.json({ error: "entityId is required" }, 400);
 
+	// PROJ-311/PROJ-407: only join in wiki page details the caller is actually allowed to
+	// see (workspace-level pages, or project-scoped pages they have a grant on). A row
+	// referencing a page outside the caller's visibility joins to nothing, same as a
+	// deleted page — the row still lists as an unavailable wiki_ref rather than leaking
+	// the restricted page's title.
+	const ctx = ctxFromHono(c);
+	const visible = visibleProjectSqlFragment(ctx, "w.project_id");
+	const joinCond = visible
+		? `w.id = a.linked_wiki_page_id AND (w.project_id IS NULL OR ${visible.sql})`
+		: "w.id = a.linked_wiki_page_id";
+
 	const rows = await c.env.DB.prepare(
-		`SELECT id, filename, content_type, size, created_at
-     FROM attachments
-     WHERE workspace_id = ? AND entity_type = ? AND entity_id = ?
-     ORDER BY created_at ASC`
+		`SELECT a.id, a.kind, a.filename, a.content_type, a.size, a.url, a.created_at,
+            w.id AS wiki_page_id, w.slug AS wiki_page_slug, w.title AS wiki_page_title,
+            w.project_id AS wiki_page_project_id
+     FROM attachments a
+     LEFT JOIN wiki_pages w ON ${joinCond}
+     WHERE a.workspace_id = ? AND a.entity_type = ? AND a.entity_id = ?
+     ORDER BY a.created_at ASC`
 	)
-		.bind(workspace.id, parsed.data, entityId)
+		.bind(...(visible ? visible.params : []), workspace.id, parsed.data, entityId)
 		.all<{
 			id: string;
+			kind: "file" | "wiki_ref" | "url";
 			filename: string;
 			content_type: string;
 			size: number;
+			url: string | null;
 			created_at: number;
+			wiki_page_id: string | null;
+			wiki_page_slug: string | null;
+			wiki_page_title: string | null;
+			wiki_page_project_id: string | null;
 		}>();
 
 	return c.json(
 		(rows.results ?? []).map((r) => ({
 			id: r.id,
+			kind: r.kind,
 			filename: r.filename,
 			contentType: r.content_type,
 			size: r.size,
+			url: r.url,
 			createdAt: r.created_at,
+			wikiPage:
+				r.kind === "wiki_ref" && r.wiki_page_id
+					? {
+							id: r.wiki_page_id,
+							title: r.wiki_page_title,
+							url: wikiPagePath(r.wiki_page_slug ?? "", r.wiki_page_project_id),
+						}
+					: null,
 		}))
 	);
+});
+
+const CreateLinkAttachmentSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("wiki_ref"),
+		entityType: EntityTypeEnum,
+		entityId: z.string().min(1),
+		wikiPageId: z.string().min(1),
+	}),
+	z.object({
+		kind: z.literal("url"),
+		entityType: EntityTypeEnum,
+		entityId: z.string().min(1),
+		url: z
+			.string()
+			.url()
+			.refine((u) => /^https?:\/\//i.test(u), "URL must be http or https"),
+		label: z.string().trim().max(200).optional(),
+	}),
+]);
+
+router.post("/links", async (c) => {
+	const workspace = c.get("workspace") as { id: string };
+	const user = c.get("user") as { id: string };
+
+	const body = await c.req.json().catch(() => null);
+	const parsed = CreateLinkAttachmentSchema.safeParse(body);
+	if (!parsed.success)
+		return c.json({ error: parsed.error.issues[0]?.message ?? "Invalid input" }, 400);
+	const input = parsed.data;
+
+	if (input.kind === "wiki_ref") {
+		// PROJ-311: getWikiPage enforces project-grant visibility, not just existence —
+		// a page in a project the caller can't see 404s the same as a nonexistent one.
+		try {
+			await wikiService.getWikiPage(ctxFromHono(c), input.wikiPageId);
+		} catch (e) {
+			if (e instanceof NotFoundError) return serviceErrToResponse(c, e);
+			throw e;
+		}
+	}
+
+	const id = crypto.randomUUID();
+	const now = Math.floor(Date.now() / 1000);
+
+	await c.env.DB.prepare(
+		`INSERT INTO attachments
+       (id, workspace_id, kind, r2_key, filename, content_type, size, url, linked_wiki_page_id,
+        entity_type, entity_id, created_by_id, created_at)
+     VALUES (?, ?, ?, '', ?, '', 0, ?, ?, ?, ?, ?, ?)`
+	)
+		.bind(
+			id,
+			workspace.id,
+			input.kind,
+			input.kind === "url" ? (input.label ?? "") : "",
+			input.kind === "url" ? input.url : null,
+			input.kind === "wiki_ref" ? input.wikiPageId : null,
+			input.entityType,
+			input.entityId,
+			user.id,
+			now
+		)
+		.run();
+
+	return c.json({ id, kind: input.kind }, 201);
 });
 
 async function parseUploadFormData(c: Context<HonoEnv>) {
@@ -235,7 +337,7 @@ router.delete("/:id", async (c) => {
 
 	if (!row) return c.json({ error: "Not found" }, 404);
 
-	await c.env.R2.delete(row.r2_key);
+	if (row.r2_key) await c.env.R2.delete(row.r2_key);
 	await c.env.DB.prepare("DELETE FROM attachments WHERE id = ?").bind(id).run();
 
 	return new Response(null, { status: 204 });

@@ -38,6 +38,7 @@ import m0034 from "../../../../packages/db/migrations/0034_issue_needs_audit.sql
 import m0035 from "../../../../packages/db/migrations/0035_project_slug.sql?raw";
 import m0036 from "../../../../packages/db/migrations/0036_feedback.sql?raw";
 import m0037 from "../../../../packages/db/migrations/0037_issue_author_kind.sql?raw";
+import m0038 from "../../../../packages/db/migrations/0038_attachment_kinds.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -78,4 +79,5 @@ export const MIGRATIONS = [
 	m0035,
 	m0036,
 	m0037,
+	m0038,
 ];
