@@ -1,6 +1,6 @@
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import { useEffect, useState } from "preact/hooks";
-import { apiFetch } from "../../utils/api-client";
+import { ApiOfflineError, apiFetch } from "../../utils/api-client";
 import type { Issue, TaskStatus } from "../board-utils";
 import { buildCreateIssuePayload, buildOptimisticIssue } from "../IssueList-helpers";
 import type { ProjectMeta } from "./types";
@@ -85,7 +85,11 @@ export function useCreateIssueModal({
 			setIssues((prev) => [newIssue, ...prev]);
 			setShowCreateModal(false);
 		} catch (err) {
-			setCreateError(`Failed to create issue: ${String(err)}`);
+			setCreateError(
+				err instanceof ApiOfflineError
+					? "You're offline — the issue wasn't created. Try again once your connection returns."
+					: `Failed to create issue: ${String(err)}`
+			);
 		} finally {
 			setSubmittingCreate(false);
 		}

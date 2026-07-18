@@ -1,6 +1,7 @@
 ---
 import { ClientRouter } from 'astro:transitions';
 import { GlossaryHelp } from '../islands/GlossaryHelp';
+import { OfflineBanner } from '../islands/OfflineBanner';
 import type { GlossaryTermId } from '../islands/glossary-definitions';
 import pkg from '../../package.json';
 
@@ -581,6 +582,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
     </style>
   </head>
   <body>
+    <OfflineBanner client:load />
     <div class="app-shell">
       <header class="mobile-topbar">
         <button
