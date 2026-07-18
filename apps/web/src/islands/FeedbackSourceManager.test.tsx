@@ -36,8 +36,15 @@ describe("FeedbackSourceManager", () => {
 	it("lists sources with name and token preview after fetch", async () => {
 		stubFetch();
 		render(<FeedbackSourceManager workspaceSlug="my-ws" projectId="p1" />);
-		expect(await screen.findByText("Onboarding survey")).toBeTruthy();
-		expect(screen.getByText(/abcdef012345/)).toBeTruthy();
+		expect((await screen.findAllByText("Onboarding survey")).length).toBeGreaterThan(0);
+		expect(screen.getAllByText(/abcdef012345/).length).toBeGreaterThan(0);
+	});
+
+	it("renders a mobile-card fallback alongside the desktop table", async () => {
+		stubFetch();
+		render(<FeedbackSourceManager workspaceSlug="my-ws" projectId="p1" />);
+		// Desktop table + mobile card both render (CSS hides one per viewport).
+		expect((await screen.findAllByText("Onboarding survey")).length).toBe(2);
 	});
 
 	it("shows the raw token once after minting a source", async () => {
@@ -76,7 +83,7 @@ describe("FeedbackSourceManager", () => {
 		stubFetch();
 		try {
 			render(<FeedbackSourceManager workspaceSlug="my-ws" />);
-			expect(await screen.findByText("Onboarding survey")).toBeTruthy();
+			expect((await screen.findAllByText("Onboarding survey")).length).toBeGreaterThan(0);
 			const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
 			expect(fetchMock.mock.calls[0][0]).toContain("/api/projects/p1/feedback-sources");
 		} finally {

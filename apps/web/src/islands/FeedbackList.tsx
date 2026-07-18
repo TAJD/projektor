@@ -48,6 +48,122 @@ function parseContext(
 	}
 }
 
+function FeedbackContext({
+	row,
+	expanded,
+	onToggle,
+}: {
+	row: Feedback;
+	expanded: boolean;
+	onToggle: () => void;
+}) {
+	const context = parseContext(row.sourceUrl);
+	if (!context) return null;
+	return (
+		<div class="mt-1">
+			<button type="button" class="text-[0.75rem] text-text-muted underline" onClick={onToggle}>
+				Context ({context.params.length})
+			</button>
+			{expanded && (
+				<div class="text-[0.75rem] text-text-muted mt-1 flex flex-col gap-0.5">
+					<a href={context.url} target="_blank" rel="noopener noreferrer" class="underline">
+						{context.url}
+					</a>
+					{context.params.map(([key, value]) => (
+						<div key={key}>
+							{key}: {value}
+						</div>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+function FeedbackRowActions({
+	row,
+	onMarkReviewed,
+	onConvert,
+}: {
+	row: Feedback;
+	onMarkReviewed: (id: string) => void;
+	onConvert: (id: string) => void;
+}) {
+	return (
+		<div class="flex gap-2 flex-wrap">
+			{row.status === "new" && (
+				<button type="button" class="btn btn-outline btn-sm" onClick={() => onMarkReviewed(row.id)}>
+					Mark reviewed
+				</button>
+			)}
+			{row.linkedIssueId ? (
+				<span class="text-[0.8rem] text-text-muted">Linked</span>
+			) : (
+				<button type="button" class="btn btn-outline btn-sm" onClick={() => onConvert(row.id)}>
+					Convert to issue
+				</button>
+			)}
+		</div>
+	);
+}
+
+interface FeedbackMobileCardsProps {
+	rows: Feedback[];
+	selected: Set<string>;
+	expanded: Set<string>;
+	onToggleRow: (id: string) => void;
+	onToggleExpanded: (id: string) => void;
+	onMarkReviewed: (id: string) => void;
+	onConvert: (id: string) => void;
+}
+
+function FeedbackMobileCards({
+	rows,
+	selected,
+	expanded,
+	onToggleRow,
+	onToggleExpanded,
+	onMarkReviewed,
+	onConvert,
+}: FeedbackMobileCardsProps) {
+	return (
+		<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
+			{rows.map((r) => (
+				<div key={r.id} class="py-3 px-4 border border-border rounded-md bg-surface">
+					<div class="flex items-start gap-2 mb-2">
+						<input
+							type="checkbox"
+							aria-label={`select row ${r.id}`}
+							checked={selected.has(r.id)}
+							onChange={() => onToggleRow(r.id)}
+							class="mt-1"
+						/>
+						<div class="flex-1">
+							<div class="flex justify-between items-center gap-2 mb-1">
+								<span class="text-[0.9rem]">{ratingDisplay(r.rating, r.ratingScale)}</span>
+								<span class="text-[0.75rem] text-text-muted">{formatDate(r.createdAt)}</span>
+							</div>
+							<div class="text-[0.875rem] text-text-base">{r.body ?? "—"}</div>
+							{r.submitterLabel && (
+								<div class="text-[0.75rem] text-text-muted mt-1">{r.submitterLabel}</div>
+							)}
+							<FeedbackContext
+								row={r}
+								expanded={expanded.has(r.id)}
+								onToggle={() => onToggleExpanded(r.id)}
+							/>
+							<div class="text-[0.75rem] text-text-muted mt-1">
+								{r.sourceName ?? "—"} · {r.status}
+							</div>
+						</div>
+					</div>
+					<FeedbackRowActions row={r} onMarkReviewed={onMarkReviewed} onConvert={onConvert} />
+				</div>
+			))}
+		</div>
+	);
+}
+
 export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }: Props) {
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	useEffect(() => {
@@ -237,108 +353,75 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 					No feedback yet.
 				</div>
 			) : (
-				<div class="overflow-x-auto">
-					<table class="w-full border-collapse text-[0.9rem]">
-						<thead>
-							<tr>
-								<th class={TH}>
-									<input
-										type="checkbox"
-										aria-label="select all"
-										checked={rows.length > 0 && selected.size === rows.length}
-										onChange={toggleSelectAll}
-									/>
-								</th>
-								<th class={TH}>Rating</th>
-								<th class={TH}>Feedback</th>
-								<th class={TH}>Source</th>
-								<th class={TH}>Status</th>
-								<th class={TH}>Received</th>
-								<th class={TH}></th>
-							</tr>
-						</thead>
-						<tbody>
-							{rows.map((r) => (
-								<tr key={r.id}>
-									<td class={TD}>
+				<>
+					<div class="overflow-x-auto max-sm:hidden">
+						<table class="w-full border-collapse text-[0.9rem]">
+							<thead>
+								<tr>
+									<th class={TH}>
 										<input
 											type="checkbox"
-											aria-label={`select row ${r.id}`}
-											checked={selected.has(r.id)}
-											onChange={() => toggleRow(r.id)}
+											aria-label="select all"
+											checked={rows.length > 0 && selected.size === rows.length}
+											onChange={toggleSelectAll}
 										/>
-									</td>
-									<td class={TD}>{ratingDisplay(r.rating, r.ratingScale)}</td>
-									<td class={`${TD} text-text-base`}>
-										<div>{r.body ?? "—"}</div>
-										{r.submitterLabel && (
-											<div class="text-[0.75rem] text-text-muted mt-1">{r.submitterLabel}</div>
-										)}
-										{(() => {
-											const context = parseContext(r.sourceUrl);
-											if (!context) return null;
-											return (
-												<div class="mt-1">
-													<button
-														type="button"
-														class="text-[0.75rem] text-text-muted underline"
-														onClick={() => toggleExpanded(r.id)}
-													>
-														Context ({context.params.length})
-													</button>
-													{expanded.has(r.id) && (
-														<div class="text-[0.75rem] text-text-muted mt-1 flex flex-col gap-0.5">
-															<a
-																href={context.url}
-																target="_blank"
-																rel="noopener noreferrer"
-																class="underline"
-															>
-																{context.url}
-															</a>
-															{context.params.map(([key, value]) => (
-																<div key={key}>
-																	{key}: {value}
-																</div>
-															))}
-														</div>
-													)}
-												</div>
-											);
-										})()}
-									</td>
-									<td class={`${TD} text-text-muted`}>{r.sourceName ?? "—"}</td>
-									<td class={`${TD} text-text-muted`}>{r.status}</td>
-									<td class={`${TD} text-text-muted`}>{formatDate(r.createdAt)}</td>
-									<td class={`${TD} whitespace-nowrap`}>
-										<div class="flex gap-2">
-											{r.status === "new" && (
-												<button
-													type="button"
-													class="btn btn-outline btn-sm"
-													onClick={() => markReviewed(r.id)}
-												>
-													Mark reviewed
-												</button>
-											)}
-											{r.linkedIssueId ? (
-												<span class="text-[0.8rem] text-text-muted">Linked</span>
-											) : (
-												<button
-													type="button"
-													class="btn btn-outline btn-sm"
-													onClick={() => convert(r.id)}
-												>
-													Convert to issue
-												</button>
-											)}
-										</div>
-									</td>
+									</th>
+									<th class={TH}>Rating</th>
+									<th class={TH}>Feedback</th>
+									<th class={TH}>Source</th>
+									<th class={TH}>Status</th>
+									<th class={TH}>Received</th>
+									<th class={TH}></th>
 								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
+							</thead>
+							<tbody>
+								{rows.map((r) => (
+									<tr key={r.id}>
+										<td class={TD}>
+											<input
+												type="checkbox"
+												aria-label={`select row ${r.id}`}
+												checked={selected.has(r.id)}
+												onChange={() => toggleRow(r.id)}
+											/>
+										</td>
+										<td class={TD}>{ratingDisplay(r.rating, r.ratingScale)}</td>
+										<td class={`${TD} text-text-base`}>
+											<div>{r.body ?? "—"}</div>
+											{r.submitterLabel && (
+												<div class="text-[0.75rem] text-text-muted mt-1">{r.submitterLabel}</div>
+											)}
+											<FeedbackContext
+												row={r}
+												expanded={expanded.has(r.id)}
+												onToggle={() => toggleExpanded(r.id)}
+											/>
+										</td>
+										<td class={`${TD} text-text-muted`}>{r.sourceName ?? "—"}</td>
+										<td class={`${TD} text-text-muted`}>{r.status}</td>
+										<td class={`${TD} text-text-muted`}>{formatDate(r.createdAt)}</td>
+										<td class={`${TD} whitespace-nowrap`}>
+											<FeedbackRowActions
+												row={r}
+												onMarkReviewed={markReviewed}
+												onConvert={convert}
+											/>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+					<FeedbackMobileCards
+						rows={rows}
+						selected={selected}
+						expanded={expanded}
+						onToggleRow={toggleRow}
+						onToggleExpanded={toggleExpanded}
+						onMarkReviewed={markReviewed}
+						onConvert={convert}
+					/>
+				</>
 			)}
 		</section>
 	);

@@ -564,28 +564,61 @@ function EpicsTable({
 	if (filteredEpics.length === 0) {
 		return <p class="text-text-muted text-sm">No epics match the active filters.</p>;
 	}
+	const sorted = sortIssues(filteredEpics, sortBy, sortDir);
 	return (
-		<div class="overflow-x-auto">
-			<table class="w-full border-collapse text-sm" aria-label="Epics">
-				<thead>
-					<tr>
-						<th class={TH_CLASS}>Title</th>
-						<th class={TH_CLASS}>Status</th>
-						<th
-							class={`${TH_CLASS} cursor-pointer select-none hover:text-text-base`}
-							onClick={() => toggleSort("priority")}
-						>
-							Priority{sortIndicator("priority", sortBy, sortDir)}
-						</th>
-						<th class={TH_CLASS}>Children</th>
-					</tr>
-				</thead>
-				<tbody>
-					{sortIssues(filteredEpics, sortBy, sortDir).map((ep) => (
-						<EpicRow key={ep.id} ep={ep} rollup={epicRollups[ep.id]} />
-					))}
-				</tbody>
-			</table>
+		<>
+			<div class="overflow-x-auto max-sm:hidden">
+				<table class="w-full border-collapse text-sm" aria-label="Epics">
+					<thead>
+						<tr>
+							<th class={TH_CLASS}>Title</th>
+							<th class={TH_CLASS}>Status</th>
+							<th
+								class={`${TH_CLASS} cursor-pointer select-none hover:text-text-base`}
+								onClick={() => toggleSort("priority")}
+							>
+								Priority{sortIndicator("priority", sortBy, sortDir)}
+							</th>
+							<th class={TH_CLASS}>Children</th>
+						</tr>
+					</thead>
+					<tbody>
+						{sorted.map((ep) => (
+							<EpicRow key={ep.id} ep={ep} rollup={epicRollups[ep.id]} />
+						))}
+					</tbody>
+				</table>
+			</div>
+			<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
+				{sorted.map((ep) => (
+					<EpicMobileCard key={ep.id} ep={ep} rollup={epicRollups[ep.id]} />
+				))}
+			</div>
+		</>
+	);
+}
+
+function EpicMobileCard({ ep, rollup }: EpicRowProps) {
+	const statusColor = CATEGORY_COLORS[ep.status_category ?? ""] ?? "var(--text-muted)";
+	return (
+		<div class="py-3 px-4 border border-border rounded-md bg-surface">
+			<a
+				href={issueUrl(ep.project_key, ep.number, ep.title, ep.id)}
+				class="text-text-base no-underline font-medium hover:underline"
+			>
+				{ep.title}
+			</a>
+			<div class="flex justify-between items-center gap-2 mt-1">
+				<span class="font-medium text-[0.8rem]" style={{ color: statusColor }}>
+					{statusDisplayName(ep.status_name, ep.status_key)}
+				</span>
+				<span class="text-xs font-medium">{PRIORITY_LABEL[ep.priority] ?? ep.priority}</span>
+			</div>
+			<div class="text-xs text-text-muted mt-1">
+				{!rollup || rollup.total === 0
+					? "—"
+					: `${rollup.done} done · ${rollup.remaining} remaining`}
+			</div>
 		</div>
 	);
 }

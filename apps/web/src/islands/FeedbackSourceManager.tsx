@@ -41,6 +41,93 @@ function parseOrigins(raw: string): string[] | undefined {
 	return list.length > 0 ? list : undefined;
 }
 
+function SourceRotateRevokeControl({
+	rotating,
+	onRotateClick,
+	onRotateConfirm,
+	onRotateCancel,
+	onRevoke,
+}: {
+	rotating: boolean;
+	onRotateClick: () => void;
+	onRotateConfirm: () => void;
+	onRotateCancel: () => void;
+	onRevoke: () => void;
+}) {
+	if (rotating) {
+		return (
+			<span class="inline-flex gap-[0.375rem] items-center flex-wrap">
+				<span class="text-[0.8rem] text-text-muted">Rotate? Old token dies.</span>
+				<button type="button" class="btn btn-danger btn-sm" onClick={onRotateConfirm}>
+					Yes
+				</button>
+				<button type="button" class="btn btn-outline btn-sm" onClick={onRotateCancel}>
+					No
+				</button>
+			</span>
+		);
+	}
+	return (
+		<span class="inline-flex gap-[0.375rem]">
+			<button type="button" class="btn btn-outline btn-sm" onClick={onRotateClick}>
+				Rotate
+			</button>
+			<button
+				type="button"
+				class="btn btn-outline btn-sm text-[var(--danger-text)] border-[var(--danger-border)]"
+				onClick={onRevoke}
+			>
+				Revoke
+			</button>
+		</span>
+	);
+}
+
+interface SourceMobileCardsProps {
+	sources: FeedbackSource[];
+	rotateId: string | null;
+	onToggleActive: (s: FeedbackSource) => void;
+	onRotateClick: (id: string) => void;
+	onRotateConfirm: (id: string) => void;
+	onRotateCancel: () => void;
+	onRevoke: (id: string) => void;
+}
+
+function SourceMobileCards({
+	sources,
+	rotateId,
+	onToggleActive,
+	onRotateClick,
+	onRotateConfirm,
+	onRotateCancel,
+	onRevoke,
+}: SourceMobileCardsProps) {
+	return (
+		<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
+			{sources.map((s) => (
+				<div key={s.id} class="py-3 px-4 border border-border rounded-md bg-surface">
+					<div class="flex justify-between items-start gap-2 mb-2">
+						<span class="font-medium text-text-base">{s.name}</span>
+						<button type="button" class="btn btn-outline btn-sm" onClick={() => onToggleActive(s)}>
+							{s.isActive ? "Active" : "Inactive"}
+						</button>
+					</div>
+					<div class="text-[0.875rem] text-text-muted mb-1">{s.description ?? "—"}</div>
+					<div class="text-[0.75rem] font-mono text-text-muted mb-1">{s.tokenPreview}</div>
+					<div class="text-[0.75rem] text-text-muted mb-2">{formatDate(s.createdAt)}</div>
+					<SourceRotateRevokeControl
+						rotating={rotateId === s.id}
+						onRotateClick={() => onRotateClick(s.id)}
+						onRotateConfirm={() => onRotateConfirm(s.id)}
+						onRotateCancel={onRotateCancel}
+						onRevoke={() => onRevoke(s.id)}
+					/>
+				</div>
+			))}
+		</div>
+	);
+}
+
 export default function FeedbackSourceManager({ workspaceSlug, projectId: projectIdProp }: Props) {
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	useEffect(() => {
@@ -248,77 +335,61 @@ export default function FeedbackSourceManager({ workspaceSlug, projectId: projec
 					No feedback sources yet.
 				</div>
 			) : (
-				<div class="overflow-x-auto">
-					<table class="w-full border-collapse text-[0.9rem]">
-						<thead>
-							<tr>
-								<th class={TH}>Name</th>
-								<th class={TH}>Description</th>
-								<th class={TH}>Active</th>
-								<th class={TH}>Token</th>
-								<th class={TH}>Created</th>
-								<th class={TH}></th>
-							</tr>
-						</thead>
-						<tbody>
-							{sources.map((s) => (
-								<tr key={s.id}>
-									<td class={`${TD} font-medium text-text-base`}>{s.name}</td>
-									<td class={`${TD} text-text-muted`}>{s.description ?? "—"}</td>
-									<td class={TD}>
-										<button
-											type="button"
-											class="btn btn-outline btn-sm"
-											onClick={() => toggleActive(s)}
-										>
-											{s.isActive ? "Active" : "Inactive"}
-										</button>
-									</td>
-									<td class={`${TD} font-mono text-[0.8rem] text-text-muted`}>{s.tokenPreview}</td>
-									<td class={`${TD} text-text-muted`}>{formatDate(s.createdAt)}</td>
-									<td class={`${TD} whitespace-nowrap`}>
-										{rotateId === s.id ? (
-											<span class="inline-flex gap-[0.375rem] items-center">
-												<span class="text-[0.8rem] text-text-muted">Rotate? Old token dies.</span>
-												<button
-													type="button"
-													class="btn btn-danger btn-sm"
-													onClick={() => confirmRotate(s.id)}
-												>
-													Yes
-												</button>
-												<button
-													type="button"
-													class="btn btn-outline btn-sm"
-													onClick={() => setRotateId(null)}
-												>
-													No
-												</button>
-											</span>
-										) : (
-											<span class="inline-flex gap-[0.375rem]">
-												<button
-													type="button"
-													class="btn btn-outline btn-sm"
-													onClick={() => setRotateId(s.id)}
-												>
-													Rotate
-												</button>
-												<button
-													type="button"
-													class="btn btn-outline btn-sm text-[var(--danger-text)] border-[var(--danger-border)]"
-													onClick={() => revoke(s.id)}
-												>
-													Revoke
-												</button>
-											</span>
-										)}
-									</td>
+				<>
+					<div class="overflow-x-auto max-sm:hidden">
+						<table class="w-full border-collapse text-[0.9rem]">
+							<thead>
+								<tr>
+									<th class={TH}>Name</th>
+									<th class={TH}>Description</th>
+									<th class={TH}>Active</th>
+									<th class={TH}>Token</th>
+									<th class={TH}>Created</th>
+									<th class={TH}></th>
 								</tr>
-							))}
-						</tbody>
-					</table>
-				</div>
+							</thead>
+							<tbody>
+								{sources.map((s) => (
+									<tr key={s.id}>
+										<td class={`${TD} font-medium text-text-base`}>{s.name}</td>
+										<td class={`${TD} text-text-muted`}>{s.description ?? "—"}</td>
+										<td class={TD}>
+											<button
+												type="button"
+												class="btn btn-outline btn-sm"
+												onClick={() => toggleActive(s)}
+											>
+												{s.isActive ? "Active" : "Inactive"}
+											</button>
+										</td>
+										<td class={`${TD} font-mono text-[0.8rem] text-text-muted`}>
+											{s.tokenPreview}
+										</td>
+										<td class={`${TD} text-text-muted`}>{formatDate(s.createdAt)}</td>
+										<td class={`${TD} whitespace-nowrap`}>
+											<SourceRotateRevokeControl
+												rotating={rotateId === s.id}
+												onRotateClick={() => setRotateId(s.id)}
+												onRotateConfirm={() => confirmRotate(s.id)}
+												onRotateCancel={() => setRotateId(null)}
+												onRevoke={() => revoke(s.id)}
+											/>
+										</td>
+									</tr>
+								))}
+							</tbody>
+						</table>
+					</div>
+					<SourceMobileCards
+						sources={sources}
+						rotateId={rotateId}
+						onToggleActive={toggleActive}
+						onRotateClick={(id) => setRotateId(id)}
+						onRotateConfirm={(id) => confirmRotate(id)}
+						onRotateCancel={() => setRotateId(null)}
+						onRevoke={(id) => revoke(id)}
+					/>
+				</>
 			)}
 		</section>
 	);

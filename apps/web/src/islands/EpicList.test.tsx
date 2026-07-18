@@ -160,7 +160,7 @@ describe("EpicList", () => {
 		render(<EpicList />);
 
 		// Sensible default rendered: falls back to the first project and loads its epics.
-		expect(await screen.findByText("Big Epic")).toBeTruthy();
+		expect((await screen.findAllByText("Big Epic")).length).toBeGreaterThan(0);
 
 		// The stale id never reached an API call.
 		expect(calledUrls.some((u) => u.includes("stale-deleted-project"))).toBe(false);
@@ -174,15 +174,23 @@ describe("EpicList", () => {
 		history.replaceState(null, "", "?projectId=p1");
 		mockFetchEpics([EPIC_ISSUE]);
 		render(<EpicList />);
-		expect(await screen.findByText("Big Epic")).toBeTruthy();
-		expect(screen.getByText("High")).toBeTruthy();
+		expect((await screen.findAllByText("Big Epic")).length).toBeGreaterThan(0);
+		expect(screen.getAllByText("High").length).toBeGreaterThan(0);
+	});
+
+	it("renders a mobile-card fallback alongside the desktop table", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchEpics([EPIC_ISSUE]);
+		render(<EpicList />);
+		// Desktop table + mobile card both render (CSS hides one per viewport).
+		expect((await screen.findAllByText("Big Epic")).length).toBe(2);
 	});
 
 	it("shows '+ New Epic' button when the epic task type is available", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		mockFetchEpics([EPIC_ISSUE]);
 		render(<EpicList />);
-		await screen.findByText("Big Epic");
+		await screen.findAllByText("Big Epic");
 		expect(screen.getByRole("button", { name: /New Epic/i })).toBeTruthy();
 	});
 
@@ -214,7 +222,7 @@ describe("EpicList", () => {
 			})
 		);
 		render(<EpicList />);
-		await screen.findByText("Big Epic");
+		await screen.findAllByText("Big Epic");
 		const issuesCall = calledUrls.find((u) => u.includes("/api/issues?"));
 		expect(issuesCall).toContain("completedAfter=");
 		expect(issuesCall).toContain("completedBefore=");
@@ -228,7 +236,7 @@ describe("EpicList", () => {
 		);
 		mockFetchEpics([EPIC_ISSUE]);
 		render(<EpicList />);
-		await screen.findByText("Big Epic");
+		await screen.findAllByText("Big Epic");
 		expect(screen.getByRole("button", { name: /Filters \(1\)/i })).toBeTruthy();
 	});
 
@@ -263,7 +271,7 @@ describe("EpicList — priority sort", () => {
 		render(<EpicList />);
 
 		// Wait for render
-		await screen.findByText("Urgent Epic");
+		await screen.findAllByText("Urgent Epic");
 
 		// Click the Priority column header to sort ascending
 		fireEvent.click(screen.getByRole("columnheader", { name: /Priority/i }));
@@ -279,7 +287,7 @@ describe("EpicList — priority sort", () => {
 		mockFetchEpics([URGENT_EPIC, MEDIUM_EPIC, LOW_EPIC]);
 		render(<EpicList />);
 
-		await screen.findByText("Urgent Epic");
+		await screen.findAllByText("Urgent Epic");
 
 		const header = screen.getByRole("columnheader", { name: /Priority/i });
 		fireEvent.click(header); // asc
@@ -296,7 +304,7 @@ describe("EpicList — priority sort", () => {
 		mockFetchEpics([URGENT_EPIC, MEDIUM_EPIC, LOW_EPIC]);
 		render(<EpicList />);
 
-		await screen.findByText("Urgent Epic");
+		await screen.findAllByText("Urgent Epic");
 
 		const header = screen.getByRole("columnheader", { name: /Priority/i });
 

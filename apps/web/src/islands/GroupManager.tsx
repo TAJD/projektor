@@ -150,12 +150,52 @@ function RoleBanner(props: { role: string; isAdmin: boolean }) {
 // Members overview — group chips + pending badge
 // ---------------------------------------------------------------------------
 
+function MemberGroupsCell(props: {
+	member: WsMember;
+	groups: Array<{ id: string; name: string }>;
+}) {
+	const isAdmin = props.member.role === "owner" || props.member.role === "admin";
+	if (isAdmin) {
+		return <span class="text-[0.78rem] text-text-muted">All projects (bypasses groups)</span>;
+	}
+	if (props.groups.length === 0) return <span class={BADGE_PENDING}>Pending — no access</span>;
+	return (
+		<>
+			{props.groups.map((g) => (
+				<span key={g.id} class={CHIP}>
+					{g.name}
+				</span>
+			))}
+		</>
+	);
+}
+
+function MembersMobileCards(props: {
+	members: WsMember[];
+	groupsByUser: Map<string, Array<{ id: string; name: string }>>;
+}) {
+	return (
+		<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
+			{props.members.map((m) => (
+				<div key={m.id} class="py-3 px-4 border border-border rounded-md bg-surface">
+					<div class="font-medium text-text-base">{m.name || m.email}</div>
+					<div class="text-[0.75rem] text-text-muted mb-1">{m.email}</div>
+					<div class="text-[0.75rem] text-text-muted mb-2">Role: {m.role}</div>
+					<div>
+						<MemberGroupsCell member={m} groups={props.groupsByUser.get(m.id) ?? []} />
+					</div>
+				</div>
+			))}
+		</div>
+	);
+}
+
 function MembersOverview(props: { members: WsMember[]; memberGroups: MemberGroupsRow[] }) {
 	const groupsByUser = new Map(props.memberGroups.map((r) => [r.userId, r.groups]));
 	return (
 		<section class={CARD}>
 			<h2 class={H2}>Members</h2>
-			<div class="overflow-x-auto">
+			<div class="overflow-x-auto max-sm:hidden">
 				<table class="w-full border-collapse">
 					<thead>
 						<tr>
@@ -165,37 +205,22 @@ function MembersOverview(props: { members: WsMember[]; memberGroups: MemberGroup
 						</tr>
 					</thead>
 					<tbody>
-						{props.members.map((m) => {
-							const isAdmin = m.role === "owner" || m.role === "admin";
-							const groups = groupsByUser.get(m.id) ?? [];
-							return (
-								<tr key={m.id}>
-									<td class={TD}>
-										<div class="font-medium text-text-base">{m.name || m.email}</div>
-										<div class="text-[0.75rem] text-text-muted">{m.email}</div>
-									</td>
-									<td class={TD}>{m.role}</td>
-									<td class={TD}>
-										{isAdmin ? (
-											<span class="text-[0.78rem] text-text-muted">
-												All projects (bypasses groups)
-											</span>
-										) : groups.length > 0 ? (
-											groups.map((g) => (
-												<span key={g.id} class={CHIP}>
-													{g.name}
-												</span>
-											))
-										) : (
-											<span class={BADGE_PENDING}>Pending — no access</span>
-										)}
-									</td>
-								</tr>
-							);
-						})}
+						{props.members.map((m) => (
+							<tr key={m.id}>
+								<td class={TD}>
+									<div class="font-medium text-text-base">{m.name || m.email}</div>
+									<div class="text-[0.75rem] text-text-muted">{m.email}</div>
+								</td>
+								<td class={TD}>{m.role}</td>
+								<td class={TD}>
+									<MemberGroupsCell member={m} groups={groupsByUser.get(m.id) ?? []} />
+								</td>
+							</tr>
+						))}
 					</tbody>
 				</table>
 			</div>
+			<MembersMobileCards members={props.members} groupsByUser={groupsByUser} />
 		</section>
 	);
 }
@@ -602,51 +627,85 @@ export default function GroupManager({ workspaceSlug }: Props) {
 							: "You don't belong to any groups yet. An owner or admin can add you to one."}
 					</div>
 				) : (
-					<div class="overflow-x-auto">
-						<table class="w-full border-collapse">
-							<thead>
-								<tr>
-									<th class={TH}>Name</th>
-									<th class={TH}>Members</th>
-									<th class={TH}>Projects</th>
-									{isAdmin && <th class={TH} />}
-								</tr>
-							</thead>
-							<tbody>
-								{data.groups.map((g) => (
-									<tr key={g.id}>
-										<td class={TD}>
-											{isAdmin ? (
-												<button
-													type="button"
-													class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
-													onClick={() => setSelected(g.id)}
-												>
-													{g.name}
-												</button>
-											) : (
-												<span class="font-medium text-text-base">{g.name}</span>
-											)}
-										</td>
-										<td class={TD}>{g.memberCount}</td>
-										<td class={TD}>{g.grantCount}</td>
-										{isAdmin && (
-											<td class={TD}>
-												<button
-													type="button"
-													class={BTN_DANGER}
-													disabled={busy}
-													onClick={() => deleteGroup(g.id)}
-												>
-													Delete
-												</button>
-											</td>
-										)}
+					<>
+						<div class="overflow-x-auto max-sm:hidden">
+							<table class="w-full border-collapse">
+								<thead>
+									<tr>
+										<th class={TH}>Name</th>
+										<th class={TH}>Members</th>
+										<th class={TH}>Projects</th>
+										{isAdmin && <th class={TH} />}
 									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
+								</thead>
+								<tbody>
+									{data.groups.map((g) => (
+										<tr key={g.id}>
+											<td class={TD}>
+												{isAdmin ? (
+													<button
+														type="button"
+														class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
+														onClick={() => setSelected(g.id)}
+													>
+														{g.name}
+													</button>
+												) : (
+													<span class="font-medium text-text-base">{g.name}</span>
+												)}
+											</td>
+											<td class={TD}>{g.memberCount}</td>
+											<td class={TD}>{g.grantCount}</td>
+											{isAdmin && (
+												<td class={TD}>
+													<button
+														type="button"
+														class={BTN_DANGER}
+														disabled={busy}
+														onClick={() => deleteGroup(g.id)}
+													>
+														Delete
+													</button>
+												</td>
+											)}
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+						<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
+							{data.groups.map((g) => (
+								<div key={g.id} class="py-3 px-4 border border-border rounded-md bg-surface">
+									<div class="flex justify-between items-center gap-2 mb-1">
+										{isAdmin ? (
+											<button
+												type="button"
+												class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
+												onClick={() => setSelected(g.id)}
+											>
+												{g.name}
+											</button>
+										) : (
+											<span class="font-medium text-text-base">{g.name}</span>
+										)}
+										{isAdmin && (
+											<button
+												type="button"
+												class={BTN_DANGER}
+												disabled={busy}
+												onClick={() => deleteGroup(g.id)}
+											>
+												Delete
+											</button>
+										)}
+									</div>
+									<div class="text-[0.75rem] text-text-muted">
+										{g.memberCount} members · {g.grantCount} projects
+									</div>
+								</div>
+							))}
+						</div>
+					</>
 				)}
 			</section>
 
