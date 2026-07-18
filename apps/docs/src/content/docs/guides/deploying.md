@@ -6,7 +6,7 @@ sidebar:
 ---
 Projektor ships as a **self-contained release artifact** and deploys from **config
 only**. There is no source checkout, no submodule or any build step on the machine that
-deploys. This page describes how the deployment process works: the model, how to stand up your own
+deploys. This page covers the model, how to stand up your own
 instance, how releases are cut, and how to keep an instance updated automatically.
 
 > Looking for the 5-minute version? See [Self-hosting](/projektor/guides/self-hosting/).
@@ -62,9 +62,9 @@ and the frontend that calls it are always in lockstep.
 
 ### 1. Fork the deploy example
 
-The recommended path is to **fork
+**Fork
 [`projektor-deploy-example`](https://github.com/TAJD/projektor-deploy-example)** -
-your fork becomes the deploy repo.
+it becomes your deploy repo.
 
 ```bash
 gh repo fork TAJD/projektor-deploy-example --clone

@@ -43,7 +43,7 @@ curl -s http://127.0.0.1:8787/bootstrap \
   | jq -r .mcpAddCommand | sh
 ```
 
-The bootstrap endpoint is disabled when `ENVIRONMENT=production`. It is safe to call multiple times - it is idempotent.
+The bootstrap endpoint is disabled when `ENVIRONMENT=production`. It is idempotent, so it's safe to call more than once.
 
 ---
 
@@ -182,7 +182,7 @@ claude mcp add --transport http \
   "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
 ```
 
-Without a valid CF Access service token, the Worker will return a `403` before the MCP layer is reached - the agent connection will silently fail. The bootstrap flow bypasses Access; agent workflows in production need both headers.
+Without a valid CF Access service token, the Worker returns a `403` before it reaches the MCP layer - the agent connection fails silently. The bootstrap flow bypasses Access; agent workflows in production need both headers.
 
 ---
 

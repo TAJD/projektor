@@ -13,16 +13,16 @@ Read this before making changes - it captures conventions that aren't obvious fr
 
 ## What projektor is
 
-A project management tool deployed on Cloudflare. Bringing together AI native design and tried and tested principles.
+A project-management tool deployed on Cloudflare, combining AI-native design with proven engineering practices.
 
 Design principles
 
 1. Fast and lightweight.
-2. Serverless using cloudflare resources.
+2. Serverless, using Cloudflare resources.
 
 Implementation details:
 
-- When implementing features or fixing bugs you must always implement a test or tests to confirm the functionality is implemented.
+- When you implement a feature or fix a bug, add a test that confirms it works.
 - **Runtime:** Hono on Cloudflare Workers
 - **Data:** D1 (SQLite) for relational data, KV for caching (Access certs, user-by-email), R2 for file attachments
 - **Schema:** Drizzle is the schema and primary query layer; raw `DB.prepare` remains in the auth/workspace middleware hot path, the dev bootstrap, and a handful of service queries (FTS, counters) where hand-written SQL is clearer.
