@@ -94,7 +94,7 @@ export default function FeedbackSummary({ workspaceSlug, projectId: projectIdPro
 							>
 								<span class="font-medium text-text-base">{v.appVersion ?? "Unknown version"}</span>
 								<span>{versionMetric(v)}</span>
-								<span>{v.withCommentCount} with comments</span>
+								{v.withCommentCount > 0 && <span>{v.withCommentCount} with comments</span>}
 							</li>
 						))}
 					</ul>

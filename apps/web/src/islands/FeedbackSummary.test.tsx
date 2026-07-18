@@ -61,6 +61,13 @@ describe("FeedbackSummary", () => {
 		expect(screen.getByText(/👍 100%/)).toBeTruthy();
 	});
 
+	it("hides the comment-count badge when a version has no written feedback", async () => {
+		stubFetch();
+		render(<FeedbackSummary workspaceSlug="my-ws" projectId="p1" />);
+		await screen.findByText("Unknown version");
+		expect(screen.queryByText(/0 with comments/)).toBeNull();
+	});
+
 	it("shows an empty state when there is no feedback yet", async () => {
 		stubFetch([]);
 		render(<FeedbackSummary workspaceSlug="my-ws" projectId="p1" />);
