@@ -96,6 +96,48 @@ describe("WikiPage", () => {
 		render(<WikiPage />);
 		expect(await screen.findByText(/Failed to load page/i)).toBeTruthy();
 	});
+
+	it("shows Move button once the page is loaded", async () => {
+		history.replaceState(null, "", "?slug=my-page");
+		mockFetchWiki(PAGE);
+		render(<WikiPage />);
+		await screen.findByText("My Page");
+		expect(screen.getByRole("button", { name: "Move" })).toBeTruthy();
+	});
+
+	it("moves a page to a new parent via PUT and refetches tree/page", async () => {
+		history.replaceState(null, "", "?slug=my-page");
+		const OTHER_PAGE_NODE = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([OTHER_PAGE_NODE]) });
+			}
+			if (init?.method === "PUT") {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Move" }));
+		fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
+		fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
+		const moveButtons = screen.getAllByRole("button", { name: "Move" });
+		fireEvent.click(moveButtons[moveButtons.length - 1]);
+
+		await waitFor(() => {
+			const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+			expect(putCall).toBeTruthy();
+			expect(putCall?.[0]).toContain("/api/wiki/my-page");
+			expect(JSON.parse(putCall?.[1].body)).toEqual({ parentId: "w2" });
+		});
+	});
 });
 
 describe("WikiPage — project scope control (PROJ-352)", () => {

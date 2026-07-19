@@ -438,6 +438,46 @@ function PageBreadcrumbs({
 	);
 }
 
+function MovePageForm({
+	options,
+	value,
+	saving,
+	error,
+	onChange,
+	onSubmit,
+	onCancel,
+}: {
+	options: SelectOption[];
+	value: string;
+	saving: boolean;
+	error: string | null;
+	onChange: (value: string) => void;
+	onSubmit: () => void;
+	onCancel: () => void;
+}) {
+	return (
+		<div class="mb-4 p-3 border border-border rounded bg-surface">
+			<p class="m-0 mb-2 text-sm font-medium text-text-base">Move to a new parent page</p>
+			{error && (
+				<p role="alert" class="text-[var(--danger-text)] mb-2 text-sm">
+					{error}
+				</p>
+			)}
+			<div class="flex flex-wrap gap-2 items-center">
+				<div class="min-w-[220px]">
+					<Select value={value} options={options} ariaLabel="New parent page" onChange={onChange} />
+				</div>
+				<button type="button" onClick={onSubmit} disabled={saving} class="btn btn-primary btn-sm">
+					{saving ? "Moving…" : "Move"}
+				</button>
+				<button type="button" onClick={onCancel} disabled={saving} class="btn btn-outline btn-sm">
+					Cancel
+				</button>
+			</div>
+		</div>
+	);
+}
+
 const TOC_LINK_BASE_CLASS =
 	"block py-[0.2rem] no-underline border-l-2 transition-[color,border-color] duration-150";
 const TOC_LINK_ACTIVE_CLASS = "text-accent border-accent font-medium";
@@ -484,6 +524,7 @@ function PageHeader({
 	onCancelEdit,
 	onStartEdit,
 	onStartCreateChild,
+	onStartMove,
 	onDelete,
 }: {
 	editing: boolean;
@@ -496,6 +537,7 @@ function PageHeader({
 	onCancelEdit: () => void;
 	onStartEdit: () => void;
 	onStartCreateChild: (pageId: string) => void;
+	onStartMove: () => void;
 	onDelete: () => void;
 }) {
 	return (
@@ -531,6 +573,9 @@ function PageHeader({
 							class="btn btn-outline btn-sm"
 						>
 							+ Child page
+						</button>
+						<button type="button" onClick={onStartMove} class="btn btn-outline btn-sm">
+							Move
 						</button>
 						<button type="button" onClick={onStartEdit} class="btn btn-outline">
 							Edit
@@ -768,6 +813,15 @@ interface PageArticleProps {
 	onStartEdit: () => void;
 	onStartCreateChild: (pageId: string) => void;
 	onDelete: () => void;
+	moving: boolean;
+	moveOptions: SelectOption[];
+	moveTargetId: string;
+	moveSaving: boolean;
+	moveError: string | null;
+	onStartMove: () => void;
+	onMoveTargetChange: (value: string) => void;
+	onSubmitMove: () => void;
+	onCancelMove: () => void;
 	latestRevision: WikiRevision | null;
 	saveError: string | null;
 	draftBanner: { title: string; content: string; savedAt: number } | null;
@@ -810,6 +864,15 @@ function PageArticleMeta(
 		| "onStartEdit"
 		| "onStartCreateChild"
 		| "onDelete"
+		| "moving"
+		| "moveOptions"
+		| "moveTargetId"
+		| "moveSaving"
+		| "moveError"
+		| "onStartMove"
+		| "onMoveTargetChange"
+		| "onSubmitMove"
+		| "onCancelMove"
 		| "latestRevision"
 		| "saveError"
 		| "draftBanner"
@@ -843,8 +906,21 @@ function PageArticleMeta(
 				onCancelEdit={props.onCancelEdit}
 				onStartEdit={props.onStartEdit}
 				onStartCreateChild={props.onStartCreateChild}
+				onStartMove={props.onStartMove}
 				onDelete={props.onDelete}
 			/>
+
+			{props.moving && (
+				<MovePageForm
+					options={props.moveOptions}
+					value={props.moveTargetId}
+					saving={props.moveSaving}
+					error={props.moveError}
+					onChange={props.onMoveTargetChange}
+					onSubmit={props.onSubmitMove}
+					onCancel={props.onCancelMove}
+				/>
+			)}
 
 			{props.latestRevision && (
 				<p class="text-[0.8rem] text-text-muted mt-1 mb-5">
@@ -1424,6 +1500,63 @@ function useWikiEditing(
 	};
 }
 
+// PROJ-237: re-parent a page from the page menu. Backend validation (cycle guard,
+// workspace scoping) already exists on PUT /api/wiki/:slug — this is UI-only.
+function useMovePage(
+	workspaceSlug: string | undefined,
+	page: WikiPageData | null,
+	fetchPage: (s: string) => Promise<void>,
+	fetchTree: () => Promise<void>
+) {
+	const [moving, setMoving] = useState(false);
+	const [moveTargetId, setMoveTargetId] = useState("");
+	const [moveSaving, setMoveSaving] = useState(false);
+	const [moveError, setMoveError] = useState<string | null>(null);
+
+	function startMove() {
+		if (!page) return;
+		setMoveTargetId(page.parent_id ?? "");
+		setMoveError(null);
+		setMoving(true);
+	}
+
+	function cancelMove() {
+		setMoving(false);
+		setMoveError(null);
+	}
+
+	async function submitMove() {
+		if (!page) return;
+		setMoveSaving(true);
+		setMoveError(null);
+		try {
+			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
+				method: "PUT",
+				workspaceSlug,
+				body: { parentId: moveTargetId || null },
+			});
+			setMoving(false);
+			await fetchTree();
+			await fetchPage(page.slug);
+		} catch (e) {
+			setMoveError(`Move failed: ${String(e)}`);
+		} finally {
+			setMoveSaving(false);
+		}
+	}
+
+	return {
+		moving,
+		moveTargetId,
+		setMoveTargetId,
+		moveSaving,
+		moveError,
+		startMove,
+		cancelMove,
+		submitMove,
+	};
+}
+
 function useCreatePageForm(
 	workspaceSlug: string | undefined,
 	projectId: string,
@@ -1536,6 +1669,7 @@ function createWikiActions(args: {
 	setToc: (t: TocItem[]) => void;
 	rawStartCreate: (parentId: string | null) => void;
 	rawSubmitCreate: () => Promise<string | undefined>;
+	cancelMove: () => void;
 }) {
 	const {
 		workspaceSlug,
@@ -1547,6 +1681,7 @@ function createWikiActions(args: {
 		setPage,
 		setError,
 		setToc,
+		cancelMove,
 	} = args;
 
 	function navigateTo(s: string) {
@@ -1556,6 +1691,7 @@ function createWikiActions(args: {
 		setError(null);
 		setToc([]);
 		setSlug(s);
+		cancelMove();
 		history.pushState(null, "", `?slug=${encodeURIComponent(s)}`);
 	}
 
@@ -1692,7 +1828,13 @@ function deriveWikiPageState(
 		? (pageMap[createForm.createParentId]?.title ?? null)
 		: null;
 	const wikiPages = Object.values(pageMap);
-	return { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages };
+	const moveOptions: SelectOption[] = [
+		{ value: "", label: "No parent (root)" },
+		...wikiPages
+			.filter((p) => p.id !== pageData.page?.id)
+			.map((p) => ({ value: p.id, label: p.title })),
+	];
+	return { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions };
 }
 
 function buildCreateFormProps(create: {
@@ -1752,6 +1894,8 @@ function buildArticleProps(article: {
 	setShowHistory: (updater: (h: boolean) => boolean) => void;
 	attach: ReturnType<typeof useWikiAttachments>;
 	workspaceSlug: string | undefined;
+	move: ReturnType<typeof useMovePage>;
+	moveOptions: SelectOption[];
 }): Omit<PageArticleProps, "page"> {
 	return {
 		breadcrumbs: article.breadcrumbs,
@@ -1791,6 +1935,15 @@ function buildArticleProps(article: {
 		onUpload: article.attach.uploadAttachment,
 		onCancelUpload: article.attach.cancelUpload,
 		onDeleteAttachment: article.attach.deleteAttachment,
+		moving: article.move.moving,
+		moveOptions: article.moveOptions,
+		moveTargetId: article.move.moveTargetId,
+		moveSaving: article.move.moveSaving,
+		moveError: article.move.moveError,
+		onStartMove: article.move.startMove,
+		onMoveTargetChange: article.move.setMoveTargetId,
+		onSubmitMove: article.move.submitMove,
+		onCancelMove: article.move.cancelMove,
 	};
 }
 
@@ -1813,6 +1966,7 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		pageData.fetchRevisions
 	);
 	const createForm = useCreatePageForm(workspaceSlug, projectId, fetchTree);
+	const move = useMovePage(workspaceSlug, pageData.page, pageData.fetchPage, fetchTree);
 
 	const { navigateTo, startCreate, submitCreate, deletePage } = createWikiActions({
 		workspaceSlug,
@@ -1826,9 +1980,10 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		setToc,
 		rawStartCreate: createForm.startCreate,
 		rawSubmitCreate: createForm.submitCreate,
+		cancelMove: move.cancelMove,
 	});
 
-	const { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages } =
+	const { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions } =
 		deriveWikiPageState(pageData, pageMap, editState, createForm, toc);
 
 	const createProps = buildCreateFormProps({
@@ -1874,6 +2029,8 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		setShowHistory: pageData.setShowHistory,
 		attach,
 		workspaceSlug,
+		move,
+		moveOptions,
 	});
 
 	if (gate.pending) return <AccessPending />;
