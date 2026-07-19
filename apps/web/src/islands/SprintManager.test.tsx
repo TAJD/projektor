@@ -57,10 +57,18 @@ afterEach(() => {
 });
 
 describe("SprintManager", () => {
-	it("renders loading state initially", () => {
+	it("renders loading state initially when a projectId is present", () => {
 		// loading starts true — visible immediately without any fetch resolving
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchSprints([]);
 		render(<SprintManager />);
 		expect(screen.getByText(/Loading sprints/i)).toBeTruthy();
+	});
+
+	it("shows 'No project specified' instead of hanging when no projectId is in the URL (PROJ-424)", () => {
+		render(<SprintManager />);
+		expect(screen.getByText(/No project specified/i)).toBeTruthy();
+		expect(screen.queryByText(/Loading sprints/i)).toBeNull();
 	});
 
 	it("renders sprint list after fetch resolves", async () => {
