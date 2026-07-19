@@ -35,3 +35,17 @@ export class ConflictError extends ServiceError {
 		super(message);
 	}
 }
+
+export class PayloadTooLargeError extends ServiceError {
+	readonly kind = "payload_too_large" as const;
+	constructor(message = "Payload too large") {
+		super(message);
+	}
+}
+
+export class UnsupportedMediaTypeError extends ServiceError {
+	readonly kind = "unsupported_media_type" as const;
+	constructor(message = "Unsupported media type") {
+		super(message);
+	}
+}

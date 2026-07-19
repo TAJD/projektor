@@ -9,6 +9,7 @@ import { customFieldsTools } from "../mcp/custom-fields";
 import { toMcpError } from "../mcp/error-adapter";
 import { feedbackTools } from "../mcp/feedback";
 import { fileClaimsTools } from "../mcp/file-claims";
+import { filesTools } from "../mcp/files";
 import { flowMetricsTools } from "../mcp/flow-metrics";
 import { groupsTools } from "../mcp/groups";
 import { issueLeasesTools } from "../mcp/issue-leases";
@@ -146,6 +147,7 @@ const coreMCPTools: MCPTool[] = [
 	...commentsTools,
 	...feedbackTools,
 	...wikiTools,
+	...filesTools,
 	...taskTypesTools,
 	...taskStatusesTools,
 	...customFieldsTools,

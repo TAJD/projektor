@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**86 tools across 20 domains.**
+**90 tools across 21 domains.**
 
 ## Coordination
 
@@ -141,6 +141,15 @@ running server.
 | `wiki_tree` | Get the wiki page hierarchy as a nested tree, optionally filtered by project |
 | `list_wiki_revisions` | List revision history for a wiki page |
 | `get_wiki_revision` | Get the content of a specific wiki revision by its ID |
+
+### Attachments
+
+| Tool | Description |
+|------|-------------|
+| `list_attachments` | List attachments (files, wiki-page links, URLs) on an issue or wiki page |
+| `get_attachment` | Get attachment metadata by id. For kind 'file' the bytes themselves are only available over REST (GET /api/files/:id) — binary content can't cross JSON-RPC. |
+| `create_link_attachment` | Attach a wiki-page reference or an external URL to an issue or wiki page |
+| `delete_attachment` | Delete an attachment by id |
 
 ### Task types
 
