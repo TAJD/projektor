@@ -1697,6 +1697,7 @@ function createWikiActions(args: {
 
 	function startCreate(parentId: string | null = null) {
 		setEditing(false);
+		args.cancelMove();
 		args.rawStartCreate(parentId);
 	}
 
@@ -1986,6 +1987,11 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 	const { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions } =
 		deriveWikiPageState(pageData, pageMap, editState, createForm, toc);
 
+	function startEdit() {
+		move.cancelMove();
+		editState.startEdit();
+	}
+
 	const createProps = buildCreateFormProps({
 		createParentTitle,
 		createTitle: createForm.createTitle,
@@ -2013,7 +2019,7 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 		saving: editState.saving,
 		save: editState.save,
 		cancelEdit: editState.cancelEdit,
-		startEdit: editState.startEdit,
+		startEdit,
 		startCreate,
 		deletePage,
 		latestRevision,
