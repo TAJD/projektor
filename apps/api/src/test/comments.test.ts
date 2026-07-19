@@ -7,6 +7,7 @@ import {
 	seedGroupGrant,
 	seedProject,
 	seedProjectFixture,
+	seedWorkspaceRoles,
 } from "./helpers";
 
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
@@ -116,6 +117,28 @@ describe("Comments REST API", () => {
 			body: JSON.stringify({ body: "" }),
 		});
 		expect(res.status).toBe(400);
+	});
+
+	// PROJ-374: addComment was missing the viewer-role guard every other write path
+	// enforces (comments.ts:76) — a workspace/project viewer could post comments.
+	it("POST returns 403 for a project viewer", async () => {
+		const roles = await seedWorkspaceRoles();
+		const project = await seedProject(roles.workspace.id);
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
+
+		const issueRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ projectId: project.id, title: "Viewer-visible issue" }),
+		});
+		const { id: viewerIssueId } = (await issueRes.json()) as { id: string };
+
+		const res = await SELF.fetch(`http://localhost/api/issues/${viewerIssueId}/comments`, {
+			method: "POST",
+			headers: authHeaders(roles.viewer.token, roles.workspace.slug),
+			body: JSON.stringify({ body: "Viewers shouldn't be able to post this" }),
+		});
+		expect(res.status).toBe(403);
 	});
 
 	it("GET returns 404 for issue in another workspace", async () => {
