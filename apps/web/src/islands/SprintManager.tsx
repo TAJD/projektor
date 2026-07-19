@@ -289,6 +289,7 @@ function useSprintData(workspaceSlug: string | undefined) {
 	useEffect(() => {
 		const id = new URLSearchParams(window.location.search).get("projectId");
 		setProjectId(id);
+		if (!id) setLoading(false);
 	}, []);
 
 	const fetchSprints = useCallback(

@@ -91,3 +91,65 @@ test.describe("Epics page", () => {
 		await expect(epicRow).toBeVisible({ timeout: 10_000 });
 	});
 });
+
+// PROJ-422: epic list + epic detail mobile layout regression coverage. Both
+// were audited and found already responsive (EpicList already renders
+// EpicMobileCard below 640px; the epic detail view reuses IssueDetail's
+// existing max-sm: stacking) — these tests lock that behaviour in.
+test.describe("Epics — mobile layout (375×812)", () => {
+	test("epic list shows mobile cards, not the desktop table", async ({ page }) => {
+		test.skip(!process.env.E2E_BASE_URL, "E2E_BASE_URL not set — skipping live deployment test");
+
+		const ctx = readCtx();
+		await openEpics(page, ctx);
+
+		const innerWidth = await page.evaluate(() => window.innerWidth);
+		expect(innerWidth).toBeLessThan(640);
+
+		const newEpicBtn = page.locator("button", { hasText: "+ New Epic" });
+		await expect(newEpicBtn).toBeVisible({ timeout: 15_000 });
+		await newEpicBtn.click();
+		await page.locator("#create-epic-title").fill(`${EPIC_TITLE} (mobile)`);
+		await page.locator("button", { hasText: "Create Epic" }).click();
+
+		// Assert the table stays hidden even once an epic actually exists to
+		// render — the earlier no-epics empty state renders no table at all, so
+		// checking beforehand would pass vacuously.
+		await expect(
+			page.locator("div", { hasText: `${EPIC_TITLE} (mobile)` }).last(),
+		).toBeVisible({ timeout: 15_000 });
+		await expect(page.locator('table[aria-label="Epics"]')).not.toBeVisible();
+
+		const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+		expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
+	});
+
+	test("epic detail page stacks the sidebar below the body, no horizontal scroll", async ({
+		page,
+	}) => {
+		test.skip(!process.env.E2E_BASE_URL, "E2E_BASE_URL not set — skipping live deployment test");
+
+		const ctx = readCtx();
+		await openEpics(page, ctx);
+
+		const newEpicBtn = page.locator("button", { hasText: "+ New Epic" });
+		await expect(newEpicBtn).toBeVisible({ timeout: 15_000 });
+		await newEpicBtn.click();
+		const detailTitle = `${EPIC_TITLE} (detail mobile)`;
+		await page.locator("#create-epic-title").fill(detailTitle);
+		await page.locator("button", { hasText: "Create Epic" }).click();
+
+		const epicLink = page
+			.locator("a", { hasText: detailTitle })
+			.or(page.locator("div", { hasText: detailTitle }).locator("a"))
+			.first();
+		await expect(epicLink).toBeVisible({ timeout: 15_000 });
+		await epicLink.click();
+
+		await expect(page.locator("text=Child issues")).toBeVisible({ timeout: 15_000 });
+
+		const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+		const innerWidth = await page.evaluate(() => window.innerWidth);
+		expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
+	});
+});
