@@ -106,17 +106,19 @@ test.describe("Epics — mobile layout (375×812)", () => {
 		const innerWidth = await page.evaluate(() => window.innerWidth);
 		expect(innerWidth).toBeLessThan(640);
 
-		await expect(page.locator('table[aria-label="Epics"]')).not.toBeVisible();
-
 		const newEpicBtn = page.locator("button", { hasText: "+ New Epic" });
 		await expect(newEpicBtn).toBeVisible({ timeout: 15_000 });
 		await newEpicBtn.click();
 		await page.locator("#create-epic-title").fill(`${EPIC_TITLE} (mobile)`);
 		await page.locator("button", { hasText: "Create Epic" }).click();
 
+		// Assert the table stays hidden even once an epic actually exists to
+		// render — the earlier no-epics empty state renders no table at all, so
+		// checking beforehand would pass vacuously.
 		await expect(
 			page.locator("div", { hasText: `${EPIC_TITLE} (mobile)` }).last(),
 		).toBeVisible({ timeout: 15_000 });
+		await expect(page.locator('table[aria-label="Epics"]')).not.toBeVisible();
 
 		const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
 		expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
