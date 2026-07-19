@@ -15,6 +15,17 @@ export class ApiOfflineError extends Error {
 	}
 }
 
+// Set once a 401 triggers window.location.reload(). The reload doesn't tear down the
+// page instantly, so other in-flight calls can still land (or get aborted by the
+// navigation) in the meantime — once we're reloading, suppress their errors too rather
+// than flashing an unrelated "failed to load"/offline error right before the page goes away.
+let reauthReloadInFlight = false;
+
+/** Test-only: reset module state between tests (see the module-level flag above). */
+export function __resetApiFetchStateForTests(): void {
+	reauthReloadInFlight = false;
+}
+
 export async function apiFetch<T = unknown>(
 	path: string,
 	opts: {
@@ -40,15 +51,18 @@ export async function apiFetch<T = unknown>(
 				: {}),
 		});
 	} catch {
+		if (reauthReloadInFlight) return new Promise<T>(() => {});
 		throw new ApiOfflineError(path, method);
 	}
 	if (!res.ok) {
 		// A 401 here means the Cloudflare Access session expired mid-use (the app itself
 		// never prompts re-login). Reload so Access can challenge and bounce the user back.
 		if (res.status === 401) {
+			reauthReloadInFlight = true;
 			window.location.reload();
 			return new Promise<T>(() => {});
 		}
+		if (reauthReloadInFlight) return new Promise<T>(() => {});
 		throw new Error(`API ${method} ${path} failed: ${res.status}`);
 	}
 	return res.json() as Promise<T>;
