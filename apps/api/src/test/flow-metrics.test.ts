@@ -22,6 +22,7 @@ interface FlowMetrics {
 		bugCount: number;
 		bugSharePercent: number | null;
 	}>;
+	bugTypeTracked: boolean;
 	reviewLatency: Distribution;
 	reviewLatencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
 	humanInterventions: Distribution;
@@ -46,6 +47,7 @@ interface FlowMetrics {
 		leaseExpiries: number;
 		abandonedClaims: number;
 		gateRejections: number;
+		wipCapPressure: number;
 	};
 }
 
@@ -794,6 +796,24 @@ describe("Flow metrics (PROJ-252)", () => {
 
 		const emptyBucket = metrics.bugShareOverTime.find((b) => b.total === 0);
 		if (emptyBucket) expect(emptyBucket.bugSharePercent).toBeNull();
+		expect(metrics.bugTypeTracked).toBe(true);
+	});
+
+	// PROJ-341: a workspace with no "bug"-keyed task type (renamed/deleted default) must
+	// produce a clearly-distinguishable state, not indistinguishable "0 bugs, tracked".
+	it("flags bugTypeTracked false when no 'bug'-keyed task type exists in the workspace", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		await seedTaskType(workspaceId, { key: "defect", name: "Defect" });
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Untracked" });
+		await stampFlowTimestamps(issue.id, { doneAt: now });
+
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?since=${now - 86400}&until=${now}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const metrics = (await res.json()) as FlowMetrics;
+		expect(metrics.bugTypeTracked).toBe(false);
 	});
 });
 
@@ -872,6 +892,14 @@ describe("Factory health tiles (PROJ-334)", () => {
 			.run();
 	}
 
+	async function seedWipCapDenial(project: string, issueId: string, occurredAt: number) {
+		await env.DB.prepare(
+			"INSERT INTO wip_cap_denials (id, workspace_id, project_id, issue_id, agent_session_id, occurred_at) VALUES (?, ?, ?, ?, NULL, ?)"
+		)
+			.bind(crypto.randomUUID(), workspaceId, project, issueId, occurredAt)
+			.run();
+	}
+
 	it("counts lease expiries, abandoned claims, and gate rejections within the window", async () => {
 		const DAY = 86400;
 		const now = Math.floor(Date.now() / 1000);
@@ -884,11 +912,13 @@ describe("Factory health tiles (PROJ-334)", () => {
 		await seedLease(issue.id, "expired", now - 1 * DAY);
 		await seedFileClaim(issue.id, "agent_ended", now - 1 * DAY);
 		await seedGateRejection(issue.id, now - 1 * DAY);
+		await seedWipCapDenial(projectId, issue.id, now - 1 * DAY);
 
 		// Out of window: excluded.
 		await seedLease(issue.id, "expired", now - 10 * DAY);
 		await seedFileClaim(issue.id, "agent_ended", now - 10 * DAY);
 		await seedGateRejection(issue.id, now - 10 * DAY);
+		await seedWipCapDenial(projectId, issue.id, now - 10 * DAY);
 
 		// Right reason but not a fault (deliberate release / reclaim by another agent) —
 		// excluded regardless of window.
@@ -908,6 +938,7 @@ describe("Factory health tiles (PROJ-334)", () => {
 			leaseExpiries: 1,
 			abandonedClaims: 1,
 			gateRejections: 1,
+			wipCapPressure: 1,
 		});
 	});
 
@@ -917,6 +948,7 @@ describe("Factory health tiles (PROJ-334)", () => {
 
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "This project" });
 		await seedLease(issue.id, "expired", now);
+		await seedWipCapDenial(projectId, issue.id, now);
 
 		const otherIssue = await seedIssue(other.workspaceId, other.projectId, other.userId, {
 			title: "Other project",
@@ -928,6 +960,7 @@ describe("Factory health tiles (PROJ-334)", () => {
 		)
 			.bind(crypto.randomUUID(), other.workspaceId, otherIssue.id, now, now, now)
 			.run();
+		await seedWipCapDenial(other.projectId, otherIssue.id, now);
 
 		const res = await SELF.fetch(
 			`http://localhost/api/projects/${projectId}/flow-metrics?since=${now - 100}&until=${now + 100}`,
@@ -935,6 +968,7 @@ describe("Factory health tiles (PROJ-334)", () => {
 		);
 		const metrics = (await res.json()) as FlowMetrics;
 		expect(metrics.factoryHealth.leaseExpiries).toBe(1);
+		expect(metrics.factoryHealth.wipCapPressure).toBe(1);
 	});
 
 	it("empty state: all counts are zero when nothing has faulted", async () => {
@@ -950,6 +984,7 @@ describe("Factory health tiles (PROJ-334)", () => {
 			leaseExpiries: 0,
 			abandonedClaims: 0,
 			gateRejections: 0,
+			wipCapPressure: 0,
 		});
 	});
 });

@@ -37,6 +37,9 @@ interface FlowMetrics {
 		bugCount: number;
 		bugSharePercent: number | null;
 	}>;
+	// PROJ-341: whether a "bug"-keyed task type exists in the workspace at all —
+	// distinguishes "tracked, 0 bugs" from "not tracked, no matching type".
+	bugTypeTracked: boolean;
 	// PROJ-328: collaboration-shape metrics — human attention, not agent-vs-human split.
 	reviewLatency: Distribution;
 	reviewLatencyOverTime: Array<{ bucketStart: string; p50: number | null }>;
@@ -66,6 +69,8 @@ interface FlowMetrics {
 		leaseExpiries: number;
 		abandonedClaims: number;
 		gateRejections: number;
+		// PROJ-342: claims denied for hitting the project's agent WIP cap.
+		wipCapPressure: number;
 	};
 }
 
@@ -338,7 +343,13 @@ function HealthTile({ metricId, value }: { metricId: MetricId; value: number }) 
 // defects?") without adding a new per-type legend/color scheme to learn. Buckets with
 // no completions are gapped (null) rather than drawn as 0%, so an empty bucket reads as
 // "no data" rather than "no bugs".
-function BugShareChart({ data }: { data: FlowMetrics["bugShareOverTime"] }) {
+function BugShareChart({
+	data,
+	bugTypeTracked,
+}: {
+	data: FlowMetrics["bugShareOverTime"];
+	bugTypeTracked: boolean;
+}) {
 	const labels = useMemo(() => data.map((d) => d.bucketStart), [data]);
 	const chartData = useMemo<uPlot.AlignedData>(
 		() => [data.map((_, i) => i), data.map((d) => d.bugSharePercent)],
@@ -387,6 +398,12 @@ function BugShareChart({ data }: { data: FlowMetrics["bugShareOverTime"] }) {
 			};
 		};
 	}, [labels]);
+
+	if (!bugTypeTracked) {
+		return (
+			<EmptyChartState message='Not tracked — no task type keyed "bug" exists in this workspace' />
+		);
+	}
 
 	if (data.length === 0 || data.every((d) => d.bugSharePercent === null)) {
 		return <EmptyChartState message="No completed issues yet" />;
@@ -730,7 +747,10 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 								caption="Bugs as a share of completed throughput — a rising trend is a quality signal, not just a volume one"
 							/>
 							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-								<BugShareChart data={metrics.bugShareOverTime} />
+								<BugShareChart
+									data={metrics.bugShareOverTime}
+									bugTypeTracked={metrics.bugTypeTracked}
+								/>
 							</div>
 						</div>
 
@@ -763,21 +783,16 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
 								<CfdChart data={metrics.cfdOverTime} />
 							</div>
-							<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-								<DistributionTiles metricId="time-in-progress" dist={metrics.timeInProgress} />
-								{/* Single-line reference to the canonical Review-latency section below —
-							    not a second 4-tile group. Label matches the popover copy it reuses. */}
-								<div class="mb-8">
-									<h2 class="m-0 mb-1 text-base font-semibold text-text-base inline-flex items-center gap-1.5">
-										Review latency
-										<MetricHelp id="review-latency" />
-									</h2>
-									<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-										Full breakdown in Efficiency &amp; collaboration, below
-									</p>
-									<StatTile label="p50" value={formatDuration(metrics.reviewLatency.p50)} />
-								</div>
-							</div>
+							{/* PROJ-392: Review latency isn't a second 4-tile group — pairing a dense
+							    4-tile card with a near-empty one in a two-column grid read as a
+							    visual bug (implying parity where there isn't any). Time-in-progress
+							    now takes the full row; the caption below points to the canonical
+							    Review-latency breakdown instead. */}
+							<DistributionTiles
+								metricId="time-in-progress"
+								caption="Review latency has its own breakdown in Efficiency & collaboration, below"
+								dist={metrics.timeInProgress}
+							/>
 						</div>
 
 						<div class="mb-8">
@@ -842,7 +857,7 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 								Fault signals for the factory itself, for the selected window — a low background
 								rate is normal; watch the trend, not any single nonzero tile
 							</p>
-							<div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+							<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
 								<HealthTile metricId="lease-expiries" value={metrics.factoryHealth.leaseExpiries} />
 								<HealthTile
 									metricId="abandoned-claims"
@@ -852,11 +867,11 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 									metricId="gate-rejections"
 									value={metrics.factoryHealth.gateRejections}
 								/>
+								<HealthTile
+									metricId="wip-cap-pressure"
+									value={metrics.factoryHealth.wipCapPressure}
+								/>
 							</div>
-							<p class="m-0 mt-2 text-[0.68rem] text-text-muted">
-								WIP-cap pressure (claims denied for exceeding the project's agent WIP limit) isn't
-								tracked yet — the denial site doesn't record an event today (PROJ-334 follow-up).
-							</p>
 						</div>
 					</SectionBand>
 				</>

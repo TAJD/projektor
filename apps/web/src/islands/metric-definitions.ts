@@ -20,6 +20,7 @@ export type MetricId =
 	| "lease-expiries"
 	| "abandoned-claims"
 	| "gate-rejections"
+	| "wip-cap-pressure"
 	| "code-heatmap"
 	| "code-heatmap-contention";
 
@@ -124,6 +125,13 @@ export const METRIC_DEFINITIONS: Record<MetricId, MetricDefinition> = {
 		label: "Gate rejections",
 		definition: "How often review sent work back for rework instead of approving it.",
 		computation: "Count of issues moved from in review back to in progress, in the window.",
+	},
+	"wip-cap-pressure": {
+		label: "WIP-cap pressure",
+		definition:
+			"How often a claim was denied because the project's agent WIP cap was already full.",
+		computation:
+			"Count of claim_issue calls rejected for exceeding the project's agent WIP limit, in the window.",
 	},
 	"code-heatmap": {
 		label: "Where work lands",

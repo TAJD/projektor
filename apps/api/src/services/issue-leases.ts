@@ -197,6 +197,15 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 
 	// No row inserted and no UNIQUE violation ⇒ the WIP-cap guard subquery held.
 	if (res.meta.changes === 0) {
+		// PROJ-342: record the denial — issue, project, timestamp, requesting agent —
+		// so the factory-health tile has fault data instead of nothing tracked.
+		await ctx.db
+			.prepare(
+				"INSERT INTO wip_cap_denials (id, workspace_id, project_id, issue_id, agent_session_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?)"
+			)
+			.bind(crypto.randomUUID(), ctx.workspaceId, projectId, issueId, agentId, now)
+			.run();
+
 		const held = await liveLeaseHoldersForProject(orm, ctx, projectId, cutoff);
 		throw new ConflictError(
 			`Project agent WIP limit reached (${cap}); currently held: ${held.join(", ")}`
