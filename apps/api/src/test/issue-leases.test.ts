@@ -259,6 +259,32 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		expect(JSON.stringify(body)).toMatch(/WIP limit/i);
 	});
 
+	it("records a wip_cap_denials event when a claim is rejected over-cap (PROJ-342)", async () => {
+		const agent = await registerAgent("worker");
+		const issues = await Promise.all(
+			Array.from({ length: 4 }, (_, i) =>
+				seedIssue(workspaceId, projectId, userId, { title: `Denial ${i}` })
+			)
+		);
+
+		for (const issue of issues.slice(0, 3)) {
+			expect((await claim(issue.id, agent)).status).toBe(201);
+		}
+
+		expect((await claim(issues[3].id, agent)).status).toBe(409);
+
+		const row = await env.DB.prepare(
+			"SELECT project_id, issue_id, agent_session_id FROM wip_cap_denials WHERE workspace_id = ?"
+		)
+			.bind(workspaceId)
+			.first<{ project_id: string; issue_id: string; agent_session_id: string }>();
+
+		expect(row).not.toBeNull();
+		expect(row?.project_id).toBe(projectId);
+		expect(row?.issue_id).toBe(issues[3].id);
+		expect(row?.agent_session_id).toBe(agent);
+	});
+
 	it("TOCTOU: N concurrent claims never push a project over the cap (PROJ-290)", async () => {
 		const agent = await registerAgent("worker");
 		const issues = await Promise.all(

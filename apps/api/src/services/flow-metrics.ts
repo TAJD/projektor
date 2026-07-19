@@ -400,6 +400,7 @@ interface FactoryHealth {
 	leaseExpiries: number;
 	abandonedClaims: number;
 	gateRejections: number;
+	wipCapPressure: number;
 }
 
 async function fetchFactoryHealth(
@@ -450,10 +451,25 @@ async function fetchFactoryHealth(
 			)
 		);
 
+	// PROJ-342: WIP-cap denials — claims rejected for hitting the per-project agent
+	// WIP cap. Recorded at the denial site in claimIssue (services/issue-leases.ts).
+	const wipCapPressure = await orm
+		.select({ id: schema.wipCapDenials.id })
+		.from(schema.wipCapDenials)
+		.where(
+			and(
+				eq(schema.wipCapDenials.workspaceId, ctx.workspaceId),
+				eq(schema.wipCapDenials.projectId, projectId),
+				gte(schema.wipCapDenials.occurredAt, since),
+				lte(schema.wipCapDenials.occurredAt, until)
+			)
+		);
+
 	return {
 		leaseExpiries: leaseExpiries.length,
 		abandonedClaims: abandonedClaims.length,
 		gateRejections: gateRejections.length,
+		wipCapPressure: wipCapPressure.length,
 	};
 }
 
@@ -542,6 +558,16 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		throughputUntil,
 		granularity
 	);
+	// PROJ-341: buildBugShareOverTime identifies bugs via typeKey === "bug" — if the
+	// workspace has no type keyed "bug" (renamed/deleted default), that always reads 0%
+	// with no indication anything's wrong. Surface whether the type exists at all so the
+	// frontend can show a distinguishable "not tracked" state instead of a silent 0%.
+	const bugTypeExists = await orm
+		.select({ id: schema.taskTypes.id })
+		.from(schema.taskTypes)
+		.where(and(eq(schema.taskTypes.workspaceId, ctx.workspaceId), eq(schema.taskTypes.key, "bug")))
+		.get();
+	const bugTypeTracked = bugTypeExists !== undefined;
 	const arrivalVsCompletionOverTime = buildArrivalVsCompletion(
 		issues,
 		throughputSince,
@@ -569,6 +595,9 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		// PROJ-331: bug share of throughput — a rising share signals the factory shipping
 		// more defects, not just more work.
 		bugShareOverTime,
+		// PROJ-341: whether a "bug"-keyed task type exists in the workspace at all —
+		// distinguishes "tracked, 0 bugs" from "not tracked, no matching type".
+		bugTypeTracked,
 		// PROJ-328: collaboration-shape metrics. reviewLatency is the primary human
 		// choke point (in_review -> done); humanInterventions and autonomyRatio are
 		// aggregated per completed issue.

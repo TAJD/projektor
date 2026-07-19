@@ -12,6 +12,7 @@ const EMPTY_METRICS = {
 	wipOverTime: [],
 	throughputOverTime: [],
 	bugShareOverTime: [],
+	bugTypeTracked: true,
 	reviewLatency: { count: 0, avg: null, p50: null, p90: null },
 	reviewLatencyOverTime: [],
 	humanInterventions: { count: 0, avg: null, p50: null, p90: null },
@@ -21,7 +22,7 @@ const EMPTY_METRICS = {
 	arrivalVsCompletionOverTime: [],
 	flowEfficiency: { count: 0, avg: null, p50: null, p90: null },
 	agingWip: [],
-	factoryHealth: { leaseExpiries: 0, abandonedClaims: 0, gateRejections: 0 },
+	factoryHealth: { leaseExpiries: 0, abandonedClaims: 0, gateRejections: 0, wipCapPressure: 0 },
 };
 
 // The real API always returns a fixed-size bucket window, even with zero completions —
@@ -41,6 +42,7 @@ const ZERO_BUCKET_METRICS = {
 		{ bucketStart: "2026-05-25", total: 0, bugCount: 0, bugSharePercent: null },
 		{ bucketStart: "2026-06-01", total: 0, bugCount: 0, bugSharePercent: null },
 	],
+	bugTypeTracked: true,
 	reviewLatency: { count: 0, avg: null, p50: null, p90: null },
 	reviewLatencyOverTime: [
 		{ bucketStart: "2026-05-25", p50: null },
@@ -59,7 +61,7 @@ const ZERO_BUCKET_METRICS = {
 	],
 	flowEfficiency: { count: 0, avg: null, p50: null, p90: null },
 	agingWip: [],
-	factoryHealth: { leaseExpiries: 0, abandonedClaims: 0, gateRejections: 0 },
+	factoryHealth: { leaseExpiries: 0, abandonedClaims: 0, gateRejections: 0, wipCapPressure: 0 },
 };
 
 const FULL_METRICS = {
@@ -77,6 +79,7 @@ const FULL_METRICS = {
 		{ bucketStart: "2026-05-25", total: 1, bugCount: 0, bugSharePercent: 0 },
 		{ bucketStart: "2026-06-01", total: 3, bugCount: 1, bugSharePercent: 1 / 3 },
 	],
+	bugTypeTracked: true,
 	reviewLatency: { count: 4, avg: 3600 * 3, p50: 3600 * 2, p90: 3600 * 6 },
 	reviewLatencyOverTime: [
 		{ bucketStart: "2026-05-25", p50: 3600 * 2 },
@@ -98,7 +101,7 @@ const FULL_METRICS = {
 		{ id: "issue-1", status: "in_progress", ageSeconds: 86400 * 12 },
 		{ id: "issue-2", status: "in_review", ageSeconds: 86400 * 3 },
 	],
-	factoryHealth: { leaseExpiries: 2, abandonedClaims: 1, gateRejections: 3 },
+	factoryHealth: { leaseExpiries: 2, abandonedClaims: 1, gateRejections: 3, wipCapPressure: 4 },
 };
 
 const EMPTY_CODE_HEATMAP = { prefix: "", totalDistinctIssues: 0, entries: [] };
@@ -167,6 +170,7 @@ describe("MetricsDashboard", () => {
 		expect(section.getByText("Gate rejections")).toBeTruthy();
 		expect(section.getByText("3")).toBeTruthy();
 		expect(section.getByText(/WIP-cap pressure/i)).toBeTruthy();
+		expect(section.getByText("4")).toBeTruthy();
 	});
 
 	it("shows a zero empty state for factory health when nothing has faulted", async () => {
@@ -176,7 +180,7 @@ describe("MetricsDashboard", () => {
 
 		const heading = await screen.findByText("Factory health");
 		const section = within(heading.closest("section") as HTMLElement);
-		expect(section.getAllByText("0")).toHaveLength(3);
+		expect(section.getAllByText("0")).toHaveLength(4);
 	});
 
 	it("shows the code-heatmap empty state fed by claim_files", async () => {
