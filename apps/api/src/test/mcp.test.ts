@@ -477,6 +477,71 @@ describe("MCP endpoint", () => {
 		expect(res.error).toBeDefined();
 	});
 
+	it("MCP delete_wiki_page cascade=true removes the page and its subtree (PROJ-238)", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
+
+		const parentRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "MCP Cascade Parent", content: "" }),
+		});
+		const parent = (await parentRes.json()) as { id: string; slug: string };
+
+		const childRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "MCP Cascade Child", content: "", parentId: parent.id }),
+		});
+		const child = (await childRes.json()) as { slug: string };
+
+		const delRes = (await mcpCall<{ content: Array<{ text: string }> }>(
+			owner.workspace.id,
+			"tools/call",
+			{ name: "delete_wiki_page", arguments: { slug: parent.slug, cascade: true } },
+			ownerHeaders
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		expect(JSON.parse(delRes.result.content[0].text)).toEqual({ ok: true, deletedCount: 2 });
+
+		const childRes2 = await SELF.fetch(`http://localhost/api/wiki/${child.slug}`, {
+			headers: ownerHeaders,
+		});
+		expect(childRes2.status).toBe(404);
+	});
+
+	it("MCP delete_wiki_page default promotes children instead of deleting them", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
+
+		const parentRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "MCP Promote Parent", content: "" }),
+		});
+		const parent = (await parentRes.json()) as { id: string; slug: string };
+
+		const childRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "MCP Promote Child", content: "", parentId: parent.id }),
+		});
+		const child = (await childRes.json()) as { slug: string };
+
+		await mcpCall(
+			owner.workspace.id,
+			"tools/call",
+			{ name: "delete_wiki_page", arguments: { slug: parent.slug } },
+			ownerHeaders
+		);
+
+		const childRes2 = await SELF.fetch(`http://localhost/api/wiki/${child.slug}`, {
+			headers: ownerHeaders,
+		});
+		expect(childRes2.status).toBe(200);
+		const childPage = (await childRes2.json()) as { parent_id: string | null };
+		expect(childPage.parent_id).toBeNull();
+	});
+
 	// --- get_prioritized_issues ---
 
 	it("get_prioritized_issues returns empty list when no open issues", async () => {

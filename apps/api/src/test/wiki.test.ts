@@ -462,6 +462,86 @@ describe("Wiki API", () => {
 		expect(page.parent_id).toBe(a.id);
 	});
 
+	it("DELETE /api/wiki/:slug (default) promotes children to the deleted page's parent (PROJ-238)", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
+
+		const grandparentRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Grandparent", content: "" }),
+		});
+		const grandparent = (await grandparentRes.json()) as { id: string };
+
+		const parentRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Parent To Delete", content: "", parentId: grandparent.id }),
+		});
+		const parent = (await parentRes.json()) as { id: string; slug: string };
+
+		const childRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Child", content: "", parentId: parent.id }),
+		});
+		const child = (await childRes.json()) as { id: string; slug: string };
+
+		const delRes = await SELF.fetch(`http://localhost/api/wiki/${parent.slug}`, {
+			method: "DELETE",
+			headers: ownerHeaders,
+		});
+		expect(delRes.status).toBe(200);
+		expect(await delRes.json()).toEqual({ ok: true, deletedCount: 1 });
+
+		const childPageRes = await SELF.fetch(`http://localhost/api/wiki/${child.slug}`, {
+			headers: ownerHeaders,
+		});
+		const childPage = (await childPageRes.json()) as { parent_id: string };
+		expect(childPage.parent_id).toBe(grandparent.id);
+	});
+
+	it("DELETE /api/wiki/:slug?cascade=true removes the page and its whole subtree", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
+
+		const parentRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Cascade Parent", content: "" }),
+		});
+		const parent = (await parentRes.json()) as { id: string; slug: string };
+
+		const childRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Cascade Child", content: "", parentId: parent.id }),
+		});
+		const child = (await childRes.json()) as { id: string; slug: string };
+
+		const grandchildRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Cascade Grandchild", content: "", parentId: child.id }),
+		});
+		const grandchild = (await grandchildRes.json()) as { slug: string };
+
+		const delRes = await SELF.fetch(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: ownerHeaders,
+		});
+		expect(delRes.status).toBe(200);
+		expect(await delRes.json()).toEqual({ ok: true, deletedCount: 3 });
+
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		for (const s of [parent.slug, child.slug, grandchild.slug]) {
+			const res = await SELF.fetch(`http://localhost/api/wiki/${s}`, {
+				headers: ownerHeaders,
+			});
+			expect(res.status).toBe(404);
+		}
+	});
+
 	it("DELETE /api/wiki/:slug returns 403 for viewer role", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",

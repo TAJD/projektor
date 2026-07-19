@@ -58,9 +58,10 @@ mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live h
 The parity audit (PROJ-236) confirmed these surface-only features are intentional, not
 drift — don't re-flag them in future audits:
 
-- **File attachments (`routes/files.ts`)** — REST-only. Binary/multipart upload and
-  streamed download can't cross JSON-RPC. Tracked separately as PROJ-234 (no MCP surface
-  at all for this domain).
+- **File attachment upload/download (`POST /api/files`, `GET /api/files/:id`)** —
+  REST-only. Binary/multipart upload and streamed download can't cross JSON-RPC.
+  Metadata operations (list, get metadata, link-create, delete) have full MCP parity
+  via `mcp/files.ts` (PROJ-234).
 - **Auth (`routes/auth.ts`): login redirect, API token minting/revocation** — REST-only.
   CF Access login is a browser redirect flow; token minting/revocation is a sensitive
   credential operation kept off the MCP surface.
@@ -274,6 +275,7 @@ These are the constraints the fleet skill reads to plan batches. Keep them curre
 | issues | `services/issues.ts` | `schemas/issues.ts` | `routes/issues.ts` | `mcp/issues.ts` | `test/issues.test.ts` |
 | projects | `services/projects.ts` | `schemas/projects.ts` | `routes/projects.ts` | `mcp/projects.ts` | `test/projects.test.ts` |
 | wiki | `services/wiki.ts` | `schemas/wiki.ts` | `routes/wiki.ts` | `mcp/wiki.ts` | `test/wiki.test.ts` |
+| files | `services/files.ts` | `schemas/files.ts` | `routes/files.ts` | `mcp/files.ts` | `test/files.test.ts` |
 | sprints | `services/sprints.ts` | `schemas/sprints.ts` | `routes/sprints.ts` | `mcp/sprints.ts` | `test/sprints.test.ts` |
 | comments | `services/comments.ts` | `schemas/comments.ts` | `routes/comments.ts` | `mcp/comments.ts` | `test/comments.test.ts` |
 | task-types | `services/task-types.ts` | `schemas/task-types.ts` | `routes/task-types.ts` | `mcp/task-types.ts` | `test/task-types.test.ts` |

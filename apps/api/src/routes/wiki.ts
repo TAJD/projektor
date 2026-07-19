@@ -90,7 +90,8 @@ router.put("/:slug", async (c) => {
 router.delete("/:slug", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await wikiService.deleteWikiPage(ctx, c.req.param("slug")));
+		const cascade = c.req.query("cascade") === "true";
+		return c.json(await wikiService.deleteWikiPage(ctx, c.req.param("slug"), { cascade }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

@@ -137,7 +137,7 @@ running server.
 | `get_wiki_page` | Get a wiki page by slug, including full content |
 | `create_wiki_page` | Create a new wiki page |
 | `update_wiki_page` | Update a wiki page by id or slug (saves a revision when content changes) |
-| `delete_wiki_page` | Delete a wiki page by slug (not allowed for viewers) |
+| `delete_wiki_page` | Delete a wiki page by slug (not allowed for viewers). By default any child pages are promoted to the deleted page's parent; pass cascade=true to delete the whole subtree instead. |
 | `wiki_tree` | Get the wiki page hierarchy as a nested tree, optionally filtered by project |
 | `list_wiki_revisions` | List revision history for a wiki page |
 | `get_wiki_revision` | Get the content of a specific wiki revision by its ID |

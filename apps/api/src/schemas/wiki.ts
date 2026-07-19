@@ -33,3 +33,9 @@ export const SearchWikiInputSchema = z.object({
 	limit: z.number().int().min(1).max(50).optional().default(10),
 	projectId: z.string().uuid().optional(),
 });
+
+export const DeleteWikiPageOptionsSchema = z.object({
+	// Default (false): children are promoted to the deleted page's parent. true: the
+	// deleted page's entire subtree is removed too.
+	cascade: z.boolean().optional().default(false),
+});
