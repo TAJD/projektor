@@ -6,6 +6,7 @@ import { commentsTools } from "./comments";
 import { customFieldsTools } from "./custom-fields";
 import { feedbackTools } from "./feedback";
 import { fileClaimsTools } from "./file-claims";
+import { filesTools } from "./files";
 import { flowMetricsTools } from "./flow-metrics";
 import { groupsTools } from "./groups";
 import { issueLeasesTools } from "./issue-leases";
@@ -58,6 +59,7 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 	{ domain: "issue-links", title: "Issue links", group: "Project data", tools: issueLinksTools },
 	{ domain: "comments", title: "Comments", group: "Project data", tools: commentsTools },
 	{ domain: "wiki", title: "Wiki", group: "Project data", tools: wikiTools },
+	{ domain: "files", title: "Attachments", group: "Project data", tools: filesTools },
 	{ domain: "task-types", title: "Task types", group: "Project data", tools: taskTypesTools },
 	{
 		domain: "task-statuses",

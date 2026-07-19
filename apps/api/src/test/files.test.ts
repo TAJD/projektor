@@ -4,6 +4,38 @@ import { authHeaders, seedFixture, seedMember, seedProject, seedToken, seedUser 
 
 const ENTITY_ID = crypto.randomUUID();
 
+type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
+type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
+
+async function mcpCall<T>(
+	workspaceId: string,
+	method: string,
+	params: unknown,
+	headers: Record<string, string>
+): Promise<JsonRpcResult<T> | JsonRpcError> {
+	const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+	});
+	return res.json();
+}
+
+async function mcpToolResult<T>(
+	workspaceId: string,
+	name: string,
+	toolArgs: unknown,
+	headers: Record<string, string>
+): Promise<T> {
+	const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+		workspaceId,
+		"tools/call",
+		{ name, arguments: toolArgs },
+		headers
+	)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+	return JSON.parse(res.result.content[0].text) as T;
+}
+
 function makeUploadRequest(
 	token: string,
 	slug: string,
@@ -557,5 +589,135 @@ describe("Files API", () => {
 			const list = (await listRes.json()) as Array<{ kind: string }>;
 			expect(list.find((l) => l.kind === "wiki_ref")).toBeUndefined();
 		});
+	});
+});
+
+// PROJ-234: attachments previously had no MCP surface at all. list/get/create-link/delete
+// are metadata-only (no binary), so they get full MCP parity; upload/download remain
+// REST-only (AGENTS.md exception).
+describe("Files MCP tools", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	it("create_link_attachment + list_attachments + get_attachment + delete_attachment round-trip", async () => {
+		const headers = authHeaders(token, slug);
+		const entityId = crypto.randomUUID();
+
+		const created = await mcpToolResult<{ id: string; kind: string }>(
+			workspaceId,
+			"create_link_attachment",
+			{ kind: "url", entityType: "issue", entityId, url: "https://example.com", label: "Docs" },
+			headers
+		);
+		expect(created.kind).toBe("url");
+
+		const list = await mcpToolResult<Array<{ id: string; filename: string; url: string | null }>>(
+			workspaceId,
+			"list_attachments",
+			{ entityType: "issue", entityId },
+			headers
+		);
+		expect(list).toHaveLength(1);
+		expect(list[0].id).toBe(created.id);
+		expect(list[0].url).toBe("https://example.com");
+
+		const meta = await mcpToolResult<{ id: string; filename: string }>(
+			workspaceId,
+			"get_attachment",
+			{ id: created.id },
+			headers
+		);
+		expect(meta.filename).toBe("Docs");
+
+		await mcpToolResult<{ ok: true }>(
+			workspaceId,
+			"delete_attachment",
+			{ id: created.id },
+			headers
+		);
+
+		const afterDelete = await mcpToolResult<unknown[]>(
+			workspaceId,
+			"list_attachments",
+			{ entityType: "issue", entityId },
+			headers
+		);
+		expect(afterDelete).toHaveLength(0);
+	});
+
+	it("get_attachment returns a JSON-RPC error for an unknown id", async () => {
+		const res = (await mcpCall(
+			workspaceId,
+			"tools/call",
+			{ name: "get_attachment", arguments: { id: crypto.randomUUID() } },
+			authHeaders(token, slug)
+		)) as JsonRpcError;
+		expect(res.error).toBeDefined();
+		expect(res.error.code).toBe(-32000);
+	});
+
+	it("create_link_attachment rejects a wiki_ref for a non-existent page", async () => {
+		const res = (await mcpCall(
+			workspaceId,
+			"tools/call",
+			{
+				name: "create_link_attachment",
+				arguments: {
+					kind: "wiki_ref",
+					entityType: "issue",
+					entityId: crypto.randomUUID(),
+					wikiPageId: crypto.randomUUID(),
+				},
+			},
+			authHeaders(token, slug)
+		)) as JsonRpcError;
+		expect(res.error).toBeDefined();
+		expect(res.error.code).toBe(-32000);
+	});
+
+	it("delete_attachment via MCP also removes the underlying R2 object for uploaded files", async () => {
+		const form = new FormData();
+		form.append("file", new File(["mcp delete test"], "mcp.txt", { type: "text/plain" }));
+		form.append("entityType", "issue");
+		form.append("entityId", crypto.randomUUID());
+		const uploadRes = await SELF.fetch("http://localhost/api/files", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		const { id } = (await uploadRes.json()) as { id: string };
+
+		const row = await env.DB.prepare("SELECT r2_key FROM attachments WHERE id = ?")
+			.bind(id)
+			.first<{ r2_key: string }>();
+		expect(await env.R2.get(row?.r2_key ?? "")).not.toBeNull();
+
+		await mcpToolResult<{ ok: true }>(
+			workspaceId,
+			"delete_attachment",
+			{ id },
+			authHeaders(token, slug)
+		);
+
+		expect(await env.R2.get(row?.r2_key ?? "")).toBeNull();
+	});
+
+	it("list_attachments scopes by workspace — another workspace sees no rows for the same entityId", async () => {
+		const other = await seedFixture();
+		const result = await mcpToolResult<unknown[]>(
+			other.workspace.id,
+			"list_attachments",
+			{ entityType: "issue", entityId: ENTITY_ID },
+			authHeaders(other.token, other.workspace.slug)
+		);
+		expect(result).toEqual([]);
 	});
 });

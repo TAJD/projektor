@@ -1,9 +1,10 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, desc, eq, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
 import { wikiPagePath } from "../lib/urls";
 import { IdSchema } from "../schemas/common";
 import {
 	CreatePageSchema,
+	DeleteWikiPageOptionsSchema,
 	ListPagesInputSchema,
 	SearchWikiInputSchema,
 	UpdatePageSchema,
@@ -18,6 +19,7 @@ import {
 } from "./access";
 import { recordActivity } from "./activity";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 type TreeNode = { id: string; slug: string; title: string; url: string; children: TreeNode[] };
@@ -368,13 +370,49 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	return { ok: true, url: wikiPagePath(page.slug, page.projectId) };
 }
 
-export async function deleteWikiPage(ctx: ServiceCtx, slug: string) {
+// PROJ-238: breadth-first walk of parent_id children, chunked to stay under D1's
+// bound-parameter cap regardless of subtree size.
+async function collectDescendantIds(
+	db: D1Database,
+	rootId: string,
+	workspaceId: string
+): Promise<string[]> {
+	const orm = drizzle(db, { schema });
+	const descendants: string[] = [];
+	let frontier = [rootId];
+	while (frontier.length > 0) {
+		const children = await inChunks(frontier, (chunk) =>
+			orm
+				.select({ id: schema.wikiPages.id })
+				.from(schema.wikiPages)
+				.where(
+					and(
+						inArray(schema.wikiPages.parentId, chunk),
+						eq(schema.wikiPages.workspaceId, workspaceId)
+					)
+				)
+		);
+		frontier = children.map((c) => c.id);
+		descendants.push(...frontier);
+	}
+	return descendants;
+}
+
+export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: unknown) {
 	const idCheck = IdSchema.safeParse(slug);
 	if (!idCheck.success)
 		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
+	const parsedOptions = DeleteWikiPageOptionsSchema.safeParse(options ?? {});
+	if (!parsedOptions.success) throw new ValidationError(parsedOptions.error.flatten());
+	const { cascade } = parsedOptions.data;
+
 	const orm = drizzle(ctx.db, { schema });
 	const page = await orm
-		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
+		.select({
+			id: schema.wikiPages.id,
+			projectId: schema.wikiPages.projectId,
+			parentId: schema.wikiPages.parentId,
+		})
 		.from(schema.wikiPages)
 		.where(and(eq(schema.wikiPages.slug, slug), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
 		.get();
@@ -390,12 +428,42 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string) {
 			throw new ForbiddenError("Insufficient permissions");
 	}
 
+	if (cascade) {
+		const descendantIds = await collectDescendantIds(ctx.db, page.id, ctx.workspaceId);
+		const allIds = [page.id, ...descendantIds];
+		await inChunks(allIds, async (chunk) => {
+			await orm
+				.delete(schema.attachments)
+				.where(inArray(schema.attachments.linkedWikiPageId, chunk));
+			return [];
+		});
+		await inChunks(allIds, async (chunk) => {
+			await orm.delete(schema.wikiPages).where(inArray(schema.wikiPages.id, chunk));
+			return [];
+		});
+		await recordActivity(ctx, {
+			entityType: "wiki_page",
+			entityId: page.id,
+			action: "deleted",
+			diff: { cascade: true, deletedCount: allIds.length },
+		});
+		return { ok: true, deletedCount: allIds.length };
+	}
+
+	// PROJ-238: no FK constraint on parent_id, so a plain delete would otherwise leave
+	// children pointing at a row that no longer exists. Default behavior is to promote
+	// them to the deleted page's own parent (which may be null, i.e. the root).
+	await orm
+		.update(schema.wikiPages)
+		.set({ parentId: page.parentId })
+		.where(eq(schema.wikiPages.parentId, page.id));
+
 	// PROJ-407: mirror the migration's ON DELETE CASCADE at the app level too, since
 	// D1 does not guarantee FK enforcement is on for every connection.
 	await orm.delete(schema.attachments).where(eq(schema.attachments.linkedWikiPageId, page.id));
 	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: page.id, action: "deleted" });
-	return { ok: true };
+	return { ok: true, deletedCount: 1 };
 }
 
 export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<TreeNode[]> {

@@ -105,15 +105,24 @@ export const wikiTools: MCPTool[] = [
 	},
 	{
 		name: "delete_wiki_page",
-		description: "Delete a wiki page by slug (not allowed for viewers)",
+		description:
+			"Delete a wiki page by slug (not allowed for viewers). By default any child pages are " +
+			"promoted to the deleted page's parent; pass cascade=true to delete the whole subtree instead.",
 		inputSchema: {
 			type: "object",
 			required: ["slug"],
-			properties: { slug: { type: "string" } },
+			properties: {
+				slug: { type: "string" },
+				cascade: {
+					type: "boolean",
+					default: false,
+					description: "Delete all descendant pages too, instead of promoting them",
+				},
+			},
 		},
 		async handler(input, ctx) {
-			const { slug } = input as { slug: string };
-			return wikiService.deleteWikiPage(ctx as ServiceCtx, slug);
+			const { slug, cascade } = input as { slug: string; cascade?: boolean };
+			return wikiService.deleteWikiPage(ctx as ServiceCtx, slug, { cascade });
 		},
 	},
 	{

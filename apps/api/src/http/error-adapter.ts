@@ -1,6 +1,13 @@
 import type { HonoEnv } from "@projektor/types";
 import type { Context } from "hono";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
+import {
+	ConflictError,
+	ForbiddenError,
+	NotFoundError,
+	PayloadTooLargeError,
+	UnsupportedMediaTypeError,
+	ValidationError,
+} from "../services/errors";
 
 export function serviceErrToResponse(c: Context<HonoEnv>, err: unknown) {
 	if (err instanceof ValidationError) {
@@ -14,6 +21,12 @@ export function serviceErrToResponse(c: Context<HonoEnv>, err: unknown) {
 	}
 	if (err instanceof ConflictError) {
 		return c.json({ error: err.message }, 409);
+	}
+	if (err instanceof PayloadTooLargeError) {
+		return c.json({ error: err.message }, 413);
+	}
+	if (err instanceof UnsupportedMediaTypeError) {
+		return c.json({ error: err.message }, 415);
 	}
 	throw err;
 }
