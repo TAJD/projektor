@@ -119,3 +119,39 @@ test.describe("Wiki create and edit flow", () => {
 		await expect(page.locator(".prose")).not.toContainText(INITIAL_CONTENT, { timeout: 5_000 });
 	});
 });
+
+// PROJ-423: wiki editor mobile layout regression coverage. MarkdownEditor was
+// audited and found already responsive (toolbar wraps via flex-wrap, and a
+// dedicated Edit/Preview toggle replaces the desktop side-by-side layout
+// below 640px) — these tests lock that behaviour in.
+test.describe("Wiki editor — mobile layout (375×812)", () => {
+	test("editor fits the viewport and shows the mobile Edit/Preview toggle", async ({ page }) => {
+		test.skip(
+			!process.env.E2E_BASE_URL,
+			"E2E_BASE_URL not set — skipping live deployment test",
+		);
+
+		const ctx = readCtx();
+		await openWiki(page, ctx);
+
+		const innerWidth = await page.evaluate(() => window.innerWidth);
+		expect(innerWidth).toBeLessThan(640);
+
+		const newPageBtn = page.locator("button", { hasText: "+ New page" });
+		await expect(newPageBtn).toBeVisible({ timeout: 15_000 });
+		await newPageBtn.click();
+
+		await expect(page.locator("#create-title")).toBeVisible({ timeout: 5_000 });
+
+		// The mobile Edit/Preview toggle only renders below 640px.
+		const previewToggle = page.locator("button", { hasText: "Preview" });
+		await expect(previewToggle).toBeVisible({ timeout: 5_000 });
+
+		await typeInEditor(page, INITIAL_CONTENT);
+		await previewToggle.click();
+		await expect(page.locator(".prose")).toContainText(INITIAL_CONTENT, { timeout: 5_000 });
+
+		const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+		expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
+	});
+});

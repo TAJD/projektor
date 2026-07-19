@@ -186,3 +186,36 @@ test.describe("Sprint planning flow", () => {
 		).toBeVisible({ timeout: 10_000 });
 	});
 });
+
+// PROJ-421: sprint list mobile layout regression coverage. SprintManager was
+// audited and found already responsive (flex-wrap throughout, no fixed
+// widths) — these tests lock that behaviour in rather than leaving it
+// unverified.
+test.describe("Sprint list — mobile layout (375×812)", () => {
+	test("header row and sprint cards fit the viewport with no horizontal scroll", async ({
+		page,
+	}) => {
+		test.skip(!process.env.E2E_BASE_URL, "E2E_BASE_URL not set — skipping live deployment test");
+
+		const ctx = readCtx();
+		const base = process.env.E2E_BASE_URL as string;
+		const projectId = await fetchFirstProjectId(base, ctx.workspaceSlug);
+		await openSprints(page, ctx, projectId);
+
+		const innerWidth = await page.evaluate(() => window.innerWidth);
+		expect(innerWidth).toBeLessThan(640);
+
+		const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+		expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
+
+		const countLabel = page.locator("p", { hasText: /sprints?/i }).first();
+		const newSprintBtn = page.locator("button", { hasText: "+ New sprint" });
+		await expect(countLabel).toBeVisible();
+		await expect(newSprintBtn).toBeVisible();
+
+		const labelBox = await countLabel.boundingBox();
+		const btnBox = await newSprintBtn.boundingBox();
+		if (!labelBox || !btnBox) throw new Error("boundingBox() returned null");
+		expect(btnBox.y).toBeGreaterThanOrEqual(labelBox.y + labelBox.height);
+	});
+});
