@@ -42,6 +42,14 @@ export async function apiFetch<T = unknown>(
 	} catch {
 		throw new ApiOfflineError(path, method);
 	}
-	if (!res.ok) throw new Error(`API ${method} ${path} failed: ${res.status}`);
+	if (!res.ok) {
+		// A 401 here means the Cloudflare Access session expired mid-use (the app itself
+		// never prompts re-login). Reload so Access can challenge and bounce the user back.
+		if (res.status === 401) {
+			window.location.reload();
+			return new Promise<T>(() => {});
+		}
+		throw new Error(`API ${method} ${path} failed: ${res.status}`);
+	}
 	return res.json() as Promise<T>;
 }
