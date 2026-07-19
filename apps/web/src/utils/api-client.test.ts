@@ -1,7 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
-import { ApiOfflineError, apiFetch } from "./api-client";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetApiFetchStateForTests, ApiOfflineError, apiFetch } from "./api-client";
 
 describe("apiFetch", () => {
+	beforeEach(() => {
+		__resetApiFetchStateForTests();
+	});
+
 	it("returns parsed JSON on a successful response", async () => {
 		vi.stubGlobal(
 			"fetch",
@@ -47,6 +51,50 @@ describe("apiFetch", () => {
 
 		expect(reload).toHaveBeenCalledTimes(1);
 		expect(settled).toBe(false);
+		Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+	});
+
+	it("suppresses errors from other in-flight calls once a 401 has triggered a reload", async () => {
+		const reload = vi.fn();
+		const originalLocation = window.location;
+		Object.defineProperty(window, "location", {
+			configurable: true,
+			value: { ...originalLocation, reload },
+		});
+
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+		apiFetch("/api/issues/i1");
+		await new Promise((r) => setTimeout(r, 0));
+		expect(reload).toHaveBeenCalledTimes(1);
+
+		// A concurrent request aborted by the same navigation (network error) or
+		// failing for any other reason shouldn't surface — the page is unloading.
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+		let networkErrorSettled = false;
+		apiFetch("/auth/me").then(
+			() => {
+				networkErrorSettled = true;
+			},
+			() => {
+				networkErrorSettled = true;
+			}
+		);
+
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+		let httpErrorSettled = false;
+		apiFetch("/api/projects").then(
+			() => {
+				httpErrorSettled = true;
+			},
+			() => {
+				httpErrorSettled = true;
+			}
+		);
+
+		await new Promise((r) => setTimeout(r, 0));
+		expect(networkErrorSettled).toBe(false);
+		expect(httpErrorSettled).toBe(false);
+
 		Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
 	});
 });

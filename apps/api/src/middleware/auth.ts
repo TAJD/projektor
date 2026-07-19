@@ -257,41 +257,16 @@ async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | nu
 	// Pre-screen without keys: avoids a JWKS fetch for obviously-invalid tokens.
 	// Mirrors the order of checks in verifyJwtPayload so early exits fire first.
 	const parts = jwt.split(".");
-	if (parts.length !== 3) {
-		console.log("[cf-access-debug] deny: malformed-jwt", { partCount: parts.length });
-		return null;
-	}
+	if (parts.length !== 3) return null;
 	try {
 		const hdr = JSON.parse(base64urlDecode(parts[0]));
-		if (hdr.alg !== "RS256") {
-			console.log("[cf-access-debug] deny: alg-mismatch", { alg: hdr.alg, kid: hdr.kid });
-			return null;
-		}
+		if (hdr.alg !== "RS256") return null;
 		const pld = JSON.parse(base64urlDecode(parts[1]));
-		if (pld.exp < Math.floor(Date.now() / 1000)) {
-			console.log("[cf-access-debug] deny: expired", {
-				exp: pld.exp,
-				now: Math.floor(Date.now() / 1000),
-			});
-			return null;
-		}
+		if (pld.exp < Math.floor(Date.now() / 1000)) return null;
 		const aud = Array.isArray(pld.aud) ? pld.aud : [pld.aud];
-		if (!aud.includes(env.CF_ACCESS_AUDIENCE)) {
-			console.log("[cf-access-debug] deny: aud-mismatch", {
-				tokenAud: aud,
-				expectedAud: env.CF_ACCESS_AUDIENCE,
-			});
-			return null;
-		}
-		if (pld.iss !== `https://${env.CF_ACCESS_TEAM_DOMAIN}`) {
-			console.log("[cf-access-debug] deny: iss-mismatch", {
-				tokenIss: pld.iss,
-				expectedIss: `https://${env.CF_ACCESS_TEAM_DOMAIN}`,
-			});
-			return null;
-		}
-	} catch (e) {
-		console.log("[cf-access-debug] deny: decode-error", { message: String(e) });
+		if (!aud.includes(env.CF_ACCESS_AUDIENCE)) return null;
+		if (pld.iss !== `https://${env.CF_ACCESS_TEAM_DOMAIN}`) return null;
+	} catch {
 		return null;
 	}
 	// All field checks passed — now fetch keys and verify the signature.
@@ -303,9 +278,6 @@ async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | nu
 		`https://${env.CF_ACCESS_TEAM_DOMAIN}`
 	);
 	if (!result) {
-		console.log("[cf-access-debug] sig-invalid-with-cached-keys", {
-			cachedKids: keys.map((k) => (k as { kid?: string }).kid),
-		});
 		// PROJ-358: claims already passed the pre-screen above, so a null result
 		// here means the signature didn't match any cached key — most likely
 		// Cloudflare rotated its Access signing keys since we cached them. Force
@@ -319,13 +291,6 @@ async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | nu
 				env.CF_ACCESS_AUDIENCE,
 				`https://${env.CF_ACCESS_TEAM_DOMAIN}`
 			);
-			if (!result) {
-				console.log("[cf-access-debug] deny: sig-invalid-after-forced-refresh", {
-					freshKids: freshKeys.map((k) => (k as { kid?: string }).kid),
-				});
-			}
-		} else {
-			console.log("[cf-access-debug] deny: forced-refresh-skipped-cooldown");
 		}
 	}
 	if (!result) return null;
