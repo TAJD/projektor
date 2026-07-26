@@ -8,7 +8,7 @@ import Select from "./Select";
 interface Props {
 	workspaceSlug?: string;
 	projectId?: string;
-	sourceId: string;
+	sourceId?: string;
 }
 
 type TabId = "items" | "summary" | "settings";
@@ -34,7 +34,7 @@ function statusLabel(s: FeedbackSource): string {
 export default function FeedbackSourceDetail({
 	workspaceSlug,
 	projectId: projectIdProp,
-	sourceId,
+	sourceId: sourceIdProp,
 }: Props) {
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	useEffect(() => {
@@ -42,6 +42,23 @@ export default function FeedbackSourceDetail({
 		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
 		if (fromUrl) setProjectId(fromUrl);
 	}, [projectIdProp]);
+
+	// Static output can't serve the dynamic /feedback/[sourceId] route directly, so
+	// FeedbackSourceDetail is also rendered by the static /feedback/view?sourceId= page (mirrors
+	// /issues/view.astro). Named "sourceId", not "id", because this page also renders ProjectNav,
+	// which reads ?id= as a *project* id — ?id= here would collide with it.
+	// Resolve sourceId from ?sourceId= first, then from the pretty-URL pathname.
+	const [sourceId, setSourceId] = useState(sourceIdProp ?? "");
+	useEffect(() => {
+		if (sourceIdProp) return;
+		const fromUrl = new URLSearchParams(window.location.search).get("sourceId");
+		if (fromUrl) {
+			setSourceId(fromUrl);
+			return;
+		}
+		const m = window.location.pathname.match(/^\/feedback\/([^/]+)/);
+		if (m) setSourceId(decodeURIComponent(m[1]));
+	}, [sourceIdProp]);
 
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [loading, setLoading] = useState(true);

@@ -100,27 +100,32 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 	const [error, setError] = useState<string | null>(null);
 	const [showCreate, setShowCreate] = useState(false);
 
-	const fetchAll = useCallback(async () => {
-		if (!projectId) return;
-		setLoading(true);
-		setError(null);
-		setForbidden(false);
-		try {
-			const [sourcesData, summaryData] = await Promise.all([
-				apiFetch<FeedbackSource[]>(`/api/projects/${projectId}/feedback-sources`, {
-					workspaceSlug,
-				}),
-				apiFetch<SourceSummary[]>(`/api/projects/${projectId}/feedback/summary`, { workspaceSlug }),
-			]);
-			setSources(Array.isArray(sourcesData) ? sourcesData : []);
-			setSummaries(Array.isArray(summaryData) ? summaryData : []);
-		} catch (e) {
-			if (String(e).includes(": 403")) setForbidden(true);
-			else setError(String(e));
-		} finally {
-			setLoading(false);
-		}
-	}, [projectId, workspaceSlug]);
+	const fetchAll = useCallback(
+		async (opts?: { background?: boolean }) => {
+			if (!projectId) return;
+			if (!opts?.background) setLoading(true);
+			setError(null);
+			setForbidden(false);
+			try {
+				const [sourcesData, summaryData] = await Promise.all([
+					apiFetch<FeedbackSource[]>(`/api/projects/${projectId}/feedback-sources`, {
+						workspaceSlug,
+					}),
+					apiFetch<SourceSummary[]>(`/api/projects/${projectId}/feedback/summary`, {
+						workspaceSlug,
+					}),
+				]);
+				setSources(Array.isArray(sourcesData) ? sourcesData : []);
+				setSummaries(Array.isArray(summaryData) ? summaryData : []);
+			} catch (e) {
+				if (String(e).includes(": 403")) setForbidden(true);
+				else setError(String(e));
+			} finally {
+				if (!opts?.background) setLoading(false);
+			}
+		},
+		[projectId, workspaceSlug]
+	);
 
 	useEffect(() => {
 		fetchAll();
@@ -162,7 +167,7 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 					projectId={projectId}
 					workspaceSlug={workspaceSlug}
 					onClose={() => setShowCreate(false)}
-					onCreated={fetchAll}
+					onCreated={() => fetchAll({ background: true })}
 				/>
 			)}
 		</section>

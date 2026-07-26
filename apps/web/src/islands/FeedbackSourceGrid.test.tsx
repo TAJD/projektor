@@ -91,6 +91,40 @@ describe("FeedbackSourceGrid", () => {
 		expect(screen.getByRole("dialog", { name: /New feedback source/i })).toBeTruthy();
 	});
 
+	it("keeps the New source modal (and its one-time token) mounted through the post-create refetch", async () => {
+		stubFetch([]);
+		render(<FeedbackSourceGrid workspaceSlug="my-ws" projectId="p1" />);
+		await screen.findByRole("button", { name: /New source/i });
+		fireEvent.click(screen.getByRole("button", { name: /New source/i }));
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+				const u = String(url);
+				if (opts?.method === "POST" && u.includes("/feedback-sources")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve({ id: "s3", token: "raw-token-value" }),
+					});
+				}
+				if (u.includes("/feedback/summary")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				if (u.includes("/feedback-sources")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([ACTIVE_SOURCE]) });
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			})
+		);
+
+		fireEvent.input(screen.getByLabelText("Name *"), { target: { value: "New source" } });
+		fireEvent.click(screen.getByRole("button", { name: "Create source" }));
+
+		expect(await screen.findByText("raw-token-value")).toBeTruthy();
+		await screen.findByText("Onboarding survey");
+		expect(screen.getByText("raw-token-value")).toBeTruthy();
+	});
+
 	it("renders an access-denied notice on a 403 list response", async () => {
 		vi.stubGlobal(
 			"fetch",

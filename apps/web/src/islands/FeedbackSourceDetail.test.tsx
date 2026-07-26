@@ -75,6 +75,31 @@ describe("FeedbackSourceDetail", () => {
 		expect(await screen.findByText(/Feedback source not found/i)).toBeTruthy();
 	});
 
+	it("resolves sourceId from ?sourceId= when not passed as a prop (static /feedback/view page)", async () => {
+		stubFetch();
+		const originalPath = window.location.pathname;
+		const originalSearch = window.location.search;
+		window.history.pushState({}, "", "/feedback/view?sourceId=s2");
+		try {
+			render(<FeedbackSourceDetail workspaceSlug="my-ws" projectId="p1" />);
+			expect(await screen.findByRole("heading", { name: "Widget" })).toBeTruthy();
+		} finally {
+			window.history.pushState({}, "", originalPath + originalSearch);
+		}
+	});
+
+	it("resolves sourceId from the pathname when not passed as a prop (SPA-fallback serving)", async () => {
+		stubFetch();
+		const originalPath = window.location.pathname;
+		window.history.pushState({}, "", "/feedback/s2");
+		try {
+			render(<FeedbackSourceDetail workspaceSlug="my-ws" projectId="p1" />);
+			expect(await screen.findByRole("heading", { name: "Widget" })).toBeTruthy();
+		} finally {
+			window.history.pushState({}, "", originalPath);
+		}
+	});
+
 	it("switching sources via the dropdown navigates to the new source's detail page", async () => {
 		stubFetch();
 		const originalLocation = window.location;

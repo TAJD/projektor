@@ -68,3 +68,4 @@ No backend changes. Existing endpoints already support what's needed:
   - Settings tab: rotate/revoke/active-toggle still work as before.
   - Revoked sources appear muted in the grid and are still reachable.
 - No automated test suite changes are in scope unless existing tests directly assert on the old flat-page structure (check `apps/web` test files touching `feedback.astro`/these islands before implementing).
+- Check for mobile and for desktop - lean on existing tests.
