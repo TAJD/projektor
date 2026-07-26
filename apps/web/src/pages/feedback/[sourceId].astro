@@ -1,0 +1,20 @@
+---
+import Base from '../../layouts/Base.astro';
+import ProjectNav from '../../islands/ProjectNav';
+import FeedbackSourceDetail from '../../islands/FeedbackSourceDetail';
+
+export async function getStaticPaths() {
+  // Paths are unknown at build time; the island resolves the source client-side
+  // via the sourceId prop (GET /api/projects/:id/feedback-sources).
+  return [];
+}
+
+const { sourceId } = Astro.params as { sourceId: string };
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Feedback source — Projektor">
+  <ProjectNav client:load workspaceSlug={workspaceSlug} pageLabel="Feedback" />
+  <div class="page-container">
+    <FeedbackSourceDetail client:load workspaceSlug={workspaceSlug} sourceId={sourceId} />
+  </div>
+</Base>

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import Select from "./Select";
 
 interface Feedback {
 	id: string;
@@ -18,8 +19,16 @@ interface Feedback {
 
 interface Props {
 	workspaceSlug?: string;
-	projectId?: string;
+	projectId: string;
+	sourceId: string;
 }
+
+const STATUS_OPTIONS = [
+	{ value: "", label: "All" },
+	{ value: "new", label: "New" },
+	{ value: "reviewed", label: "Reviewed" },
+	{ value: "actioned", label: "Actioned" },
+];
 
 const TD = "px-3 py-2 border-b border-border align-top text-[0.875rem]";
 const TH =
@@ -152,9 +161,7 @@ function FeedbackMobileCards({
 								expanded={expanded.has(r.id)}
 								onToggle={() => onToggleExpanded(r.id)}
 							/>
-							<div class="text-[0.75rem] text-text-muted mt-1">
-								{r.sourceName ?? "—"} · {r.status}
-							</div>
+							<div class="text-[0.75rem] text-text-muted mt-1">{r.status}</div>
 						</div>
 					</div>
 					<FeedbackRowActions row={r} onMarkReviewed={onMarkReviewed} onConvert={onConvert} />
@@ -164,32 +171,23 @@ function FeedbackMobileCards({
 	);
 }
 
-export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }: Props) {
-	const [projectId, setProjectId] = useState(projectIdProp ?? "");
-	useEffect(() => {
-		if (projectIdProp) return;
-		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
-		if (fromUrl) setProjectId(fromUrl);
-	}, [projectIdProp]);
+export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Props) {
 	const [rows, setRows] = useState<Feedback[]>([]);
 	const [status, setStatus] = useState("");
-	const [sourceFilter, setSourceFilter] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
 	const fetchRows = useCallback(async () => {
-		if (!projectId) return;
+		if (!projectId || !sourceId) return;
 		setLoading(true);
 		setError(null);
 		try {
-			const params = new URLSearchParams();
+			const params = new URLSearchParams({ sourceId });
 			if (status) params.set("status", status);
-			if (sourceFilter) params.set("sourceId", sourceFilter);
-			const qs = params.toString();
 			const data = await apiFetch<Feedback[]>(
-				`/api/projects/${projectId}/feedback${qs ? `?${qs}` : ""}`,
+				`/api/projects/${projectId}/feedback?${params.toString()}`,
 				{ workspaceSlug }
 			);
 			setRows(Array.isArray(data) ? data : []);
@@ -198,7 +196,7 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 		} finally {
 			setLoading(false);
 		}
-	}, [projectId, status, sourceFilter, workspaceSlug]);
+	}, [projectId, sourceId, status, workspaceSlug]);
 
 	useEffect(() => {
 		fetchRows();
@@ -279,55 +277,21 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 		});
 	}
 
-	const sourceOptions = Array.from(
-		new Map(rows.filter((r) => r.sourceName).map((r) => [r.sourceId, r.sourceName])).entries()
-	);
-
 	return (
 		<section>
 			<div class="flex gap-4 items-end mb-4">
 				<div class="flex flex-col gap-1">
-					<label class="text-[0.8rem] font-semibold text-text-muted" for="fb-status">
-						Status
-					</label>
-					<select
-						id="fb-status"
-						class="px-2 py-1 border border-border rounded bg-bg text-text-base text-sm"
+					<span class="text-[0.8rem] font-semibold text-text-muted">Status</span>
+					<Select
+						ariaLabel="Status"
 						value={status}
-						onChange={(e) => {
-							setStatus((e.target as HTMLSelectElement).value);
+						onChange={(v) => {
+							setStatus(v);
 							setSelected(new Set());
 						}}
-					>
-						<option value="">All</option>
-						<option value="new">New</option>
-						<option value="reviewed">Reviewed</option>
-						<option value="actioned">Actioned</option>
-					</select>
+						options={STATUS_OPTIONS}
+					/>
 				</div>
-				{sourceOptions.length > 1 && (
-					<div class="flex flex-col gap-1">
-						<label class="text-[0.8rem] font-semibold text-text-muted" for="fb-source">
-							Source
-						</label>
-						<select
-							id="fb-source"
-							class="px-2 py-1 border border-border rounded bg-bg text-text-base text-sm"
-							value={sourceFilter}
-							onChange={(e) => {
-								setSourceFilter((e.target as HTMLSelectElement).value);
-								setSelected(new Set());
-							}}
-						>
-							<option value="">All sources</option>
-							{sourceOptions.map(([id, name]) => (
-								<option key={id} value={id}>
-									{name}
-								</option>
-							))}
-						</select>
-					</div>
-				)}
 			</div>
 
 			{error && (
@@ -368,7 +332,6 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 									</th>
 									<th class={TH}>Rating</th>
 									<th class={TH}>Feedback</th>
-									<th class={TH}>Source</th>
 									<th class={TH}>Status</th>
 									<th class={TH}>Received</th>
 									<th class={TH}></th>
@@ -397,7 +360,6 @@ export default function FeedbackList({ workspaceSlug, projectId: projectIdProp }
 												onToggle={() => toggleExpanded(r.id)}
 											/>
 										</td>
-										<td class={`${TD} text-text-muted`}>{r.sourceName ?? "—"}</td>
 										<td class={`${TD} text-text-muted`}>{r.status}</td>
 										<td class={`${TD} text-text-muted`}>{formatDate(r.createdAt)}</td>
 										<td class={`${TD} whitespace-nowrap`}>

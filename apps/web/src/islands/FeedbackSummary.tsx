@@ -1,4 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 
 interface VersionSummary {
@@ -19,7 +19,8 @@ interface SourceSummary {
 
 interface Props {
 	workspaceSlug?: string;
-	projectId?: string;
+	projectId: string;
+	sourceId: string;
 }
 
 function versionMetric(v: VersionSummary): string {
@@ -30,37 +31,31 @@ function versionMetric(v: VersionSummary): string {
 	return parts.join(" · ");
 }
 
-export default function FeedbackSummary({ workspaceSlug, projectId: projectIdProp }: Props) {
-	const [projectId, setProjectId] = useState(projectIdProp ?? "");
-	useEffect(() => {
-		if (projectIdProp) return;
-		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
-		if (fromUrl) setProjectId(fromUrl);
-	}, [projectIdProp]);
-
-	const [sources, setSources] = useState<SourceSummary[]>([]);
+export default function FeedbackSummary({ workspaceSlug, projectId, sourceId }: Props) {
+	const [summary, setSummary] = useState<SourceSummary | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
-	useEffect(() => {
+	const fetchSummary = useCallback(async () => {
 		if (!projectId) return;
-		let cancelled = false;
 		setLoading(true);
 		setError(null);
-		apiFetch<SourceSummary[]>(`/api/projects/${projectId}/feedback/summary`, { workspaceSlug })
-			.then((data) => {
-				if (!cancelled) setSources(Array.isArray(data) ? data : []);
-			})
-			.catch((e) => {
-				if (!cancelled) setError(String(e));
-			})
-			.finally(() => {
-				if (!cancelled) setLoading(false);
+		try {
+			const data = await apiFetch<SourceSummary[]>(`/api/projects/${projectId}/feedback/summary`, {
+				workspaceSlug,
 			});
-		return () => {
-			cancelled = true;
-		};
-	}, [projectId, workspaceSlug]);
+			const list = Array.isArray(data) ? data : [];
+			setSummary(list.find((s) => s.sourceId === sourceId) ?? null);
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setLoading(false);
+		}
+	}, [projectId, sourceId, workspaceSlug]);
+
+	useEffect(() => {
+		fetchSummary();
+	}, [fetchSummary]);
 
 	if (error) {
 		return (
@@ -70,36 +65,33 @@ export default function FeedbackSummary({ workspaceSlug, projectId: projectIdPro
 		);
 	}
 	if (loading) return <p aria-live="polite">Loading summary…</p>;
-	if (sources.length === 0) {
+	if (!summary || summary.versions.length === 0) {
 		return (
-			<div class="p-6 text-center text-text-muted bg-surface rounded-lg border border-border mb-4">
+			<div class="p-6 text-center text-text-muted bg-surface rounded-lg border border-border">
 				No feedback yet.
 			</div>
 		);
 	}
 
 	return (
-		<section class="mb-6 flex flex-col gap-4">
-			{sources.map((s) => (
-				<div key={s.sourceId} class="bg-surface rounded-lg border border-border p-4">
-					<div class="flex items-baseline gap-2 mb-2">
-						<h3 class="font-semibold text-text-base">{s.sourceName ?? "Untitled source"}</h3>
-						<span class="text-[0.8rem] text-text-muted">{s.totalCount} total</span>
-					</div>
-					<ul class="flex flex-col gap-1">
-						{s.versions.map((v) => (
-							<li
-								key={v.appVersion ?? "unknown"}
-								class="flex flex-wrap gap-x-3 text-[0.875rem] text-text-muted"
-							>
-								<span class="font-medium text-text-base">{v.appVersion ?? "Unknown version"}</span>
-								<span>{versionMetric(v)}</span>
-								{v.withCommentCount > 0 && <span>{v.withCommentCount} with comments</span>}
-							</li>
-						))}
-					</ul>
+		<section class="flex flex-col gap-4">
+			<div class="bg-surface rounded-lg border border-border p-4">
+				<div class="flex items-baseline gap-2 mb-2">
+					<span class="text-[0.8rem] text-text-muted">{summary.totalCount} total</span>
 				</div>
-			))}
+				<ul class="flex flex-col gap-1">
+					{summary.versions.map((v) => (
+						<li
+							key={v.appVersion ?? "unknown"}
+							class="flex flex-wrap gap-x-3 text-[0.875rem] text-text-muted"
+						>
+							<span class="font-medium text-text-base">{v.appVersion ?? "Unknown version"}</span>
+							<span>{versionMetric(v)}</span>
+							{v.withCommentCount > 0 && <span>{v.withCommentCount} with comments</span>}
+						</li>
+					))}
+				</ul>
+			</div>
 		</section>
 	);
 }
