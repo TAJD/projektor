@@ -814,5 +814,58 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         document.addEventListener('astro:page-load', bindThemeToggle);
       })();
     </script>
+    <!-- PROJ-428: hide the top bar on scroll-down, reveal on scroll-up, so it
+         doesn't permanently eat vertical space on long pages. Suppressed while
+         the mobile drawer or the account menu popover is open so the bar can't
+         disappear mid-interaction. rAF-throttled since scroll fires far more
+         often than a frame renders. -->
+    <script is:inline>
+      (function () {
+        var lastY = 0;
+        var accumulatedDown = 0;
+        var HIDE_THRESHOLD = 8;
+        var ticking = false;
+
+        function shouldStayVisible() {
+          var shell = document.querySelector('.app-shell');
+          var menuOpen = document.querySelector('.account-menu-popover');
+          return !!(shell && shell.classList.contains('drawer-open')) || !!menuOpen;
+        }
+
+        function onScroll() {
+          if (ticking) return;
+          ticking = true;
+          requestAnimationFrame(function () {
+            ticking = false;
+            var topbar = document.getElementById('app-topbar');
+            if (!topbar) return;
+            var y = window.scrollY;
+            if (shouldStayVisible() || y <= 0) {
+              topbar.classList.remove('topbar-hidden');
+              accumulatedDown = 0;
+              lastY = y;
+              return;
+            }
+            var delta = y - lastY;
+            if (delta > 0) {
+              accumulatedDown += delta;
+              if (accumulatedDown > HIDE_THRESHOLD) topbar.classList.add('topbar-hidden');
+            } else {
+              accumulatedDown = 0;
+              topbar.classList.remove('topbar-hidden');
+            }
+            lastY = y;
+          });
+        }
+
+        window.addEventListener('scroll', onScroll, { passive: true });
+        document.addEventListener('astro:after-swap', function () {
+          var topbar = document.getElementById('app-topbar');
+          if (topbar) topbar.classList.remove('topbar-hidden');
+          lastY = window.scrollY;
+          accumulatedDown = 0;
+        });
+      })();
+    </script>
   </body>
 </html>
