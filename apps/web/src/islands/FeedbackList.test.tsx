@@ -64,27 +64,24 @@ function stubFetch(rows: unknown[] = [ROW, ROW_2], bulkConvertStatus = 201) {
 	return fetchMock;
 }
 
-// Table interactions are scoped to the desktop table via `within`, since the
-// mobile-card fallback (PROJ-415) renders the same controls a second time —
-// both are always in the DOM, CSS picks which is visible per viewport (jsdom
-// doesn't evaluate CSS, see apps/web/src/test/viewport.ts).
 function table() {
 	return within(screen.getByRole("table"));
 }
 
 describe("FeedbackList", () => {
-	it("renders feedback rows with body and source name", async () => {
-		stubFetch([ROW]);
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+	it("renders feedback rows with body, scoped to the given source", async () => {
+		const fetchMock = stubFetch([ROW]);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		expect((await screen.findAllByText("Great onboarding")).length).toBeGreaterThan(0);
-		expect(screen.getAllByText(/Onboarding survey/).length).toBeGreaterThan(0);
+		expect(String(fetchMock.mock.calls[0][0])).toContain("sourceId=s1");
 	});
 
 	it("changing the status filter refetches with the status query param", async () => {
 		const fetchMock = stubFetch();
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
-		fireEvent.change(screen.getByLabelText(/Status/i), { target: { value: "reviewed" } });
+		fireEvent.click(screen.getByRole("combobox", { name: "Status" }));
+		fireEvent.click(screen.getByRole("option", { name: "Reviewed" }));
 		await waitFor(() => {
 			expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("status=reviewed"))).toBe(
 				true
@@ -94,7 +91,7 @@ describe("FeedbackList", () => {
 
 	it("mark-reviewed PATCHes with status reviewed and refetches", async () => {
 		const fetchMock = stubFetch([ROW]);
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
 		fireEvent.click(table().getByRole("button", { name: /Mark reviewed/i }));
 		await waitFor(() => {
@@ -113,7 +110,7 @@ describe("FeedbackList", () => {
 
 	it("convert-to-issue POSTs and refetches", async () => {
 		const fetchMock = stubFetch([ROW]);
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
 		fireEvent.click(table().getByRole("button", { name: /Convert to issue/i }));
 		await waitFor(() => {
@@ -127,7 +124,7 @@ describe("FeedbackList", () => {
 
 	it("select-all then bulk mark-reviewed POSTs both ids and refetches", async () => {
 		const fetchMock = stubFetch();
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
 		fireEvent.click(screen.getByLabelText(/select all/i));
 		fireEvent.click(screen.getByRole("button", { name: /^Mark all reviewed$/i }));
@@ -144,7 +141,7 @@ describe("FeedbackList", () => {
 
 	it("select-all then bulk convert-to-issue POSTs both ids and refetches", async () => {
 		const fetchMock = stubFetch();
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
 		fireEvent.click(screen.getByLabelText(/select all/i));
 		fireEvent.click(screen.getByRole("button", { name: /^Convert all to issue$/i }));
@@ -161,7 +158,7 @@ describe("FeedbackList", () => {
 
 	it("shows an error and keeps the selection when bulk convert-to-issue conflicts", async () => {
 		stubFetch([ROW, ROW_2], 409);
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
 		fireEvent.click(screen.getByLabelText(/select all/i));
 		fireEvent.click(screen.getByRole("button", { name: /^Convert all to issue$/i }));
@@ -174,8 +171,7 @@ describe("FeedbackList — mobile viewport", () => {
 	it("renders a mobile-card fallback alongside the desktop table", async () => {
 		setViewportWidth(MOBILE_WIDTH);
 		stubFetch([ROW]);
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
-		// Desktop table + mobile card both render (CSS hides one per viewport).
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		expect((await screen.findAllByText("Great onboarding")).length).toBe(2);
 	});
 });
@@ -186,28 +182,14 @@ const ROW_WITH_CONTEXT = {
 	sourceUrl: "https://ironvolume.example.com/wod?seed=abc123&focus=strength",
 };
 
-const ROW_BARE_URL = {
-	...ROW,
-	id: "f4",
-	sourceUrl: "https://ironvolume.example.com/wod",
-};
-
-const ROW_MALFORMED_URL = {
-	...ROW,
-	id: "f5",
-	sourceUrl: "not a url",
-};
-
-const ROW_JS_URL = {
-	...ROW,
-	id: "f6",
-	sourceUrl: "javascript:alert(1)",
-};
+const ROW_BARE_URL = { ...ROW, id: "f4", sourceUrl: "https://ironvolume.example.com/wod" };
+const ROW_MALFORMED_URL = { ...ROW, id: "f5", sourceUrl: "not a url" };
+const ROW_JS_URL = { ...ROW, id: "f6", sourceUrl: "javascript:alert(1)" };
 
 describe("FeedbackList structured context", () => {
 	it("shows a Context toggle with the param count and expands to reveal params + raw link", async () => {
 		stubFetch([ROW_WITH_CONTEXT]);
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
 		const toggle = table().getByRole("button", { name: /Context \(2\)/i });
 		expect(screen.queryByText(/seed:/i)).toBeNull();
@@ -219,7 +201,7 @@ describe("FeedbackList structured context", () => {
 
 	it("shows a Context (0) toggle for a sourceUrl with no query string, expanding to just the raw link", async () => {
 		stubFetch([ROW_BARE_URL]);
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
 		const toggle = table().getByRole("button", { name: /Context \(0\)/i });
 		fireEvent.click(toggle);
@@ -228,21 +210,25 @@ describe("FeedbackList structured context", () => {
 
 	it("renders no Context toggle when sourceUrl is null", async () => {
 		stubFetch([ROW]);
-		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />);
+		render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />);
 		await screen.findAllByText("Great onboarding");
 		expect(table().queryByRole("button", { name: /Context/i })).toBeNull();
 	});
 
 	it("renders no Context toggle for a malformed sourceUrl, without throwing", async () => {
 		stubFetch([ROW_MALFORMED_URL]);
-		expect(() => render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />)).not.toThrow();
+		expect(() =>
+			render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />)
+		).not.toThrow();
 		await screen.findAllByText("Great onboarding");
 		expect(table().queryByRole("button", { name: /Context/i })).toBeNull();
 	});
 
 	it("renders no Context toggle for a javascript: sourceUrl, without throwing", async () => {
 		stubFetch([ROW_JS_URL]);
-		expect(() => render(<FeedbackList workspaceSlug="my-ws" projectId="p1" />)).not.toThrow();
+		expect(() =>
+			render(<FeedbackList workspaceSlug="my-ws" projectId="p1" sourceId="s1" />)
+		).not.toThrow();
 		await screen.findAllByText("Great onboarding");
 		expect(table().queryByRole("button", { name: /Context/i })).toBeNull();
 	});
