@@ -20,3 +20,11 @@ describe("Base layout — mobile viewport", () => {
 		expect(mobileQuery).toMatch(/input,\s*textarea,\s*select\s*{\s*font-size:\s*16px;/);
 	});
 });
+
+describe("Base layout — account menu replaces legacy login/logout emoji", () => {
+	it("renders AccountMenu in the topbar and has no leftover key/door emoji links", () => {
+		expect(source).toContain("<AccountMenu");
+		expect(source).not.toContain("🔑");
+		expect(source).not.toContain("🚪");
+	});
+});

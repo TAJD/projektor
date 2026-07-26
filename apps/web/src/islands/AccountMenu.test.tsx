@@ -60,7 +60,9 @@ describe("AccountMenu — signed-in state", () => {
 		expect(menu).toBeTruthy();
 
 		const refresh = screen.getByRole("menuitem", { name: "Refresh session" });
-		expect(refresh.getAttribute("href")).toBe("/auth/login?redirect_url=%2F");
+		expect(refresh.getAttribute("href")).toBe(
+			`/auth/login?redirect_url=${encodeURIComponent(window.location.href)}`
+		);
 
 		const logout = screen.getByRole("menuitem", { name: "Log out" });
 		expect(logout.getAttribute("href")).toBe("/cdn-cgi/access/logout");

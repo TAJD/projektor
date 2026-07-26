@@ -291,14 +291,14 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
       .app-shell { min-height: 100vh; }
       .sidebar {
         position: fixed;
-        top: var(--topbar-height);
+        top: 0;
         left: 0;
         bottom: 0;
         width: var(--sidebar-width);
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
-        padding: 1rem 0.75rem;
+        padding: calc(1rem + var(--topbar-height)) 0.75rem 1rem;
         background: var(--nav-bg);
         border-right: 1px solid var(--border);
         z-index: 100;
@@ -445,7 +445,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           width: min(82vw, 280px);
           transform: translateX(-100%);
           transition: transform 0.22s ease;
-          padding: 1rem 0.875rem;
+          padding: calc(1rem + var(--topbar-height)) 0.875rem 1rem;
           box-shadow: none;
         }
         .app-shell.drawer-open .sidebar {

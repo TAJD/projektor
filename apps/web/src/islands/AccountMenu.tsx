@@ -12,6 +12,7 @@ interface MeResponse {
 }
 
 const POPOVER_MARGIN = 8;
+const PUBLIC_VIEWER_EMAIL = "public-viewer@projektor.local"; // PROJ-373 anonymous fallback — apps/api/src/middleware/auth.ts
 
 function initials(name: string, email: string): string {
 	const source = name.trim() || email;
@@ -36,9 +37,17 @@ export function AccountMenu({ workspaceSlug }: Props) {
 
 	useEffect(() => {
 		let cancelled = false;
-		apiFetch<MeResponse>("/auth/me", { workspaceSlug: resolveWorkspaceSlug(workspaceSlug) })
+		apiFetch<MeResponse>("/auth/me", {
+			workspaceSlug: resolveWorkspaceSlug(workspaceSlug),
+			on401: "throw",
+		})
 			.then((data) => {
-				if (!cancelled) setUser({ email: data.user.email, name: data.user.name });
+				if (cancelled) return;
+				if (data.user.email === PUBLIC_VIEWER_EMAIL) {
+					setFailed(true);
+					return;
+				}
+				setUser({ email: data.user.email, name: data.user.name });
 			})
 			.catch(() => {
 				if (!cancelled) setFailed(true);
@@ -105,8 +114,7 @@ export function AccountMenu({ workspaceSlug }: Props) {
 		);
 	}
 
-	const redirectTarget =
-		typeof location !== "undefined" ? location.pathname + location.search : "/";
+	const redirectTarget = typeof location !== "undefined" ? location.href : "/";
 
 	return (
 		<div class="account-menu" ref={rootRef}>
@@ -117,6 +125,7 @@ export function AccountMenu({ workspaceSlug }: Props) {
 				aria-haspopup="menu"
 				aria-expanded={open}
 				aria-controls={open ? menuId : undefined}
+				aria-label={`Account: ${user.name || user.email}`}
 				onClick={() => (open ? setOpen(false) : openMenu())}
 			>
 				<span class="account-menu-avatar" aria-hidden="true">
