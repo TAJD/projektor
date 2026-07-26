@@ -36,14 +36,23 @@ On a single warm reused connection to the dogfood Worker:
 | `/api/issues/{uuid}/comments` | 957 ms |
 
 Network RTT to the edge is ~110 ms, so ~620–990 ms is server time, for payloads
-of 5.7 KiB. The cause is visible in the middleware chain: `rate-limit.ts` does a
-`DELETE` + upsert + `SELECT`, `auth.ts` does a `SELECT` on `api_tokens` plus an
-`UPDATE last_used_at`, `workspace.ts` does a workspace `SELECT` plus a membership
-`SELECT` — roughly **seven sequential D1 round trips before the route handler runs
-its first query**.
+of 5.7 KiB. Counting only *blocking* D1 round trips before the route handler runs
+its first query, on the browser (CF Access) path with warm isolate caches:
+
+- `rate-limit.ts` — 2 (upsert, then a separate count `SELECT`), plus a prune
+  `DELETE` at 1% probability.
+- `auth.ts` → `provisionUserOnLogin` — 3. It runs on *every* request despite the
+  name, and for an admin its cost is `2 + N` for N workspaces, sequentially.
+- `workspace.ts` — 2 (workspace by slug, then membership).
+
+**Seven sequential round trips**, each paying full D1 latency. Two things that are
+*not* the cause, checked so they aren't re-investigated: `api_tokens.last_used_at`
+is already throttled and `waitUntil`-wrapped (PROJ-360), and the JWKS keys and
+`upsertUserByEmail` are served from isolate-local caches (PROJ-354).
 
 This is the single largest lever and no frontend change fixes it; caching only
-hides it. It lives in `apps/api`, outside this ticket's scope. Raise separately.
+hides it. It lives in `apps/api`, outside this ticket's scope. Raised as PROJ-432,
+with the provisioning finding as PROJ-433.
 
 ### 2. `/issues/view` ships CodeMirror to readers
 
@@ -173,9 +182,14 @@ teardown on 401/logout, a workspace-scoped database name, a schema version, and
 leaves private data at rest on a phone that may be shared or lost. Not worth it
 while offline means logged out.
 
+Raised as PROJ-434. Worth re-measuring whether it still pays for itself once
+PROJ-432 lands — if authenticated requests drop from ~1s to ~200ms, the perceived
+win shrinks. Sequence it second.
+
 ### API middleware round trips
 
-See "1. The API is the floor". Largest available win, `apps/api`, separate ticket.
+See "1. The API is the floor". Largest available win. PROJ-432, with PROJ-433
+under it.
 
 ## Verification
 
