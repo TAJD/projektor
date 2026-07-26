@@ -29,7 +29,16 @@ const SUMMARY = [
 		sourceId: "s1",
 		sourceName: "Onboarding survey",
 		totalCount: 5,
-		versions: [{ appVersion: "v1", totalCount: 5, withCommentCount: 1, thumbsUpPct: 80, avgFiveStar: null, lastSeenAt: 5000 }],
+		versions: [
+			{
+				appVersion: "v1",
+				totalCount: 5,
+				withCommentCount: 1,
+				thumbsUpPct: 80,
+				avgFiveStar: null,
+				lastSeenAt: 5000,
+			},
+		],
 	},
 ];
 
@@ -85,9 +94,11 @@ describe("FeedbackSourceGrid", () => {
 	it("renders an access-denied notice on a 403 list response", async () => {
 		vi.stubGlobal(
 			"fetch",
-			vi.fn().mockImplementation(() =>
-				Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) })
-			)
+			vi
+				.fn()
+				.mockImplementation(() =>
+					Promise.resolve({ ok: false, status: 403, json: () => Promise.resolve({}) })
+				)
 		);
 		render(<FeedbackSourceGrid workspaceSlug="my-ws" projectId="p1" />);
 		expect(await screen.findByText(/Only workspace owners and admins/i)).toBeTruthy();

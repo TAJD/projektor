@@ -63,7 +63,9 @@ function SourceCard({ source, summary }: { source: FeedbackSource; summary?: Sou
 					{statusLabel(source)}
 				</span>
 			</div>
-			<span class="text-xs text-text-muted">{total === 0 ? "No feedback yet" : `${total} total`}</span>
+			<span class="text-xs text-text-muted">
+				{total === 0 ? "No feedback yet" : `${total} total`}
+			</span>
 			<span class="text-xs text-text-muted">
 				{lastSeenAt > 0 ? `Last activity ${formatDate(lastSeenAt)}` : "No activity yet"}
 			</span>
@@ -105,7 +107,9 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 		setForbidden(false);
 		try {
 			const [sourcesData, summaryData] = await Promise.all([
-				apiFetch<FeedbackSource[]>(`/api/projects/${projectId}/feedback-sources`, { workspaceSlug }),
+				apiFetch<FeedbackSource[]>(`/api/projects/${projectId}/feedback-sources`, {
+					workspaceSlug,
+				}),
 				apiFetch<SourceSummary[]>(`/api/projects/${projectId}/feedback/summary`, { workspaceSlug }),
 			]);
 			setSources(Array.isArray(sourcesData) ? sourcesData : []);
@@ -126,7 +130,8 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 	if (forbidden) {
 		return (
 			<div class="p-4 bg-surface border border-border rounded-md text-text-muted">
-				<strong>Access denied.</strong> Only workspace owners and admins can manage feedback sources.
+				<strong>Access denied.</strong> Only workspace owners and admins can manage feedback
+				sources.
 			</div>
 		);
 	}
@@ -143,7 +148,10 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 	return (
 		<section>
 			<h1 class="text-xl font-bold text-text-base mb-4">Feedback sources</h1>
-			<div class="grid gap-4" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>
+			<div
+				class="grid gap-4"
+				style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}
+			>
 				{sources.map((s) => (
 					<SourceCard key={s.id} source={s} summary={summaryBySource.get(s.id)} />
 				))}
