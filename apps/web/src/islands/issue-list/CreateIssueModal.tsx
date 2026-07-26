@@ -1,7 +1,7 @@
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import { PRIORITY_OPTIONS } from "../../utils/issue-utils";
 import type { TaskStatus } from "../board-utils";
-import MarkdownEditor from "../MarkdownEditor";
+import MarkdownEditor from "../LazyMarkdownEditor";
 import Select from "../Select";
 import type { ProjectMeta } from "./types";
 

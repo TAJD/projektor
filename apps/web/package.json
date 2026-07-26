@@ -4,12 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "astro build && node scripts/assert-sw.mjs",
     "type-check": "astro check",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test --grep-invert @long",
-    "test:e2e:long": "playwright test --grep @long"
+    "test:e2e:long": "playwright test --grep @long",
+    "verify:sw": "node scripts/assert-sw.mjs"
   },
   "dependencies": {
     "@astrojs/preact": "^4.0.0",

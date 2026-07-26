@@ -5,7 +5,7 @@ import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
 import { renderMdWithWikilinks, renderMermaidDiagrams } from "../utils/markdown";
 import AccessPending from "./AccessPending";
-import MarkdownEditor from "./MarkdownEditor";
+import MarkdownEditor from "./LazyMarkdownEditor";
 import Select, { type SelectOption } from "./Select";
 
 interface ProjectOption {
