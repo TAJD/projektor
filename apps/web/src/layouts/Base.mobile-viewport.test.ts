@@ -8,12 +8,23 @@ const source = readFileSync(join(__dirname, "Base.astro"), "utf-8");
 
 describe("Base layout — mobile viewport", () => {
 	it("forces 16px form-control font-size on mobile so iOS Safari doesn't auto-zoom on focus (PROJ-304)", () => {
-		const mobileQueryStart = source.lastIndexOf("@media (max-width: 640px)");
+		// PROJ-428 added a second, unrelated `@media (max-width: 640px)` block
+		// (account-menu), so anchor on the iOS-zoom comment instead of the
+		// (no longer unique) media-query text itself.
+		const mobileQueryStart = source.indexOf("/* iOS Safari auto-zooms");
 		expect(mobileQueryStart).toBeGreaterThan(-1);
 
 		const mobileQueryEnd = source.indexOf("\n      }", mobileQueryStart);
 		const mobileQuery = source.slice(mobileQueryStart, mobileQueryEnd);
 
 		expect(mobileQuery).toMatch(/input,\s*textarea,\s*select\s*{\s*font-size:\s*16px;/);
+	});
+});
+
+describe("Base layout — account menu replaces legacy login/logout emoji", () => {
+	it("renders AccountMenu in the topbar and has no leftover key/door emoji links", () => {
+		expect(source).toContain("<AccountMenu");
+		expect(source).not.toContain("🔑");
+		expect(source).not.toContain("🚪");
 	});
 });

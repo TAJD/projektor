@@ -33,6 +33,7 @@ export async function apiFetch<T = unknown>(
 		method?: string;
 		body?: unknown;
 		headers?: Record<string, string>;
+		on401?: "reload" | "throw";
 	} = {}
 ): Promise<T> {
 	const isFormData = opts.body instanceof FormData;
@@ -58,6 +59,9 @@ export async function apiFetch<T = unknown>(
 		// A 401 here means the Cloudflare Access session expired mid-use (the app itself
 		// never prompts re-login). Reload so Access can challenge and bounce the user back.
 		if (res.status === 401) {
+			if (opts.on401 === "throw") {
+				throw new Error(`API ${method} ${path} failed: 401`);
+			}
 			reauthReloadInFlight = true;
 			window.location.reload();
 			return new Promise<T>(() => {});

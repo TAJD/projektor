@@ -1,5 +1,6 @@
 ---
 import { ClientRouter } from 'astro:transitions';
+import { AccountMenu } from '../islands/AccountMenu';
 import { GlossaryHelp } from '../islands/GlossaryHelp';
 import { OfflineBanner } from '../islands/OfflineBanner';
 import type { GlossaryTermId } from '../islands/glossary-definitions';
@@ -297,7 +298,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
-        padding: 1rem 0.75rem;
+        padding: calc(1rem + var(--topbar-height)) 0.75rem 1rem;
         background: var(--nav-bg);
         border-right: 1px solid var(--border);
         z-index: 100;
@@ -306,19 +307,18 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
       .app-main {
         margin-left: var(--sidebar-width);
         min-width: 0;
+        padding-top: var(--topbar-height);
       }
-      .sidebar-brand {
+      .topbar-brand {
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        padding: 0.25rem 0.5rem 0.75rem;
-        color: var(--text);
         text-decoration: none;
+        color: var(--text);
         font-weight: 700;
         font-size: 1.0625rem;
         letter-spacing: -0.02em;
       }
-      .sidebar-brand .brand-mark,
       .topbar-brand .brand-mark {
         display: inline-flex;
         align-items: center;
@@ -396,58 +396,56 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         user-select: none;
       }
 
-      /* ── Mobile top bar + hamburger (hidden on desktop) ───────────────── */
-      .mobile-topbar { display: none; }
+      /* ── App top bar: brand, hamburger (mobile only), account menu ────── */
+      .app-topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: var(--topbar-height);
+        padding: 0 0.75rem;
+        background: var(--nav-bg);
+        border-bottom: 1px solid var(--border);
+        z-index: 110;
+        transition: transform 0.2s ease;
+      }
+      .app-topbar.topbar-hidden { transform: translateY(-100%); }
+      .app-topbar-start {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-width: 0;
+      }
+      .hamburger {
+        display: none;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        flex-shrink: 0;
+        border: none;
+        background: none;
+        color: var(--text);
+        cursor: pointer;
+        border-radius: 8px;
+      }
+      .hamburger:hover { background: var(--surface); }
+      .hamburger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
       .drawer-overlay { display: none; }
 
       @media (max-width: 640px) {
-        /* Top app bar holds the hamburger + brand; fixed above content */
-        .mobile-topbar {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: var(--topbar-height);
-          padding: 0 0.5rem;
-          background: var(--nav-bg);
-          border-bottom: 1px solid var(--border);
-          z-index: 90;
-        }
-        .hamburger {
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          width: 44px;
-          height: 44px;
-          flex-shrink: 0;
-          border: none;
-          background: none;
-          color: var(--text);
-          cursor: pointer;
-          border-radius: 8px;
-        }
-        .hamburger:hover { background: var(--surface); }
-        .hamburger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-        .mobile-topbar .topbar-brand {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          text-decoration: none;
-          color: var(--text);
-          font-weight: 700;
-          font-size: 1.0625rem;
-          letter-spacing: -0.02em;
-        }
+        .hamburger { display: inline-flex; }
 
         /* Sidebar becomes an off-canvas drawer */
         .sidebar {
           width: min(82vw, 280px);
           transform: translateX(-100%);
           transition: transform 0.22s ease;
-          padding: 1rem 0.875rem;
+          padding: calc(1rem + var(--topbar-height)) 0.875rem 1rem;
           box-shadow: none;
         }
         .app-shell.drawer-open .sidebar {
@@ -471,11 +469,8 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           pointer-events: auto;
         }
 
-        /* Content fills the width; offset only for the top bar */
-        .app-main {
-          margin-left: 0;
-          padding-top: var(--topbar-height);
-        }
+        /* Content fills the width; sidebar's own margin collapses too */
+        .app-main { margin-left: 0; }
 
         /* Roomier tap targets inside the drawer */
         .sidebar-link { padding: 0.6875rem 0.75rem; }
@@ -588,35 +583,121 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         text-transform: none;
         letter-spacing: normal;
       }
+
+      /* ── Account menu (island) ─────────────────────────────────────── */
+      .account-menu { position: relative; display: inline-flex; }
+      .account-menu-trigger {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.25rem 0.625rem 0.25rem 0.25rem;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: none;
+        color: var(--text);
+        font: inherit;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        cursor: pointer;
+        line-height: 1;
+      }
+      .account-menu-trigger:hover { background: var(--surface); }
+      .account-menu-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .account-menu-trigger:disabled { cursor: default; opacity: 0.6; }
+      .account-menu-avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.5rem;
+        height: 1.5rem;
+        border-radius: 50%;
+        background: var(--accent);
+        color: var(--on-accent);
+        font-size: 0.6875rem;
+        font-weight: 700;
+        flex-shrink: 0;
+      }
+      .account-menu-name {
+        white-space: nowrap;
+        max-width: 9rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .account-menu-caret { font-size: 0.625rem; opacity: 0.6; }
+      .account-menu-login {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.375rem 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.8125rem;
+      }
+      .account-menu-login:hover { color: var(--text); }
+      .account-menu-popover {
+        z-index: 200;
+        width: 14rem;
+        max-width: min(14rem, 85vw);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: var(--shadow-sm);
+        padding: 0.375rem;
+        font-size: 0.875rem;
+      }
+      .account-menu-identity {
+        padding: 0.375rem 0.5rem 0.5rem;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 0.25rem;
+      }
+      .account-menu-identity-name { font-weight: 600; color: var(--text); }
+      .account-menu-identity-email {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        overflow-wrap: break-word;
+      }
+      .account-menu-item {
+        display: block;
+        padding: 0.5rem 0.5rem;
+        border-radius: 6px;
+        color: var(--text);
+        text-decoration: none;
+        font-size: 0.8125rem;
+      }
+      .account-menu-item:hover { background: var(--surface); }
+      .account-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+      @media (max-width: 640px) {
+        .account-menu-name { display: none; }
+      }
     </style>
   </head>
   <body>
     <OfflineBanner client:load />
     <div class="app-shell">
-      <header class="mobile-topbar">
-        <button
-          class="hamburger"
-          type="button"
-          aria-label="Open navigation menu"
-          aria-controls="app-sidebar"
-          aria-expanded="false"
-        >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-        </button>
-        <a href="/" class="topbar-brand">
-          <span class="brand-mark">P</span>
-          <span>Projektor</span>
-        </a>
+      <header class="app-topbar" id="app-topbar">
+        <div class="app-topbar-start">
+          <button
+            class="hamburger"
+            type="button"
+            aria-label="Open navigation menu"
+            aria-controls="app-sidebar"
+            aria-expanded="false"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <a href="/" class="topbar-brand">
+            <span class="brand-mark">P</span>
+            <span>Projektor</span>
+          </a>
+        </div>
+        <AccountMenu client:load />
       </header>
 
       <div class="drawer-overlay" aria-hidden="true"></div>
 
       <aside class="sidebar" id="app-sidebar">
-        <a href="/" class="sidebar-brand">
-          <span class="brand-mark">P</span>
-          <span class="brand-text">Projektor</span>
-        </a>
-
         <nav class="sidebar-nav" aria-label="Primary">
           {navItems.map((item) => (
             <span class="sidebar-link-row">
@@ -648,8 +729,6 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
 
         <div class="sidebar-footer">
           <a href="/help" class="theme-toggle" aria-label="Help — glossary of terms" title="Help">?</a>
-          <a href="/" class="theme-toggle" aria-label="Log in — refresh your session" title="Log in">🔑</a>
-          <a href="/cdn-cgi/access/logout" class="theme-toggle" aria-label="Log out" title="Log out">🚪</a>
           <button class="theme-toggle" aria-label="Toggle colour scheme">🌙</button>
         </div>
         <div class="sidebar-version">v{appVersion}</div>
@@ -733,6 +812,59 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         }
 
         document.addEventListener('astro:page-load', bindThemeToggle);
+      })();
+    </script>
+    <!-- PROJ-428: hide the top bar on scroll-down, reveal on scroll-up, so it
+         doesn't permanently eat vertical space on long pages. Suppressed while
+         the mobile drawer or the account menu popover is open so the bar can't
+         disappear mid-interaction. rAF-throttled since scroll fires far more
+         often than a frame renders. -->
+    <script is:inline>
+      (function () {
+        var lastY = 0;
+        var accumulatedDown = 0;
+        var HIDE_THRESHOLD = 8;
+        var ticking = false;
+
+        function shouldStayVisible() {
+          var shell = document.querySelector('.app-shell');
+          var menuOpen = document.querySelector('.account-menu-popover');
+          return !!(shell && shell.classList.contains('drawer-open')) || !!menuOpen;
+        }
+
+        function onScroll() {
+          if (ticking) return;
+          ticking = true;
+          requestAnimationFrame(function () {
+            ticking = false;
+            var topbar = document.getElementById('app-topbar');
+            if (!topbar) return;
+            var y = window.scrollY;
+            if (shouldStayVisible() || y <= 0) {
+              topbar.classList.remove('topbar-hidden');
+              accumulatedDown = 0;
+              lastY = y;
+              return;
+            }
+            var delta = y - lastY;
+            if (delta > 0) {
+              accumulatedDown += delta;
+              if (accumulatedDown > HIDE_THRESHOLD) topbar.classList.add('topbar-hidden');
+            } else {
+              accumulatedDown = 0;
+              topbar.classList.remove('topbar-hidden');
+            }
+            lastY = y;
+          });
+        }
+
+        window.addEventListener('scroll', onScroll, { passive: true });
+        document.addEventListener('astro:after-swap', function () {
+          var topbar = document.getElementById('app-topbar');
+          if (topbar) topbar.classList.remove('topbar-hidden');
+          lastY = window.scrollY;
+          accumulatedDown = 0;
+        });
       })();
     </script>
   </body>
