@@ -38,6 +38,20 @@ import { createWorkspace, listUserWorkspaces } from "./services/workspaces";
 
 const app = new Hono<HonoEnv>();
 
+// PROJ-430: Hono's default handler answers an uncaught throw with a bare,
+// unlogged 500, which is why diagnosing the overnight error burst needed
+// temporary instrumentation (PROJ-427/#131). Log the failure with its request
+// context and return the same JSON error shape every other endpoint uses.
+app.onError((err, c) => {
+	console.error("unhandled error", {
+		method: c.req.method,
+		path: c.req.path,
+		err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+		stack: err instanceof Error ? err.stack : undefined,
+	});
+	return c.json({ error: "Internal Server Error" }, 500);
+});
+
 // PROJ-378: anonymous feedback ingestion. Mounted ahead of the global logger()
 // and cors() calls below — not merely ahead of auth — the same "register before
 // the .use() you need to skip" technique already used for /api/health (mounted

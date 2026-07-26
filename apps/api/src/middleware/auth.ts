@@ -35,6 +35,12 @@ export interface AuthUser {
 
 type AuthOutcome = { kind: "skip" } | { kind: "deny"; response: Response } | { kind: "allow" };
 
+// PROJ-430: separates "we could not check this token" from "this token is bad".
+// The frontend reloads the page to re-authenticate on a 401, so reporting an
+// unreachable JWKS endpoint as 401 sends the user through a login round-trip
+// that cannot fix it — and reloading on a still-broken backend loops.
+class AuthUnavailableError extends Error {}
+
 // 1. Cloudflare Access JWT (header or cookie)
 async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	const cfJwt =
@@ -42,7 +48,16 @@ async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 		parseCookie(c.req.header("cookie") ?? "", "CF_Authorization");
 	if (!cfJwt) return { kind: "skip" };
 
-	const user = await validateCfAccessJwt(cfJwt, c.env);
+	let user: AuthUser | null;
+	try {
+		user = await validateCfAccessJwt(cfJwt, c.env);
+	} catch (err) {
+		if (!(err instanceof AuthUnavailableError)) throw err;
+		return {
+			kind: "deny",
+			response: c.json({ error: "Authentication temporarily unavailable" }, 503),
+		};
+	}
 	if (!user) return { kind: "deny", response: c.json({ error: "Invalid Access token" }, 401) };
 
 	await provisionUserOnLogin(c.env, user);
@@ -270,7 +285,7 @@ async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | nu
 		return null;
 	}
 	// All field checks passed — now fetch keys and verify the signature.
-	const keys = await getCfAccessKeys(env);
+	const keys = await getCfAccessKeysOrUnavailable(env);
 	let result = await verifyJwtPayload(
 		jwt,
 		keys,
@@ -283,7 +298,7 @@ async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | nu
 		// Cloudflare rotated its Access signing keys since we cached them. Force
 		// one rate-limited refetch and retry before giving up, instead of
 		// leaving every login failing until both cache layers expire.
-		const freshKeys = await getCfAccessKeys(env, { forceRefresh: true });
+		const freshKeys = await getCfAccessKeysOrUnavailable(env, { forceRefresh: true });
 		if (freshKeys !== keys) {
 			result = await verifyJwtPayload(
 				jwt,
@@ -319,6 +334,19 @@ async function fetchAndCacheCfAccessKeys(env: Env): Promise<JsonWebKey[]> {
 	await env.KV.put("cf-access-certs", JSON.stringify(keys), { expirationTtl: 3600 });
 	inMemoryCertsCache = { keys, expiresAt: Date.now() + CERTS_LOCAL_TTL_MS };
 	return keys;
+}
+
+// A cold cache plus an unreachable/erroring JWKS endpoint leaves us unable to
+// verify anything — surface that as its own failure rather than an auth verdict.
+async function getCfAccessKeysOrUnavailable(
+	env: Env,
+	opts?: { forceRefresh?: boolean }
+): Promise<JsonWebKey[]> {
+	try {
+		return await getCfAccessKeys(env, opts);
+	} catch {
+		throw new AuthUnavailableError();
+	}
 }
 
 async function getCfAccessKeys(env: Env, opts?: { forceRefresh?: boolean }): Promise<JsonWebKey[]> {
