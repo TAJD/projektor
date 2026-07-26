@@ -47,7 +47,19 @@ export async function rateLimitMiddleware(
 		limit = parseInt(c.env.RATE_LIMIT_AUTH_MAX ?? "300", 10);
 	}
 
-	const count = await incrementCounter(c.env.DB, key, slot, windowSecs);
+	// PROJ-430: every request writes then reads one hot row, so a burst from a
+	// single key serialises on it. A D1 error here is a limiter outage, not a
+	// client problem — fail open rather than turning it into a 500 for a request
+	// that would otherwise have succeeded.
+	let count: number;
+	try {
+		count = await incrementCounter(c.env.DB, key, slot, windowSecs);
+	} catch (err) {
+		console.error("rate-limit counter unavailable, failing open", { key, err: String(err) });
+		await next();
+		return;
+	}
+
 	if (count > limit) {
 		const windowRemaining = slot + windowSecs - now;
 		c.header("Retry-After", String(windowRemaining > 0 ? windowRemaining : windowSecs));

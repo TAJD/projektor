@@ -1001,3 +1001,53 @@ describe("PROJ-79: MCP protocol validation", () => {
 		expect(body.jsonrpc).toBe("2.0");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// PROJ-430: an auth *infrastructure* failure (the JWKS endpoint unreachable)
+// must not masquerade as a session problem. The frontend reloads the page to
+// re-authenticate on a 401 (PROJ-427), so answering a certs-fetch failure with
+// a 401 sends the client off to re-login for something re-login cannot fix.
+// It must also not be a bare, unlogged 500.
+// ---------------------------------------------------------------------------
+
+describe("PROJ-430: CF Access certs fetch failure", () => {
+	it("returns 503, not 401 or 500, when the JWKS endpoint is unreachable", async () => {
+		const keyPair = (await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"]
+		)) as CryptoKeyPair;
+
+		const domain = "proj-430-unreachable.example.com";
+		const audience = "proj-430-audience";
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		env.CF_ACCESS_AUDIENCE = audience;
+
+		// Cold both cache layers so validateCfAccessJwt has to hit the network,
+		// which fails for this domain in the test runtime.
+		resetAuthCachesForTests();
+		await env.KV.delete("cf-access-certs");
+
+		// Claims are entirely valid — only the certs fetch is broken.
+		const jwt = await signTestJwt(keyPair.privateKey, {
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			aud: audience,
+			iss: `https://${domain}`,
+			email: `proj-430-${crypto.randomUUID().slice(0, 8)}@example.com`,
+		});
+
+		const res = await SELF.fetch("http://localhost/auth/me", {
+			headers: { "Cf-Access-Jwt-Assertion": jwt },
+		});
+
+		expect(res.status).toBe(503);
+		expect((await res.json()) as { error: string }).toEqual({
+			error: "Authentication temporarily unavailable",
+		});
+	});
+});
