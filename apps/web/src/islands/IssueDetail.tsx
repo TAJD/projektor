@@ -38,33 +38,52 @@ function useResolvedIssueId(
 ) {
 	const [issueId, setIssueId] = useState(issueIdProp ?? "");
 	const [resolveError, setResolveError] = useState<string | null>(null);
+	// PROJ-431: /api/issues/KEY-N returns the *whole* issue, byte-identical to
+	// /api/issues/{uuid}. Keeping only `.id` and letting useIssueCore refetch by UUID
+	// put a second serial round trip in front of first paint — ~1.3s on mobile, on the
+	// canonical URL form. Hand the payload on as seed state instead; the UUID-keyed
+	// fetch still runs and revalidates, just no longer blocking anything.
+	const [resolvedIssue, setResolvedIssue] = useState<IssueData | null>(null);
+	// Whether an id is still being worked out. Without it the component's "no issue ID
+	// provided" branch renders for the whole resolve round trip — a ~1.3s error flash on
+	// mobile, on the canonical pretty URL. It can't be derived during render: the island
+	// is prerendered at build time, so `window` is only safe to touch from an effect.
+	const [resolving, setResolving] = useState(!issueIdProp);
 
 	useEffect(() => {
-		if (!issueIdProp) {
-			setIssueId(new URLSearchParams(window.location.search).get("id") ?? "");
+		if (issueIdProp) return;
+
+		const fromQuery = new URLSearchParams(window.location.search).get("id");
+		if (fromQuery) {
+			setIssueId(fromQuery);
+			setResolving(false);
+			return;
 		}
-	}, [issueIdProp]);
 
-	// Resolve issueNumber+projectSlug to UUID via the KEY-NUMBER API format (e.g. PROJ-42)
-	useEffect(() => {
-		if (issueIdProp || !projectSlug || issueNumber === undefined) return;
-		apiFetch<{ id: string }>(`/api/issues/${projectSlug}-${issueNumber}`, { workspaceSlug })
-			.then((data) => setIssueId(data.id))
-			.catch((e) => setResolveError(String(e)));
+		// Either handed in as props, or — when this page is served as the fallback for a
+		// pretty-URL route (/projects/KEY/issues/N/title) — parsed back off the pathname.
+		const pretty = window.location.pathname.match(/^\/projects\/([^/]+)\/issues\/(\d+)\//);
+		const ref =
+			projectSlug && issueNumber !== undefined
+				? `${projectSlug}-${issueNumber}`
+				: pretty
+					? `${pretty[1]}-${pretty[2]}`
+					: null;
+		if (!ref) {
+			setResolving(false);
+			return;
+		}
+
+		apiFetch<IssueData>(`/api/issues/${ref}`, { workspaceSlug })
+			.then((data) => {
+				setResolvedIssue(data);
+				setIssueId(data.id);
+			})
+			.catch((e) => setResolveError(String(e)))
+			.finally(() => setResolving(false));
 	}, [issueIdProp, projectSlug, issueNumber, workspaceSlug]);
 
-	// When served as fallback for pretty-URL issue routes (/projects/KEY/issues/N/title),
-	// extract KEY and N from the pathname and resolve to a UUID via the API.
-	useEffect(() => {
-		if (issueIdProp || projectSlug || issueNumber !== undefined) return;
-		const m = window.location.pathname.match(/^\/projects\/([^/]+)\/issues\/(\d+)\//);
-		if (!m) return;
-		apiFetch<{ id: string }>(`/api/issues/${m[1]}-${m[2]}`, { workspaceSlug })
-			.then((data) => setIssueId(data.id))
-			.catch((e) => setResolveError(String(e)));
-	}, [issueIdProp, projectSlug, issueNumber, workspaceSlug]);
-
-	return { issueId, resolveError };
+	return { issueId, resolveError, resolvedIssue, resolving };
 }
 
 function useBackHref() {
@@ -168,15 +187,23 @@ function useIssueCore(
 	issueId: string,
 	workspaceSlug: string | undefined,
 	fetchLinks: () => Promise<void>,
-	fetchAttachments: () => Promise<void>
+	fetchAttachments: () => Promise<void>,
+	seedIssue: IssueData | null
 ) {
-	const [issue, setIssue] = useState<IssueData | null>(null);
+	const [issue, setIssue] = useState<IssueData | null>(seedIssue);
 	const [comments, setComments] = useState<Comment[]>([]);
 	const [statuses, setStatuses] = useState<TaskStatus[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [members, setMembers] = useState<Member[]>([]);
 	const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+	// The seed resolves asynchronously, so it can't just be the useState initial value.
+	// Only ever fills the gap before the first real fetch lands — never clobbers fresher
+	// data, or a local optimistic update made while that fetch was in flight.
+	useEffect(() => {
+		if (seedIssue) setIssue((prev) => prev ?? seedIssue);
+	}, [seedIssue]);
 
 	const fetchIssue = useCallback(async () => {
 		try {
@@ -505,7 +532,7 @@ export default function IssueDetail({
 	projectSlug,
 	workspaceSlug,
 }: Props) {
-	const { issueId, resolveError } = useResolvedIssueId(
+	const { issueId, resolveError, resolvedIssue, resolving } = useResolvedIssueId(
 		issueIdProp,
 		issueNumber,
 		projectSlug,
@@ -527,7 +554,7 @@ export default function IssueDetail({
 		currentUserId,
 		fetchIssue,
 		fetchComments,
-	} = useIssueCore(issueId, workspaceSlug, fetchLinks, fetchAttachments);
+	} = useIssueCore(issueId, workspaceSlug, fetchLinks, fetchAttachments, resolvedIssue);
 
 	const { parentEpic, childIssues } = useEpicRelations(issue, workspaceSlug);
 
@@ -540,13 +567,8 @@ export default function IssueDetail({
 		changeAssignee,
 	} = useIssueMutations({ issue, setIssue, issueId, workspaceSlug, statuses, members, fetchIssue });
 
-	if (!issueId)
-		return (
-			<p class="text-text-muted">
-				No issue ID provided. Add <code>?id=…</code> to the URL.
-			</p>
-		);
-	if (loading) return <p aria-live="polite">Loading…</p>;
+	// Error first: a failed resolve leaves issueId empty, so this has to be checked
+	// before the branches below or it would show as a permanent "Loading…".
 	const loadError = error ?? resolveError;
 	if (loadError)
 		return (
@@ -554,6 +576,17 @@ export default function IssueDetail({
 				Failed to load issue: {loadError}
 			</p>
 		);
+	if (!issueId && !resolving)
+		return (
+			<p class="text-text-muted">
+				No issue ID provided. Add <code>?id=…</code> to the URL.
+			</p>
+		);
+	// PROJ-431: paint as soon as the core issue is known rather than waiting on the
+	// whole seven-request fan-out (statuses, members, files, links…). Every section
+	// below already degrades on empty data and upgrades when it arrives — e.g.
+	// StatusField renders a read-only label until `statuses` lands, then a <Select>.
+	if (loading && !issue) return <p aria-live="polite">Loading…</p>;
 	if (!issue) return null;
 
 	const issueRef = formatIssueRef(issue.project_key, issue.number);

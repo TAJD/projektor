@@ -2,6 +2,7 @@ import { useEffect, useState } from "preact/hooks";
 import { formatIssueRef, isValidIssueRef, normalizeIssueRef } from "../lib/issue-ref";
 import { parseStoryPoints } from "../lib/story-points";
 import { apiFetch } from "../utils/api-client";
+import { clearDraft, draftKey, loadDraft, saveDraft } from "../utils/drafts";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
 import { renderMd } from "../utils/markdown";
@@ -22,7 +23,7 @@ import {
 	PRIORITY_COLORS,
 	relativeTime,
 } from "./issue-detail-helpers";
-import MarkdownEditor from "./MarkdownEditor";
+import MarkdownEditor from "./LazyMarkdownEditor";
 import Select from "./Select";
 
 const PencilIcon = () => (
@@ -346,16 +347,32 @@ export function BodySection({
 	const [editBody, setEditBody] = useState("");
 	const [savingBody, setSavingBody] = useState(false);
 	const [saveBodyError, setSaveBodyError] = useState<string | null>(null);
+	const key = draftKey(workspaceSlug, issueId, "body");
+	const [hasDraft, setHasDraft] = useState(false);
 
-	function startEditBody() {
-		setEditBody(issue.body ?? "");
+	// Surface an unsaved edit from a previous visit, rather than silently reopening the
+	// editor — the user may have moved on, and the issue may have changed since.
+	useEffect(() => {
+		setHasDraft(loadDraft(key) !== null);
+	}, [key]);
+
+	function startEditBody(fromDraft = false) {
+		setEditBody((fromDraft ? loadDraft(key) : null) ?? issue.body ?? "");
 		setSaveBodyError(null);
 		setEditingBody(true);
+	}
+
+	function updateBody(value: string) {
+		setEditBody(value);
+		saveDraft(key, value);
+		setHasDraft(!!value.trim());
 	}
 
 	function cancelEditBody() {
 		setEditingBody(false);
 		setSaveBodyError(null);
+		clearDraft(key);
+		setHasDraft(false);
 	}
 
 	async function saveBody() {
@@ -367,6 +384,9 @@ export function BodySection({
 				method: "PATCH",
 				body: { body: editBody },
 			});
+			// Only discard once the server has it — a failed save keeps the text.
+			clearDraft(key);
+			setHasDraft(false);
 			await fetchIssue();
 			setEditingBody(false);
 		} catch (e) {
@@ -386,7 +406,7 @@ export function BodySection({
 				{!editingBody && (
 					<button
 						type="button"
-						onClick={startEditBody}
+						onClick={() => startEditBody()}
 						title="Edit description"
 						class="text-text-muted hover:text-text-base transition-colors rounded p-0.5"
 					>
@@ -401,10 +421,23 @@ export function BodySection({
 				</p>
 			)}
 
+			{!editingBody && hasDraft && (
+				<p class="mb-3 text-sm text-text-muted">
+					You have an unsaved description edit.{" "}
+					<button
+						type="button"
+						onClick={() => startEditBody(true)}
+						class="underline bg-transparent border-0 p-0 text-inherit cursor-pointer font-[inherit]"
+					>
+						Resume editing
+					</button>
+				</p>
+			)}
+
 			{editingBody ? (
 				<div>
 					<div class="mb-2">
-						<MarkdownEditor value={editBody} onChange={setEditBody} minHeight="240px" />
+						<MarkdownEditor value={editBody} onChange={updateBody} minHeight="240px" />
 					</div>
 					<div class="flex gap-2">
 						<button type="button" onClick={saveBody} disabled={savingBody} class="btn btn-primary">
@@ -1437,6 +1470,18 @@ function useNewCommentForm(
 	const [newComment, setNewComment] = useState("");
 	const [postingComment, setPostingComment] = useState(false);
 	const [commentError, setCommentError] = useState<string | null>(null);
+	const key = draftKey(workspaceSlug, issueId, "comment");
+
+	// Restore any unsent comment. Keyed on issueId so switching issues picks up that
+	// issue's own draft rather than carrying text across.
+	useEffect(() => {
+		setNewComment(loadDraft(key) ?? "");
+	}, [key]);
+
+	function updateComment(value: string) {
+		setNewComment(value);
+		saveDraft(key, value);
+	}
 
 	async function submitComment(e: Event) {
 		e.preventDefault();
@@ -1449,6 +1494,8 @@ function useNewCommentForm(
 				method: "POST",
 				body: { body: newComment.trim() },
 			});
+			// Only discard the draft once the server has it — a failed post keeps the text.
+			clearDraft(key);
 			setNewComment("");
 			await fetchComments();
 		} catch (e) {
@@ -1458,7 +1505,7 @@ function useNewCommentForm(
 		}
 	}
 
-	return { newComment, setNewComment, postingComment, commentError, submitComment };
+	return { newComment, setNewComment: updateComment, postingComment, commentError, submitComment };
 }
 
 export function CommentsSection({
@@ -1527,7 +1574,9 @@ export function CommentsSection({
 					onInput={(e) => setNewComment((e.target as HTMLTextAreaElement).value)}
 					placeholder="Add a comment…"
 					rows={4}
-					class="w-full px-3 py-2 border border-border rounded text-sm resize-y box-border mb-2 bg-bg text-text-base"
+					// text-base (16px) on phones: below 16px iOS Safari zooms the viewport
+					// when the field takes focus. sm:text-sm keeps desktop as it was.
+					class="w-full px-3 py-2 border border-border rounded text-base sm:text-sm resize-y box-border mb-2 bg-bg text-text-base"
 				/>
 				<button
 					type="submit"

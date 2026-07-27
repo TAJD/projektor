@@ -40,3 +40,27 @@ describe("PWA service worker — navigations must reach the network (PROJ-430)",
 		expect(configSource).toMatch(/handler:\s*['"]NetworkOnly['"]/);
 	});
 });
+
+// PROJ-431: the precache had grown to 4.17 MiB / 111 entries, dominated by chunks
+// that are dynamically imported and reached by a minority of sessions (mermaid,
+// cytoscape and katex render wiki diagrams and maths; the editor mounts only on Edit).
+// They still load on demand — this only keeps them out of the install-time payload.
+describe("PWA precache — keep the install payload small (PROJ-431)", () => {
+	it("excludes the heavy dynamically-imported vendor chunks", () => {
+		const globIgnores = configSource.match(/globIgnores:\s*\[([\s\S]*?)\]/)?.[1] ?? "";
+		for (const chunk of ["mermaid", "cytoscape", "katex", "MarkdownEditor", "Diagram-"]) {
+			expect(globIgnores, `${chunk} should not be precached`).toContain(chunk);
+		}
+	});
+
+	// The config patterns above are brittle to chunk renames; the byte budget asserted
+	// against the built sw.js is the guard that actually holds. It runs as part of the
+	// build (astro build && node scripts/assert-sw.mjs) because CI runs unit tests
+	// before the build, so a dist-reading test here would just skip.
+	it("enforces the precache budget from the build, against the built sw.js", () => {
+		const pkg = JSON.parse(
+			readFileSync(join(__dirname, "../../package.json"), "utf-8")
+		) as { scripts: Record<string, string> };
+		expect(pkg.scripts.build).toContain("scripts/assert-sw.mjs");
+	});
+});

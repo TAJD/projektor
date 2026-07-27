@@ -11,13 +11,16 @@ interface Props {
 	minHeight?: string;
 }
 
+// Sub-640px gets a 44px-square touch target (the toolbar was ~24px tall, well under
+// the accessible minimum on a phone). Desktop keeps the original compact sizing.
 const TOOLBAR_BUTTON_CLASS =
+	"min-w-[44px] min-h-[44px] sm:min-w-0 sm:min-h-0 inline-flex items-center justify-center " +
 	"px-[7px] py-[2px] border border-transparent rounded-[3px] bg-transparent text-text-base " +
 	"cursor-pointer text-[0.8rem] font-[inherit] leading-[1.5] hover:bg-border";
 
 function mobileToggleClass(active: boolean): string {
 	const base =
-		"px-[10px] py-[2px] border rounded-[3px] text-[0.8rem] font-[inherit] cursor-pointer";
+		"min-h-[44px] px-[14px] py-[2px] border rounded-[3px] text-[0.8rem] font-[inherit] cursor-pointer";
 	const state = active
 		? " bg-accent text-white border-accent"
 		: " border-border bg-transparent text-text-base";
@@ -220,10 +223,16 @@ function useMarkdownEditorView(
 					"&": { background: "var(--bg)", color: "var(--text)" },
 					".cm-content": {
 						fontFamily: "ui-monospace, 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
-						fontSize: "0.875rem",
+						// 16px on phones. Below 16px, iOS Safari zooms the viewport when a
+						// field takes focus, and the viewport meta sets no maximum-scale —
+						// so tapping into the editor used to jump the whole page.
+						fontSize: "1rem",
 						padding: "0.5rem 0.75rem",
 						minHeight,
 						caretColor: "var(--text)",
+					},
+					"@media (min-width: 640px)": {
+						".cm-content": { fontSize: "0.875rem" },
 					},
 					".cm-line": { lineHeight: "1.6" },
 					".cm-focused": { outline: "none" },

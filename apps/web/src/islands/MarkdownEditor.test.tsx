@@ -3,6 +3,8 @@
 // MarkdownEditor has no network dependency. It mounts a CodeMirror editor and
 // renders a live preview pane. The pattern: render with props, assert on the
 // toolbar buttons and preview pane content. cleanup runs via setup.ts afterEach.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MarkdownEditor from "./MarkdownEditor";
@@ -124,5 +126,30 @@ describe("MarkdownEditor", () => {
 		// After click the Edit button loses its active styles (class contains bg-transparent)
 		const editToggle = buttons.find((b) => b.textContent === "Edit");
 		expect(editToggle?.className).toContain("border-border");
+	});
+});
+
+// ─── PROJ-431: mobile editing ────────────────────────────────────────────────
+
+describe("MarkdownEditor — mobile ergonomics (PROJ-431)", () => {
+	const source = readFileSync(join(__dirname, "MarkdownEditor.tsx"), "utf-8");
+
+	// Toolbar buttons were ~24px tall (py-[2px] at 0.8rem), well under the 44px
+	// accessible touch target. Desktop keeps the original compact sizing.
+	it("gives toolbar buttons a 44px touch target on small screens only", () => {
+		expect(source).toMatch(/min-w-\[44px\] min-h-\[44px\] sm:min-w-0 sm:min-h-0/);
+	});
+
+	it("gives the mobile Edit/Preview toggle a 44px touch target", () => {
+		expect(source).toMatch(/min-h-\[44px\][^"]*px-\[14px\]/);
+	});
+
+	// Below 16px, iOS Safari zooms the viewport when the field takes focus, and the
+	// viewport meta sets no maximum-scale.
+	it("sets a 16px editor font on phones and restores 0.875rem from 640px up", () => {
+		expect(source).toMatch(/fontSize:\s*"1rem"/);
+		expect(source).toMatch(
+			/"@media \(min-width: 640px\)":\s*\{\s*"\.cm-content":\s*\{\s*fontSize:\s*"0\.875rem"\s*\}/
+		);
 	});
 });

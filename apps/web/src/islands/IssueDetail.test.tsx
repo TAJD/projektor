@@ -359,3 +359,112 @@ describe("workspace-slug header contract (PROJ-98)", () => {
 		}
 	});
 });
+
+// ─── PROJ-431: first-paint path ───────────────────────────────────────────────
+
+describe("PROJ-431 — first paint", () => {
+	// /api/issues/KEY-N returns the same payload as /api/issues/{uuid}, so the resolve
+	// step already holds a complete issue. Refetching by UUID before rendering put a
+	// second serial round trip (~1.3s on mobile) in front of first paint.
+	it("renders from the resolve response without waiting for the UUID-keyed refetch", async () => {
+		history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+
+		let releaseRefetch: (() => void) | undefined;
+		const refetchGate = new Promise<void>((r) => {
+			releaseRefetch = r;
+		});
+		let uuidFetches = 0;
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/comments") || u.includes("/links")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				if (u.includes("task-statuses") || u.includes("/api/files")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				if (u.endsWith("/api/issues/PROJ-7")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
+				}
+				if (u.endsWith("/api/issues/plain-1")) {
+					uuidFetches++;
+					// Never settles until released — if render waited on it, nothing would paint.
+					return refetchGate.then(() => ({
+						ok: true,
+						json: () => Promise.resolve(PLAIN_ISSUE_DATA),
+					}));
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+			})
+		);
+
+		render(<IssueDetail />);
+
+		await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+		expect(uuidFetches).toBe(1);
+		releaseRefetch?.();
+	});
+
+	// The page used to gate on Promise.all over all seven requests, so title and body
+	// waited behind /api/files, /api/task-statuses and /api/workspaces/{slug}.
+	it("paints the issue before the secondary requests settle", async () => {
+		let releaseSecondary: (() => void) | undefined;
+		const secondaryGate = new Promise<void>((r) => {
+			releaseSecondary = r;
+		});
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.endsWith("/api/issues/plain-1")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
+				}
+				// Everything else — statuses, files, links, comments, members — hangs.
+				return secondaryGate.then(() => ({ ok: true, json: () => Promise.resolve([]) }));
+			})
+		);
+
+		render(<IssueDetail issueId="plain-1" />);
+
+		// The full view is on screen (title + breadcrumb), not the page-level placeholder.
+		// Individual sections may still show their own loading state — that's the point.
+		await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+		expect(screen.getByRole("article")).toBeDefined();
+		releaseSecondary?.();
+	});
+
+	// issueId is empty for the whole resolve round trip, so the "no issue ID" branch
+	// used to render as a ~1.3s error flash on the canonical pretty URL.
+	it("shows a loading state, not 'No issue ID provided', while resolving a pretty URL", async () => {
+		history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+
+		let release: ((v: unknown) => void) | undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation(
+				() =>
+					new Promise((r) => {
+						release = r;
+					})
+			)
+		);
+
+		render(<IssueDetail />);
+
+		await waitFor(() => expect(screen.getByText(/Loading/)).toBeDefined());
+		expect(screen.queryByText(/No issue ID provided/)).toBeNull();
+		release?.({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
+	});
+
+	it("still reports 'No issue ID provided' when there is genuinely nothing to resolve", async () => {
+		history.replaceState(null, "", "/issues/view");
+		vi.stubGlobal("fetch", vi.fn());
+
+		render(<IssueDetail />);
+
+		await waitFor(() => expect(screen.getByText(/No issue ID provided/)).toBeDefined());
+	});
+});

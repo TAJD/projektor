@@ -1,6 +1,7 @@
 import { createPortal } from "preact/compat";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { clearAllDrafts } from "../utils/drafts";
 import { resolveWorkspaceSlug } from "../utils/workspace";
 
 interface Props {
@@ -161,7 +162,13 @@ export function AccountMenu({ workspaceSlug }: Props) {
 							>
 								Refresh session
 							</a>
-							<a role="menuitem" class="account-menu-item" href="/cdn-cgi/access/logout">
+							<a
+								role="menuitem"
+								class="account-menu-item"
+								href="/cdn-cgi/access/logout"
+								// PROJ-431: don't leave one user's unsent drafts on a shared device.
+								onClick={() => clearAllDrafts()}
+							>
 								Log out
 							</a>
 						</div>

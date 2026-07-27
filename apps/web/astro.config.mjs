@@ -33,6 +33,26 @@ export default defineConfig({
         // never left the device — an expired tab just 401ed and reloaded forever.
         // Assets stay precached; navigations must hit the network.
         globPatterns: ['**/*.{css,js,svg,png,ico,json}'],
+        // PROJ-431: these are all dynamically imported and reached by a minority of
+        // sessions (mermaid/cytoscape/katex render wiki diagrams and maths; the editor
+        // only mounts on Edit). Precaching them cost 4.17 MiB on install and a
+        // re-download on every deploy. They still load on demand over the network —
+        // this only removes them from the install-time payload.
+        // The real guard against regression is the precache budget asserted in
+        // astro.config.precache.test.ts, not these patterns.
+        globIgnores: [
+          '**/mermaid*.js',
+          '**/cytoscape*.js',
+          '**/katex*.js',
+          '**/cynefin*.js',
+          '**/MarkdownEditor*.js',
+          '**/*Diagram-*.js',
+          '**/swimlanes-*.js',
+          '**/cose-bilkent-*.js',
+          '**/flow-charts*.js',
+          '**/dagre-*.js',
+          '**/ordinal-*.js',
+        ],
         runtimeCaching: [
           {
             urlPattern: /^\/(?:api|mcp)\//,
