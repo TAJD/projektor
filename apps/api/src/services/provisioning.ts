@@ -78,54 +78,26 @@ function resolveDomainMapping(
 }
 
 /**
- * Make `user` an `owner` of the given workspace, given their current role there
- * (null = not a member). Split from the read so callers that already know the role
- * — see provisionAdmin's join — don't pay a second query to rediscover it.
+ * Make `user` an `owner` of the given workspace, whether or not they're already a member.
+ *
+ * One upsert, no preceding read. The role provisionAdmin holds comes from a join taken
+ * several awaits earlier, so acting on it would be a lost update: if a membership row
+ * appeared in the meantime (an invite, or another isolate provisioning the same admin) an
+ * insert-if-absent would be silently discarded and leave the admin under-privileged —
+ * previously self-healing on the next request, but now cached for the whole TTL.
  */
 async function grantOwner(
 	orm: ReturnType<typeof drizzle>,
 	workspaceId: string,
-	userId: string,
-	currentRole: string | null
-): Promise<void> {
-	if (currentRole === null) {
-		await orm
-			.insert(schema.workspaceMembers)
-			.values({ workspaceId, userId, role: "owner", joinedAt: Math.floor(Date.now() / 1000) })
-			.onConflictDoNothing();
-		return;
-	}
-	if (currentRole !== "owner") {
-		await orm
-			.update(schema.workspaceMembers)
-			.set({ role: "owner" })
-			.where(
-				and(
-					eq(schema.workspaceMembers.workspaceId, workspaceId),
-					eq(schema.workspaceMembers.userId, userId)
-				)
-			);
-	}
-}
-
-/** Ensure `user` is an `owner` member of the given workspace (insert or promote). */
-async function ensureOwner(
-	orm: ReturnType<typeof drizzle>,
-	workspaceId: string,
 	userId: string
 ): Promise<void> {
-	const member = await orm
-		.select({ role: schema.workspaceMembers.role })
-		.from(schema.workspaceMembers)
-		.where(
-			and(
-				eq(schema.workspaceMembers.workspaceId, workspaceId),
-				eq(schema.workspaceMembers.userId, userId)
-			)
-		)
-		.get();
-
-	await grantOwner(orm, workspaceId, userId, member?.role ?? null);
+	await orm
+		.insert(schema.workspaceMembers)
+		.values({ workspaceId, userId, role: "owner", joinedAt: Math.floor(Date.now() / 1000) })
+		.onConflictDoUpdate({
+			target: [schema.workspaceMembers.workspaceId, schema.workspaceMembers.userId],
+			set: { role: "owner" },
+		});
 }
 
 /**
@@ -175,12 +147,13 @@ async function provisionAdmin(
 			.from(schema.workspaces)
 			.where(eq(schema.workspaces.slug, slug))
 			.get();
-		if (created) await ensureOwner(orm, created.id, user.id);
+		if (created) await grantOwner(orm, created.id, user.id);
 	}
 
-	// Admins own every workspace, including migrated ones they didn't create.
+	// Admins own every workspace, including migrated ones they didn't create. The role here
+	// only decides whether a write is worth issuing; grantOwner is correct either way.
 	for (const w of rows) {
-		if (w.role !== "owner") await grantOwner(orm, w.id, user.id, w.role);
+		if (w.role !== "owner") await grantOwner(orm, w.id, user.id);
 	}
 }
 
@@ -248,10 +221,18 @@ export async function forgetProvisionedForTests(env: Env, userId: string): Promi
  * API-token / MCP auth never reaches here — those identities are provisioned explicitly when
  * the token is minted, so we leave them untouched.
  *
- * Runs at most once per user per PROVISIONED_LOCAL_TTL_MS. An admin therefore picks up
- * ownership of a workspace someone *else* created within that window rather than on their
- * very next request; a workspace they create themselves makes them owner immediately, via
- * createWorkspace.
+ * Runs at most once per user per TTL — up to 2× PROVISIONED_LOCAL_TTL_MS in the worst case,
+ * since a KV hit re-extends the isolate-local marker. An admin therefore picks up ownership
+ * of a workspace someone *else* created within that window rather than on their very next
+ * request; a workspace they create themselves makes them owner immediately, via
+ * createWorkspace. Changing AUTO_JOIN_ROLE or WORKSPACE_DOMAIN_MAP likewise takes up to
+ * that long to affect an already-marked user — the KV marker outlives a redeploy.
+ *
+ * Note this is what re-adds a membership that removeMember deleted (see
+ * services/workspaces.ts): for anyone in ADMIN_EMAILS, or on an instance with AUTO_JOIN_ROLE
+ * or a domain mapping, removal has always been undone by the next provisioning run. It used
+ * to be undone on the user's very next request, so it visibly never worked; now it holds
+ * until the marker expires and then reverts.
  */
 export async function ensureUserProvisioned(
 	env: Env,
