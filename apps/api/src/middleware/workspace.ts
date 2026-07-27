@@ -72,36 +72,36 @@ export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
 		);
 	}
 
-	const workspace = mcpWorkspaceId
-		? await c.env.DB.prepare("SELECT id, name, slug FROM workspaces WHERE id = ?")
-				.bind(mcpWorkspaceId)
-				.first<{ id: string; name: string; slug: string }>()
-		: await c.env.DB.prepare("SELECT id, name, slug FROM workspaces WHERE slug = ?")
-				.bind(slug)
-				.first<{ id: string; name: string; slug: string }>();
+	// PROJ-432: the workspace and this user's membership of it in one round trip. They were
+	// two sequential D1 queries, on a path every authenticated request goes through. A LEFT
+	// JOIN keeps the two outcomes distinguishable: no row at all is a missing workspace
+	// (404), a row with a null role is a non-member (403).
+	const user = c.get("user") as { id: string };
+	const lookup = `SELECT w.id, w.name, w.slug, m.role
+	                FROM workspaces w
+	                LEFT JOIN workspace_members m
+	                  ON m.workspace_id = w.id AND m.user_id = ?
+	                WHERE w.${mcpWorkspaceId ? "id" : "slug"} = ?`;
+	const row = await c.env.DB.prepare(lookup)
+		.bind(user.id, mcpWorkspaceId ?? slug)
+		.first<{ id: string; name: string; slug: string; role: string | null }>();
 
-	if (!workspace) return c.json({ error: "Workspace not found" }, 404);
+	if (!row) return c.json({ error: "Workspace not found" }, 404);
 
 	// PROJ-16: when auth came from a workspace-scoped token, enforce confinement.
 	// null = user-scoped token (allowed in any workspace the user is a member of).
-	// undefined = CF Access / dev-bypass (no token — membership check below is the gate).
+	// undefined = CF Access / dev-bypass (no token — the membership check below is the gate).
+	// Checked before membership so a token pointed at the wrong workspace gets the same 403
+	// it always did, rather than leaking whether the caller happens to be a member there.
 	const tokenWorkspaceId = c.get("tokenWorkspaceId");
-	if (tokenWorkspaceId != null && workspace.id !== tokenWorkspaceId) {
+	if (tokenWorkspaceId != null && row.id !== tokenWorkspaceId) {
 		return c.json({ error: "Forbidden" }, 403);
 	}
 
-	// Verify membership
-	const user = c.get("user") as { id: string };
-	const member = await c.env.DB.prepare(
-		"SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?"
-	)
-		.bind(workspace.id, user.id)
-		.first<{ role: string }>();
+	if (!row.role) return c.json({ error: "Forbidden" }, 403);
 
-	if (!member) return c.json({ error: "Forbidden" }, 403);
-
-	c.set("workspace", workspace);
-	c.set("role", member.role);
+	c.set("workspace", { id: row.id, name: row.name, slug: row.slug });
+	c.set("role", row.role);
 
 	return next();
 }

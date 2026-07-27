@@ -14,7 +14,8 @@ import type { Context, Next } from "hono";
 // rate-limited. Migrating to KV would break that test, which is outside this
 // ticket's file scope. A future migration needs wiki.test.ts to also clear KV.
 //
-// D1 supports atomic upsert with RETURNING, keeping this to a single round-trip.
+// The upsert and its read-back are issued as one D1 batch, so this costs a single round
+// trip (see incrementCounter — RETURNING would be tidier but isn't reliable locally).
 //
 // Key selection: when the request carries a bearer token the bucket is keyed by a
 // SHA-256 prefix of that token (own quota per credential, brute-force bounded).
@@ -98,9 +99,9 @@ async function sha256Prefix(input: string): Promise<string> {
 const PRUNE_PROBABILITY = 0.01;
 const PRUNE_RETENTION_WINDOWS = 10;
 
-async function pruneStaleRateLimitRows(db: D1Database, windowSecs: number): Promise<void> {
+function pruneStaleRateLimitRows(db: D1Database, windowSecs: number): D1PreparedStatement {
 	const cutoff = Math.floor(Date.now() / 1000) - windowSecs * PRUNE_RETENTION_WINDOWS;
-	await db.prepare("DELETE FROM rate_limit WHERE window_start < ?").bind(cutoff).run();
+	return db.prepare("DELETE FROM rate_limit WHERE window_start < ?").bind(cutoff);
 }
 
 async function incrementCounter(
@@ -112,24 +113,29 @@ async function incrementCounter(
 	// Upsert: if same window slot, increment; if window has rolled over, reset to 1.
 	// We use a separate SELECT because D1's local runtime may not reliably return
 	// RETURNING values from DML statements.
-	await db
-		.prepare(`
+	//
+	// PROJ-432: sent as one batch rather than sequential awaits. D1 runs a batch in order
+	// inside an implicit transaction, so the SELECT still observes the upsert above it —
+	// but the whole thing costs one round trip instead of two (three when pruning).
+	const statements = [
+		db
+			.prepare(`
     INSERT INTO rate_limit (key, count, window_start) VALUES (?, 1, ?)
     ON CONFLICT(key) DO UPDATE SET
       count = CASE WHEN rate_limit.window_start = ? THEN rate_limit.count + 1 ELSE 1 END,
       window_start = ?
   `)
-		.bind(key, slot, slot, slot)
-		.run();
+			.bind(key, slot, slot, slot),
+		db.prepare("SELECT count FROM rate_limit WHERE key = ?").bind(key),
+	];
 
+	// Last in the batch: it only ever deletes rows many windows older than the one just
+	// written, so it cannot race the count above.
 	if (Math.random() < PRUNE_PROBABILITY) {
-		await pruneStaleRateLimitRows(db, windowSecs);
+		statements.push(pruneStaleRateLimitRows(db, windowSecs));
 	}
 
-	const row = await db
-		.prepare("SELECT count FROM rate_limit WHERE key = ?")
-		.bind(key)
-		.first<{ count: number }>();
+	const [, selected] = await db.batch<{ count: number }>(statements);
 
-	return row?.count ?? 1;
+	return selected.results[0]?.count ?? 1;
 }

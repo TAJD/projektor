@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
+import { bumpRateCounter } from "../middleware/rate-limit";
 import { authHeaders, seedFixture } from "./helpers";
 
 // Must match wrangler.test.toml values.
@@ -192,5 +193,41 @@ describe("PROJ-361: opportunistic rate_limit row pruning", () => {
 			.bind("ip:stale-client-2")
 			.first();
 		expect(staleRow).not.toBeNull();
+	});
+});
+
+// PROJ-432: the limiter runs on every request, and its upsert + read-back used to be two
+// sequential awaits. They're one D1 batch now — same statements, same order, one round trip.
+describe("PROJ-432: the counter costs one round trip", () => {
+	function countingDb(db: D1Database) {
+		const counts = { prepare: 0, batch: 0 };
+		const proxy = new Proxy(db, {
+			get(target, prop, receiver) {
+				if (prop === "prepare") counts.prepare++;
+				if (prop === "batch") counts.batch++;
+				const value = Reflect.get(target, prop, receiver);
+				return typeof value === "function" ? value.bind(target) : value;
+			},
+		});
+		return { counts, proxy };
+	}
+
+	it("issues a single batch rather than sequential statements", async () => {
+		const { counts, proxy } = countingDb(env.DB);
+		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // no prune
+		try {
+			await bumpRateCounter(proxy, `ip:batch-${crypto.randomUUID().slice(0, 8)}`, WINDOW_SECS);
+		} finally {
+			randomSpy.mockRestore();
+		}
+
+		expect(counts.batch).toBe(1);
+	});
+
+	it("still counts correctly through the batch", async () => {
+		const key = `ip:batch-count-${crypto.randomUUID().slice(0, 8)}`;
+		expect(await bumpRateCounter(env.DB, key, WINDOW_SECS)).toBe(1);
+		expect(await bumpRateCounter(env.DB, key, WINDOW_SECS)).toBe(2);
+		expect(await bumpRateCounter(env.DB, key, WINDOW_SECS)).toBe(3);
 	});
 });
