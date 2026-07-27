@@ -552,6 +552,7 @@ describe("PROJ-438 — critical path", () => {
 			history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
 			(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
 				key: "PROJ-7",
+				t: Date.now(),
 				response: Promise.resolve({
 					ok: true,
 					json: () => Promise.resolve(PLAIN_ISSUE_DATA),
@@ -572,6 +573,7 @@ describe("PROJ-438 — critical path", () => {
 			history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
 			(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
 				key: "PROJ-7",
+				t: Date.now(),
 				response: Promise.resolve({ ok: false, status: 401 }),
 			};
 			const mock = stubFetch();
@@ -588,6 +590,7 @@ describe("PROJ-438 — critical path", () => {
 			history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
 			(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
 				key: "PROJ-999",
+				t: Date.now(),
 				response: Promise.resolve({
 					ok: true,
 					json: () => Promise.resolve({ ...PLAIN_ISSUE_DATA, title: "Wrong Issue" }),
@@ -615,6 +618,7 @@ describe("PROJ-438 — prefetch on the ?id= form", () => {
 	it("claims a prefetch keyed by UUID instead of refetching", async () => {
 		(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
 			key: "plain-1",
+			t: Date.now(),
 			response: Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) }),
 		};
 		const mock = makeFetchForDetail(PLAIN_ISSUE_DATA);
@@ -625,5 +629,81 @@ describe("PROJ-438 — prefetch on the ?id= form", () => {
 
 		const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
 		expect(calls).not.toContain("/api/issues/plain-1");
+	});
+});
+
+// A handoff nobody claims outlives the page that made it — ClientRouter swaps the body,
+// not the window — and a seeded issue skips the refetch, so a stale claim would never be
+// corrected. Bounded by age rather than trusted.
+describe("PROJ-438 — stale prefetch handoff", () => {
+	afterEach(() => {
+		delete (window as unknown as Record<string, unknown>).__projektorIssuePrefetch;
+	});
+
+	it("ignores a handoff older than the freshness bound and fetches instead", async () => {
+		history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+		(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
+			key: "PROJ-7",
+			t: Date.now() - 60_000,
+			response: Promise.resolve({
+				ok: true,
+				json: () => Promise.resolve({ ...PLAIN_ISSUE_DATA, title: "Hour-old Title" }),
+			}),
+		};
+		const mock = makeFetchForDetail(PLAIN_ISSUE_DATA);
+		vi.stubGlobal("fetch", mock);
+
+		render(<IssueDetail />);
+		await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+
+		expect(screen.queryByText("Hour-old Title")).toBeNull();
+		const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
+		expect(calls).toContain("/api/issues/PROJ-7");
+	});
+
+	it("still uses a handoff issued moments ago", async () => {
+		history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+		(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
+			key: "PROJ-7",
+			t: Date.now() - 200,
+			response: Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) }),
+		};
+		const mock = makeFetchForDetail(PLAIN_ISSUE_DATA);
+		vi.stubGlobal("fetch", mock);
+
+		render(<IssueDetail />);
+		await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+
+		const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
+		expect(calls).not.toContain("/api/issues/PROJ-7");
+	});
+});
+
+// The inline script is the half these tests can't execute, so pin its contract against
+// the source: it must survive ClientRouter's script de-duplication, agree with the
+// island on which identifier wins, and stamp the handoff so it can go stale.
+describe("PROJ-438 — inline prefetch script contract", () => {
+	const source = readFileSync(join(__dirname, "../pages/issues/view.astro"), "utf-8");
+
+	it("opts out of ClientRouter's run-once script de-duplication", () => {
+		expect(source).toMatch(/<script is:inline data-astro-rerun/);
+	});
+
+	it("stamps the handoff with a timestamp", () => {
+		expect(source).toMatch(/t: Date\.now\(\)/);
+	});
+
+	it("clears a leftover handoff before the router swaps in a new page", () => {
+		expect(source).toMatch(/astro:before-swap/);
+		expect(source).toMatch(/delete window\.__projektorIssuePrefetch/);
+	});
+
+	// Both sides must agree, or a URL carrying both forms is prefetched under one key
+	// and claimed under the other.
+	it("prefers ?id= over the pretty path, matching the island", () => {
+		const idFirst = source.indexOf("URLSearchParams(location.search).get('id')");
+		const pathFallback = source.indexOf("pretty[1] + '-' + pretty[2]");
+		expect(idFirst).toBeGreaterThan(-1);
+		expect(pathFallback).toBeGreaterThan(idFirst);
 	});
 });

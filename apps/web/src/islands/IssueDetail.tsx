@@ -316,12 +316,13 @@ function useIssueCore(
 	// entirely: scheduled once the browser has nothing better to do.
 	useEffect(() => {
 		if (!issueId) return;
-		const idle = (
-			window as unknown as { requestIdleCallback?: (cb: () => void, o?: object) => number }
-		).requestIdleCallback;
-		if (idle) {
-			idle(() => fetchAttachments(), { timeout: 2000 });
-			return;
+		const w = window as unknown as {
+			requestIdleCallback?: (cb: () => void, o?: object) => number;
+			cancelIdleCallback?: (h: number) => void;
+		};
+		if (w.requestIdleCallback) {
+			const handle = w.requestIdleCallback(() => fetchAttachments(), { timeout: 2000 });
+			return () => w.cancelIdleCallback?.(handle);
 		}
 		const t = setTimeout(fetchAttachments, 0);
 		return () => clearTimeout(t);

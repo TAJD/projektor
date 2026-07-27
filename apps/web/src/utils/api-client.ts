@@ -109,6 +109,13 @@ export async function apiFetch<T = unknown>(
 			if (opts.on401 === "throw") {
 				throw new Error(`API ${method} ${path} failed: 401`);
 			}
+			// A reload this page load has already been triggered by an earlier 401 — this
+			// is the same expiry, not a second failed attempt. Without this, whichever
+			// request happens to 401 second surfaces "your session has expired" on screen
+			// for the instant before the reload navigates away. Which request that is comes
+			// down to effect ordering, so it moves whenever the page's fetches are
+			// rearranged (it moved onto the issue page in PROJ-438).
+			if (reauthReloadInFlight) return new Promise<T>(() => {});
 			if (reauthAttemptedAt !== null) throw new SessionExpiredError();
 			markReauthAttempt();
 			reauthReloadInFlight = true;
