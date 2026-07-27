@@ -242,3 +242,67 @@ describe("Issue Links role guards", () => {
 		expect(deleteRes.status).toBe(403);
 	});
 });
+
+// PROJ-438: same as comments — the URL carries a ref, so the read takes one.
+describe("PROJ-438 — links accept an issue ref", () => {
+	it("GET /:ref/links returns the same links as GET /:uuid/links", async () => {
+		const fixture = await seedFixture({ role: "owner" });
+		const slug = fixture.workspace.slug;
+		const project = await seedProject(fixture.workspace.id);
+		const a = await seedIssue(fixture.workspace.id, project.id, fixture.user.id, { title: "A" });
+		const b = await seedIssue(fixture.workspace.id, project.id, fixture.user.id, { title: "B" });
+
+		await SELF.fetch(`http://localhost/api/issues/${a.id}/links`, {
+			method: "POST",
+			headers: authHeaders(fixture.token, slug),
+			body: JSON.stringify({ targetIssueId: b.id, type: "blocks" }),
+		});
+
+		const detail = await SELF.fetch(`http://localhost/api/issues/${a.id}`, {
+			headers: authHeaders(fixture.token, slug),
+		});
+		const { project_key: key, number } = (await detail.json()) as {
+			project_key: string;
+			number: number;
+		};
+
+		const byRef = await SELF.fetch(`http://localhost/api/issues/${key}-${number}/links`, {
+			headers: authHeaders(fixture.token, slug),
+		});
+		const byUuid = await SELF.fetch(`http://localhost/api/issues/${a.id}/links`, {
+			headers: authHeaders(fixture.token, slug),
+		});
+
+		expect(byRef.status).toBe(200);
+		expect(await byRef.json()).toEqual(await byUuid.json());
+	});
+
+	it("a ref belonging to another workspace is 404", async () => {
+		const mine = await seedFixture({ role: "owner" });
+		const theirs = await seedFixture({ role: "owner" });
+		const theirProject = await seedProject(theirs.workspace.id, "OTHER");
+		await seedIssue(theirs.workspace.id, theirProject.id, theirs.user.id, { title: "Not yours" });
+
+		const res = await SELF.fetch("http://localhost/api/issues/OTHER-1/links", {
+			headers: authHeaders(mine.token, mine.workspace.slug),
+		});
+
+		expect(res.status).toBe(404);
+	});
+
+	// Writes were deliberately left UUID-only — they're never on a first-paint path.
+	it("POST /:ref/links is still rejected — writes did not widen", async () => {
+		const fixture = await seedFixture({ role: "owner" });
+		const project = await seedProject(fixture.workspace.id);
+		await seedIssue(fixture.workspace.id, project.id, fixture.user.id, { title: "A" });
+		const b = await seedIssue(fixture.workspace.id, project.id, fixture.user.id, { title: "B" });
+
+		const res = await SELF.fetch(`http://localhost/api/issues/${project.key}-1/links`, {
+			method: "POST",
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+			body: JSON.stringify({ targetIssueId: b.id, type: "blocks" }),
+		});
+
+		expect(res.status).toBe(400);
+	});
+});

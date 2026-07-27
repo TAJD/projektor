@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { formatIssueRef } from "../lib/issue-ref";
 import { apiFetch } from "../utils/api-client";
+import { claimPrefetchedIssue } from "../utils/issue-prefetch";
 import { issueUrl } from "../utils/issue-url";
 import {
 	AttachmentsSection,
@@ -37,12 +38,17 @@ function useResolvedIssueId(
 	workspaceSlug: string | undefined
 ) {
 	const [issueId, setIssueId] = useState(issueIdProp ?? "");
+	// Whatever identifier this page was reached by — a ref ("PROJ-42") from the pretty
+	// URL, or a UUID from ?id= / props. PROJ-438: the reads that accept either (the
+	// issue, its comments, its links) key off this instead of `issueId`, so they no
+	// longer queue behind the ref→UUID resolve. It is set once and never swapped for
+	// the UUID afterwards, which is what stops them all firing a second time.
+	const [readKey, setReadKey] = useState(issueIdProp ?? "");
 	const [resolveError, setResolveError] = useState<string | null>(null);
 	// PROJ-431: /api/issues/KEY-N returns the *whole* issue, byte-identical to
 	// /api/issues/{uuid}. Keeping only `.id` and letting useIssueCore refetch by UUID
 	// put a second serial round trip in front of first paint — ~1.3s on mobile, on the
-	// canonical URL form. Hand the payload on as seed state instead; the UUID-keyed
-	// fetch still runs and revalidates, just no longer blocking anything.
+	// canonical URL form. Hand the payload on as seed state instead.
 	const [resolvedIssue, setResolvedIssue] = useState<IssueData | null>(null);
 	// Whether an id is still being worked out. Without it the component's "no issue ID
 	// provided" branch renders for the whole resolve round trip — a ~1.3s error flash on
@@ -56,6 +62,7 @@ function useResolvedIssueId(
 		const fromQuery = new URLSearchParams(window.location.search).get("id");
 		if (fromQuery) {
 			setIssueId(fromQuery);
+			setReadKey(fromQuery);
 			setResolving(false);
 			return;
 		}
@@ -73,8 +80,9 @@ function useResolvedIssueId(
 			setResolving(false);
 			return;
 		}
+		setReadKey(ref);
 
-		apiFetch<IssueData>(`/api/issues/${ref}`, { workspaceSlug })
+		loadIssue(ref, workspaceSlug)
 			.then((data) => {
 				setResolvedIssue(data);
 				setIssueId(data.id);
@@ -83,7 +91,25 @@ function useResolvedIssueId(
 			.finally(() => setResolving(false));
 	}, [issueIdProp, projectSlug, issueNumber, workspaceSlug]);
 
-	return { issueId, resolveError, resolvedIssue, resolving };
+	return { issueId, readKey, resolveError, resolvedIssue, resolving };
+}
+
+/**
+ * The issue, from the inline prefetch if that beat us to it (PROJ-438) or over the
+ * network if not. A prefetch that missed — expired session, offline, a 404 — is not
+ * treated as a failure: it just falls through to `apiFetch`, which is where 401
+ * re-authentication and offline reporting live.
+ */
+async function loadIssue(ref: string, workspaceSlug: string | undefined): Promise<IssueData> {
+	const prefetched = claimPrefetchedIssue<IssueData>(ref);
+	if (prefetched) {
+		try {
+			return await prefetched;
+		} catch {
+			// fall through
+		}
+	}
+	return apiFetch<IssueData>(`/api/issues/${ref}`, { workspaceSlug });
 }
 
 function useBackHref() {
@@ -105,22 +131,22 @@ function useBackHref() {
 	return backHref;
 }
 
-function useIssueLinks(issueId: string, workspaceSlug: string | undefined) {
+function useIssueLinks(readKey: string, workspaceSlug: string | undefined) {
 	const [links, setLinks] = useState<IssueLink[]>([]);
 	const [fetchingLinks, setFetchingLinks] = useState(false);
 
 	const fetchLinks = useCallback(async () => {
-		if (!issueId) return;
+		if (!readKey) return;
 		setFetchingLinks(true);
 		try {
-			const data = await apiFetch<IssueLink[]>(`/api/issues/${issueId}/links`, { workspaceSlug });
+			const data = await apiFetch<IssueLink[]>(`/api/issues/${readKey}/links`, { workspaceSlug });
 			setLinks(Array.isArray(data) ? data : []);
 		} catch {
 			// non-fatal
 		} finally {
 			setFetchingLinks(false);
 		}
-	}, [issueId, workspaceSlug]);
+	}, [readKey, workspaceSlug]);
 
 	return { links, fetchingLinks, fetchLinks };
 }
@@ -185,6 +211,7 @@ function useEpicRelations(issue: IssueData | null, workspaceSlug: string | undef
 
 function useIssueCore(
 	issueId: string,
+	readKey: string,
 	workspaceSlug: string | undefined,
 	fetchLinks: () => Promise<void>,
 	fetchAttachments: () => Promise<void>,
@@ -207,7 +234,11 @@ function useIssueCore(
 
 	const fetchIssue = useCallback(async () => {
 		try {
-			const data = await apiFetch<IssueData>(`/api/issues/${issueId}`, { workspaceSlug });
+			// loadIssue, not apiFetch: on the ?id=<uuid> form the inline script prefetched
+			// under that same key, and this is the call that would otherwise duplicate it.
+			// Claiming is single-use, so the refresh-after-mutation callers still go to the
+			// network — which is the whole point of them.
+			const data = await loadIssue(issueId, workspaceSlug);
 			setIssue(data);
 		} catch (e) {
 			setError(String(e));
@@ -215,52 +246,86 @@ function useIssueCore(
 	}, [issueId, workspaceSlug]);
 
 	const fetchComments = useCallback(async () => {
+		if (!readKey) return;
 		try {
-			const data = await apiFetch<Comment[]>(`/api/issues/${issueId}/comments`, { workspaceSlug });
+			const data = await apiFetch<Comment[]>(`/api/issues/${readKey}/comments`, { workspaceSlug });
 			setComments(Array.isArray(data) ? data : []);
 		} catch {
 			// non-fatal
 		}
-	}, [issueId, workspaceSlug]);
+	}, [readKey, workspaceSlug]);
 
+	// PROJ-438: comments and links accept the same ref the URL carries, so they go out
+	// on the identifier we already have rather than waiting a full round trip for the
+	// UUID. `readKey` never changes once set, so this doesn't re-fire when it lands.
+	useEffect(() => {
+		if (!readKey) return;
+		fetchComments();
+		fetchLinks();
+	}, [fetchComments, fetchLinks, readKey]);
+
+	// Nothing here depends on which issue this is — no reason to sequence it behind
+	// the resolve.
+	useEffect(() => {
+		(async () => {
+			try {
+				const data = await apiFetch<TaskStatus[]>("/api/task-statuses", { workspaceSlug });
+				if (Array.isArray(data)) setStatuses(data);
+			} catch {
+				// non-fatal
+			}
+		})();
+		(async () => {
+			try {
+				const data = await apiFetch<{ user: { id: string } }>("/auth/me", { workspaceSlug });
+				setCurrentUserId(data.user.id);
+			} catch {
+				// non-fatal — edit/delete buttons simply won't show
+			}
+		})();
+		(async () => {
+			if (!workspaceSlug) return;
+			try {
+				const data = await apiFetch<{ members: Member[] }>(`/api/workspaces/${workspaceSlug}`, {
+					workspaceSlug,
+				});
+				if (Array.isArray(data?.members)) setMembers(data.members);
+			} catch {
+				// non-fatal — assignee field falls back to display-only
+			}
+		})();
+	}, [workspaceSlug]);
+
+	// PROJ-438: when the resolve seeded us, its response *is* the issue — the same 31
+	// keys /api/issues/{uuid} would return. Fetching it again was a second copy of a
+	// payload already in hand, 100ms behind the first. `fetchIssue` itself stays: the
+	// mutation handlers call it directly to refresh after a write.
 	useEffect(() => {
 		if (!issueId) return;
+		if (seedIssue?.id === issueId) {
+			setLoading(false);
+			return;
+		}
 		setLoading(true);
 		setError(null);
-		Promise.all([
-			fetchIssue(),
-			fetchComments(),
-			fetchLinks(),
-			fetchAttachments(),
-			(async () => {
-				try {
-					const data = await apiFetch<TaskStatus[]>("/api/task-statuses", { workspaceSlug });
-					if (Array.isArray(data)) setStatuses(data);
-				} catch {
-					// non-fatal
-				}
-			})(),
-			(async () => {
-				try {
-					const data = await apiFetch<{ user: { id: string } }>("/auth/me", { workspaceSlug });
-					setCurrentUserId(data.user.id);
-				} catch {
-					// non-fatal — edit/delete buttons simply won't show
-				}
-			})(),
-			(async () => {
-				if (!workspaceSlug) return;
-				try {
-					const data = await apiFetch<{ members: Member[] }>(`/api/workspaces/${workspaceSlug}`, {
-						workspaceSlug,
-					});
-					if (Array.isArray(data?.members)) setMembers(data.members);
-				} catch {
-					// non-fatal — assignee field falls back to display-only
-				}
-			})(),
-		]).finally(() => setLoading(false));
-	}, [fetchIssue, fetchComments, fetchLinks, fetchAttachments, workspaceSlug]);
+		fetchIssue().finally(() => setLoading(false));
+	}, [fetchIssue, issueId, seedIssue]);
+
+	// Attachments render below the body, children and relations — well under the fold —
+	// but were the slowest call in the mount fan-out at 249ms. Off the critical path
+	// entirely: scheduled once the browser has nothing better to do.
+	useEffect(() => {
+		if (!issueId) return;
+		const idle = (
+			window as unknown as { requestIdleCallback?: (cb: () => void, o?: object) => number }
+		).requestIdleCallback;
+		if (idle) {
+			idle(() => fetchAttachments(), { timeout: 2000 });
+			return;
+		}
+		const t = setTimeout(fetchAttachments, 0);
+		return () => clearTimeout(t);
+	}, [fetchAttachments, issueId]);
 
 	return {
 		issue,
@@ -532,7 +597,7 @@ export default function IssueDetail({
 	projectSlug,
 	workspaceSlug,
 }: Props) {
-	const { issueId, resolveError, resolvedIssue, resolving } = useResolvedIssueId(
+	const { issueId, readKey, resolveError, resolvedIssue, resolving } = useResolvedIssueId(
 		issueIdProp,
 		issueNumber,
 		projectSlug,
@@ -540,7 +605,7 @@ export default function IssueDetail({
 	);
 	const backHref = useBackHref();
 
-	const { links, fetchingLinks, fetchLinks } = useIssueLinks(issueId, workspaceSlug);
+	const { links, fetchingLinks, fetchLinks } = useIssueLinks(readKey, workspaceSlug);
 	const { attachments, fetchAttachments } = useIssueAttachments(issueId, workspaceSlug);
 
 	const {
@@ -554,7 +619,7 @@ export default function IssueDetail({
 		currentUserId,
 		fetchIssue,
 		fetchComments,
-	} = useIssueCore(issueId, workspaceSlug, fetchLinks, fetchAttachments, resolvedIssue);
+	} = useIssueCore(issueId, readKey, workspaceSlug, fetchLinks, fetchAttachments, resolvedIssue);
 
 	const { parentEpic, childIssues } = useEpicRelations(issue, workspaceSlug);
 

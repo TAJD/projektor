@@ -368,6 +368,41 @@ async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, 
 	);
 }
 
+export const ISSUE_REF_PATTERN = /^([A-Z]+)-(\d+)$/;
+
+/**
+ * Accept either identifier in an `:issueId` path segment.
+ *
+ * PROJ-438: only `GET /api/issues/:id` understood a ref, so a browser landing on
+ * /projects/KEY/N/… had to resolve the UUID and only then ask for that issue's comments
+ * and links — a full round trip of dead time on the critical path, per sub-resource.
+ *
+ * This resolves within `ctx.workspaceId` only, and answers "not found" for a ref that
+ * doesn't, so it can't be used to probe for issues in another workspace. It does not
+ * check project visibility: callers pass the returned id to a service that already
+ * does (PROJ-311), and duplicating that here would be a second way to get it wrong.
+ */
+export async function resolveIssueIdParam(ctx: ServiceCtx, param: string): Promise<string> {
+	const m = param.match(ISSUE_REF_PATTERN);
+	if (!m) return param;
+
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ id: schema.issues.id })
+		.from(schema.issues)
+		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+		.where(
+			and(
+				eq(schema.projects.key, m[1]),
+				eq(schema.issues.number, parseInt(m[2], 10)),
+				eq(schema.issues.workspaceId, ctx.workspaceId)
+			)
+		)
+		.get();
+	if (!row) throw new NotFoundError("Issue not found");
+	return row.id;
+}
+
 async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, ref: string) {
 	const m = ref.match(/^([A-Z]+)-(\d+)$/);
 	if (!m)

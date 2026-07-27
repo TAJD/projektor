@@ -245,9 +245,9 @@ describe("URL path parsing (pretty-URL fallback)", () => {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 			if (u.includes("?parentId="))
 				return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
-			// Ref lookup: GET /api/issues/PROJ-87 → returns the UUID
+			// Ref lookup: GET /api/issues/PROJ-87 returns the whole issue, not just its id
 			if (u.endsWith("/api/issues/PROJ-87")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "plain-1" }) });
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
 			}
 			// Full issue fetch by UUID
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
@@ -403,7 +403,9 @@ describe("PROJ-431 — first paint", () => {
 		render(<IssueDetail />);
 
 		await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
-		expect(uuidFetches).toBe(1);
+		// PROJ-438: was 1 — the resolve response already *is* the issue, so the UUID-keyed
+		// fetch was a second copy of a payload we held, 100ms behind the first.
+		expect(uuidFetches).toBe(0);
 		releaseRefetch?.();
 	});
 
@@ -466,5 +468,162 @@ describe("PROJ-431 — first paint", () => {
 		render(<IssueDetail />);
 
 		await waitFor(() => expect(screen.getByText(/No issue ID provided/)).toBeDefined());
+	});
+});
+
+// ─── PROJ-438: critical path ──────────────────────────────────────────────────
+
+describe("PROJ-438 — critical path", () => {
+	function stubFetch(impl?: (url: string) => unknown) {
+		const mock = vi.fn().mockImplementation((url: string) => {
+			const u = String(url);
+			const custom = impl?.(u);
+			if (custom) return custom;
+			if (u.endsWith("/api/issues/PROJ-7")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
+			}
+			if (u.endsWith("/api/issues/plain-1")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+		});
+		vi.stubGlobal("fetch", mock);
+		return mock;
+	}
+
+	// Comments and links used to wait for the ref→UUID resolve to come back before they
+	// could name the issue. They accept the ref now, so they go out on it.
+	it("requests comments and links by ref, without waiting for the UUID", async () => {
+		history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+
+		// The resolve never settles: anything that fired anyway did so without the UUID.
+		const mock = stubFetch((u) =>
+			u.endsWith("/api/issues/PROJ-7") ? new Promise(() => {}) : undefined
+		);
+
+		render(<IssueDetail />);
+
+		await waitFor(() => {
+			const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
+			expect(calls).toContain("/api/issues/PROJ-7/comments");
+			expect(calls).toContain("/api/issues/PROJ-7/links");
+		});
+	});
+
+	// The whole reason readKey is set once and never swapped: keying these on the UUID as
+	// soon as it landed would fetch every one of them a second time.
+	it("does not re-request comments or links once the UUID resolves", async () => {
+		history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+		const mock = stubFetch();
+
+		render(<IssueDetail />);
+		await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+
+		const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
+		expect(calls.filter((u) => u.endsWith("/comments"))).toHaveLength(1);
+		expect(calls.filter((u) => u.endsWith("/links"))).toHaveLength(1);
+	});
+
+	// Attachments render below body, children and relations, and were the slowest call in
+	// the mount fan-out. They must not be in flight before the issue paints.
+	it("does not request attachments before the issue is on screen", async () => {
+		history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+		const mock = stubFetch();
+
+		render(<IssueDetail />);
+		await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+
+		const atFirstPaint = (mock.mock.calls as [string][]).map(([u]) => String(u));
+		expect(atFirstPaint.some((u) => u.includes("/api/files"))).toBe(false);
+
+		// …but they do still arrive.
+		await waitFor(() => {
+			const later = (mock.mock.calls as [string][]).map(([u]) => String(u));
+			expect(later.some((u) => u.includes("/api/files"))).toBe(true);
+		});
+	});
+
+	describe("inline prefetch handoff", () => {
+		afterEach(() => {
+			delete (window as unknown as Record<string, unknown>).__projektorIssuePrefetch;
+		});
+
+		it("uses the prefetched response instead of issuing its own request", async () => {
+			history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+			(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
+				key: "PROJ-7",
+				response: Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve(PLAIN_ISSUE_DATA),
+				}),
+			};
+			const mock = stubFetch();
+
+			render(<IssueDetail />);
+			await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+
+			const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
+			expect(calls).not.toContain("/api/issues/PROJ-7");
+		});
+
+		// A prefetch that 401s or 404s must not become the user's error. apiFetch owns
+		// re-authentication (PROJ-430); the prefetch deliberately knows nothing about it.
+		it("falls back to a normal fetch when the prefetch came back non-ok", async () => {
+			history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+			(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
+				key: "PROJ-7",
+				response: Promise.resolve({ ok: false, status: 401 }),
+			};
+			const mock = stubFetch();
+
+			render(<IssueDetail />);
+			await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+
+			const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
+			expect(calls).toContain("/api/issues/PROJ-7");
+		});
+
+		// Stale handoff from a previous page — must never be served for a different issue.
+		it("ignores a prefetch that was issued for a different issue", async () => {
+			history.replaceState(null, "", "/projects/PROJ/issues/7/plain-task");
+			(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
+				key: "PROJ-999",
+				response: Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ ...PLAIN_ISSUE_DATA, title: "Wrong Issue" }),
+				}),
+			};
+			const mock = stubFetch();
+
+			render(<IssueDetail />);
+			await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+
+			expect(screen.queryByText("Wrong Issue")).toBeNull();
+			const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
+			expect(calls).toContain("/api/issues/PROJ-7");
+		});
+	});
+});
+
+// The ?id=<uuid> form gets the same prefetch — the inline script keys on whichever
+// identifier the URL carries, and this is the fetch that would otherwise duplicate it.
+describe("PROJ-438 — prefetch on the ?id= form", () => {
+	afterEach(() => {
+		delete (window as unknown as Record<string, unknown>).__projektorIssuePrefetch;
+	});
+
+	it("claims a prefetch keyed by UUID instead of refetching", async () => {
+		(window as unknown as Record<string, unknown>).__projektorIssuePrefetch = {
+			key: "plain-1",
+			response: Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) }),
+		};
+		const mock = makeFetchForDetail(PLAIN_ISSUE_DATA);
+		vi.stubGlobal("fetch", mock);
+
+		render(<IssueDetail issueId="plain-1" />);
+		await waitFor(() => expect(screen.getByText("Plain Task")).toBeDefined());
+
+		const calls = (mock.mock.calls as [string][]).map(([u]) => String(u));
+		expect(calls).not.toContain("/api/issues/plain-1");
 	});
 });

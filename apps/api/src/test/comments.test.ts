@@ -5,6 +5,7 @@ import {
 	seedComment,
 	seedFixture,
 	seedGroupGrant,
+	seedIssue,
 	seedProject,
 	seedProjectFixture,
 	seedWorkspaceRoles,
@@ -251,5 +252,71 @@ describe("Comments MCP cross-workspace security", () => {
 
 		expect(res.error).toBeDefined();
 		expect(res.error.code).toBe(-32000);
+	});
+});
+
+// PROJ-438: the browser reaches an issue page by ref, so making it resolve the UUID
+// before it can ask for comments put a whole round trip of dead time on the critical
+// path. These reads now take either identifier.
+describe("PROJ-438 — comments accept an issue ref", () => {
+	it("GET /:ref/comments returns the same comments as GET /:uuid/comments", async () => {
+		const fixture = await seedProjectFixture({ role: "owner" });
+		const issue = await seedIssue(fixture.workspaceId, fixture.projectId, fixture.userId, {
+			title: "Referenced issue",
+		});
+		await seedComment(issue.id, fixture.userId, "visible via both identifiers");
+
+		const detail = await SELF.fetch(`http://localhost/api/issues/${issue.id}`, {
+			headers: authHeaders(fixture.token, fixture.slug),
+		});
+		const { project_key: key, number } = (await detail.json()) as {
+			project_key: string;
+			number: number;
+		};
+
+		const byRef = await SELF.fetch(`http://localhost/api/issues/${key}-${number}/comments`, {
+			headers: authHeaders(fixture.token, fixture.slug),
+		});
+		const byUuid = await SELF.fetch(`http://localhost/api/issues/${issue.id}/comments`, {
+			headers: authHeaders(fixture.token, fixture.slug),
+		});
+
+		expect(byRef.status).toBe(200);
+		expect(await byRef.json()).toEqual(await byUuid.json());
+	});
+
+	// The whole point of resolving inside the caller's workspace. A ref is guessable in a
+	// way a UUID isn't — KEY-1 exists almost everywhere — so this is the case that would
+	// turn refs into a cross-tenant read.
+	it("a ref belonging to another workspace is 404, not that workspace's comments", async () => {
+		const mine = await seedProjectFixture({ role: "owner" });
+		const theirs = await seedFixture({ role: "owner" });
+		const theirProject = await seedProject(theirs.workspace.id, "OTHER");
+		const theirIssue = await seedIssue(theirs.workspace.id, theirProject.id, theirs.user.id, {
+			title: "Not yours",
+		});
+		await seedComment(theirIssue.id, theirs.user.id, "secret");
+
+		const res = await SELF.fetch("http://localhost/api/issues/OTHER-1/comments", {
+			headers: authHeaders(mine.token, mine.slug),
+		});
+
+		expect(res.status).toBe(404);
+	});
+
+	// The ref path must not become a way around PROJ-311 project grants.
+	it("a ref for an issue in a project the caller has no grant on is 404", async () => {
+		const fixture = await seedProjectFixture({ role: "member" });
+		const ungranted = await seedProject(fixture.workspaceId, "NOGRANT");
+		const issue = await seedIssue(fixture.workspaceId, ungranted.id, fixture.userId, {
+			title: "Invisible",
+		});
+		await seedComment(issue.id, fixture.userId, "secret");
+
+		const res = await SELF.fetch("http://localhost/api/issues/NOGRANT-1/comments", {
+			headers: authHeaders(fixture.token, fixture.slug),
+		});
+
+		expect(res.status).toBe(404);
 	});
 });
