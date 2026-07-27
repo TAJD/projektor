@@ -34,8 +34,18 @@ const server = createServer(async (req, res) => {
       });
       const buf = Buffer.from(await upstream.arrayBuffer());
       apiTimings.push({ path: url.pathname + url.search, ms: performance.now() - t0, status: upstream.status, bytes: buf.length });
-      res.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') ?? 'application/json' });
-      res.end(buf);
+      // Cloudflare serves API JSON compressed too; without matching that, the mobile
+      // profile charges ~4x the API bytes production actually sends over the wire.
+      const ctype = upstream.headers.get('content-type') ?? 'application/json';
+      const acc = String(req.headers['accept-encoding'] ?? '');
+      const compressible = /json|text/.test(ctype) && buf.length > 0;
+      const enc = compressible && acc.includes('br') ? 'br' : compressible && acc.includes('gzip') ? 'gzip' : null;
+      const out = enc === 'br' ? brotliCompressSync(buf) : enc === 'gzip' ? gzipSync(buf, { level: 9 }) : buf;
+      res.writeHead(upstream.status, {
+        'content-type': ctype,
+        ...(enc ? { 'content-encoding': enc } : {}),
+      });
+      res.end(out);
     } catch (e) {
       res.writeHead(502).end(JSON.stringify({ error: String(e) }));
     }
