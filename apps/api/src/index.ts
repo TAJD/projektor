@@ -4,6 +4,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serviceErrToResponse } from "./http/error-adapter";
 import { authMiddleware } from "./middleware/auth";
+import { etagMiddleware } from "./middleware/etag";
 import { rateLimitMiddleware } from "./middleware/rate-limit";
 import { workspaceMiddleware } from "./middleware/workspace";
 import { agentMessagesRouter } from "./routes/agent-messages";
@@ -210,7 +211,7 @@ app.post("/api/workspaces", authMiddleware, async (c) => {
 app.use("/api/workspaces/:slug", authMiddleware, workspaceMiddleware);
 app.use("/api/workspaces/:slug/*", authMiddleware, workspaceMiddleware);
 // Cross-workspace project list — auth only, no workspace context needed
-app.get("/api/projects", authMiddleware, async (c) => {
+app.get("/api/projects", authMiddleware, etagMiddleware, async (c) => {
 	const user = c.get("user") as { id: string };
 	try {
 		return c.json(await listAllProjects(user.id, c.env.DB));
@@ -247,6 +248,17 @@ app.use("/api/agent-messages/*", authMiddleware, workspaceMiddleware);
 // No workspaceMiddleware: the workflow spec is global, not workspace-scoped.
 app.use("/api/workflow", authMiddleware);
 app.use("/api/workflow/*", authMiddleware);
+
+// PROJ-439: conditional GETs on the read-heavy JSON routes. Registered *after* the
+// auth/workspace .use() calls above so an unauthorised request short-circuits before
+// this ever runs — a 304 must never be returned where a 401/403/404 belongs.
+// Not applied to /api/files/*: GET /api/files/:id streams an R2 object, and buffering
+// it to hash would trade a bandwidth saving for a memory and latency cost.
+// The cross-workspace project list is registered further up, ahead of these .use()
+// calls, so a .use() here would never wrap it — it takes the middleware inline instead.
+app.use("/api/issues", etagMiddleware);
+app.use("/api/issues/*", etagMiddleware);
+app.use("/api/task-statuses", etagMiddleware);
 
 app.route("/api/workspaces", workspacesRouter);
 app.route("/api/workspaces", groupsRouter);
