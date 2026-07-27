@@ -368,7 +368,10 @@ async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, 
 	);
 }
 
-export const ISSUE_REF_PATTERN = /^([A-Z]+)-(\d+)$/;
+// Digits are bounded: parseInt("9".repeat(400)) is Infinity, which drizzle would happily
+// bind and D1 would reject as a type error — a 500 where a 404 belongs. Anything longer
+// than this isn't a ref, so it falls through to being treated as an id and 404s.
+export const ISSUE_REF_PATTERN = /^([A-Z]+)-(\d{1,9})$/;
 
 /**
  * Accept either identifier in an `:issueId` path segment.
@@ -378,9 +381,12 @@ export const ISSUE_REF_PATTERN = /^([A-Z]+)-(\d+)$/;
  * and links — a full round trip of dead time on the critical path, per sub-resource.
  *
  * This resolves within `ctx.workspaceId` only, and answers "not found" for a ref that
- * doesn't, so it can't be used to probe for issues in another workspace. It does not
- * check project visibility: callers pass the returned id to a service that already
- * does (PROJ-311), and duplicating that here would be a second way to get it wrong.
+ * doesn't, so it can't be used to probe for issues in another workspace.
+ *
+ * It does NOT check project visibility. Both current callers hand the returned id
+ * straight to a service that does (PROJ-311), and duplicating the check here would be a
+ * second place to get it wrong. If you add a caller, confirm that holds for yours too —
+ * an id from this function is workspace-scoped and nothing more.
  */
 export async function resolveIssueIdParam(ctx: ServiceCtx, param: string): Promise<string> {
 	const m = param.match(ISSUE_REF_PATTERN);

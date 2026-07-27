@@ -288,7 +288,36 @@ describe("PROJ-438 — comments accept an issue ref", () => {
 	// The whole point of resolving inside the caller's workspace. A ref is guessable in a
 	// way a UUID isn't — KEY-1 exists almost everywhere — so this is the case that would
 	// turn refs into a cross-tenant read.
-	it("a ref belonging to another workspace is 404, not that workspace's comments", async () => {
+	//
+	// Both workspaces get the *same* project key and the same issue number deliberately.
+	// With distinct keys this would still pass with the resolver's workspace filter
+	// deleted, because listComments re-filters on workspace and 404s anyway — the test
+	// would be green while the thing it names was broken.
+	it("resolves a colliding ref inside the caller's own workspace, not the other one", async () => {
+		const mine = await seedFixture({ role: "owner" });
+		const myProject = await seedProject(mine.workspace.id, "DUP");
+		const myIssue = await seedIssue(mine.workspace.id, myProject.id, mine.user.id, {
+			title: "Mine",
+		});
+		await seedComment(myIssue.id, mine.user.id, "mine");
+
+		const theirs = await seedFixture({ role: "owner" });
+		const theirProject = await seedProject(theirs.workspace.id, "DUP");
+		const theirIssue = await seedIssue(theirs.workspace.id, theirProject.id, theirs.user.id, {
+			title: "Not yours",
+		});
+		await seedComment(theirIssue.id, theirs.user.id, "secret");
+
+		const res = await SELF.fetch("http://localhost/api/issues/DUP-1/comments", {
+			headers: authHeaders(mine.token, mine.workspace.slug),
+		});
+
+		expect(res.status).toBe(200);
+		const bodies = ((await res.json()) as Array<{ body: string }>).map((c) => c.body);
+		expect(bodies).toEqual(["mine"]);
+	});
+
+	it("a ref that exists only in another workspace is 404", async () => {
 		const mine = await seedProjectFixture({ role: "owner" });
 		const theirs = await seedFixture({ role: "owner" });
 		const theirProject = await seedProject(theirs.workspace.id, "OTHER");

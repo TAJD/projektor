@@ -277,7 +277,34 @@ describe("PROJ-438 — links accept an issue ref", () => {
 		expect(await byRef.json()).toEqual(await byUuid.json());
 	});
 
-	it("a ref belonging to another workspace is 404", async () => {
+	// Same key and number in both workspaces on purpose — see the matching test in
+	// comments.test.ts for why distinct keys would let this pass with the resolver's
+	// workspace filter removed.
+	it("resolves a colliding ref inside the caller's own workspace", async () => {
+		const mine = await seedFixture({ role: "owner" });
+		const myProject = await seedProject(mine.workspace.id, "DUP");
+		const a = await seedIssue(mine.workspace.id, myProject.id, mine.user.id, { title: "A" });
+		const b = await seedIssue(mine.workspace.id, myProject.id, mine.user.id, { title: "B" });
+		await SELF.fetch(`http://localhost/api/issues/${a.id}/links`, {
+			method: "POST",
+			headers: authHeaders(mine.token, mine.workspace.slug),
+			body: JSON.stringify({ targetIssueId: b.id, type: "blocks" }),
+		});
+
+		const theirs = await seedFixture({ role: "owner" });
+		const theirProject = await seedProject(theirs.workspace.id, "DUP");
+		await seedIssue(theirs.workspace.id, theirProject.id, theirs.user.id, { title: "Not yours" });
+
+		const res = await SELF.fetch("http://localhost/api/issues/DUP-1/links", {
+			headers: authHeaders(mine.token, mine.workspace.slug),
+		});
+
+		expect(res.status).toBe(200);
+		const links = (await res.json()) as Array<{ linkedIssueId: string }>;
+		expect(links.map((l) => l.linkedIssueId)).toEqual([b.id]);
+	});
+
+	it("a ref that exists only in another workspace is 404", async () => {
 		const mine = await seedFixture({ role: "owner" });
 		const theirs = await seedFixture({ role: "owner" });
 		const theirProject = await seedProject(theirs.workspace.id, "OTHER");
