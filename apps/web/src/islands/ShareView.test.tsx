@@ -120,6 +120,47 @@ describe("ShareView — data fetch/render path", () => {
 	});
 });
 
+// Mermaid hydration (PROJ-447) — mirrors markdown.test.ts's mocked-mermaid approach,
+// but through the island so we assert the effect actually wires up renderMermaidDiagrams.
+describe("ShareView — mermaid hydration", () => {
+	afterEach(() => {
+		vi.doUnmock("mermaid");
+		vi.resetModules();
+	});
+
+	it("hydrates a mermaid fence in the shared issue body", async () => {
+		const run = vi.fn().mockResolvedValue(undefined);
+		const initialize = vi.fn();
+		vi.doMock("mermaid", () => ({ default: { initialize, run } }));
+		vi.resetModules();
+		const { default: MockedShareView } = await import("./ShareView");
+
+		vi.stubGlobal(
+			"fetch",
+			setupFetch({ ...SHARED_ISSUE, body: "```mermaid\ngraph TD\n    A --> B\n```" })
+		);
+		render(<MockedShareView />);
+
+		await waitFor(() => {
+			expect(run).toHaveBeenCalled();
+		});
+	});
+
+	it("does not hydrate (mermaid.run is never called) for a body without a fence", async () => {
+		const run = vi.fn().mockResolvedValue(undefined);
+		const initialize = vi.fn();
+		vi.doMock("mermaid", () => ({ default: { initialize, run } }));
+		vi.resetModules();
+		const { default: MockedShareView } = await import("./ShareView");
+
+		vi.stubGlobal("fetch", setupFetch());
+		render(<MockedShareView />);
+
+		await screen.findByText("Shared Bug Report");
+		expect(run).not.toHaveBeenCalled();
+	});
+});
+
 describe("ShareView — invalid link", () => {
 	it("shows the generic error state when the URL path doesn't match /share/:token", async () => {
 		history.pushState(null, "", "/not-a-share-link");

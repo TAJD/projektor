@@ -410,60 +410,59 @@ async function fetchFactoryHealth(
 	since: number,
 	until: number
 ): Promise<FactoryHealth> {
-	const leaseExpiries = await orm
-		.select({ id: schema.issueLeases.id })
-		.from(schema.issueLeases)
-		.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
-		.where(
-			and(
-				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
-				eq(schema.issues.projectId, projectId),
-				eq(schema.issueLeases.releaseReason, "expired"),
-				gte(schema.issueLeases.releasedAt, since),
-				lte(schema.issueLeases.releasedAt, until)
-			)
-		);
-
-	const abandonedClaims = await orm
-		.select({ id: schema.issueFileClaims.id })
-		.from(schema.issueFileClaims)
-		.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
-		.where(
-			and(
-				eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-				eq(schema.issues.projectId, projectId),
-				eq(schema.issueFileClaims.releaseReason, "agent_ended"),
-				gte(schema.issueFileClaims.releasedAt, since),
-				lte(schema.issueFileClaims.releasedAt, until)
-			)
-		);
-
-	const gateRejections = await orm
-		.select({ id: schema.issueGateRejections.id })
-		.from(schema.issueGateRejections)
-		.innerJoin(schema.issues, eq(schema.issueGateRejections.issueId, schema.issues.id))
-		.where(
-			and(
-				eq(schema.issueGateRejections.workspaceId, ctx.workspaceId),
-				eq(schema.issues.projectId, projectId),
-				gte(schema.issueGateRejections.occurredAt, since),
-				lte(schema.issueGateRejections.occurredAt, until)
-			)
-		);
-
-	// PROJ-342: WIP-cap denials — claims rejected for hitting the per-project agent
-	// WIP cap. Recorded at the denial site in claimIssue (services/issue-leases.ts).
-	const wipCapPressure = await orm
-		.select({ id: schema.wipCapDenials.id })
-		.from(schema.wipCapDenials)
-		.where(
-			and(
-				eq(schema.wipCapDenials.workspaceId, ctx.workspaceId),
-				eq(schema.wipCapDenials.projectId, projectId),
-				gte(schema.wipCapDenials.occurredAt, since),
-				lte(schema.wipCapDenials.occurredAt, until)
-			)
-		);
+	const [leaseExpiries, abandonedClaims, gateRejections, wipCapPressure] = await Promise.all([
+		orm
+			.select({ id: schema.issueLeases.id })
+			.from(schema.issueLeases)
+			.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
+			.where(
+				and(
+					eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+					eq(schema.issues.projectId, projectId),
+					eq(schema.issueLeases.releaseReason, "expired"),
+					gte(schema.issueLeases.releasedAt, since),
+					lte(schema.issueLeases.releasedAt, until)
+				)
+			),
+		orm
+			.select({ id: schema.issueFileClaims.id })
+			.from(schema.issueFileClaims)
+			.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
+			.where(
+				and(
+					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+					eq(schema.issues.projectId, projectId),
+					eq(schema.issueFileClaims.releaseReason, "agent_ended"),
+					gte(schema.issueFileClaims.releasedAt, since),
+					lte(schema.issueFileClaims.releasedAt, until)
+				)
+			),
+		orm
+			.select({ id: schema.issueGateRejections.id })
+			.from(schema.issueGateRejections)
+			.innerJoin(schema.issues, eq(schema.issueGateRejections.issueId, schema.issues.id))
+			.where(
+				and(
+					eq(schema.issueGateRejections.workspaceId, ctx.workspaceId),
+					eq(schema.issues.projectId, projectId),
+					gte(schema.issueGateRejections.occurredAt, since),
+					lte(schema.issueGateRejections.occurredAt, until)
+				)
+			),
+		// PROJ-342: WIP-cap denials — claims rejected for hitting the per-project agent
+		// WIP cap. Recorded at the denial site in claimIssue (services/issue-leases.ts).
+		orm
+			.select({ id: schema.wipCapDenials.id })
+			.from(schema.wipCapDenials)
+			.where(
+				and(
+					eq(schema.wipCapDenials.workspaceId, ctx.workspaceId),
+					eq(schema.wipCapDenials.projectId, projectId),
+					gte(schema.wipCapDenials.occurredAt, since),
+					lte(schema.wipCapDenials.occurredAt, until)
+				)
+			),
+	]);
 
 	return {
 		leaseExpiries: leaseExpiries.length,
@@ -526,19 +525,40 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		.map((i) => (i.inReviewAt ?? i.doneAt!) - i.claimedAt!);
 
 	const issueIds = issues.map((i) => i.id);
-	const humanCommentCounts = await fetchHumanCommentCounts(orm, issueIds);
-	const leaseHeldSeconds = await fetchLeaseHeldSeconds(orm, issues);
-	const humanInterventions = computeHumanInterventions(issues, humanCommentCounts, inWindow);
-	const autonomyRatios = computeAutonomyRatios(issues, leaseHeldSeconds, inWindow);
 
 	const now = Math.floor(Date.now() / 1000);
 	const wipSince = since ?? now - 30 * 86400;
 	const wipUntil = until ?? now;
-	const wipOverTime = buildWipOverTime(issues, wipSince, wipUntil);
 
 	// Default window = the current ISO week plus the preceding 5 weeks (6 weeks total).
 	const throughputSince = since ?? mondayAtOrBefore(now) - 5 * 7 * 86400;
 	const throughputUntil = until ?? now;
+
+	// PROJ-446: everything below depends only on `issues` (already fetched) plus
+	// ctx/projectId — none of these four reads depend on each other, so run them
+	// concurrently instead of one round trip at a time.
+	const [humanCommentCounts, leaseHeldSeconds, bugTypeExists, factoryHealth] = await Promise.all([
+		fetchHumanCommentCounts(orm, issueIds),
+		fetchLeaseHeldSeconds(orm, issues),
+		// PROJ-341: buildBugShareOverTime identifies bugs via typeKey === "bug" — if the
+		// workspace has no type keyed "bug" (renamed/deleted default), that always reads 0%
+		// with no indication anything's wrong. Surface whether the type exists at all so the
+		// frontend can show a distinguishable "not tracked" state instead of a silent 0%.
+		orm
+			.select({ id: schema.taskTypes.id })
+			.from(schema.taskTypes)
+			.where(
+				and(eq(schema.taskTypes.workspaceId, ctx.workspaceId), eq(schema.taskTypes.key, "bug"))
+			)
+			.get(),
+		// PROJ-334: same window as the throughput/CFD/etc. buckets below — the "selected
+		// window" the tile row is scoped to.
+		fetchFactoryHealth(orm, ctx, projectId, throughputSince, throughputUntil),
+	]);
+
+	const humanInterventions = computeHumanInterventions(issues, humanCommentCounts, inWindow);
+	const autonomyRatios = computeAutonomyRatios(issues, leaseHeldSeconds, inWindow);
+	const wipOverTime = buildWipOverTime(issues, wipSince, wipUntil);
 	const throughputOverTime = buildThroughputOverTime(
 		issues,
 		throughputSince,
@@ -558,15 +578,6 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		throughputUntil,
 		granularity
 	);
-	// PROJ-341: buildBugShareOverTime identifies bugs via typeKey === "bug" — if the
-	// workspace has no type keyed "bug" (renamed/deleted default), that always reads 0%
-	// with no indication anything's wrong. Surface whether the type exists at all so the
-	// frontend can show a distinguishable "not tracked" state instead of a silent 0%.
-	const bugTypeExists = await orm
-		.select({ id: schema.taskTypes.id })
-		.from(schema.taskTypes)
-		.where(and(eq(schema.taskTypes.workspaceId, ctx.workspaceId), eq(schema.taskTypes.key, "bug")))
-		.get();
 	const bugTypeTracked = bugTypeExists !== undefined;
 	const arrivalVsCompletionOverTime = buildArrivalVsCompletion(
 		issues,
@@ -576,16 +587,6 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	);
 	const flowEfficiencies = computeFlowEfficiencies(issues, leaseHeldSeconds, inWindow);
 	const agingWip = buildAgingWip(issues, now);
-
-	// PROJ-334: same window as the throughput/CFD/etc. buckets above — the "selected
-	// window" the tile row is scoped to.
-	const factoryHealth = await fetchFactoryHealth(
-		orm,
-		ctx,
-		projectId,
-		throughputSince,
-		throughputUntil
-	);
 
 	return {
 		leadTime: summarize(leadTimes),

@@ -178,13 +178,11 @@ export default function MyIssues({ workspaceSlug }: Props) {
 			setLoading(true);
 			setError(null);
 			try {
-				const meData = await apiFetch<{ user: { id: string } }>("/auth/me", { workspaceSlug });
-				const userId = meData.user.id;
-
-				const data = await apiFetch<{ items: Issue[] }>(
-					`/api/issues?assignee=${encodeURIComponent(userId)}`,
-					{ workspaceSlug }
-				);
+				// PROJ-444: "me" resolves server-side to the calling user — no more
+				// /auth/me round trip before this fetch can even start.
+				const data = await apiFetch<{ items: Issue[] }>("/api/issues?assignee=me", {
+					workspaceSlug,
+				});
 				setIssues(Array.isArray(data.items) ? data.items : []);
 			} catch (e) {
 				setError(String(e));

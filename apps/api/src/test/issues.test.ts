@@ -1218,6 +1218,167 @@ describe("Issues API", () => {
 	});
 });
 
+// ─── PROJ-441/442/444: list-endpoint perf sweep ──────────────────────────────
+describe("Issues API — includeRollups/includeBody/assignee=me (perf sweep)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+	let userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
+	});
+
+	async function listIssues(url: string) {
+		const res = await SELF.fetch(url, { headers: authHeaders(token, slug) });
+		return { res, page: (await res.json()) as { items: Array<Record<string, unknown>> } };
+	}
+
+	// PROJ-441
+	it("includeRollups=1 attaches a rollup per item for parents with mixed-status children", async () => {
+		const parentRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Parent with children" }),
+		});
+		const { id: parentId } = (await parentRes.json()) as { id: string };
+		await seedIssue(workspaceId, projectId, userId, { parentId, status: "backlog" });
+		await seedIssue(workspaceId, projectId, userId, { parentId, status: "backlog" });
+		await seedIssue(workspaceId, projectId, userId, { parentId, status: "done" });
+
+		const { page } = await listIssues(`http://localhost/api/issues?noParent=true&includeRollups=1`);
+		const parentItem = page.items.find((i) => i.id === parentId) as {
+			rollup: { total: number; byStatus: Record<string, number>; done: number; remaining: number };
+		};
+		expect(parentItem).toBeDefined();
+		expect(parentItem.rollup.total).toBe(3);
+		expect(parentItem.rollup.byStatus.backlog).toBe(2);
+		expect(parentItem.rollup.byStatus.done).toBe(1);
+		expect(parentItem.rollup.done).toBe(1);
+		expect(parentItem.rollup.remaining).toBe(2);
+	});
+
+	it("without includeRollups, items carry no rollup key", async () => {
+		await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "No rollup wanted" }),
+		});
+		const { page } = await listIssues("http://localhost/api/issues");
+		expect(page.items).toHaveLength(1);
+		expect("rollup" in page.items[0]).toBe(false);
+	});
+
+	it("includeRollups counts children in a different project the same as getIssue's own rollup", async () => {
+		const otherProject = await seedProject(workspaceId, "OTH");
+		const parentRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Cross-project parent" }),
+		});
+		const { id: parentId } = (await parentRes.json()) as { id: string };
+		await seedIssue(workspaceId, otherProject.id, userId, { parentId, status: "done" });
+
+		// getIssue's own rollup (unaffected by this change) — the baseline to match.
+		const getRes = await SELF.fetch(`http://localhost/api/issues/${parentId}`, {
+			headers: authHeaders(token, slug),
+		});
+		const single = (await getRes.json()) as { rollup: { total: number; done: number } };
+		expect(single.rollup.total).toBe(1);
+		expect(single.rollup.done).toBe(1);
+
+		const { page } = await listIssues(`http://localhost/api/issues?noParent=true&includeRollups=1`);
+		const parentItem = page.items.find((i) => i.id === parentId) as {
+			rollup: { total: number; done: number };
+		};
+		expect(parentItem.rollup.total).toBe(single.rollup.total);
+		expect(parentItem.rollup.done).toBe(single.rollup.done);
+	});
+
+	it("includeRollups groups by raw status even when status_category diverges, matching getIssue", async () => {
+		const parentRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Category-divergent parent" }),
+		});
+		const { id: parentId } = (await parentRes.json()) as { id: string };
+		const { id: childId } = await seedIssue(workspaceId, projectId, userId, {
+			parentId,
+			status: "backlog",
+		});
+		// Custom-status issues carry a status_category distinct from their raw status;
+		// the list rollup must still key byStatus on the raw status like getIssue does.
+		await env.DB.prepare("UPDATE issues SET status_category = 'done' WHERE id = ?")
+			.bind(childId)
+			.run();
+
+		const getRes = await SELF.fetch(`http://localhost/api/issues/${parentId}`, {
+			headers: authHeaders(token, slug),
+		});
+		const single = (await getRes.json()) as {
+			rollup: { total: number; byStatus: Record<string, number>; done: number };
+		};
+
+		const { page } = await listIssues(`http://localhost/api/issues?noParent=true&includeRollups=1`);
+		const parentItem = page.items.find((i) => i.id === parentId) as {
+			rollup: { total: number; byStatus: Record<string, number>; done: number };
+		};
+		expect(parentItem.rollup).toEqual(single.rollup);
+		expect(parentItem.rollup.byStatus).toEqual({ backlog: 1 });
+		expect(parentItem.rollup.done).toBe(0);
+	});
+
+	// PROJ-442
+	it("list items omit body by default; includeBody=1 restores it", async () => {
+		await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Has a body", body: "Some body text" }),
+		});
+
+		const { page: defaultPage } = await listIssues("http://localhost/api/issues");
+		expect(defaultPage.items).toHaveLength(1);
+		expect("body" in defaultPage.items[0]).toBe(false);
+
+		const { page: withBody } = await listIssues("http://localhost/api/issues?includeBody=1");
+		expect(withBody.items[0].body).toBe("Some body text");
+	});
+
+	// PROJ-444
+	it("assignee=me returns the calling user's issues", async () => {
+		const other = await seedUser("me-filter-other@example.com");
+		await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Assigned to me", assigneeId: userId }),
+		});
+		await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Assigned to someone else", assigneeId: other.id }),
+		});
+
+		const { page } = await listIssues("http://localhost/api/issues?assignee=me");
+		expect(page.items).toHaveLength(1);
+		expect(page.items[0].title).toBe("Assigned to me");
+	});
+
+	it("assignee filter still accepts a literal user id", async () => {
+		const other = await seedUser("literal-id-filter@example.com");
+		await seedMember(workspaceId, other.id);
+		await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Assigned to other", assigneeId: other.id }),
+		});
+
+		const { page } = await listIssues(`http://localhost/api/issues?assignee=${other.id}`);
+		expect(page.items).toHaveLength(1);
+		expect(page.items[0].title).toBe("Assigned to other");
+	});
+});
+
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issues MCP — typeId", () => {
 	let token: string;
