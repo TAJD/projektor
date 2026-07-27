@@ -549,6 +549,22 @@ describe("PROJ-274: read-scoped token is denied write on every request", () => {
 		});
 		expect(res.status).toBe(403);
 	});
+
+	// PROJ-432 folded the workspace lookup and the membership lookup into one LEFT JOIN.
+	// The two failure modes it has to keep apart: no row at all is a workspace that doesn't
+	// exist (404, covered above), a row with no membership is a non-member (403 — this).
+	// Collapsing them would leak workspace existence, or hide it from legitimate members.
+	it("an existing workspace the caller is not a member of returns 403, not 404", async () => {
+		const fixture = await seedFixture();
+		await env.DB.prepare("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?")
+			.bind(fixture.workspace.id, fixture.user.id)
+			.run();
+
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+		});
+		expect(res.status).toBe(403);
+	});
 });
 
 // ---------------------------------------------------------------------------

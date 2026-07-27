@@ -1,10 +1,20 @@
 import { env } from "cloudflare:test";
 import type { Env } from "@projektor/types";
-import { describe, expect, it } from "vitest";
-import { provisionPublicViewer, provisionUserOnLogin } from "../services/provisioning";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+	ensureUserProvisioned,
+	forgetProvisionedForTests,
+	provisionPublicViewer,
+	resetProvisioningCacheForTests,
+} from "../services/provisioning";
 import { seedMember, seedUser, seedWorkspace } from "./helpers";
 
-// provisionUserOnLogin reads its config from the Env it's handed, so each test builds an
+// PROJ-433: provisioning short-circuits on a cached marker, which is module state and
+// outlives an individual test. Clear it between cases, or a test asserting on
+// provisioning's writes could be reading the previous test's.
+beforeEach(resetProvisioningCacheForTests);
+
+// ensureUserProvisioned reads its config from the Env it's handed, so each test builds an
 // Env by spreading the test bindings and overriding the provisioning vars. Unique slugs +
 // emails per test keep the shared D1 from leaking state across cases.
 function envWith(overrides: Partial<Env>): Env {
@@ -26,7 +36,7 @@ describe("login provisioning", () => {
 		const slug = "prov-admin-create";
 		const admin = await seedUser("admin-create@example.com");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "admin-create@example.com",
 				DEFAULT_WORKSPACE_SLUG: slug,
@@ -47,7 +57,7 @@ describe("login provisioning", () => {
 		const ws = await seedWorkspace(slug);
 		const user = await seedUser("viewer-join@example.com");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "someone-else@example.com",
 				DEFAULT_WORKSPACE_SLUG: slug,
@@ -63,7 +73,7 @@ describe("login provisioning", () => {
 		const slug = "prov-not-yet";
 		const user = await seedUser("early-bird@example.com");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "boss@example.com",
 				DEFAULT_WORKSPACE_SLUG: slug,
@@ -81,7 +91,7 @@ describe("login provisioning", () => {
 		const ws = await seedWorkspace(slug);
 		const user = await seedUser("no-autojoin@example.com");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "boss@example.com",
 				DEFAULT_WORKSPACE_SLUG: slug,
@@ -98,7 +108,7 @@ describe("login provisioning", () => {
 		const ws = await seedWorkspace(slug);
 		const user = await seedUser("unset-autojoin@example.com");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "boss@example.com",
 				DEFAULT_WORKSPACE_SLUG: slug,
@@ -116,7 +126,7 @@ describe("login provisioning", () => {
 		const user = await seedUser("promote-me@example.com");
 		await seedMember(ws.id, user.id, "viewer");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "promote-me@example.com",
 				DEFAULT_WORKSPACE_SLUG: slug,
@@ -133,7 +143,7 @@ describe("login provisioning", () => {
 		const defaultWs = await seedWorkspace("prov-default-1");
 		const user = await seedUser("colleague@example.com");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "boss@example.com",
 				DEFAULT_WORKSPACE_SLUG: "prov-default-1",
@@ -153,7 +163,7 @@ describe("login provisioning", () => {
 		const defaultWs = await seedWorkspace("prov-default-2");
 		const admin = await seedUser("tajd@example.com");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "tajd@example.com",
 				DEFAULT_WORKSPACE_SLUG: "prov-default-2",
@@ -176,7 +186,7 @@ describe("login provisioning", () => {
 		// Pre-existing low role in one of them must be promoted to owner, not left as-is.
 		await seedMember(wsA.id, admin.id, "viewer");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "owns-everything@example.com",
 				DEFAULT_WORKSPACE_SLUG: "prov-own-all-default",
@@ -194,7 +204,7 @@ describe("login provisioning", () => {
 		const slug = "prov-case";
 		const user = await seedUser("mixed-case@example.com");
 
-		await provisionUserOnLogin(
+		await ensureUserProvisioned(
 			envWith({
 				ADMIN_EMAILS: "Mixed-Case@Example.com",
 				DEFAULT_WORKSPACE_SLUG: slug,
@@ -208,6 +218,151 @@ describe("login provisioning", () => {
 			.first<{ id: string }>();
 		expect(ws).not.toBeNull();
 		expect(await memberRole(ws!.id, user.id)).toBe("owner");
+	});
+});
+
+// PROJ-433: provisioning used to run in full on every authenticated request. It now runs
+// once per user per TTL. There's no query counter to assert against here, so these prove
+// the short-circuit the way it's actually observable: delete what provisioning wrote, call
+// again, and see whether it comes back.
+describe("PROJ-433: provisioning runs once per user, not per request", () => {
+	async function dropMembership(workspaceId: string, userId: string) {
+		await env.DB.prepare("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?")
+			.bind(workspaceId, userId)
+			.run();
+	}
+
+	it("does not re-run for a user it has already provisioned", async () => {
+		const slug = "prov-cache-hit";
+		const ws = await seedWorkspace(slug);
+		const user = await seedUser("cache-hit@example.com");
+		const config = envWith({
+			ADMIN_EMAILS: "",
+			DEFAULT_WORKSPACE_SLUG: slug,
+			AUTO_JOIN_ROLE: "viewer",
+		});
+
+		await ensureUserProvisioned(config, user);
+		expect(await memberRole(ws.id, user.id)).toBe("viewer");
+
+		await dropMembership(ws.id, user.id);
+		await ensureUserProvisioned(config, user);
+
+		// Still gone: the second call short-circuited instead of re-writing the membership.
+		expect(await memberRole(ws.id, user.id)).toBeNull();
+	});
+
+	it("re-runs once the marker is gone", async () => {
+		const slug = "prov-cache-expiry";
+		const ws = await seedWorkspace(slug);
+		const user = await seedUser("cache-expiry@example.com");
+		const config = envWith({
+			ADMIN_EMAILS: "",
+			DEFAULT_WORKSPACE_SLUG: slug,
+			AUTO_JOIN_ROLE: "viewer",
+		});
+
+		await ensureUserProvisioned(config, user);
+		await dropMembership(ws.id, user.id);
+
+		await forgetProvisionedForTests(config, user.id);
+		await ensureUserProvisioned(config, user);
+
+		expect(await memberRole(ws.id, user.id)).toBe("viewer");
+	});
+
+	// The marker must not record a run that did nothing because the workspace wasn't there
+	// yet — that user would then stay unprovisioned for the whole TTL after bootstrap.
+	it("does not cache a run that bailed waiting for the default workspace", async () => {
+		const slug = "prov-cache-early-bird";
+		const user = await seedUser("cache-early-bird@example.com");
+		const config = envWith({
+			ADMIN_EMAILS: "",
+			DEFAULT_WORKSPACE_SLUG: slug,
+			AUTO_JOIN_ROLE: "viewer",
+		});
+
+		await ensureUserProvisioned(config, user);
+
+		const ws = await seedWorkspace(slug);
+		await ensureUserProvisioned(config, user);
+
+		expect(await memberRole(ws.id, user.id)).toBe("viewer");
+	});
+
+	it("caches the public viewer too", async () => {
+		const slug = "prov-cache-public";
+		const ws = await seedWorkspace(slug);
+		const user = await seedUser("cache-public@projektor.local");
+		const config = envWith({ DEFAULT_WORKSPACE_SLUG: slug });
+
+		await provisionPublicViewer(config, user);
+		await dropMembership(ws.id, user.id);
+		await provisionPublicViewer(config, user);
+
+		expect(await memberRole(ws.id, user.id)).toBeNull();
+	});
+});
+
+// PROJ-432/433: the point of this work was round trips, so count them. A Proxy over the
+// D1 binding records every statement the code under test issues.
+function countingDb(db: D1Database) {
+	const counts = { prepare: 0, batch: 0 };
+	const proxy = new Proxy(db, {
+		get(target, prop, receiver) {
+			if (prop === "prepare") {
+				counts.prepare++;
+			} else if (prop === "batch") {
+				counts.batch++;
+			}
+			const value = Reflect.get(target, prop, receiver);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+	return { counts, proxy };
+}
+
+describe("PROJ-433: provisioning query count", () => {
+	it("costs one query for an already-owning admin, regardless of workspace count", async () => {
+		const admin = await seedUser("count-admin@example.com");
+		const slug = "prov-count-default";
+		for (const s of [slug, "prov-count-a", "prov-count-b", "prov-count-c"]) {
+			await seedWorkspace(s);
+		}
+		const config = envWith({
+			ADMIN_EMAILS: "count-admin@example.com",
+			DEFAULT_WORKSPACE_SLUG: slug,
+		});
+
+		// An admin owns *every* workspace, and this suite's D1 is shared, so the first run
+		// legitimately writes a membership for each one. Measure the steady state after that:
+		// same admin, same workspaces, nothing left to do.
+		await ensureUserProvisioned(config, admin);
+		await forgetProvisionedForTests(config, admin.id);
+
+		const { counts, proxy } = countingDb(env.DB);
+		await ensureUserProvisioned(envWith({ ...config, DB: proxy }), admin);
+
+		// One joined read of every workspace plus this admin's role in each. Previously it
+		// was a workspace-list read plus a membership SELECT per workspace — dozens here.
+		expect(counts.prepare).toBe(1);
+	});
+
+	it("costs nothing at all once the user is cached", async () => {
+		const admin = await seedUser("count-admin-warm@example.com");
+		const ws = await seedWorkspace("prov-count-warm");
+		await seedMember(ws.id, admin.id, "owner");
+		const config = envWith({
+			ADMIN_EMAILS: "count-admin-warm@example.com",
+			DEFAULT_WORKSPACE_SLUG: "prov-count-warm",
+		});
+
+		await ensureUserProvisioned(config, admin);
+
+		const { counts, proxy } = countingDb(env.DB);
+		await ensureUserProvisioned(envWith({ ...config, DB: proxy }), admin);
+
+		expect(counts.prepare).toBe(0);
 	});
 });
 

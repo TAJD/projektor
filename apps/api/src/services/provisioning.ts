@@ -77,41 +77,27 @@ function resolveDomainMapping(
 	return parseDomainMap(raw).get(email.slice(at + 1).toLowerCase()) ?? null;
 }
 
-/** Ensure `user` is an `owner` member of the given workspace (insert or promote). */
-async function ensureOwner(
+/**
+ * Make `user` an `owner` of the given workspace, whether or not they're already a member.
+ *
+ * One upsert, no preceding read. The role provisionAdmin holds comes from a join taken
+ * several awaits earlier, so acting on it would be a lost update: if a membership row
+ * appeared in the meantime (an invite, or another isolate provisioning the same admin) an
+ * insert-if-absent would be silently discarded and leave the admin under-privileged —
+ * previously self-healing on the next request, but now cached for the whole TTL.
+ */
+async function grantOwner(
 	orm: ReturnType<typeof drizzle>,
 	workspaceId: string,
 	userId: string
 ): Promise<void> {
-	const member = await orm
-		.select({ role: schema.workspaceMembers.role })
-		.from(schema.workspaceMembers)
-		.where(
-			and(
-				eq(schema.workspaceMembers.workspaceId, workspaceId),
-				eq(schema.workspaceMembers.userId, userId)
-			)
-		)
-		.get();
-
-	if (!member) {
-		await orm
-			.insert(schema.workspaceMembers)
-			.values({ workspaceId, userId, role: "owner", joinedAt: Math.floor(Date.now() / 1000) })
-			.onConflictDoNothing();
-		return;
-	}
-	if (member.role !== "owner") {
-		await orm
-			.update(schema.workspaceMembers)
-			.set({ role: "owner" })
-			.where(
-				and(
-					eq(schema.workspaceMembers.workspaceId, workspaceId),
-					eq(schema.workspaceMembers.userId, userId)
-				)
-			);
-	}
+	await orm
+		.insert(schema.workspaceMembers)
+		.values({ workspaceId, userId, role: "owner", joinedAt: Math.floor(Date.now() / 1000) })
+		.onConflictDoUpdate({
+			target: [schema.workspaceMembers.workspaceId, schema.workspaceMembers.userId],
+			set: { role: "owner" },
+		});
 }
 
 /**
@@ -125,31 +111,101 @@ async function provisionAdmin(
 	slug: string,
 	name: string
 ): Promise<void> {
-	// Ensure the default workspace exists (first-run bootstrap). createWorkspace inserts the
-	// caller as `owner` and seeds default task types/statuses.
-	const def = await orm
-		.select({ id: schema.workspaces.id })
+	// PROJ-433: every workspace plus this admin's role in each, in one query. The previous
+	// shape read the workspace list and then looped a per-workspace membership SELECT, so
+	// the cost of an already-provisioned admin grew with the number of workspaces. Steady
+	// state is now this single read and no writes.
+	const rows = await orm
+		.select({
+			id: schema.workspaces.id,
+			slug: schema.workspaces.slug,
+			role: schema.workspaceMembers.role,
+		})
 		.from(schema.workspaces)
-		.where(eq(schema.workspaces.slug, slug))
-		.get();
-	if (!def) {
+		.leftJoin(
+			schema.workspaceMembers,
+			and(
+				eq(schema.workspaceMembers.workspaceId, schema.workspaces.id),
+				eq(schema.workspaceMembers.userId, user.id)
+			)
+		)
+		.all();
+
+	// First-run bootstrap: createWorkspace inserts the caller as `owner` and seeds default
+	// task types/statuses. Only reachable once per instance, so the extra read it costs
+	// never lands on the warm path.
+	if (!rows.some((r) => r.slug === slug)) {
 		try {
 			await createWorkspace(env.DB, user.id, { name, slug });
 		} catch (e) {
-			// Lost a race with another admin's concurrent login — the loop below still ensures membership.
+			// Lost a race with another admin's concurrent login — they created it, so we are
+			// not its owner and the join above never saw it. Ensure membership explicitly.
 			if (!(e instanceof ConflictError)) throw e;
 		}
+		const created = await orm
+			.select({ id: schema.workspaces.id })
+			.from(schema.workspaces)
+			.where(eq(schema.workspaces.slug, slug))
+			.get();
+		if (created) await grantOwner(orm, created.id, user.id);
 	}
 
-	// Make this admin an owner of every workspace (including any migrated ones they didn't create).
-	const all = await orm.select({ id: schema.workspaces.id }).from(schema.workspaces).all();
-	for (const w of all) {
-		await ensureOwner(orm, w.id, user.id);
+	// Admins own every workspace, including migrated ones they didn't create. The role here
+	// only decides whether a write is worth issuing; grantOwner is correct either way.
+	for (const w of rows) {
+		if (w.role !== "owner") await grantOwner(orm, w.id, user.id);
 	}
 }
 
+// PROJ-433: this is reached on every authenticated request, not on a login event —
+// Cloudflare Access mints its cookie at the edge, so the Worker only ever sees an
+// already-valid JWT and there is no login to hang the work off. Its inputs (ADMIN_EMAILS,
+// AUTO_JOIN_ROLE, WORKSPACE_DOMAIN_MAP) are fixed until redeploy and the work is
+// idempotent, so re-running it per request bought nothing but D1 latency. Remember that it
+// ran instead: isolate-local, with KV behind it for cold isolates — the same two-layer
+// shape middleware/auth.ts already uses for Access keys and users (PROJ-354).
+const inMemoryProvisionedCache = new Map<string, number>();
+const PROVISIONED_LOCAL_TTL_MS = 300 * 1000;
+const PROVISIONED_KV_TTL_SECS = 300;
+
+function provisionedKey(userId: string): string {
+	return `provisioned:${userId}`;
+}
+
+async function alreadyProvisioned(env: Env, userId: string): Promise<boolean> {
+	const localExpiry = inMemoryProvisionedCache.get(userId);
+	if (localExpiry && localExpiry > Date.now()) return true;
+
+	if (!(await env.KV.get(provisionedKey(userId)))) return false;
+	inMemoryProvisionedCache.set(userId, Date.now() + PROVISIONED_LOCAL_TTL_MS);
+	return true;
+}
+
+async function markProvisioned(env: Env, userId: string): Promise<void> {
+	inMemoryProvisionedCache.set(userId, Date.now() + PROVISIONED_LOCAL_TTL_MS);
+	await env.KV.put(provisionedKey(userId), "1", { expirationTtl: PROVISIONED_KV_TTL_SECS });
+}
+
 /**
- * Idempotent, config-driven provisioning run on every Cloudflare Access (browser) login.
+ * Test-only: drop the isolate-local marker. Module state outlives an individual test, so
+ * without this a test that provisions the same user twice would silently skip the second
+ * run and assert against the first one's writes.
+ */
+export function resetProvisioningCacheForTests(): void {
+	inMemoryProvisionedCache.clear();
+}
+
+/**
+ * Test-only: forget a specific user in *both* layers, so the next call really re-provisions.
+ * Clearing the isolate-local map alone isn't enough — the KV marker would still short-circuit.
+ */
+export async function forgetProvisionedForTests(env: Env, userId: string): Promise<void> {
+	inMemoryProvisionedCache.delete(userId);
+	await env.KV.delete(provisionedKey(userId));
+}
+
+/**
+ * Idempotent, config-driven provisioning for a Cloudflare Access (browser) identity.
  *
  * Cloudflare Access (backed by the Entra email list) is the gate — it decides *who* may log
  * in. This decides *what they get* once inside:
@@ -164,11 +220,32 @@ async function provisionAdmin(
  *
  * API-token / MCP auth never reaches here — those identities are provisioned explicitly when
  * the token is minted, so we leave them untouched.
+ *
+ * Runs at most once per user per TTL — up to 2× PROVISIONED_LOCAL_TTL_MS in the worst case,
+ * since a KV hit re-extends the isolate-local marker. An admin therefore picks up ownership
+ * of a workspace someone *else* created within that window rather than on their very next
+ * request; a workspace they create themselves makes them owner immediately, via
+ * createWorkspace. Changing AUTO_JOIN_ROLE or WORKSPACE_DOMAIN_MAP likewise takes up to
+ * that long to affect an already-marked user — the KV marker outlives a redeploy.
+ *
+ * Note this is what re-adds a membership that removeMember deleted (see
+ * services/workspaces.ts): for anyone in ADMIN_EMAILS, or on an instance with AUTO_JOIN_ROLE
+ * or a domain mapping, removal has always been undone by the next provisioning run. It used
+ * to be undone on the user's very next request, so it visibly never worked; now it holds
+ * until the marker expires and then reverts.
  */
-export async function provisionUserOnLogin(
+export async function ensureUserProvisioned(
 	env: Env,
 	user: { id: string; email: string }
 ): Promise<void> {
+	if (await alreadyProvisioned(env, user.id)) return;
+	// Only remember runs that reached a settled outcome. Bailing because a workspace hasn't
+	// been bootstrapped yet is transient — caching it would leave that user unprovisioned
+	// for the whole TTL after an admin finally creates it.
+	if (await runProvisioning(env, user)) await markProvisioned(env, user.id);
+}
+
+async function runProvisioning(env: Env, user: { id: string; email: string }): Promise<boolean> {
 	const slug = env.DEFAULT_WORKSPACE_SLUG?.trim() || "projektor";
 	const name = env.DEFAULT_WORKSPACE_NAME?.trim() || "Projektor";
 	const isAdmin = parseEmailSet(env.ADMIN_EMAILS).has(user.email.toLowerCase());
@@ -178,7 +255,7 @@ export async function provisionUserOnLogin(
 	// Admins own everything — bootstrap the default workspace if needed, then own all workspaces.
 	if (isAdmin) {
 		await provisionAdmin(orm, env, user, slug, name);
-		return;
+		return true;
 	}
 
 	// Domain confinement: a non-admin whose email domain is mapped joins ONLY the mapped
@@ -190,7 +267,7 @@ export async function provisionUserOnLogin(
 			.from(schema.workspaces)
 			.where(eq(schema.workspaces.slug, mapped.slug))
 			.get();
-		if (!ws) return; // mapped workspace doesn't exist yet — nothing to join
+		if (!ws) return false; // mapped workspace doesn't exist yet — nothing to join
 		await orm
 			.insert(schema.workspaceMembers)
 			.values({
@@ -200,19 +277,19 @@ export async function provisionUserOnLogin(
 				joinedAt: Math.floor(Date.now() / 1000),
 			})
 			.onConflictDoNothing();
-		return;
+		return true;
 	}
 
 	// Plain non-admin: auto-join the default workspace at AUTO_JOIN_ROLE, if it exists.
 	const role = resolveAutoJoinRole(env.AUTO_JOIN_ROLE);
-	if (!role) return; // auto-join disabled
+	if (!role) return true; // auto-join disabled — settled by config, nothing to retry
 
 	const ws = await orm
 		.select({ id: schema.workspaces.id })
 		.from(schema.workspaces)
 		.where(eq(schema.workspaces.slug, slug))
 		.get();
-	if (!ws) return; // wait for an admin to bootstrap the default workspace
+	if (!ws) return false; // wait for an admin to bootstrap the default workspace
 
 	await orm
 		.insert(schema.workspaceMembers)
@@ -223,6 +300,7 @@ export async function provisionUserOnLogin(
 			joinedAt: Math.floor(Date.now() / 1000),
 		})
 		.onConflictDoNothing();
+	return true;
 }
 
 /**
@@ -231,8 +309,14 @@ export async function provisionUserOnLogin(
  * `viewer`. Deliberately hardcoded to `viewer` — unlike AUTO_JOIN_ROLE, this
  * has no configurable role; anonymous access is read-only or it doesn't exist.
  * A no-op until an admin has bootstrapped the default workspace.
+ *
+ * Cached like ensureUserProvisioned above, and for the same reason: with PUBLIC_READ_ONLY
+ * on this is the hot path for every anonymous request. There is exactly one public-viewer
+ * identity, so the marker is shared by all of them.
  */
 export async function provisionPublicViewer(env: Env, user: { id: string }): Promise<void> {
+	if (await alreadyProvisioned(env, user.id)) return;
+
 	const slug = env.DEFAULT_WORKSPACE_SLUG?.trim() || "projektor";
 	const orm = drizzle(env.DB, { schema });
 
@@ -252,4 +336,5 @@ export async function provisionPublicViewer(env: Env, user: { id: string }): Pro
 			joinedAt: Math.floor(Date.now() / 1000),
 		})
 		.onConflictDoNothing();
+	await markProvisioned(env, user.id);
 }

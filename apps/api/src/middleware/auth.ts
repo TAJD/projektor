@@ -1,7 +1,7 @@
 import type { Env, HonoEnv } from "@projektor/types";
 import type { Context, Next } from "hono";
 import { capabilityForMethod, parseScopes, tokenAllows } from "../auth/scopes";
-import { provisionPublicViewer, provisionUserOnLogin } from "../services/provisioning";
+import { ensureUserProvisioned, provisionPublicViewer } from "../services/provisioning";
 import { bumpRateCounter } from "./rate-limit";
 
 // PROJ-373: the shared identity anonymous requests are provisioned as when
@@ -60,7 +60,7 @@ async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	}
 	if (!user) return { kind: "deny", response: c.json({ error: "Invalid Access token" }, 401) };
 
-	await provisionUserOnLogin(c.env, user);
+	await ensureUserProvisioned(c.env, user);
 	c.set("user", user);
 	c.set("authKind", "human");
 	return { kind: "allow" };
@@ -159,7 +159,7 @@ async function tryDevBypassAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	if (c.env.ENVIRONMENT !== "development" || !c.env.DEV_USER_EMAIL) return { kind: "skip" };
 
 	const user = await upsertUserByEmail(c.env.DEV_USER_EMAIL, c.env.DB);
-	await provisionUserOnLogin(c.env, user);
+	await ensureUserProvisioned(c.env, user);
 	c.set("user", user);
 	c.set("authKind", "human");
 	return { kind: "allow" };
