@@ -827,3 +827,22 @@ describe("date-range filter (server-side, PROJ-212)", () => {
 		await waitFor(() => expect(lastIssuesUrl(mock2)).toMatch(/completedAfter=\d+/));
 	});
 });
+
+describe("mount fetch count (perf regression)", () => {
+	it("fetches the main list once and the epic dropdown once on a plain load", async () => {
+		const mockFetch = setupEpicFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+
+		// Let the lookup arrivals (projects/task-types) and URL sync settle —
+		// each used to refire the main list fetch via effect-dep identity churn.
+		await screen.findByRole("combobox", { name: "Filter by epic" });
+		await new Promise((r) => setTimeout(r, 50));
+
+		const urls = (mockFetch.mock.calls as [string][]).map((c) => String(c[0]));
+		const listCalls = urls.filter((u) => u.includes("/api/issues?") && !u.includes("typeId="));
+		const epicDropdownCalls = urls.filter((u) => u.includes("typeId=type-epic"));
+		expect(listCalls).toHaveLength(1);
+		expect(epicDropdownCalls).toHaveLength(1);
+	});
+});

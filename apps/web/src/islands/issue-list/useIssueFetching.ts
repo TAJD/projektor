@@ -42,24 +42,13 @@ export function useIssueFetching(
 	const [total, setTotal] = useState(0);
 
 	// Build the filter query params shared by the initial fetch and "Load more"
-	// (everything except limit/cursor, which the callers set).
-	const buildFilterParams = useCallback(
-		() => buildFilterQueryParams(filters, projects, taskTypes),
-		[
-			filters.filterStatuses,
-			filters.filterPriorities,
-			filters.filterProject,
-			filters.filterType,
-			filters.filterEpicId,
-			filters.filterSprintId,
-			filters.hideEpics,
-			filters.filterDateField,
-			filters.filterDateFrom,
-			filters.filterDateTo,
-			projects,
-			taskTypes,
-		]
-	);
+	// (everything except limit/cursor, which the callers set). Keyed on the
+	// *serialized* params, not input identities: the filter arrays and lookup
+	// lists get fresh identities on mount/arrival without changing the resulting
+	// query, and each identity change used to refire the issues fetch — 4
+	// byte-identical GETs per page load.
+	const filterQs = buildFilterQueryParams(filters, projects, taskTypes).toString();
+	const buildFilterParams = useCallback(() => new URLSearchParams(filterQs), [filterQs]);
 
 	// List view paginates 30 at a time (PROJ-201). Board/backlog operate on the
 	// whole working set, so they request a larger page.

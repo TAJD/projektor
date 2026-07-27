@@ -133,9 +133,14 @@ export function useIssueLookups(
 	}, [workspaceSlug]);
 
 	// Fetch epics for the epic filter dropdown, independent of the paginated list
-	// (PROJ-211). Scoped to the active project filter when set.
+	// (PROJ-211). Scoped to the active project filter when set. Keyed on the
+	// derived ids, not the lookup-array identities — a fresh projects/taskTypes
+	// array that resolves to the same ids must not refire this fetch.
+	const epicTypeId = taskTypes.find((t) => t.key === "epic")?.id;
+	const epicProjectId = filterProject
+		? projects.find((p) => p.key === filterProject)?.id
+		: undefined;
 	useEffect(() => {
-		const epicTypeId = taskTypes.find((t) => t.key === "epic")?.id;
 		if (!epicTypeId) {
 			setEpics([]);
 			return;
@@ -143,10 +148,7 @@ export function useIssueLookups(
 		(async () => {
 			try {
 				const qs = new URLSearchParams({ typeId: epicTypeId, limit: "100" });
-				const projectId = filterProject
-					? projects.find((p) => p.key === filterProject)?.id
-					: undefined;
-				if (projectId) qs.set("project", projectId);
+				if (epicProjectId) qs.set("project", epicProjectId);
 				const data = await apiFetch<{ items: Issue[] }>(`/api/issues?${qs.toString()}`, {
 					workspaceSlug,
 				});
@@ -155,7 +157,7 @@ export function useIssueLookups(
 				// non-fatal — epic dropdown just won't populate
 			}
 		})();
-	}, [workspaceSlug, taskTypes, filterProject, projects]);
+	}, [workspaceSlug, epicTypeId, epicProjectId]);
 
 	return {
 		statuses,
