@@ -144,6 +144,38 @@ describe("apiFetch — re-auth loop guard (PROJ-430)", () => {
 		restoreLocation();
 	});
 
+	// A page issues several requests at once. The first 401 triggers the reload; the rest
+	// are the same expiry, not a second failed attempt, so they must stay silent until the
+	// navigation happens. Otherwise whichever one lands second paints "your session has
+	// expired" over the page for the instant before it goes away — and which request that
+	// is depends on effect ordering, so it moves whenever the page's fetches are
+	// rearranged (PROJ-438 moved it onto the issue page).
+	it("stays silent for concurrent 401s while the first one's reload is in flight", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
+
+		const first = apiFetch("/auth/me");
+		await new Promise((r) => setTimeout(r, 0));
+		expect(reload).toHaveBeenCalledTimes(1);
+
+		let settled = false;
+		const second = apiFetch("/api/issues/i1").then(
+			() => {
+				settled = true;
+			},
+			() => {
+				settled = true;
+			}
+		);
+		await new Promise((r) => setTimeout(r, 0));
+
+		expect(settled).toBe(false);
+		expect(reload).toHaveBeenCalledTimes(1);
+		void first;
+		void second;
+
+		restoreLocation();
+	});
+
 	it("re-arms after a successful response, so a later expiry can re-auth again", async () => {
 		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401 }));
 		apiFetch("/api/issues/i1");

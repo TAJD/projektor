@@ -2,14 +2,18 @@ import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { addComment, deleteComment, listComments, updateComment } from "../services/comments";
+import { resolveIssueIdParam } from "../services/issues";
 import { ctxFromHono } from "../services/types";
 
 const router = new Hono<HonoEnv>();
 
+// Reads accept a ref ("PROJ-42") as well as a UUID so the browser doesn't have to
+// resolve one before asking (PROJ-438). Writes stay UUID-only — they're never on a
+// first-paint path, so there's nothing to gain for the extra surface.
 router.get("/:issueId/comments", async (c) => {
 	const ctx = ctxFromHono(c);
-	const issueId = c.req.param("issueId");
 	try {
+		const issueId = await resolveIssueIdParam(ctx, c.req.param("issueId"));
 		return c.json(await listComments(ctx, { issueId }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);

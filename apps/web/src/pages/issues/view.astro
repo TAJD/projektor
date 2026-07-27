@@ -6,6 +6,53 @@ import IssueDetail from '../../islands/IssueDetail';
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
 <Base title="Issue — Projektor">
+  <!-- PROJ-438: the island can't ask for the issue until its bundle has downloaded and
+       hydrated — measured at ~445ms on a mobile profile, with nothing else in flight.
+       This runs during HTML parse instead and hands the in-flight response to
+       IssueDetail (utils/issue-prefetch.ts). Deliberately dumb: no retry, no 401
+       handling, no error surfacing. Anything other than a 2xx and the island falls
+       through to its normal apiFetch path, which owns all of that (PROJ-430).
+
+       data-astro-rerun is load-bearing. ClientRouter keys inline scripts by their text
+       and refuses to run one it has run before, so without it this fires on the first
+       navigation to an issue page and never again — and clicking through from the issue
+       list is the common case, not a full page load. -->
+  <script is:inline data-astro-rerun define:vars={{ workspaceSlug }}>
+    (function () {
+      try {
+        // An unclaimed handoff would otherwise outlive the page that made it: the router
+        // swaps the body, not the window. Registered once per tab; deleting is idempotent
+        // and runs before the incoming page's scripts, so it can't eat a fresh handoff.
+        if (!window.__projektorIssuePrefetchBound) {
+          window.__projektorIssuePrefetchBound = true;
+          document.addEventListener('astro:before-swap', function () {
+            delete window.__projektorIssuePrefetch;
+          });
+        }
+
+        // Same precedence the island uses (?id= before the pretty path). They have to
+        // agree: a URL that satisfies both would otherwise be prefetched under one key
+        // and claimed under the other, leaving a handoff nobody ever takes.
+        var pretty = location.pathname.match(/^\/projects\/([^/]+)\/issues\/(\d+)\//);
+        var key =
+          new URLSearchParams(location.search).get('id') ||
+          (pretty ? pretty[1] + '-' + pretty[2] : null);
+        if (!key) return;
+        window.__projektorIssuePrefetch = {
+          key: key,
+          t: Date.now(),
+          response: fetch('/api/issues/' + encodeURIComponent(key), {
+            credentials: 'include',
+            headers: workspaceSlug ? { 'X-Workspace-Slug': workspaceSlug } : {},
+          }).catch(function () {
+            return null;
+          }),
+        };
+      } catch (e) {
+        // Never let a prefetch failure stop the page from loading normally.
+      }
+    })();
+  </script>
   <div class="page-container">
     <IssueDetail client:load workspaceSlug={workspaceSlug} />
   </div>
