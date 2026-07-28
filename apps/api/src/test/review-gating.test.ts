@@ -239,6 +239,38 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 		expect(ids).not.toContain(clean.id);
 	});
 
+	it("list_issues({ needsAudit: false }) surfaces unflagged closures only (PROJ-449)", async () => {
+		const flagged = await seedIssue(workspaceId, projectId, userId, { title: "Flagged" });
+		const clean = await seedIssue(workspaceId, projectId, userId, { title: "Clean" });
+		const { agentSessionId: flaggedAgent } = await seedAgentLease(workspaceId, flagged.id);
+		const { agentSessionId: cleanAgent } = await seedAgentLease(workspaceId, clean.id);
+
+		await patch(flagged.id, {
+			status: "done",
+			agentSessionId: flaggedAgent,
+			completionReport: report,
+		});
+		await patch(clean.id, {
+			status: "done",
+			agentSessionId: cleanAgent,
+			completionReport: {
+				summary: "Did the thing",
+				verification: "https://github.com/TAJD/projektor/pull/93",
+			},
+		});
+
+		// z.coerce.boolean() would coerce the string "false" to true, silently
+		// inverting this filter. Guards against regressing to that.
+		const res = await SELF.fetch(
+			`http://localhost/api/issues?projectId=${projectId}&needsAudit=false`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const { items } = (await res.json()) as { items: Array<{ id: string }> };
+		const ids = items.map((i) => i.id);
+		expect(ids).toContain(clean.id);
+		expect(ids).not.toContain(flagged.id);
+	});
+
 	// --- Report stamped only on a real transition (PROJ-293) ---
 
 	it("does not stamp/post a completionReport on a title-only update", async () => {

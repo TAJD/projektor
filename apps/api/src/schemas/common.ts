@@ -25,3 +25,13 @@ export const TaxonomyIdSchema = z.union([
 	z.string().uuid(),
 	z.string().regex(/^[0-9a-f]{32}$/i, "Invalid id"),
 ]);
+
+// Query-string booleans arrive as strings; MCP sends real JSON booleans. z.coerce.boolean()
+// makes the string "false" truthy (any non-empty string coerces to true), silently inverting
+// params like needsAudit=false. Parse the string forms explicitly instead. "" (bare ?flag with
+// no value) maps to false, matching Boolean("") under the old z.coerce.boolean() behavior.
+export const BooleanQueryParam = z.union([
+	z.boolean(),
+	z.enum(["true", "1"]).transform(() => true),
+	z.enum(["false", "0", ""]).transform(() => false),
+]);
