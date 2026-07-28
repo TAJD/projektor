@@ -19,8 +19,8 @@ setup page. Full detail, including the one-command and manual/CI paths, is in th
 
 The Worker is live but nobody can reach it yet - **Cloudflare Access** has to sit in
 front before login works (a `*.workers.dev` toggle, or a custom domain). Turn that on,
-then log in: the first address in `ADMIN_EMAILS` becomes the workspace owner
-automatically. Step-by-step:
+then log in with any address in `ADMIN_EMAILS`: the first one to log in creates the
+default workspace and becomes its owner automatically. Step-by-step:
 [CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
 ## 3. Connect an agent (about 2 minutes)

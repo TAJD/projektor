@@ -7,7 +7,7 @@ export const flowMetricsTools: MCPTool[] = [
 		description:
 			"Time-in-state (leadTime, cycleTime, timeInProgress, reviewLatency, agingWip), " +
 			"collaboration-shape (humanInterventions, autonomyRatio, flowEfficiency — human " +
-			"attention, not an agent-vs-human split), volume-over-time (throughput, cfdOverTime, " +
+			"attention, not an agent-vs-human split), volume-over-time (wipOverTime, throughputOverTime, cfdOverTime, " +
 			"arrivalVsCompletionOverTime, bugShareOverTime, bugTypeTracked), and factoryHealth " +
 			"(leaseExpiries, abandonedClaims, gateRejections, wipCapPressure) metrics for a project, " +
 			"computed from indexed transition timestamps. Full definitions: " +

@@ -39,7 +39,8 @@ includes it. A project with a long ready→claimed queue will show a lower
 
 | Metric | Definition |
 |---|---|
-| `throughput` | issues completed per bucket |
+| `wipOverTime` | work-in-progress (claimed but not done) count per bucket |
+| `throughputOverTime` | issues completed per bucket |
 | `cfdOverTime` | cumulative flow diagram: per-bucket counts of issues in each stage (`backlogTodo`, `inProgress`, `inReview`, `done`). `done` is cumulative and never decreases; a widening band between two stages is a choke point. |
 | `arrivalVsCompletionOverTime` | issues created vs. completed per bucket, plus `net` (created − completed) — answers whether the backlog is growing or burning |
 | `bugShareOverTime` | bug share of completed throughput per bucket (`total`, `bugCount`, `bugSharePercent`). Untyped issues count toward `total` but never `bugCount`. A rising trend signals more defects shipping, not just more work. |

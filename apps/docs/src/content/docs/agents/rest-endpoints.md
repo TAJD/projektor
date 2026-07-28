@@ -12,8 +12,10 @@ JSON-RPC/tool-call shape (binary uploads, redirects, public unauthenticated link
 Guides already point users at these, so they're documented here as a stable subset
 you can depend on.
 
-All endpoints below require the same bearer-token auth as MCP (`Authorization: Bearer
-pk_...` plus `X-Workspace-Slug`) unless marked **public**.
+All `/api/*` endpoints below require the same bearer-token auth as MCP
+(`Authorization: Bearer pk_...` plus `X-Workspace-Slug`) unless marked **public**. The
+`/auth/*` endpoints are the exception - they authenticate the *user*, not a workspace,
+so they take a Cloudflare Access session (or no auth at all) instead.
 
 ## File attachments
 
@@ -21,7 +23,7 @@ Binary upload/download doesn't fit JSON-RPC, so attachments are REST-only.
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `GET` | `/api/files` | List attachments for an issue (`?issueId=`) |
+| `GET` | `/api/files` | List attachments for an issue or wiki page (`?entityType=issue\|wiki_page&entityId=`) |
 | `POST` | `/api/files` | Upload a file (multipart) |
 | `POST` | `/api/files/links` | Attach an external link instead of a binary |
 | `GET` | `/api/files/:id` | Download an attachment |
