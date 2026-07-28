@@ -542,6 +542,87 @@ describe("Wiki API", () => {
 		}
 	});
 
+	async function uploadFileToPage(token: string, slug: string, pageId: string) {
+		const form = new FormData();
+		form.append("file", new File(["attachment content"], "doc.txt", { type: "text/plain" }));
+		form.append("entityType", "wiki_page");
+		form.append("entityId", pageId);
+		const res = await SELF.fetch("http://localhost/api/files", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		const { id } = (await res.json()) as { id: string };
+		const row = await env.DB.prepare("SELECT r2_key FROM attachments WHERE id = ?")
+			.bind(id)
+			.first<{ r2_key: string }>();
+		return { attachmentId: id, r2Key: row!.r2_key };
+	}
+
+	it("DELETE /api/wiki/:slug (default) removes the R2 object for a file attached to the page (PROJ-426)", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
+
+		const pageRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Page With File", content: "" }),
+		});
+		const page = (await pageRes.json()) as { id: string; slug: string };
+
+		const { attachmentId, r2Key } = await uploadFileToPage(
+			owner.token,
+			owner.workspace.slug,
+			page.id
+		);
+		expect(await env.R2.get(r2Key)).not.toBeNull();
+
+		const delRes = await SELF.fetch(`http://localhost/api/wiki/${page.slug}`, {
+			method: "DELETE",
+			headers: ownerHeaders,
+		});
+		expect(delRes.status).toBe(200);
+
+		expect(await env.R2.get(r2Key)).toBeNull();
+		const row = await env.DB.prepare("SELECT id FROM attachments WHERE id = ?")
+			.bind(attachmentId)
+			.first();
+		expect(row).toBeNull();
+	});
+
+	it("DELETE /api/wiki/:slug?cascade=true removes R2 objects for files attached across the subtree (PROJ-426)", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
+
+		const parentRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Cascade Parent With File", content: "" }),
+		});
+		const parent = (await parentRes.json()) as { id: string; slug: string };
+
+		const childRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ title: "Cascade Child With File", content: "", parentId: parent.id }),
+		});
+		const child = (await childRes.json()) as { id: string; slug: string };
+
+		const parentFile = await uploadFileToPage(owner.token, owner.workspace.slug, parent.id);
+		const childFile = await uploadFileToPage(owner.token, owner.workspace.slug, child.id);
+		expect(await env.R2.get(parentFile.r2Key)).not.toBeNull();
+		expect(await env.R2.get(childFile.r2Key)).not.toBeNull();
+
+		const delRes = await SELF.fetch(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: ownerHeaders,
+		});
+		expect(delRes.status).toBe(200);
+
+		expect(await env.R2.get(parentFile.r2Key)).toBeNull();
+		expect(await env.R2.get(childFile.r2Key)).toBeNull();
+	});
+
 	it("DELETE /api/wiki/:slug returns 403 for viewer role", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
