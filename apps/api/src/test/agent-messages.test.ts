@@ -295,7 +295,7 @@ describe("Agent Messages API", () => {
 				(m) => m.body.includes("force-claimed") && m.body.includes("src/forced.ts")
 			)
 		).toBe(true);
-	});
+	}, 15000); // PROJ-248: many sequential MCP round-trips; full-suite contention pushes this past the 5s default
 
 	// C4: workspace isolation; issue-scope isolation; cursor stability
 	// 4 requests (post, list from other ws, post other-issue, list-ws scope) within limit
