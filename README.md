@@ -146,14 +146,16 @@ pnpm --filter @projektor/api test   # vitest against an in-process Worker + Mini
 pnpm turbo type-check               # tsc --noEmit across the monorepo
 ```
 
-Both must be green before opening a PR - they mirror CI exactly (`.github/workflows/ci.yml`).
+Both must be green before opening a PR. CI (`.github/workflows/ci.yml`) runs these plus more -
+coverage-enforced test runs, the `@projektor/db` and `@projektor/docs` suites, the web build, and
+a generated-docs freshness check. See [AGENTS.md](./AGENTS.md) for the full list.
 
 ### Git hooks (lefthook)
 
 `pnpm install` wires two hooks automatically:
 
 - **pre-commit** - `pnpm turbo type-check` (fast; turbo-cached)
-- **pre-push** - `pnpm --filter @projektor/api test` (~8 s vitest suite)
+- **pre-push** - `pnpm biome check .`, `pnpm --filter @projektor/api test`, and `pnpm --filter @projektor/web test`
 
 Bypass for WIP commits: `git commit --no-verify -m "wip: …"`
 
@@ -179,7 +181,7 @@ Frontend: **Astro + Preact**, served as static assets via Workers Static Assets;
 
 ## Roadmap / Contributing
 
-Feature requests and bugs are tracked in the live projektor dogfood instance - projektor is built with itself.
+The live projektor dogfood instance tracks feature requests and bugs - projektor is built with itself.
 
 [AGENTS.md](./AGENTS.md) is the contributor guide: conventions, file layout, the service-layer contract, and how to work in parallel without conflicts. Read it before opening a PR.
 

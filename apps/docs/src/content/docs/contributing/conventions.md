@@ -26,7 +26,7 @@ Implementation details:
 - **Runtime:** Hono on Cloudflare Workers
 - **Data:** D1 (SQLite) for relational data, KV for caching (Access certs, user-by-email), R2 for file attachments
 - **Schema:** Drizzle is the schema and primary query layer; raw `DB.prepare` remains in the auth/workspace middleware hot path, the dev bootstrap, and a handful of service queries (FTS, counters) where hand-written SQL is clearer.
-- **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets - see below), `packages/*` (db, types, plugin-sdk), `plugins/*`
+- **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets - see below), `apps/docs` (the Astro docs site linked throughout this file), `packages/*` (db, types, plugin-sdk), `plugins/*`
 - **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-workspace`) downloads it and ships it with `wrangler` - no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*"]`, so `/api/*` and `/mcp/*` always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
 
 ## Planning and design docs live in the wiki, not the repo
@@ -109,9 +109,11 @@ Bounded arrays (enums like priority) are fine to bind directly. When in doubt, c
 bumped by `release-prepare.yml`, tagged by `release-tag.yml`, and read by
 `release.yml`/`scripts/build-release.sh` to produce the release artifact (embedded
 as `VERSION` in the tarball and injected into the MCP `serverInfo.version` via
-esbuild `--define`). Every other package's `package.json` `version` field is a fixed
-`0.0.0-workspace` placeholder - those packages are workspace-internal and not
-independently released, so their version field is unused and intentionally never bumped.
+esbuild `--define`). Every other `apps/*`/`packages/*` package's `package.json`
+`version` field is a fixed `0.0.0-workspace` placeholder - those packages are
+workspace-internal and not independently released, so their version field is unused
+and intentionally never bumped. `plugins/*` packages carry their own unused
+placeholder versions (e.g. `0.0.0`, `0.0.1`), not `0.0.0-workspace`.
 
 ## File layout per domain
 
@@ -136,7 +138,7 @@ When adding/changing a domain (issues, projects, wiki, comments, …):
 - **IDs** are `crypto.randomUUID()`.
 - **Issue numbers** use `COALESCE(MAX(number),0)+1` per project - known race under concurrency (tracked as a follow-up).
 - **Auth** (`middleware/auth.ts`): Cloudflare Access JWT (browser) OR `Authorization: Bearer <token>` (agents) OR a dev bypass (`DEV_USER_EMAIL`, non-prod only). API tokens are workspace-scoped - don't widen that.
-- **Login provisioning** (`services/provisioning.ts`): runs on every CF Access / dev-bypass login (not the token path). Cloudflare Access is the gate; config decides what a user gets inside - `ADMIN_EMAILS` → `owner` (first admin login also creates the `DEFAULT_WORKSPACE_SLUG` workspace), everyone else → `AUTO_JOIN_ROLE` (default `viewer`; `none` = invite-only). Idempotent; safe to run per request.
+- **Login provisioning** (`services/provisioning.ts`): runs on every CF Access / dev-bypass login (not the token path). Cloudflare Access is the gate; config decides what a user gets inside - `ADMIN_EMAILS` → `owner` (first admin login also creates the `DEFAULT_WORKSPACE_SLUG` workspace), everyone else → `AUTO_JOIN_ROLE` (default `none` = invite-only; set it, e.g. `viewer`, to auto-join). Idempotent; safe to run per request.
 - **Roles** (`owner`/`admin`/`member`/`viewer`) are enforced in services via `ctx.role`. Mutations generally block `viewer`; destructive ops may require `owner`.
 - **Group-based project access (PROJ-311)** is the authorization model for project-scoped data. Access is **default-deny**: owner/admin see everything, but everyone else sees a project only if one of their **groups** holds a `(project, role)` grant. The effective in-project role is the strongest grant across the user's groups and *replaces* their workspace role inside that project (so a workspace `viewer` with a `member` grant can write there). Enforce it through `services/access.ts`: `visibleProjectPredicate` (an indexed `EXISTS` subquery — filter every project-scoped **list** query with it), `effectiveProjectRole`/`requireProjectAccess` (resolve a single resource; `null` → 404 to hide existence), and `canWriteProject`. Membership is read per-request, so grant/revoke takes effect on the next request with no session state. The `groups` domain (service/routes/mcp) is owner/admin-only CRUD over groups, members, and grants.
 - **The plugin system is not wired at runtime yet** (`pluginRegistry` is empty; `enabled_plugins` is unread). Treat `plugins/*` as not-yet-functional until that lands.
@@ -191,16 +193,16 @@ curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 Then open **http://localhost:4321** - with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
-**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/api test`, `pnpm --filter @projektor/web test`, and `pnpm --filter @projektor/web build` must all be green. CI runs exactly these.
+**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, `pnpm --filter @projektor/api test:coverage`, `pnpm --filter @projektor/web test:coverage`, `pnpm --filter @projektor/web build`, and `pnpm --filter @projektor/docs build` must all be green, and `pnpm gen:docs` must produce no diff. CI runs exactly these (`.github/workflows/ci.yml`).
 
 ## Git hooks (lefthook)
 
 `pnpm install` runs `prepare`, which calls `lefthook install` and wires two hooks:
 
 - **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages), `pnpm biome check --changed --no-errors-on-unmatched` (lint, changed files only), and the island API convention check.
-- **pre-push** - `pnpm --filter @projektor/api test` and `pnpm --filter @projektor/web test` (too slow for every commit but catches the failures that most often break CI).
+- **pre-push** - `pnpm biome check .` (full-repo lint), `pnpm --filter @projektor/api test`, and `pnpm --filter @projektor/web test` (too slow for every commit but catches the failures that most often break CI).
 
-These mirror CI (`.github/workflows/ci.yml`), which additionally runs `pnpm lint` (full repo) and `pnpm --filter @projektor/web build` as PR gates. New contributors get the hooks automatically after `pnpm install`.
+CI (`.github/workflows/ci.yml`) runs a superset of these: the generated-docs freshness check, `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, coverage-enforced test runs for `@projektor/api` and `@projektor/web`, and both the web and docs builds. New contributors get the hooks automatically after `pnpm install`.
 
 **Bypass for WIP commits/pushes:** pass `--no-verify` (or `-n`) to git:
 
@@ -293,11 +295,14 @@ it up. See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/
 
 **CI commands** (must all pass before opening a PR):
 ```bash
+pnpm gen:docs   # must produce no diff
 pnpm lint
 pnpm turbo type-check
-pnpm --filter @projektor/api test
-pnpm --filter @projektor/web test
+pnpm --filter @projektor/db test
+pnpm --filter @projektor/api test:coverage
+pnpm --filter @projektor/web test:coverage
 pnpm --filter @projektor/web build
+pnpm --filter @projektor/docs build
 ```
 
 **Merge ordering rule:** if two agents both touch the same frontend file (e.g.

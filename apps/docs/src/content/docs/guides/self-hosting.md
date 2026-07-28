@@ -9,7 +9,7 @@ Projektor deploys to **your own Cloudflare account** from a small **config-only 
 downloads a pre-built release artifact - no source checkout and no build step. Pick the
 path that suits you; they're ordered easiest first.
 
-Want to see it running before you deploy your own? Check out the
+Want to see it running before you deploy your own? Visit the
 [live demo](https://projektor-demo.tajdickson.workers.dev).
 
 ## One click
@@ -39,7 +39,7 @@ The Worker is live, but **Cloudflare Access** must front it before anyone can lo
 `ADMIN_EMAILS` becomes owner - and mint a token for agents. Full handoff:
 [CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
-**Updating later:** bump `projektor.version` and re-deploy (or just push, if you wired CI).
+**Updating later:** bump `projektor.version` and re-deploy (or push, if you wired CI).
 
 ## Manual or CI deploys
 
