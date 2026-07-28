@@ -5,39 +5,18 @@ export const flowMetricsTools: MCPTool[] = [
 	{
 		name: "get_flow_metrics",
 		description:
-			"Lead time (ready→done), cycle time (claimed→done), WIP over time, throughput over time, and " +
-			"collaboration-shape metrics for a project, computed from indexed transition timestamps. " +
-			"Collaboration-shape metrics measure human attention rather than agent-vs-human split: " +
-			"reviewLatency (in_review→done, the primary human choke point) with a reviewLatencyOverTime " +
-			"trend; humanInterventions (human-authored comments + status bounces out of review, per " +
-			"completed issue); and autonomyRatio (lease-held time ÷ cycle time, per completed issue). " +
-			"cfdOverTime is a cumulative flow diagram: per-bucket counts of issues currently in each " +
-			"stage (backlogTodo, inProgress, inReview, done), derived from the same transition " +
-			"timestamps — done is cumulative (never decreases) and a widening band is a choke point. " +
-			"timeInProgress (claimed→next stage) pairs with reviewLatency as the time-in-state " +
-			"breakdown. arrivalVsCompletionOverTime is created vs completed issues per bucket plus " +
-			"net (created - completed), answering whether the backlog is growing or burning. " +
-			"flowEfficiency is lease-held time / lead time (lead time = done - ready) for issues " +
-			"completed in the window - distinct from " +
-			"autonomyRatio, which divides by cycle time (done - claimed) instead and so excludes " +
-			"queueing time between ready and claimed. agingWip lists every currently open " +
-			"(in_progress/in_review) issue with its age since claim, a present-state snapshot not " +
-			"scoped to since/until, meant to be read against this response's cycleTime p50/p90 as " +
-			"reference lines - makes stuck items visible before they finish and skew the percentiles. " +
-			"bugShareOverTime is the bug share of completed throughput per bucket (total completed, " +
-			"bugCount, bugSharePercent) - untyped issues count toward total but never bugCount; a " +
-			"rising trend signals the factory shipping more defects, not just more work. " +
-			"bugTypeTracked reports whether a task type keyed 'bug' exists in the workspace at all - " +
-			"false means bug share can't be computed (no matching type), distinct from a genuine 0%. " +
-			"factoryHealth is fault signals for the factory itself, not the work, windowed by since/" +
-			"until: leaseExpiries (issue leases reclaimed because the holder stopped heartbeating), " +
-			"abandonedClaims (file claims released because the agent's session ended rather than " +
-			"deliberately), gateRejections (in_review→in_progress bounces specifically - narrower " +
-			"than humanInterventions' bounce count, which also counts review→cancelled), and " +
-			"wipCapPressure (claims denied for hitting the project's per-agent WIP cap). " +
-			"Measure flow before tuning WIP limits. Throughput/review-latency/CFD/arrival/bug-share " +
-			"bucketing defaults to weekly (current ISO week plus the preceding 5 weeks); pass " +
-			"granularity: 'day' for daily buckets.",
+			"Time-in-state (leadTime, cycleTime, timeInProgress, reviewLatency, agingWip), " +
+			"collaboration-shape (humanInterventions, autonomyRatio, flowEfficiency — human " +
+			"attention, not an agent-vs-human split), volume-over-time (throughput, cfdOverTime, " +
+			"arrivalVsCompletionOverTime, bugShareOverTime, bugTypeTracked), and factoryHealth " +
+			"(leaseExpiries, abandonedClaims, gateRejections, wipCapPressure) metrics for a project, " +
+			"computed from indexed transition timestamps. Full definitions: " +
+			"/projektor/agents/flow-metrics/. Two easily-confused pairs: autonomyRatio divides by " +
+			"cycleTime (claimed→done) while flowEfficiency divides by leadTime (ready→done), so " +
+			"flowEfficiency is always ≤ autonomyRatio when there's a ready→claimed queue; and " +
+			"bugTypeTracked:false (no 'bug' task type in the workspace) is distinct from a genuine " +
+			"0% bug share. Bucketing defaults to weekly (current ISO week plus the preceding 5 " +
+			"weeks); pass granularity: 'day' for daily buckets.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],

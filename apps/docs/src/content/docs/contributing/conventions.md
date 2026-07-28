@@ -55,13 +55,13 @@ mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live h
 
 ### Deliberate REST↔MCP parity exceptions
 
-The parity audit (PROJ-236) confirmed these surface-only features are intentional, not
-drift — don't re-flag them in future audits:
+These surface-only features are intentional, not drift — don't re-flag them in future
+audits:
 
 - **File attachment upload/download (`POST /api/files`, `GET /api/files/:id`)** —
   REST-only. Binary/multipart upload and streamed download can't cross JSON-RPC.
   Metadata operations (list, get metadata, link-create, delete) have full MCP parity
-  via `mcp/files.ts` (PROJ-234).
+  via `mcp/files.ts`.
 - **Auth (`routes/auth.ts`): login redirect, API token minting/revocation** — REST-only.
   CF Access login is a browser redirect flow; token minting/revocation is a sensitive
   credential operation kept off the MCP surface.
@@ -79,7 +79,7 @@ drift — don't re-flag them in future audits:
   endpoint is intentionally unauthenticated by token).
 - **`get_prioritized_issues`** — MCP-only. An agent-productivity tool ("what should I
   work on next") with no natural REST/browser analog.
-- **Public feedback submission (`POST /api/feedback/submit`, PROJ-378)** — REST-only.
+- **Public feedback submission (`POST /api/feedback/submit`)** — REST-only.
   Anonymous end-user feedback from a third-party product, authenticated by a per-source
   bearer token, not a session — there's no ServiceCtx user/role for an MCP tool to act as.
   Feedback *source management* (create/list/update/rotate/revoke) has full REST+MCP
@@ -140,7 +140,7 @@ When adding/changing a domain (issues, projects, wiki, comments, …):
 - **Auth** (`middleware/auth.ts`): Cloudflare Access JWT (browser) OR `Authorization: Bearer <token>` (agents) OR a dev bypass (`DEV_USER_EMAIL`, non-prod only). API tokens are workspace-scoped - don't widen that.
 - **Login provisioning** (`services/provisioning.ts`): runs on every CF Access / dev-bypass login (not the token path). Cloudflare Access is the gate; config decides what a user gets inside - `ADMIN_EMAILS` → `owner` (first admin login also creates the `DEFAULT_WORKSPACE_SLUG` workspace), everyone else → `AUTO_JOIN_ROLE` (default `none` = invite-only; set it, e.g. `viewer`, to auto-join). Idempotent; safe to run per request.
 - **Roles** (`owner`/`admin`/`member`/`viewer`) are enforced in services via `ctx.role`. Mutations generally block `viewer`; destructive ops may require `owner`.
-- **Group-based project access (PROJ-311)** is the authorization model for project-scoped data. Access is **default-deny**: owner/admin see everything, but everyone else sees a project only if one of their **groups** holds a `(project, role)` grant. The effective in-project role is the strongest grant across the user's groups and *replaces* their workspace role inside that project (so a workspace `viewer` with a `member` grant can write there). Enforce it through `services/access.ts`: `visibleProjectPredicate` (an indexed `EXISTS` subquery — filter every project-scoped **list** query with it), `effectiveProjectRole`/`requireProjectAccess` (resolve a single resource; `null` → 404 to hide existence), and `canWriteProject`. Membership is read per-request, so grant/revoke takes effect on the next request with no session state. The `groups` domain (service/routes/mcp) is owner/admin-only CRUD over groups, members, and grants.
+- **Group-based project access** is the authorization model for project-scoped data. Access is **default-deny**: owner/admin see everything, but everyone else sees a project only if one of their **groups** holds a `(project, role)` grant. The effective in-project role is the strongest grant across the user's groups and *replaces* their workspace role inside that project (so a workspace `viewer` with a `member` grant can write there). Enforce it through `services/access.ts`: `visibleProjectPredicate` (an indexed `EXISTS` subquery — filter every project-scoped **list** query with it), `effectiveProjectRole`/`requireProjectAccess` (resolve a single resource; `null` → 404 to hide existence), and `canWriteProject`. Membership is read per-request, so grant/revoke takes effect on the next request with no session state. The `groups` domain (service/routes/mcp) is owner/admin-only CRUD over groups, members, and grants.
 - **The plugin system is not wired at runtime yet** (`pluginRegistry` is empty; `enabled_plugins` is unread). Treat `plugins/*` as not-yet-functional until that lands.
 
 ## localStorage policy (frontend)
@@ -256,9 +256,10 @@ You are working in a parallel fleet. Use the projektor MCP to coordinate:
 5. `release_files` then `end_agent` when done.
 ```
 
-See `~/.claude/docs/spawning-sessions.md` for the full prompt template (Coordination + Finish line are both required sections).
+A full spawn prompt also needs a **Finish** section (what "done" means for the task,
+and what to report back) alongside the Coordination section above.
 
-### Fleet planning rules (for the `/fleet` skill and human planners)
+### Fleet planning rules
 
 These are the constraints the fleet skill reads to plan batches. Keep them current when the codebase changes.
 

@@ -87,7 +87,7 @@ export const issuesTools: MCPTool[] = [
 				needsAudit: {
 					type: "boolean",
 					description:
-						"Filter to agent-initiated done-closures flagged for human audit (PROJ-375) — true for unverifiable evidence, false for externally-checkable evidence",
+						"Filter to agent-initiated done-closures flagged for human audit — true for unverifiable evidence, false for externally-checkable evidence",
 				},
 				includeRollups: {
 					type: "boolean",
@@ -152,8 +152,8 @@ export const issuesTools: MCPTool[] = [
 	{
 		name: "update_issue",
 		description:
-			"Update an issue - status, priority, title, body, assignee, or labels. Review gating " +
-			"(PROJ-254/375): pass agentSessionId to identify yourself as an agent; entering in_review as " +
+			"Update an issue - status, priority, title, body, assignee, or labels. Review gating: " +
+			"pass agentSessionId to identify yourself as an agent; entering in_review as " +
 			"an agent requires completionReport. Agents CAN transition directly to done (no human " +
 			"approval gate) — but if the completionReport.verification isn't externally checkable (no " +
 			"CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review.",
