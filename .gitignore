@@ -15,3 +15,7 @@ dist/
 dev-server.log
 .cofferdam/cache/
 coverage/
+
+# local agent tooling state (spawn-claude worktrees, scratch plans/research) — a nested
+# biome.json under here otherwise trips `biome check .`'s nested-root-config detection
+.claude/

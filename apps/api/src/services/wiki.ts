@@ -398,6 +398,44 @@ async function collectDescendantIds(
 	return descendants;
 }
 
+// PROJ-426: file attachments uploaded directly to a wiki page (entityType="wiki_page",
+// entityId=pageId) aren't covered by the FK cascade on linkedWikiPageId — that column is
+// only set for wiki_ref pointer attachments elsewhere that link to this page. Delete the
+// R2 objects before dropping the rows, mirroring mcp/files.ts's delete_attachment handler.
+async function deleteWikiPageAttachments(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle<typeof schema>>,
+	pageIds: string[]
+): Promise<void> {
+	const fileAttachments = await orm
+		.select({ r2Key: schema.attachments.r2Key })
+		.from(schema.attachments)
+		.where(
+			and(
+				eq(schema.attachments.entityType, "wiki_page"),
+				inArray(schema.attachments.entityId, pageIds),
+				eq(schema.attachments.kind, "file")
+			)
+		);
+	for (const { r2Key } of fileAttachments) {
+		if (r2Key) await ctx.r2.delete(r2Key);
+	}
+
+	await orm
+		.delete(schema.attachments)
+		.where(
+			and(
+				eq(schema.attachments.entityType, "wiki_page"),
+				inArray(schema.attachments.entityId, pageIds)
+			)
+		);
+
+	// PROJ-407: mirror the migration's ON DELETE CASCADE at the app level too, since
+	// D1 does not guarantee FK enforcement is on for every connection. wiki_ref pointer
+	// rows have no R2 object (r2Key is "").
+	await orm.delete(schema.attachments).where(inArray(schema.attachments.linkedWikiPageId, pageIds));
+}
+
 export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: unknown) {
 	const idCheck = IdSchema.safeParse(slug);
 	if (!idCheck.success)
@@ -432,9 +470,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 		const descendantIds = await collectDescendantIds(ctx.db, page.id, ctx.workspaceId);
 		const allIds = [page.id, ...descendantIds];
 		await inChunks(allIds, async (chunk) => {
-			await orm
-				.delete(schema.attachments)
-				.where(inArray(schema.attachments.linkedWikiPageId, chunk));
+			await deleteWikiPageAttachments(ctx, orm, chunk);
 			return [];
 		});
 		await inChunks(allIds, async (chunk) => {
@@ -458,9 +494,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 		.set({ parentId: page.parentId })
 		.where(eq(schema.wikiPages.parentId, page.id));
 
-	// PROJ-407: mirror the migration's ON DELETE CASCADE at the app level too, since
-	// D1 does not guarantee FK enforcement is on for every connection.
-	await orm.delete(schema.attachments).where(eq(schema.attachments.linkedWikiPageId, page.id));
+	await deleteWikiPageAttachments(ctx, orm, [page.id]);
 	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: page.id, action: "deleted" });
 	return { ok: true, deletedCount: 1 };
