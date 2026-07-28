@@ -4,6 +4,27 @@ import { and, eq } from "drizzle-orm";
 import { ConflictError } from "./errors";
 import { createWorkspace } from "./workspaces";
 
+// PROJ-436: an owner's explicit removeMember call is durable — provisioning must not
+// re-add a tombstoned (workspace, user) pair, even though ADMIN_EMAILS / AUTO_JOIN_ROLE /
+// WORKSPACE_DOMAIN_MAP would otherwise say they belong. inviteMember clears the tombstone.
+async function isRemovalTombstoned(
+	orm: ReturnType<typeof drizzle>,
+	workspaceId: string,
+	userId: string
+): Promise<boolean> {
+	const row = await orm
+		.select({ workspaceId: schema.provisioningRemovals.workspaceId })
+		.from(schema.provisioningRemovals)
+		.where(
+			and(
+				eq(schema.provisioningRemovals.workspaceId, workspaceId),
+				eq(schema.provisioningRemovals.userId, userId)
+			)
+		)
+		.get();
+	return !!row;
+}
+
 const VALID_ROLES = ["owner", "admin", "member", "viewer"] as const;
 type Role = (typeof VALID_ROLES)[number];
 
@@ -91,6 +112,9 @@ async function grantOwner(
 	workspaceId: string,
 	userId: string
 ): Promise<void> {
+	// PROJ-436: an owner who was explicitly removed from this workspace stays removed,
+	// even though they're still an admin instance-wide.
+	if (await isRemovalTombstoned(orm, workspaceId, userId)) return;
 	await orm
 		.insert(schema.workspaceMembers)
 		.values({ workspaceId, userId, role: "owner", joinedAt: Math.floor(Date.now() / 1000) })
@@ -228,11 +252,10 @@ export async function forgetProvisionedForTests(env: Env, userId: string): Promi
  * createWorkspace. Changing AUTO_JOIN_ROLE or WORKSPACE_DOMAIN_MAP likewise takes up to
  * that long to affect an already-marked user — the KV marker outlives a redeploy.
  *
- * Note this is what re-adds a membership that removeMember deleted (see
- * services/workspaces.ts): for anyone in ADMIN_EMAILS, or on an instance with AUTO_JOIN_ROLE
- * or a domain mapping, removal has always been undone by the next provisioning run. It used
- * to be undone on the user's very next request, so it visibly never worked; now it holds
- * until the marker expires and then reverts.
+ * PROJ-436: removeMember (services/workspaces.ts) tombstones the removal in
+ * provisioning_removals, and grantOwner / the domain-map and auto-join paths above all check
+ * it before re-adding — so a config match (ADMIN_EMAILS, AUTO_JOIN_ROLE, WORKSPACE_DOMAIN_MAP)
+ * no longer undoes an explicit removal. inviteMember clears the tombstone.
  */
 export async function ensureUserProvisioned(
 	env: Env,
@@ -268,6 +291,8 @@ async function runProvisioning(env: Env, user: { id: string; email: string }): P
 			.where(eq(schema.workspaces.slug, mapped.slug))
 			.get();
 		if (!ws) return false; // mapped workspace doesn't exist yet — nothing to join
+		// PROJ-436: a removed user's domain mapping no longer re-adds them to this workspace.
+		if (await isRemovalTombstoned(orm, ws.id, user.id)) return true;
 		await orm
 			.insert(schema.workspaceMembers)
 			.values({
@@ -291,6 +316,8 @@ async function runProvisioning(env: Env, user: { id: string; email: string }): P
 		.get();
 	if (!ws) return false; // wait for an admin to bootstrap the default workspace
 
+	// PROJ-436: a removed user isn't auto-rejoined to the default workspace.
+	if (await isRemovalTombstoned(orm, ws.id, user.id)) return true;
 	await orm
 		.insert(schema.workspaceMembers)
 		.values({

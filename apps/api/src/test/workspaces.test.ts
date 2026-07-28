@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
@@ -6,6 +6,7 @@ import {
 	seedMember,
 	seedProject,
 	seedToken,
+	seedUser,
 	seedWorkspace,
 } from "./helpers";
 
@@ -367,6 +368,41 @@ describe("DELETE /api/workspaces/:slug (PROJ-96)", () => {
 			headers: ownerHeaders,
 		});
 		expect(stillThere.status).toBe(200);
+	});
+});
+
+describe("Member removal tombstone (PROJ-436)", () => {
+	async function tombstoneRow(workspaceId: string, userId: string) {
+		return env.DB.prepare(
+			"SELECT removed_at FROM provisioning_removals WHERE workspace_id = ? AND user_id = ?"
+		)
+			.bind(workspaceId, userId)
+			.first<{ removed_at: number }>();
+	}
+
+	it("removing a member records a tombstone; re-inviting them clears it", async () => {
+		const fixture = await seedFixture({ role: "owner" });
+		const memberUser = await seedUser(`m-436-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		await seedMember(fixture.workspace.id, memberUser.id, "member");
+		const ownerHeaders = authHeaders(fixture.token, fixture.workspace.slug);
+
+		const delRes = await SELF.fetch(
+			`http://localhost/api/workspaces/${fixture.workspace.slug}/members/${memberUser.id}`,
+			{ method: "DELETE", headers: ownerHeaders }
+		);
+		expect(delRes.status).toBe(200);
+		expect(await tombstoneRow(fixture.workspace.id, memberUser.id)).not.toBeNull();
+
+		const inviteRes = await SELF.fetch(
+			`http://localhost/api/workspaces/${fixture.workspace.slug}/members`,
+			{
+				method: "POST",
+				headers: ownerHeaders,
+				body: JSON.stringify({ email: memberUser.email, role: "member" }),
+			}
+		);
+		expect(inviteRes.status).toBe(201);
+		expect(await tombstoneRow(fixture.workspace.id, memberUser.id)).toBeNull();
 	});
 });
 

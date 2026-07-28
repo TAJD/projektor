@@ -34,6 +34,25 @@ export const workspaceMembers = sqliteTable(
 	})
 );
 
+// PROJ-436: a durable record that an owner explicitly removed this user from this
+// workspace, so provisioning (ADMIN_EMAILS / AUTO_JOIN_ROLE / WORKSPACE_DOMAIN_MAP) skips
+// re-adding them here. Cleared by re-inviting the user to the same workspace.
+export const provisioningRemovals = sqliteTable(
+	"provisioning_removals",
+	{
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		removedAt: integer("removed_at").notNull(),
+	},
+	(t) => ({
+		pk: primaryKey({ columns: [t.workspaceId, t.userId] }),
+	})
+);
+
 export const apiTokens = sqliteTable("api_tokens", {
 	id: text("id").primaryKey(),
 	// NULL = user-scoped token (valid across all workspaces the user is a member of)
