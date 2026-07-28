@@ -124,6 +124,24 @@ describe("Projects REST", () => {
 		expect(res.status).toBe(400);
 	});
 
+	it("POST /api/projects returns 400 for a key starting with a digit (PROJ-440)", async () => {
+		const res = await SELF.fetch("http://localhost/api/projects", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ name: "Leading digit", key: "2FA" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("POST /api/projects accepts a key containing digits after the first character (PROJ-440)", async () => {
+		const res = await SELF.fetch("http://localhost/api/projects", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ name: "Digit key", key: "WEB2" }),
+		});
+		expect(res.status).toBe(201);
+	});
+
 	it("POST /api/projects returns 400 for name too long", async () => {
 		const res = await SELF.fetch("http://localhost/api/projects", {
 			method: "POST",

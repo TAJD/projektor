@@ -433,6 +433,43 @@ describe("Issues API", () => {
 		expect(issue.project_key).toBe("PROJ");
 	});
 
+	it("GET /api/issues/KEY-NUMBER resolves for a project key containing digits (PROJ-440)", async () => {
+		const digitProject = await seedProject(workspaceId, "WEB2");
+		const createRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId: digitProject.id, title: "Digit-key ref issue" }),
+		});
+		expect(createRes.status).toBe(201);
+		const created = (await createRes.json()) as { id: string; number: number };
+
+		const getRes = await SELF.fetch(`http://localhost/api/issues/WEB2-${created.number}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(getRes.status).toBe(200);
+		const issue = (await getRes.json()) as { title: string; project_key: string };
+		expect(issue.title).toBe("Digit-key ref issue");
+		expect(issue.project_key).toBe("WEB2");
+
+		const commentsRes = await SELF.fetch(
+			`http://localhost/api/issues/WEB2-${created.number}/comments`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(commentsRes.status).toBe(200);
+
+		const linksRes = await SELF.fetch(`http://localhost/api/issues/WEB2-${created.number}/links`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(linksRes.status).toBe(200);
+	});
+
+	it("GET /api/issues/:ref with an absurdly long number is a 404, not a 500 (PROJ-440)", async () => {
+		const res = await SELF.fetch(`http://localhost/api/issues/PROJ-${"9".repeat(400)}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(404);
+	});
+
 	it("GET /api/issues/:id includes project_key (PROJ-226 tab title regression)", async () => {
 		const created = await seedIssue(workspaceId, projectId, userId, { title: "By id" });
 

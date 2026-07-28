@@ -433,7 +433,7 @@ async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, 
 // Digits are bounded: parseInt("9".repeat(400)) is Infinity, which drizzle would happily
 // bind and D1 would reject as a type error — a 500 where a 404 belongs. Anything longer
 // than this isn't a ref, so it falls through to being treated as an id and 404s.
-export const ISSUE_REF_PATTERN = /^([A-Z]+)-(\d{1,9})$/;
+export const ISSUE_REF_PATTERN = /^([A-Z][A-Z0-9]*)-(\d{1,9})$/;
 
 /**
  * Accept either identifier in an `:issueId` path segment.
@@ -472,7 +472,7 @@ export async function resolveIssueIdParam(ctx: ServiceCtx, param: string): Promi
 }
 
 async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, ref: string) {
-	const m = ref.match(/^([A-Z]+)-(\d+)$/);
+	const m = ref.match(ISSUE_REF_PATTERN);
 	if (!m)
 		throw new ValidationError({
 			formErrors: ["ref must be in format KEY-NUMBER"],
