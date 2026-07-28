@@ -103,7 +103,7 @@ running server.
 
 | Tool | Description |
 |------|-------------|
-| `list_issues` | List issues in the workspace, optionally filtered by status, priority, project, or assignee |
+| `list_issues` | List issues in the workspace, optionally filtered by status, priority, project, or assignee. Items omit `body` by default — pass includeBody:true to include it. Pass includeRollups:true to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item. |
 | `get_issue` | Get a single issue by ID or project key + number (e.g. "PROJ-42") |
 | `create_issue` | Create a new issue in a project |
 | `update_issue` | Update an issue - status, priority, title, body, assignee, or labels. Review gating (PROJ-254/375): pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. |

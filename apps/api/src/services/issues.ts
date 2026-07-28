@@ -150,11 +150,17 @@ function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): 
 	}
 }
 
-function addAssociationFilters(conditions: Condition[], filters: ListIssuesFilters): void {
+function addAssociationFilters(
+	conditions: Condition[],
+	ctx: ServiceCtx,
+	filters: ListIssuesFilters
+): void {
 	const { projectId, assignee, parentId, noParent, typeId, excludeTypeIds, sprintId } = filters;
 
 	if (projectId) conditions.push(eq(schema.issues.projectId, projectId));
-	if (assignee) conditions.push(eq(schema.issues.assigneeId, assignee));
+	// PROJ-444: "me" resolves to the calling user, so a caller never needs its own id.
+	if (assignee)
+		conditions.push(eq(schema.issues.assigneeId, assignee === "me" ? ctx.userId : assignee));
 	if (parentId) conditions.push(eq(schema.issues.parentId, parentId));
 	if (noParent) conditions.push(isNull(schema.issues.parentId));
 	if (typeId) conditions.push(eq(schema.issues.typeId, typeId));
@@ -234,7 +240,7 @@ async function buildListIssuesConditions(
 	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
 	if (visible) conditions.push(visible);
 	addStatusFilters(conditions, filters);
-	addAssociationFilters(conditions, filters);
+	addAssociationFilters(conditions, ctx, filters);
 	await addCustomFieldFilter(orm, ctx, conditions, filters);
 	addDateRangeFilters(conditions, filters);
 	return conditions;
@@ -312,15 +318,71 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 
 	const issueIds = (items as Array<{ id: string }>).map((i) => i.id);
 	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
-	const itemsWithFields = (items as Array<Record<string, unknown>>).map((i) => ({
-		...i,
-		customFields: customFieldsByIssue[i.id as string] ?? [],
-		url: i.project_key
-			? issuePath(i.project_key as string, i.number as number, i.title as string)
-			: null,
-	}));
+	// PROJ-441: computed in one grouped query for the whole page, rather than the
+	// frontend fanning out a getIssue call per row.
+	const rollupsByParent = filters.includeRollups
+		? await computeChildRollupsForParents(ctx, orm, issueIds)
+		: null;
+
+	const itemsWithFields = (items as Array<Record<string, unknown>>).map((i) => {
+		// PROJ-442: body is omitted by default — callers that need it pass includeBody=1.
+		const { body: _body, ...rest } = i;
+		const item: Record<string, unknown> = {
+			...rest,
+			...(filters.includeBody ? { body: i.body } : {}),
+			customFields: customFieldsByIssue[i.id as string] ?? [],
+			url: i.project_key
+				? issuePath(i.project_key as string, i.number as number, i.title as string)
+				: null,
+		};
+		if (rollupsByParent) item.rollup = rollupsByParent[i.id as string] ?? computeChildRollup([]);
+		return item;
+	});
 
 	return { items: itemsWithFields, nextCursor, total };
+}
+
+// PROJ-441: batched sibling of the single-issue rollup in getIssue below — one grouped
+// query for every parent id on the page instead of N getIssue-shaped queries. Groups by
+// the raw `status` column, exactly like getIssue's child query, so the two surfaces
+// return identical rollups for the same parent — byStatus keys and the done/remaining
+// derivation in computeChildRollup must never diverge between them. Workspace-scoped
+// like every query; deliberately NOT project-visibility filtered, matching getIssue's
+// own child rollup (see assertIssueProjectVisible — that gate applies to the parent
+// issue, not to counting its children).
+async function computeChildRollupsForParents(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	parentIds: string[]
+): Promise<Record<string, ReturnType<typeof computeChildRollup>>> {
+	if (parentIds.length === 0) return {};
+
+	type ChildRow = { parent_id: string; status: string; count: number };
+	const rows = (await inChunks(parentIds, (chunk) =>
+		orm
+			.select({
+				parent_id: schema.issues.parentId,
+				status: schema.issues.status,
+				count: sql<number>`count(*)`,
+			})
+			.from(schema.issues)
+			.where(
+				and(eq(schema.issues.workspaceId, ctx.workspaceId), inArray(schema.issues.parentId, chunk))
+			)
+			.groupBy(schema.issues.parentId, schema.issues.status)
+	)) as ChildRow[];
+
+	const rowsByParent: Record<string, Array<{ status: string; count: number }>> = {};
+	for (const row of rows) {
+		if (!rowsByParent[row.parent_id]) rowsByParent[row.parent_id] = [];
+		rowsByParent[row.parent_id].push({ status: row.status, count: row.count });
+	}
+
+	const result: Record<string, ReturnType<typeof computeChildRollup>> = {};
+	for (const parentId of parentIds) {
+		result[parentId] = computeChildRollup(rowsByParent[parentId] ?? []);
+	}
+	return result;
 }
 
 // Snake-case aliases preserve the existing response contract. The labels raw expression

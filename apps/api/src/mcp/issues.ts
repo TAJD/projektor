@@ -14,7 +14,9 @@ export const issuesTools: MCPTool[] = [
 	{
 		name: "list_issues",
 		description:
-			"List issues in the workspace, optionally filtered by status, priority, project, or assignee",
+			"List issues in the workspace, optionally filtered by status, priority, project, or assignee. " +
+			"Items omit `body` by default — pass includeBody:true to include it. Pass includeRollups:true " +
+			"to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -38,7 +40,10 @@ export const issuesTools: MCPTool[] = [
 					type: "string",
 					description: "Comma-separated priorities (OR-matched), e.g. urgent,high",
 				},
-				assignee: { type: "string", description: "Filter by assignee user ID" },
+				assignee: {
+					type: "string",
+					description: 'Filter by assignee user ID, or "me" for the calling user',
+				},
 				parentId: {
 					type: "string",
 					description: "Filter by parent issue ID (returns direct children only)",
@@ -83,6 +88,15 @@ export const issuesTools: MCPTool[] = [
 					type: "boolean",
 					description:
 						"Filter to agent-initiated done-closures flagged for human audit (PROJ-375) — true for unverifiable evidence, false for externally-checkable evidence",
+				},
+				includeRollups: {
+					type: "boolean",
+					description:
+						"Attach a `rollup` of child status counts (total/byStatus/done/remaining) to each returned item",
+				},
+				includeBody: {
+					type: "boolean",
+					description: "Include the `body` field on each item (omitted by default)",
 				},
 				cursor: { type: "number", description: "Pagination cursor (created_at of last item)" },
 				limit: { type: "number", default: 50, description: "Max 100" },

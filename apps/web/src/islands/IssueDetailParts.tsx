@@ -1,11 +1,11 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { formatIssueRef, isValidIssueRef, normalizeIssueRef } from "../lib/issue-ref";
 import { parseStoryPoints } from "../lib/story-points";
 import { apiFetch } from "../utils/api-client";
 import { clearDraft, draftKey, loadDraft, saveDraft } from "../utils/drafts";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
-import { renderMd } from "../utils/markdown";
+import { renderMd, renderMermaidDiagrams } from "../utils/markdown";
 import { categoryColor } from "./board-utils";
 import type {
 	Attachment,
@@ -25,6 +25,23 @@ import {
 } from "./issue-detail-helpers";
 import MarkdownEditor from "./LazyMarkdownEditor";
 import Select from "./Select";
+
+// Minimal duplicate of the mermaid rules in WikiPage.tsx's WIKI_PAGE_STYLES
+// (~line 1749) — issue/comment prose uses Tailwind's typography .prose, not
+// WikiPage's hand-rolled one, so there's no shared stylesheet to hang this on.
+const MERMAID_PROSE_STYLES = `
+	.prose pre.mermaid {
+		display: flex;
+		justify-content: center;
+		background: none;
+		padding: 0;
+	}
+	.prose pre.mermaid svg {
+		max-width: 100%;
+		width: auto;
+		height: auto;
+	}
+`;
 
 const PencilIcon = () => (
 	<svg
@@ -349,12 +366,25 @@ export function BodySection({
 	const [saveBodyError, setSaveBodyError] = useState<string | null>(null);
 	const key = draftKey(workspaceSlug, issueId, "body");
 	const [hasDraft, setHasDraft] = useState(false);
+	const bodyRef = useRef<HTMLDivElement>(null);
 
 	// Surface an unsaved edit from a previous visit, rather than silently reopening the
 	// editor — the user may have moved on, and the issue may have changed since.
 	useEffect(() => {
 		setHasDraft(loadDraft(key) !== null);
 	}, [key]);
+
+	// Hydrate ```mermaid code blocks into rendered diagrams (mirrors WikiPage's effect).
+	// editingBody is a dep because cancelling an edit remounts the rendered container
+	// with the body unchanged — hydration must run again for the fresh DOM.
+	useEffect(() => {
+		if (editingBody) return;
+		const container = bodyRef.current;
+		if (!container) return;
+		renderMermaidDiagrams(container).catch(() => {
+			// non-fatal — leave the raw code block visible
+		});
+	}, [issue.body, editingBody]);
 
 	function startEditBody(fromDraft = false) {
 		setEditBody((fromDraft ? loadDraft(key) : null) ?? issue.body ?? "");
@@ -455,12 +485,14 @@ export function BodySection({
 				</div>
 			) : issue.body ? (
 				<div
+					ref={bodyRef}
 					class="prose prose-sm max-w-none overflow-x-auto break-words"
 					dangerouslySetInnerHTML={{ __html: renderMd(issue.body) }}
 				/>
 			) : (
 				<p class="text-text-muted italic">No description.</p>
 			)}
+			<style>{MERMAID_PROSE_STYLES}</style>
 		</section>
 	);
 }
@@ -1339,6 +1371,20 @@ function CommentItem({
 	onSave: () => void;
 	onDelete: () => void;
 }) {
+	const bodyRef = useRef<HTMLDivElement>(null);
+
+	// Hydrate ```mermaid code blocks into rendered diagrams (mirrors WikiPage's effect).
+	// isEditing is a dep because cancelling an edit remounts the rendered container
+	// with the body unchanged — hydration must run again for the fresh DOM.
+	useEffect(() => {
+		if (isEditing) return;
+		const container = bodyRef.current;
+		if (!container) return;
+		renderMermaidDiagrams(container).catch(() => {
+			// non-fatal — leave the raw code block visible
+		});
+	}, [comment.body, isEditing]);
+
 	return (
 		<div class="px-4 py-3 border border-border rounded-lg mb-3 bg-surface shadow-[var(--shadow-sm)]">
 			<div class="flex justify-between mb-[0.375rem]">
@@ -1389,6 +1435,7 @@ function CommentItem({
 				</div>
 			) : (
 				<div
+					ref={bodyRef}
 					class="prose prose-sm max-w-none overflow-x-auto break-words"
 					dangerouslySetInnerHTML={{ __html: renderMd(comment.body) }}
 				/>

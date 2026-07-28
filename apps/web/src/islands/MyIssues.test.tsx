@@ -1,10 +1,10 @@
 // MyIssues island — mock-fetch tests.
 //
-// MyIssues first resolves the current user via /auth/me, then fetches
-// /api/issues?assignee=<userId> and groups the results by project. The
-// pattern: stub global fetch to branch on URL, render, and await the
-// post-load UI (view-mode buttons in IssueList's pattern don't apply here —
-// instead wait for the "Include done" checkbox which only renders post-load).
+// MyIssues fetches /api/issues?assignee=me (server-resolved to the calling
+// user, PROJ-444) and groups the results by project. The pattern: stub
+// global fetch to branch on URL, render, and await the post-load UI
+// (view-mode buttons in IssueList's pattern don't apply here — instead wait
+// for the "Include done" checkbox which only renders post-load).
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Issue } from "./board-utils";
@@ -78,9 +78,6 @@ const OPEN_ISSUE_PROJ_B: Issue = {
 function setupFetch(issues: Issue[] = [OPEN_ISSUE_PROJ_A, DONE_ISSUE_PROJ_A, OPEN_ISSUE_PROJ_B]) {
 	return vi.fn().mockImplementation((url: string) => {
 		const u = String(url);
-		if (u.includes("/auth/me")) {
-			return Promise.resolve({ ok: true, json: () => Promise.resolve({ user: { id: USER_ID } }) });
-		}
 		if (u.includes("/api/issues")) {
 			return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: issues }) });
 		}
@@ -104,47 +101,26 @@ describe("MyIssues — loading and error states", () => {
 		expect(screen.getByText(/Loading/i)).toBeTruthy();
 	});
 
-	it("shows an error message when /auth/me fails", async () => {
+	it("shows an error message when the issues fetch fails", async () => {
 		vi.stubGlobal(
 			"fetch",
-			vi.fn().mockImplementation((url: string) => {
-				if (String(url).includes("/auth/me")) return Promise.reject(new Error("network down"));
-				return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
-			})
+			vi.fn().mockImplementation(() => Promise.reject(new Error("boom")))
 		);
 		render(<MyIssues />);
 		expect(await screen.findByRole("alert")).toBeTruthy();
 		expect(screen.getByText(/Failed to load issues/i)).toBeTruthy();
 	});
-
-	it("shows an error message when the issues fetch fails", async () => {
-		vi.stubGlobal(
-			"fetch",
-			vi.fn().mockImplementation((url: string) => {
-				const u = String(url);
-				if (u.includes("/auth/me"))
-					return Promise.resolve({
-						ok: true,
-						json: () => Promise.resolve({ user: { id: USER_ID } }),
-					});
-				return Promise.reject(new Error("boom"));
-			})
-		);
-		render(<MyIssues />);
-		expect(await screen.findByRole("alert")).toBeTruthy();
-	});
 });
 
 describe("MyIssues — cross-project fetch and grouping", () => {
-	it("resolves the user via /auth/me then fetches issues scoped to that assignee", async () => {
+	it("fetches issues scoped to assignee=me (server resolves the calling user)", async () => {
 		const mockFetch = setupFetch();
 		vi.stubGlobal("fetch", mockFetch);
 		render(<MyIssues />);
 		await waitForLoaded();
 
 		const calls = (mockFetch.mock.calls as [string, unknown][]).map(([u]) => String(u));
-		expect(calls.some((u) => u.includes("/auth/me"))).toBe(true);
-		expect(calls.some((u) => u.includes(`assignee=${USER_ID}`))).toBe(true);
+		expect(calls.some((u) => u.includes("/api/issues?assignee=me"))).toBe(true);
 	});
 
 	it("groups issues by project under a heading per project", async () => {
@@ -219,7 +195,7 @@ describe("MyIssues — empty states", () => {
 });
 
 describe("MyIssues — workspace-slug header contract", () => {
-	it("includes X-Workspace-Slug header on both requests when workspaceSlug prop is passed", async () => {
+	it("includes X-Workspace-Slug header when workspaceSlug prop is passed", async () => {
 		const mockFetch = setupFetch();
 		vi.stubGlobal("fetch", mockFetch);
 		render(<MyIssues workspaceSlug="my-workspace" />);

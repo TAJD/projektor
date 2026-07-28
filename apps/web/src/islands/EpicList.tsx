@@ -27,6 +27,10 @@ interface ProjectMeta {
 
 type EpicRollup = { done: number; remaining: number; total: number };
 
+// PROJ-441: rollup is attached server-side per item when includeRollups=1 is passed —
+// see the /api/issues fetch in useEpicsData below.
+type EpicItem = Issue & { rollup?: EpicRollup };
+
 const PRIORITY_LABEL: Record<string, string> = {
 	urgent: "Urgent",
 	high: "High",
@@ -83,24 +87,6 @@ function resolveProjectId(
 	if (prev) return prev;
 	const validated = stored && projects.some((p) => p.id === stored) ? stored : null;
 	return validated ?? projects[0]?.id ?? null;
-}
-
-async function fetchEpicRollups(
-	epicItems: Issue[],
-	workspaceSlug: string | undefined
-): Promise<Record<string, EpicRollup>> {
-	const results = await Promise.all(
-		epicItems.map((ep) =>
-			apiFetch<{ rollup?: EpicRollup }>(`/api/issues/${ep.id}`, { workspaceSlug })
-				.then((detail) => (detail.rollup ? { id: ep.id, rollup: detail.rollup } : null))
-				.catch(() => null)
-		)
-	);
-	const rollups: Record<string, EpicRollup> = {};
-	for (const r of results) {
-		if (r) rollups[r.id] = r.rollup;
-	}
-	return rollups;
 }
 
 function defaultCreateProjectId(projectId: string | null, projects: ProjectMeta[]): string {
@@ -325,8 +311,7 @@ function useEpicsData(
 	filterDateFrom: string,
 	filterDateTo: string
 ) {
-	const [epics, setEpics] = useState<Issue[]>([]);
-	const [epicRollups, setEpicRollups] = useState<Record<string, EpicRollup>>({});
+	const [epics, setEpics] = useState<EpicItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
@@ -343,16 +328,13 @@ function useEpicsData(
 				project: projectId,
 				typeId: epicTypeId,
 				limit: "100",
+				// PROJ-441: child rollups computed server-side in one grouped query,
+				// attached per item — replaces the old per-epic getIssue fan-out.
+				includeRollups: "1",
 			});
 			applyDateRangeParams(qs, filterDateField, filterDateFrom, filterDateTo);
-			const data = await apiFetch<{ items: Issue[] }>(`/api/issues?${qs}`, { workspaceSlug });
-			const epicItems = data.items ?? [];
-			setEpics(epicItems);
-			setEpicRollups({});
-
-			if (epicItems.length > 0) {
-				fetchEpicRollups(epicItems, workspaceSlug).then(setEpicRollups);
-			}
+			const data = await apiFetch<{ items: EpicItem[] }>(`/api/issues?${qs}`, { workspaceSlug });
+			setEpics(data.items ?? []);
 		} catch (e) {
 			setError(String(e));
 		} finally {
@@ -364,7 +346,7 @@ function useEpicsData(
 		if (projectIdReady) fetchEpics();
 	}, [fetchEpics, projectIdReady]);
 
-	return { epics, epicRollups, loading, error, fetchEpics };
+	return { epics, loading, error, fetchEpics };
 }
 
 function useCreateEpicForm(
@@ -449,7 +431,7 @@ export default function EpicList({ workspaceSlug }: Props) {
 	const [sortBy, setSortBy] = useState<SortKey>("created_at");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-	const { epics, epicRollups, loading, error, fetchEpics } = useEpicsData(
+	const { epics, loading, error, fetchEpics } = useEpicsData(
 		projectId,
 		projectIdReady,
 		epicTypeId,
@@ -515,7 +497,6 @@ export default function EpicList({ workspaceSlug }: Props) {
 			<EpicsTable
 				epics={epics}
 				filteredEpics={filteredEpics}
-				epicRollups={epicRollups}
 				sortBy={sortBy}
 				sortDir={sortDir}
 				toggleSort={toggleSort}
@@ -540,22 +521,14 @@ export default function EpicList({ workspaceSlug }: Props) {
 }
 
 interface EpicsTableProps {
-	epics: Issue[];
-	filteredEpics: Issue[];
-	epicRollups: Record<string, EpicRollup>;
+	epics: EpicItem[];
+	filteredEpics: EpicItem[];
 	sortBy: SortKey;
 	sortDir: "asc" | "desc";
 	toggleSort: (key: SortKey) => void;
 }
 
-function EpicsTable({
-	epics,
-	filteredEpics,
-	epicRollups,
-	sortBy,
-	sortDir,
-	toggleSort,
-}: EpicsTableProps) {
+function EpicsTable({ epics, filteredEpics, sortBy, sortDir, toggleSort }: EpicsTableProps) {
 	if (epics.length === 0) {
 		return (
 			<p class="text-text-muted text-sm">No epics found. Use the button above to create one.</p>
@@ -564,7 +537,9 @@ function EpicsTable({
 	if (filteredEpics.length === 0) {
 		return <p class="text-text-muted text-sm">No epics match the active filters.</p>;
 	}
-	const sorted = sortIssues(filteredEpics, sortBy, sortDir);
+	// sortIssues' signature is Issue[] => Issue[]; the sort is a pure reorder, so the
+	// rollup field carried by EpicItem survives — safe to cast back.
+	const sorted = sortIssues(filteredEpics, sortBy, sortDir) as EpicItem[];
 	return (
 		<>
 			<div class="overflow-x-auto max-sm:hidden">
@@ -584,14 +559,14 @@ function EpicsTable({
 					</thead>
 					<tbody>
 						{sorted.map((ep) => (
-							<EpicRow key={ep.id} ep={ep} rollup={epicRollups[ep.id]} />
+							<EpicRow key={ep.id} ep={ep} rollup={ep.rollup} />
 						))}
 					</tbody>
 				</table>
 			</div>
 			<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
 				{sorted.map((ep) => (
-					<EpicMobileCard key={ep.id} ep={ep} rollup={epicRollups[ep.id]} />
+					<EpicMobileCard key={ep.id} ep={ep} rollup={ep.rollup} />
 				))}
 			</div>
 		</>

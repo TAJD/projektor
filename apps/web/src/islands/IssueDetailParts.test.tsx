@@ -4,10 +4,10 @@
 // page to scroll horizontally on mobile; the rendered-markdown container must
 // carry its own horizontal scroll instead. jsdom doesn't lay out real pixel
 // widths, so this asserts the containing class rather than measured overflow.
-import { render, screen } from "@testing-library/preact";
-import { describe, expect, it } from "vitest";
+import { render, screen, waitFor } from "@testing-library/preact";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BodySection } from "./IssueDetailParts";
-import type { IssueData } from "./issue-detail-helpers";
+import type { Comment, IssueData } from "./issue-detail-helpers";
 
 const WIDE_TABLE_BODY = `
 | Column A | Column B | Column C | Column D | Column E | Column F | Column G |
@@ -63,5 +63,93 @@ describe("BodySection", () => {
 		const pre = container?.querySelector("pre");
 		expect(pre).toBeTruthy();
 		expect(pre?.closest(".prose")).toBe(container);
+	});
+});
+
+// Mermaid hydration (PROJ-447) — mirrors markdown.test.ts's mocked-mermaid approach,
+// but through the island so we assert the effect actually wires up renderMermaidDiagrams.
+describe("BodySection — mermaid hydration", () => {
+	afterEach(() => {
+		vi.doUnmock("mermaid");
+		vi.resetModules();
+	});
+
+	it("hydrates a mermaid fence in the issue body", async () => {
+		const run = vi.fn().mockResolvedValue(undefined);
+		const initialize = vi.fn();
+		vi.doMock("mermaid", () => ({ default: { initialize, run } }));
+		vi.resetModules();
+		const { BodySection: MockedBodySection } = await import("./IssueDetailParts");
+
+		render(
+			<MockedBodySection
+				issue={{ ...ISSUE, body: "```mermaid\ngraph TD\n    A --> B\n```" }}
+				issueId={ISSUE.id}
+				workspaceSlug="ws"
+				fetchIssue={async () => {}}
+			/>
+		);
+
+		await waitFor(() => {
+			expect(run).toHaveBeenCalled();
+		});
+	});
+
+	it("does not hydrate (mermaid.run is never called) for a body without a fence", async () => {
+		const run = vi.fn().mockResolvedValue(undefined);
+		const initialize = vi.fn();
+		vi.doMock("mermaid", () => ({ default: { initialize, run } }));
+		vi.resetModules();
+		const { BodySection: MockedBodySection } = await import("./IssueDetailParts");
+
+		render(
+			<MockedBodySection
+				issue={ISSUE}
+				issueId={ISSUE.id}
+				workspaceSlug="ws"
+				fetchIssue={async () => {}}
+			/>
+		);
+
+		await screen.findByRole("table");
+		expect(run).not.toHaveBeenCalled();
+	});
+});
+
+const COMMENT: Comment = {
+	id: "c1",
+	body: "```mermaid\ngraph TD\n    A --> B\n```",
+	author_id: "u1",
+	author_name: "Author",
+	author_email: "author@example.com",
+	created_at: 1000,
+};
+
+describe("CommentsSection — mermaid hydration", () => {
+	afterEach(() => {
+		vi.doUnmock("mermaid");
+		vi.resetModules();
+	});
+
+	it("hydrates a mermaid fence in a comment body", async () => {
+		const run = vi.fn().mockResolvedValue(undefined);
+		const initialize = vi.fn();
+		vi.doMock("mermaid", () => ({ default: { initialize, run } }));
+		vi.resetModules();
+		const { CommentsSection: MockedCommentsSection } = await import("./IssueDetailParts");
+
+		render(
+			<MockedCommentsSection
+				issueId="i1"
+				workspaceSlug="ws"
+				comments={[COMMENT]}
+				currentUserId={null}
+				fetchComments={async () => {}}
+			/>
+		);
+
+		await waitFor(() => {
+			expect(run).toHaveBeenCalled();
+		});
 	});
 });

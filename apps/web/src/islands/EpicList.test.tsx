@@ -27,6 +27,8 @@ interface Issue {
 	sprint_id: string | null;
 	updated_at: number;
 	created_at: number;
+	// PROJ-441: attached server-side per item when includeRollups=1 is passed.
+	rollup?: { done: number; remaining: number; total: number };
 }
 
 const EPIC_ISSUE: Issue = {
@@ -184,6 +186,42 @@ describe("EpicList", () => {
 		render(<EpicList />);
 		// Desktop table + mobile card both render (CSS hides one per viewport).
 		expect((await screen.findAllByText("Big Epic")).length).toBe(2);
+	});
+
+	it("requests includeRollups=1 and renders the rollup embedded on each item (PROJ-441)", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		const calledUrls: string[] = [];
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				calledUrls.push(u);
+				if (u.includes("/api/task-types")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([{ id: "tt1", key: "epic", name: "Epic" }]),
+					});
+				}
+				if (u.includes("/api/issues")) {
+					return Promise.resolve({
+						ok: true,
+						json: () =>
+							Promise.resolve({
+								items: [{ ...EPIC_ISSUE, rollup: { done: 1, remaining: 2, total: 3 } }],
+							}),
+					});
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			})
+		);
+		render(<EpicList />);
+		await screen.findAllByText("Big Epic");
+
+		const issuesCall = calledUrls.find((u) => u.includes("/api/issues?"));
+		expect(issuesCall).toContain("includeRollups=1");
+		// No more per-epic getIssue fan-out for rollups (fetchEpicRollups removed).
+		expect(calledUrls.some((u) => /\/api\/issues\/e1$/.test(u))).toBe(false);
+		expect(screen.getAllByText("1 done · 2 remaining").length).toBeGreaterThan(0);
 	});
 
 	it("shows '+ New Epic' button when the epic task type is available", async () => {

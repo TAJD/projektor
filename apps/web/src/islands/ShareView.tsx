@@ -1,6 +1,6 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
-import { renderMd } from "../utils/markdown";
+import { renderMd, renderMermaidDiagrams } from "../utils/markdown";
 
 interface SharedIssue {
 	title: string;
@@ -33,6 +33,23 @@ const PRIORITY_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Minimal duplicate of the mermaid rules in WikiPage.tsx's WIKI_PAGE_STYLES
+// (~line 1749) — the share page's .prose is hand-rolled CSS in
+// pages/share/view.astro, not WikiPage's, so there's no shared stylesheet to hang this on.
+const MERMAID_PROSE_STYLES = `
+	.prose pre.mermaid {
+		display: flex;
+		justify-content: center;
+		background: none;
+		padding: 0;
+	}
+	.prose pre.mermaid svg {
+		max-width: 100%;
+		width: auto;
+		height: auto;
+	}
+`;
 
 function formatDate(unixSeconds: number): string {
 	const d = new Date(unixSeconds * 1000);
@@ -165,6 +182,16 @@ export default function ShareView() {
 	const [issue, setIssue] = useState<SharedIssue | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const bodyRef = useRef<HTMLDivElement>(null);
+
+	// Hydrate ```mermaid code blocks into rendered diagrams (mirrors WikiPage's effect).
+	useEffect(() => {
+		const container = bodyRef.current;
+		if (!container) return;
+		renderMermaidDiagrams(container).catch(() => {
+			// non-fatal — leave the raw code block visible
+		});
+	}, [issue?.body]);
 
 	useEffect(() => {
 		const m = window.location.pathname.match(/^\/share\/([^/]+)$/);
@@ -229,6 +256,7 @@ export default function ShareView() {
 			{/* Body */}
 			{issue.body ? (
 				<div
+					ref={bodyRef}
 					class="prose"
 					dangerouslySetInnerHTML={{ __html: renderMd(issue.body) }}
 					style={{ marginBottom: "1.5rem" }}
@@ -241,6 +269,7 @@ export default function ShareView() {
 
 			{/* Custom fields */}
 			<CustomFieldsSection fields={issue.customFields} />
+			<style>{MERMAID_PROSE_STYLES}</style>
 		</div>
 	);
 }

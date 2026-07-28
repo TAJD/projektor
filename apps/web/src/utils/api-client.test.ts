@@ -219,3 +219,114 @@ describe("apiFetch — re-auth loop guard (PROJ-430)", () => {
 		restoreLocation();
 	});
 });
+
+// PROJ-443: concurrent identical GETs share one underlying fetch. Not a cache — the
+// dedupe entry only exists while the request is in flight.
+describe("apiFetch — in-flight GET dedupe (PROJ-443)", () => {
+	beforeEach(() => {
+		sessionStorage.clear();
+		__resetApiFetchStateForTests();
+	});
+
+	it("shares one fetch across concurrent GETs to the same path+slug", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "i1" }) });
+		vi.stubGlobal("fetch", fetchMock);
+
+		const [a, b] = await Promise.all([
+			apiFetch("/api/issues/i1", { workspaceSlug: "ws1" }),
+			apiFetch("/api/issues/i1", { workspaceSlug: "ws1" }),
+		]);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(a).toEqual({ id: "i1" });
+		expect(b).toEqual({ id: "i1" });
+	});
+
+	it("does not share fetches across different paths or different workspace slugs", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "i1" }) });
+		vi.stubGlobal("fetch", fetchMock);
+
+		await Promise.all([
+			apiFetch("/api/issues/i1", { workspaceSlug: "ws1" }),
+			apiFetch("/api/issues/i2", { workspaceSlug: "ws1" }),
+			apiFetch("/api/issues/i1", { workspaceSlug: "ws2" }),
+		]);
+
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+	});
+
+	it("does not share fetches across different on401 behaviours", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "i1" }) });
+		vi.stubGlobal("fetch", fetchMock);
+
+		await Promise.all([apiFetch("/auth/me", { on401: "throw" }), apiFetch("/auth/me")]);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("never dedupes a GET with custom headers", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "i1" }) });
+		vi.stubGlobal("fetch", fetchMock);
+
+		await Promise.all([
+			apiFetch("/api/issues/i1", { headers: { "X-Custom": "a" } }),
+			apiFetch("/api/issues/i1", { headers: { "X-Custom": "b" } }),
+		]);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("never dedupes a POST", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "i1" }) });
+		vi.stubGlobal("fetch", fetchMock);
+
+		await Promise.all([
+			apiFetch("/api/issues", { method: "POST", body: { title: "a" } }),
+			apiFetch("/api/issues", { method: "POST", body: { title: "a" } }),
+		]);
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("fetches again for a later identical GET once the first has settled", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "i1" }) });
+		vi.stubGlobal("fetch", fetchMock);
+
+		await apiFetch("/api/issues/i1", { workspaceSlug: "ws1" });
+		await apiFetch("/api/issues/i1", { workspaceSlug: "ws1" });
+
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("rejects every joiner and clears the entry when the fetch rejects", async () => {
+		const fetchMock = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+		vi.stubGlobal("fetch", fetchMock);
+
+		const first = apiFetch("/api/issues/i1", { workspaceSlug: "ws1" });
+		const second = apiFetch("/api/issues/i1", { workspaceSlug: "ws1" });
+
+		await expect(first).rejects.toBeInstanceOf(ApiOfflineError);
+		await expect(second).rejects.toBeInstanceOf(ApiOfflineError);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "i1" }) })
+		);
+		await expect(apiFetch("/api/issues/i1", { workspaceSlug: "ws1" })).resolves.toEqual({
+			id: "i1",
+		});
+	});
+});

@@ -38,6 +38,8 @@ router.get("/", async (c) => {
 		updatedAfter,
 		updatedBefore,
 		needsAudit,
+		includeRollups,
+		includeBody,
 		cursor,
 		limit,
 	} = c.req.query();
@@ -65,6 +67,8 @@ router.get("/", async (c) => {
 				updatedAfter,
 				updatedBefore,
 				needsAudit,
+				includeRollups,
+				includeBody,
 				cursor,
 				limit,
 			})

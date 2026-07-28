@@ -51,7 +51,9 @@ export const ListIssuesSchema = z.object({
 	priority: PriorityEnum.optional(),
 	priorities: z.string().optional(),
 	projectId: z.string().optional(),
-	assignee: z.string().optional(),
+	// PROJ-444: "me" is a sentinel the service resolves to ctx.userId — kept visible in
+	// the schema (rather than folded silently into z.string()) so both surfaces document it.
+	assignee: z.union([z.literal("me"), z.string()]).optional(),
 	parentId: z.string().uuid().optional(),
 	noParent: z.coerce.boolean().optional(),
 	typeId: TaxonomyIdSchema.optional(),
@@ -66,6 +68,13 @@ export const ListIssuesSchema = z.object({
 	// PROJ-375: surface agent-initiated done-closures whose evidence wasn't
 	// externally checkable, for periodic human audit.
 	needsAudit: z.coerce.boolean().optional(),
+	// PROJ-441: compute child rollups for the returned page in one grouped query
+	// (see computeChildRollupsForParents in services/issues.ts) instead of the
+	// frontend fanning out a getIssue call per row.
+	includeRollups: z.coerce.boolean().optional(),
+	// PROJ-442: list items omit `body` by default (it's rarely needed and can be
+	// large); set this to restore it.
+	includeBody: z.coerce.boolean().optional(),
 	cursor: z.coerce.number().optional(),
 	limit: z.coerce.number().min(1).max(100).default(30),
 });
