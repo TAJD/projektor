@@ -225,7 +225,7 @@ boundary.
   "result": {
     "protocolVersion": "2024-11-05",
     "capabilities": { "tools": {} },
-    "serverInfo": { "name": "projektor", "version": "<release version, e.g. 0.4.13>" }
+    "serverInfo": { "name": "projektor", "version": "<the deployed release's version, e.g. from its git tag>" }
   }
 }
 ```

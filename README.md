@@ -154,7 +154,7 @@ a generated-docs freshness check. See [AGENTS.md](./AGENTS.md) for the full list
 
 `pnpm install` wires two hooks automatically:
 
-- **pre-commit** - `pnpm turbo type-check` (fast; turbo-cached)
+- **pre-commit** - `pnpm turbo type-check` (fast; turbo-cached), `pnpm biome check --changed` (lint, changed files only), and the island API convention check
 - **pre-push** - `pnpm biome check .`, `pnpm --filter @projektor/api test`, and `pnpm --filter @projektor/web test`
 
 Bypass for WIP commits: `git commit --no-verify -m "wip: …"`

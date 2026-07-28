@@ -193,7 +193,7 @@ curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 Then open **http://localhost:4321** - with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
-**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, `pnpm --filter @projektor/api test:coverage`, `pnpm --filter @projektor/web test:coverage`, `pnpm --filter @projektor/web build`, and `pnpm --filter @projektor/docs build` must all be green, and `pnpm gen:docs` must produce no diff. CI runs exactly these (`.github/workflows/ci.yml`).
+**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, `pnpm --filter @projektor/api test:coverage`, `pnpm --filter @projektor/web test:coverage`, `pnpm --filter @projektor/web build`, and `pnpm --filter @projektor/docs build` must all be green, and `pnpm gen:docs` must produce no diff. CI runs these plus `node scripts/check-island-api.mjs` (`.github/workflows/ci.yml`).
 
 ## Git hooks (lefthook)
 
@@ -202,7 +202,7 @@ as that user (a member of the seeded `projektor` workspace), and the islands loa
 - **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages), `pnpm biome check --changed --no-errors-on-unmatched` (lint, changed files only), and the island API convention check.
 - **pre-push** - `pnpm biome check .` (full-repo lint), `pnpm --filter @projektor/api test`, and `pnpm --filter @projektor/web test` (too slow for every commit but catches the failures that most often break CI).
 
-CI (`.github/workflows/ci.yml`) runs a superset of these: the generated-docs freshness check, `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, coverage-enforced test runs for `@projektor/api` and `@projektor/web`, and both the web and docs builds. New contributors get the hooks automatically after `pnpm install`.
+CI (`.github/workflows/ci.yml`) runs a superset of these: the generated-docs freshness check, `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, coverage-enforced test runs for `@projektor/api` and `@projektor/web`, both the web and docs builds, and `node scripts/check-island-api.mjs`. New contributors get the hooks automatically after `pnpm install`.
 
 **Bypass for WIP commits/pushes:** pass `--no-verify` (or `-n`) to git:
 

@@ -4,7 +4,7 @@ description: "The research behind Projektor's workflow design: flow literature, 
 sidebar:
   order: 2
 ---
-Projektor's tagline is "AI native design and tried and tested principles". This
+Projektor combines AI-native design with tried-and-tested principles. This
 page presents the evidence: the two bodies of research the design draws on, and
 the principles that fall out where they agree.
 
@@ -89,8 +89,9 @@ and its rules cannot diverge.
 
 The WIP research is blunt: nobody can tell you your optimal limit. So the
 tracker stamps transition timestamps and exposes lead time, cycle time, and
-WIP-over-time — and defaults (like the agent concurrency cap) derive from your
-measured baseline, not folklore.
+WIP-over-time — the measurements a team needs before tuning defaults like the
+agent concurrency cap (currently a flat default of 3) against its own baseline,
+not folklore.
 
 ### 6. Humans gate the exits
 
