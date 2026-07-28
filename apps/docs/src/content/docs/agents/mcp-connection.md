@@ -43,7 +43,7 @@ curl -s http://127.0.0.1:8787/bootstrap \
   | jq -r .mcpAddCommand | sh
 ```
 
-The bootstrap endpoint is disabled when `ENVIRONMENT=production`. It is idempotent, so it's safe to call more than once.
+The bootstrap endpoint is enabled only when `ENVIRONMENT=development` - any other value, including an unset one, disables it. It is idempotent, so it's safe to call more than once.
 
 ---
 
@@ -76,7 +76,7 @@ curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
 # Response: { "token": "pk_..." }
 ```
 
-`scopes` must be `["read"]`, `["write"]`, or `["read", "write"]`. `expiresAt` is optional (unix seconds).
+`scopes` is a list of `"read"`, `"write"`, or `"*"` (full access) - e.g. `["read"]`, `["read", "write"]`, or `["*"]`. `expiresAt` is optional (unix seconds).
 
 ---
 
@@ -225,7 +225,7 @@ boundary.
   "result": {
     "protocolVersion": "2024-11-05",
     "capabilities": { "tools": {} },
-    "serverInfo": { "name": "projektor", "version": "0.1.0" }
+    "serverInfo": { "name": "projektor", "version": "<the deployed release's version, e.g. from its git tag>" }
   }
 }
 ```

@@ -6,31 +6,31 @@ sidebar:
 ---
 Tools for agentic development split into three concerns: running the agents,
 coordinating them, and tracking the work. The mistake is to treat each concern
-as its own product. They are not products - they are concerns, and the real
+as its own product. They are not products — they are concerns, and the real
 product boundary is the API. With MCP as the shared interface, one tool can cut
 a vertical slice through several concerns and stay coherent, because the
 interface stays coherent. That is what Projektor is: not one layer, but a slice
 across several.
 
-This page is the *why*. For the *how* - the multi-agent loop these concerns
-combine into - see [Agentic workflows](/projektor/agents/agent-workflows/).
+This page is the *why*. For the *how* — the multi-agent loop these concerns
+combine into — see [Agentic workflows](/projektor/agents/agent-workflows/).
 
 ## The three concerns
 
-1. **Implementation - the runtime.** Spawning agents, worktrees, job objects.
+1. **Implementation — the runtime.** Spawning agents, worktrees, job objects.
    Choosing which model runs (Opus plans, Sonnet builds, Haiku looks up). Tuning
    prompts and context to keep tokens cheap. And the verification steps that move
    work forward: running the tests, doing the human review.
-2. **Coordination - communication.** A message bus, agent presence, context
+2. **Coordination — communication.** A message bus, agent presence, context
    fetching, shared skills. For a fleet, most of this collapses into project
    management: the issue graph **is** the shared memory, and status changes
    **are** the events.
-3. **Project management - the source of truth.** The durable state: the issue,
+3. **Project management — the source of truth.** The durable state: the issue,
    epic, and sprint graph; machine-readable priorities; and the state-machine
    nodes that record what verification decided.
 
 Projektor is a single MCP surface spanning coordination and project management.
-Through file claims it also reaches into the runtime - deciding who may write
+Through file claims it also reaches into the runtime — deciding who may write
 which file. It owns the **nodes** of the work state machine; the implementation
 layer owns the **transitions**. Projektor never runs a test or judges a diff. It
 records the outcome.
@@ -78,7 +78,7 @@ Projektor sits between two kinds of tool that already exist:
 - **Jira / Notion** are mature and scalable, but human-first: agent access is
   bolted on, the API is not the primary surface, and you cannot cheaply
   self-host a slice of them.
-- **beads** is genuinely agent-native, but it is a git-file tracker - issues
+- **beads** is genuinely agent-native, but it is a git-file tracker — issues
   stored as JSONL in the repo. That gives offline resilience and issues that
   version alongside the code, but it is structurally per-repo and bound to git
   merges.
@@ -102,7 +102,7 @@ not a rewrite.
 These are deliberate bets, not oversights:
 
 1. **A central coordinator on the write path.** A deployed tracker puts
-   Projektor's availability on every worker's critical path - the price of
+   Projektor's availability on every worker's critical path — the price of
    cross-project claims and presence that beads, being offline and git-backed,
    never pays. The bet: fleet-scale coordination is worth more than git's offline
    resilience and the issue-versioned-with-code property.
@@ -115,7 +115,7 @@ These are deliberate bets, not oversights:
 
 ## Where to go next
 
-- **The operational loop:** [Agentic workflows](/projektor/agents/agent-workflows/) - how the
+- **The operational loop:** [Agentic workflows](/projektor/agents/agent-workflows/) — how the
   three concerns combine into a real multi-agent dev cycle.
 - **The system underneath:** [Architecture](/projektor/architecture/system-design/).
 - **Connect an agent:** [Connect an AI agent](/projektor/agents/mcp-connection/).

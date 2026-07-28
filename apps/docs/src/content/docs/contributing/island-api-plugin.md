@@ -12,7 +12,7 @@ how it replaced an older grep script (CD-69).
 
 ## Why a cofferdam plugin instead of a grep script
 
-The convention used to be enforced by a shell script that grepped island source files
+A shell script used to enforce the convention, grepping island source files
 for `buildHeaders` and `fetch(`. That worked, but it had no AST awareness — it couldn't
 tell a real `fetch()` call from a string that happened to contain the word, and it
 couldn't be extended to catch `window.fetch()`-style bypasses without ad-hoc regex
@@ -70,7 +70,7 @@ for (const ln of file.lines()) {
 }
 ```
 
-Deliberately, this loop does **not** skip lines flagged by `LineView.isComment` or
+This loop deliberately does **not** skip lines flagged by `LineView.isComment` or
 `isStringLiteral` — the original grep script scanned raw text unconditionally, and
 preserving that means the plugin doesn't silently lose coverage relative to what it
 replaced (the fixture's third case exists specifically to guard against a future "skip

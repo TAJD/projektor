@@ -5,8 +5,8 @@ sidebar:
   order: 2
 ---
 Projektor ships as a **self-contained release artifact** and deploys from **config
-only**. There is no source checkout, no submodule or any build step on the machine that
-deploys. This page covers the model, how to stand up your own
+only**. There is no source checkout, no submodule, and no build step on the deploy
+machine. This page covers the model, how to stand up your own
 instance, how releases are cut, and how to keep an instance updated automatically.
 
 > Looking for the 5-minute version? See [Self-hosting](/projektor/guides/self-hosting/).
@@ -95,7 +95,7 @@ echo "v0.3.7" > projektor.version          # pin whichever tag you picked
 ```
 
 Fill in the `REPLACE_` values: D1 `database_id`, KV `id`, your Cloudflare Access
-team domain + audience, and `ADMIN_EMAILS`. The artifact-owned paths
+team domain and audience, and `ADMIN_EMAILS`. The artifact-owned paths
 (`main = ./vendor/worker.js`, `[assets].directory = ./vendor/web`,
 `migrations_dir = ./vendor/migrations`) and `compatibility_flags = ["nodejs_compat"]`
 are already set - leave them.
@@ -215,7 +215,7 @@ How it's wired:
    `projektor.version` (a `[skip ci]` commit), and deploys.
 
 The result: `git push --tags` in `projektor` → your instance is running the new
-version, no manual step. To deploy by hand instead, just bump `projektor.version`,
+version, no manual step. To deploy by hand instead, bump `projektor.version`,
 commit, and push.
 
 ## Operating notes
