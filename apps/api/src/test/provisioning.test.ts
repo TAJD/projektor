@@ -30,6 +30,15 @@ async function memberRole(workspaceId: string, userId: string) {
 	return row?.role ?? null;
 }
 
+// Simulates a prior removeMember call without going through the HTTP route.
+async function tombstoneRemoval(workspaceId: string, userId: string) {
+	await env.DB.prepare(
+		"INSERT INTO provisioning_removals (workspace_id, user_id, removed_at) VALUES (?, ?, ?)"
+	)
+		.bind(workspaceId, userId, Math.floor(Date.now() / 1000))
+		.run();
+}
+
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("login provisioning", () => {
 	it("first admin login creates the default workspace and makes them owner", async () => {
@@ -218,6 +227,66 @@ describe("login provisioning", () => {
 			.first<{ id: string }>();
 		expect(ws).not.toBeNull();
 		expect(await memberRole(ws!.id, user.id)).toBe("owner");
+	});
+});
+
+// PROJ-436: removeMember tombstones the removal (provisioning_removals); provisioning must
+// respect it across all three re-add paths, without affecting workspaces the user wasn't
+// removed from.
+describe("PROJ-436: removal tombstone", () => {
+	it("a tombstoned admin is not re-owned of that workspace, but still owns others", async () => {
+		const removedFrom = await seedWorkspace("prov-436-admin-removed");
+		const stillOwns = await seedWorkspace("prov-436-admin-other");
+		const admin = await seedUser("removed-admin@example.com");
+		await tombstoneRemoval(removedFrom.id, admin.id);
+
+		await ensureUserProvisioned(
+			envWith({
+				ADMIN_EMAILS: "removed-admin@example.com",
+				DEFAULT_WORKSPACE_SLUG: "prov-436-admin-default-unused",
+				AUTO_JOIN_ROLE: "viewer",
+			}),
+			admin
+		);
+
+		expect(await memberRole(removedFrom.id, admin.id)).toBeNull();
+		expect(await memberRole(stillOwns.id, admin.id)).toBe("owner");
+	});
+
+	it("a tombstoned user is not auto-rejoined to the default workspace", async () => {
+		const slug = "prov-436-autojoin-removed";
+		const ws = await seedWorkspace(slug);
+		const user = await seedUser("removed-viewer@example.com");
+		await tombstoneRemoval(ws.id, user.id);
+
+		await ensureUserProvisioned(
+			envWith({
+				ADMIN_EMAILS: "boss@example.com",
+				DEFAULT_WORKSPACE_SLUG: slug,
+				AUTO_JOIN_ROLE: "viewer",
+			}),
+			user
+		);
+
+		expect(await memberRole(ws.id, user.id)).toBeNull();
+	});
+
+	it("a tombstoned user is not re-mapped into their domain's workspace", async () => {
+		const mappedWs = await seedWorkspace("prov-436-domain-removed");
+		const user = await seedUser("removed-colleague@example.com");
+		await tombstoneRemoval(mappedWs.id, user.id);
+
+		await ensureUserProvisioned(
+			envWith({
+				ADMIN_EMAILS: "boss@example.com",
+				DEFAULT_WORKSPACE_SLUG: "prov-436-domain-default-unused",
+				AUTO_JOIN_ROLE: "viewer",
+				WORKSPACE_DOMAIN_MAP: '{"example.com":{"slug":"prov-436-domain-removed","role":"member"}}',
+			}),
+			user
+		);
+
+		expect(await memberRole(mappedWs.id, user.id)).toBeNull();
 	});
 });
 

@@ -135,6 +135,16 @@ export async function inviteMember(ctx: ServiceCtx, input: unknown) {
 	await orm
 		.insert(schema.workspaceMembers)
 		.values({ workspaceId: ctx.workspaceId, userId: user.id, role: newRole, joinedAt: now });
+	// PROJ-436: re-inviting a previously-removed user clears their removal tombstone, so
+	// provisioning can re-add them again if config (ADMIN_EMAILS etc) says it should.
+	await orm
+		.delete(schema.provisioningRemovals)
+		.where(
+			and(
+				eq(schema.provisioningRemovals.workspaceId, ctx.workspaceId),
+				eq(schema.provisioningRemovals.userId, user.id)
+			)
+		);
 	return { ok: true };
 }
 
@@ -155,6 +165,20 @@ export async function removeMember(ctx: ServiceCtx, targetUserId: string) {
 				eq(schema.workspaceMembers.userId, targetUserId)
 			)
 		);
+	// PROJ-436: tombstone the removal so ensureUserProvisioned (ADMIN_EMAILS / AUTO_JOIN_ROLE /
+	// WORKSPACE_DOMAIN_MAP) doesn't silently re-add this user once their provisioning cache
+	// expires. Cleared by inviteMember above.
+	await orm
+		.insert(schema.provisioningRemovals)
+		.values({
+			workspaceId: ctx.workspaceId,
+			userId: targetUserId,
+			removedAt: Math.floor(Date.now() / 1000),
+		})
+		.onConflictDoUpdate({
+			target: [schema.provisioningRemovals.workspaceId, schema.provisioningRemovals.userId],
+			set: { removedAt: Math.floor(Date.now() / 1000) },
+		});
 	return { ok: true };
 }
 
