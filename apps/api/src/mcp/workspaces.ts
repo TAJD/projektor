@@ -70,7 +70,7 @@ export const workspacesTools: MCPTool[] = [
 				.get();
 			if (!ws) throw new NotFoundError("Workspace not found");
 
-			return deleteWorkspace({ ...ctx, workspaceId: ws.id }, "projektor");
+			return deleteWorkspace({ ...ctx, workspaceId: ws.id }, workspaceSlug, "projektor");
 		},
 	},
 	{

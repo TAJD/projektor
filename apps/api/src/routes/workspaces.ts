@@ -95,7 +95,9 @@ router.delete("/:slug/tokens/:tokenId", async (c) => {
 router.delete("/:slug", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await deleteWorkspace(ctx, c.env.DEFAULT_WORKSPACE_SLUG ?? "projektor"));
+		return c.json(
+			await deleteWorkspace(ctx, c.req.param("slug"), c.env.DEFAULT_WORKSPACE_SLUG ?? "projektor")
+		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

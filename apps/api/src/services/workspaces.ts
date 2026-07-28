@@ -238,6 +238,7 @@ export async function revokeToken(ctx: ServiceCtx, tokenId: string) {
 
 export async function deleteWorkspace(
 	ctx: ServiceCtx,
+	pathSlug: string,
 	defaultWorkspaceSlug: string
 ): Promise<{ ok: true }> {
 	if (ctx.role !== "owner") {
@@ -252,6 +253,13 @@ export async function deleteWorkspace(
 		.get();
 
 	if (!ws) throw new NotFoundError("Workspace not found");
+
+	// PROJ-437: ctx.workspaceId is resolved from the X-Workspace-Slug header (or Host
+	// subdomain), not the URL's :slug — without this check a caller whose header names
+	// workspace A but whose URL names workspace B would silently delete A instead of B.
+	if (ws.slug !== pathSlug) {
+		throw new NotFoundError("Workspace not found");
+	}
 
 	if (ws.slug === defaultWorkspaceSlug) {
 		throw new ValidationError({
