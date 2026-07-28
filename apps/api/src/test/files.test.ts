@@ -1,6 +1,14 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedMember, seedProject, seedToken, seedUser } from "./helpers";
+import {
+	authHeaders,
+	seedFixture,
+	seedMember,
+	seedProject,
+	seedToken,
+	seedUser,
+	seedWorkspaceRoles,
+} from "./helpers";
 
 const ENTITY_ID = crypto.randomUUID();
 
@@ -590,6 +598,60 @@ describe("Files API", () => {
 			expect(list.find((l) => l.kind === "wiki_ref")).toBeUndefined();
 		});
 	});
+
+	describe("PROJ-425: viewer role is denied write access", () => {
+		it("POST /api/files rejects a viewer upload → 403", async () => {
+			const { workspace, viewer } = await seedWorkspaceRoles();
+			const form = new FormData();
+			form.append("file", new File(["data"], "f.txt", { type: "text/plain" }));
+			form.append("entityType", "issue");
+			form.append("entityId", crypto.randomUUID());
+			const res = await SELF.fetch("http://localhost/api/files", {
+				method: "POST",
+				headers: { Authorization: `Bearer ${viewer.token}`, "X-Workspace-Slug": workspace.slug },
+				body: form,
+			});
+			expect(res.status).toBe(403);
+		});
+
+		it("POST /api/files/links rejects a viewer → 403", async () => {
+			const { workspace, viewer } = await seedWorkspaceRoles();
+			const res = await SELF.fetch("http://localhost/api/files/links", {
+				method: "POST",
+				headers: {
+					...authHeaders(viewer.token, workspace.slug),
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify({
+					kind: "url",
+					entityType: "issue",
+					entityId: crypto.randomUUID(),
+					url: "https://example.com",
+				}),
+			});
+			expect(res.status).toBe(403);
+		});
+
+		it("DELETE /api/files/:id rejects a viewer → 403", async () => {
+			const { workspace, owner, viewer } = await seedWorkspaceRoles();
+			const form = new FormData();
+			form.append("file", new File(["data"], "f.txt", { type: "text/plain" }));
+			form.append("entityType", "issue");
+			form.append("entityId", crypto.randomUUID());
+			const uploadRes = await SELF.fetch("http://localhost/api/files", {
+				method: "POST",
+				headers: { Authorization: `Bearer ${owner.token}`, "X-Workspace-Slug": workspace.slug },
+				body: form,
+			});
+			const { id } = (await uploadRes.json()) as { id: string };
+
+			const delRes = await SELF.fetch(`http://localhost/api/files/${id}`, {
+				method: "DELETE",
+				headers: authHeaders(viewer.token, workspace.slug),
+			});
+			expect(delRes.status).toBe(403);
+		});
+	});
 });
 
 // PROJ-234: attachments previously had no MCP surface at all. list/get/create-link/delete
@@ -719,5 +781,47 @@ describe("Files MCP tools", () => {
 			authHeaders(other.token, other.workspace.slug)
 		);
 		expect(result).toEqual([]);
+	});
+
+	it("create_link_attachment via MCP rejects a viewer session → JSON-RPC error", async () => {
+		const { workspace, viewer } = await seedWorkspaceRoles();
+		const res = (await mcpCall(
+			workspace.id,
+			"tools/call",
+			{
+				name: "create_link_attachment",
+				arguments: {
+					kind: "url",
+					entityType: "issue",
+					entityId: crypto.randomUUID(),
+					url: "https://example.com",
+				},
+			},
+			authHeaders(viewer.token, workspace.slug)
+		)) as JsonRpcError;
+		expect(res.error).toBeDefined();
+	});
+
+	it("delete_attachment via MCP rejects a viewer session → JSON-RPC error", async () => {
+		const { workspace, owner, viewer } = await seedWorkspaceRoles();
+		const created = await mcpToolResult<{ id: string }>(
+			workspace.id,
+			"create_link_attachment",
+			{
+				kind: "url",
+				entityType: "issue",
+				entityId: crypto.randomUUID(),
+				url: "https://example.com",
+			},
+			authHeaders(owner.token, workspace.slug)
+		);
+
+		const res = (await mcpCall(
+			workspace.id,
+			"tools/call",
+			{ name: "delete_attachment", arguments: { id: created.id } },
+			authHeaders(viewer.token, workspace.slug)
+		)) as JsonRpcError;
+		expect(res.error).toBeDefined();
 	});
 });

@@ -86,14 +86,19 @@ router.post("/", async (c) => {
 	// live in the service (PROJ-234).
 	await c.env.R2.put(r2Key, await file.arrayBuffer(), { httpMetadata: { contentType } });
 
-	const { id } = await filesService.recordUpload(ctx, {
-		entityType,
-		entityId,
-		filename: file.name,
-		contentType,
-		size: file.size,
-		r2Key,
-	});
+	let id: string;
+	try {
+		({ id } = await filesService.recordUpload(ctx, {
+			entityType,
+			entityId,
+			filename: file.name,
+			contentType,
+			size: file.size,
+			r2Key,
+		}));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
 
 	return c.json({ id, filename: file.name, contentType, size: file.size }, 201);
 });

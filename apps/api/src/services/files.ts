@@ -8,6 +8,7 @@ import {
 } from "../schemas/files";
 import { visibleProjectSqlFragment } from "./access";
 import {
+	ForbiddenError,
 	NotFoundError,
 	PayloadTooLargeError,
 	UnsupportedMediaTypeError,
@@ -15,6 +16,15 @@ import {
 } from "./errors";
 import type { ServiceCtx } from "./types";
 import * as wikiService from "./wiki";
+
+// PROJ-425: attachments never checked ctx.role at all — a viewer could create/delete
+// them. Mirrors comments.ts's flat viewer guard rather than wiki.ts's per-project
+// requireWikiWrite: attachment entityIds aren't required to reference an existing
+// issue/wiki page row (they're free-floating metadata keyed by entity_type/entity_id),
+// so resolving a project to check per-project role isn't possible in general.
+function requireAttachmentWrite(ctx: ServiceCtx): void {
+	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+}
 
 export interface AttachmentDto {
 	id: string;
@@ -122,6 +132,8 @@ export async function createLinkAttachment(
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const data = parsed.data;
 
+	requireAttachmentWrite(ctx);
+
 	if (data.kind === "wiki_ref") {
 		// PROJ-311: getWikiPage enforces project-grant visibility, not just existence —
 		// a page in a project the caller can't see 404s the same as a nonexistent one.
@@ -197,6 +209,8 @@ export async function recordUpload(ctx: ServiceCtx, input: unknown): Promise<{ i
 	const parsed = RecordFileUploadSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { entityType, entityId, filename, contentType, size, r2Key } = parsed.data;
+
+	requireAttachmentWrite(ctx);
 
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -276,6 +290,8 @@ export async function deleteAttachment(
 ): Promise<{ r2Key: string }> {
 	const parsed = DeleteAttachmentSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+
+	requireAttachmentWrite(ctx);
 
 	const row = await ctx.db
 		.prepare("SELECT r2_key FROM attachments WHERE id = ? AND workspace_id = ?")
