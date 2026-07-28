@@ -720,7 +720,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
                 )}
                 <span class="link-label">{item.label}</span>
               </a>
-              {item.glossaryId && <GlossaryHelp client:load id={item.glossaryId} />}
+              {item.glossaryId && <GlossaryHelp client:idle id={item.glossaryId} />}
             </span>
           ))}
         </nav>
