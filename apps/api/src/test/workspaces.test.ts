@@ -351,6 +351,23 @@ describe("DELETE /api/workspaces/:slug (PROJ-96)", () => {
 		});
 		expect(res.status).toBe(409);
 	});
+
+	it("URL slug mismatched with X-Workspace-Slug header → 404, neither workspace is deleted (PROJ-437)", async () => {
+		// ctx.workspaceId (and thus the actual delete target) is resolved from the header,
+		// not the URL. Naming a *different* workspace in the URL must not silently delete
+		// the header's workspace, nor the URL's.
+		const other = await seedWorkspace(`del-437-${crypto.randomUUID().slice(0, 8)}`);
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${other.slug}`, {
+			method: "DELETE",
+			headers: ownerHeaders, // X-Workspace-Slug: slug (the fixture workspace, not `other`)
+		});
+		expect(res.status).toBe(404);
+
+		const stillThere = await SELF.fetch(`http://localhost/api/workspaces/${slug}`, {
+			headers: ownerHeaders,
+		});
+		expect(stillThere.status).toBe(200);
+	});
 });
 
 describe("GET /api/workspaces/:slug (currentUserRole)", () => {
