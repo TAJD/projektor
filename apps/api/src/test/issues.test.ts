@@ -342,7 +342,7 @@ describe("Issues API", () => {
 		);
 		expect(second.items).toHaveLength(5);
 		expect(second.nextCursor).toBeNull();
-	});
+	}, 15000); // PROJ-248: seeds 35 issues sequentially; full-suite contention pushes this past the 5s default
 
 	it("reports the real total match count, not just the loaded page size (PROJ-303)", async () => {
 		const base = 1_700_000_000;
@@ -406,7 +406,7 @@ describe("Issues API", () => {
 		expect(
 			scoped.items.every((i) => (i as { title: string }).title.startsWith("Older issue"))
 		).toBe(true);
-	});
+	}, 15000); // PROJ-248: seeds 65 issues sequentially; full-suite contention pushes this past the 5s default
 
 	it("GET /api/issues/:id returns 404 for unknown id", async () => {
 		const res = await SELF.fetch(`http://localhost/api/issues/${crypto.randomUUID()}`, {
