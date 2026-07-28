@@ -6,6 +6,7 @@ import {
 	createIssue,
 	deleteIssue,
 	getIssue,
+	ISSUE_REF_PATTERN,
 	listIssues,
 	searchIssues,
 	updateIssue,
@@ -94,7 +95,7 @@ router.get("/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	const param = c.req.param("id");
 	// Accept KEY-NUMBER refs (e.g. PROJ-42) as well as UUIDs
-	const input = /^[A-Z]+-\d+$/.test(param) ? { ref: param } : { id: param };
+	const input = ISSUE_REF_PATTERN.test(param) ? { ref: param } : { id: param };
 	try {
 		return c.json(await getIssue(ctx, input));
 	} catch (e) {

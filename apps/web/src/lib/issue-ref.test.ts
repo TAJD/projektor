@@ -117,4 +117,12 @@ describe("isValidIssueRef", () => {
 	it("returns false for input with no hyphen", () => {
 		expect(isValidIssueRef("PROJ42")).toBe(false);
 	});
+
+	it("returns true for a key containing digits (PROJ-440)", () => {
+		expect(isValidIssueRef("WEB2-15")).toBe(true);
+	});
+
+	it("returns false for a key starting with a digit", () => {
+		expect(isValidIssueRef("2FA-1")).toBe(false);
+	});
 });
