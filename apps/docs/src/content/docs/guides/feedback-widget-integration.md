@@ -107,7 +107,7 @@ status/source, mark it reviewed, or convert it directly into an issue.
 
 ## See also
 
-- Design background: [PROJ-378](https://github.com/TAJD/projektor) (direct user feedback
-  ingestion)
 - [MCP tool catalog](/projektor/agents/tool-catalog/) for the full set of
   feedback-source management tools (create/list/update/rotate/revoke)
+- [REST endpoints](/projektor/agents/rest-endpoints/) - `POST /api/feedback/submit`
+  is public and REST-only; there is no MCP equivalent for end-user submission

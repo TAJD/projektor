@@ -24,30 +24,39 @@ flowchart LR
         gate{"Admitted by an<br/>Access policy?"}
     end
     subgraph pk["Projektor — authorization"]
-        provision["Provisioning:<br/>upsert user, auto-join<br/>workspace as viewer"]
+        provision["Provisioning:<br/>upsert user record"]
+        member{"Auto-join configured?<br/>(default: no — invite-only)"}
         authz{"Group grants for<br/>the target project?"}
     end
     denied(["401 — never reaches Projektor"])
+    noaccess(["403 — no workspace membership<br/>until an admin invites them"])
     pending(["Empty 'access pending' state"])
     scoped(["Sees only granted projects,<br/>at the granted role"])
 
     user --> gate
     gate -->|no| denied
-    gate -->|yes| provision --> authz
+    gate -->|yes| provision --> member
+    member -->|no| noaccess
+    member -->|yes, joins as viewer| authz
     authz -->|none| pending
     authz -->|one or more| scoped
 
     classDef gateCls fill:#e0ecff,stroke:#36c,color:#036;
     classDef pkCls fill:#e6f7e6,stroke:#2a2,color:#060;
     class gate gateCls;
-    class provision,authz pkCls;
+    class provision,member,authz pkCls;
 ```
 
-Access admits a first-time login, upserts them, and auto-joins them to the
-workspace as a `viewer` **with no groups**. With no grants, the default-deny rule
-means they see nothing — no projects, issues, or project wiki — until an admin
-adds them to a group. This is the "access pending" state, and it is the whole
-point: admission is not access.
+Access admits a first-time login and Projektor upserts a user record for them —
+but by default that's it. Auto-join is invite-only unless an operator opts in
+(`AUTO_JOIN_ROLE`, unset by default); a newly-admitted user with no workspace
+membership gets **403 Forbidden** until an admin calls `invite_member`. Operators
+who want an open instance can set `AUTO_JOIN_ROLE=viewer`, which auto-joins every
+admitted user to the workspace as a `viewer` **with no groups**. Either way, groups
+are never auto-granted: with no grants, the default-deny rule means a member sees
+nothing — no projects, issues, or project wiki — until an admin adds them to a
+group. This is the "access pending" state, and it is the whole point: membership
+is not access.
 
 Workspace **owner/admin bypass groups entirely** and see everything. This
 preserves the `ADMIN_EMAILS` bootstrap and makes lockout impossible — there is

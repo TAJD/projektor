@@ -1,15 +1,18 @@
 ---
 title: "Agentic workflows"
-description: "The end-to-end multi-agent loop: lifecycle, coordination, and project management."
+description: "How Projektor fits the agentic dev-tools stack, and the end-to-end multi-agent loop: lifecycle, coordination, and project management."
 sidebar:
   order: 3
 ---
 Projektor is **MCP-native**: AI agents are a first-class client, not an afterthought.
-Everything a browser user can do, an agent can do over a JSON-RPC MCP endpoint. This
-page describes the layers agents use to do it.
+Everything a browser user can do, an agent can do over a JSON-RPC MCP endpoint.
 
-Agentic development breaks down into three concerns. Projektor integrates across all of them.
-
+Tools for agentic development split into three concerns: running the agents,
+coordinating them, and tracking the work. The mistake is to treat each concern as its
+own product. They are not products — they are concerns, and the real product boundary
+is the API. With MCP as the shared interface, one tool can cut a vertical slice through
+several concerns and stay coherent, because the interface stays coherent. That is what
+Projektor is: not one layer, but a slice across two of the three.
 
 | Layer | Runs where | What it does | Reference |
 |------|-----------|--------------|-----------|
@@ -17,12 +20,47 @@ Agentic development breaks down into three concerns. Projektor integrates across
 | **2 · Coordination** | Projektor MCP | Lets parallel agents announce themselves, claim files, and message each other so they don't clobber each other's work | [Contributor conventions](/projektor/contributing/conventions/) (Fleet coordination protocol) |
 | **3 · Project management** | Projektor MCP | The actual work: issues, sprints, wiki, links - and "what should I work on next?" | [MCP tool catalog](/projektor/agents/tool-catalog/), [Connect an agent](/projektor/agents/mcp-connection/) |
 
-Layers 2 and 3 are Projektor itself. Layer 1 is the harness around it. You can use any
-layer alone - a single agent needs only Layer 3 - but the power comes from combining them.
+Projektor is a single MCP surface spanning layers 2 and 3. Through file claims it also
+reaches into layer 1 — deciding who may write which file. It owns the **nodes** of the
+work state machine; the implementation layer owns the **transitions**. Projektor never
+runs a test or judges a diff; it records the outcome. You can use any layer alone — a
+single agent needs only layer 3 — but the power comes from combining them.
 
-> **Where this fits.** For how these three layers sit relative to other tools (Jira,
-> Notion, beads) and why Projektor deliberately spans layers 2–3, see
-> [Where Projektor fits](/projektor/philosophy/where-projektor-fits/). That page is the *why*; this one is the *how*.
+```mermaid
+flowchart TB
+    human(["Human / lead agent - intent, priorities, final review"])
+
+    subgraph L3["3 · Project management - source of truth"]
+        graph3["Issue / epic / sprint graph = shared memory"]
+        prio["Prioritise & decompose (machine-readable)"]
+        state["State-machine NODES - records verification outcome"]
+    end
+
+    subgraph L2["2 · Coordination - communication"]
+        prim["Agent-native primitives: file claims · registry · heartbeat"]
+        evt["Comments · status · messages = event log / bus"]
+        ctx["Context fetch · skills · repo memory"]
+    end
+
+    subgraph L1["1 · Lifecycle - runtime"]
+        spawn["Spawn · worktrees · job objects"]
+        route["Routing: which agent/model handles what"]
+        cond["Conditioning: prompt / context optimisation"]
+        verify{{"Transitions: tests + human review"}}
+    end
+
+    projektor["Projektor - one MCP surface, vertical slice"]
+    projektor -.-> graph3
+    projektor -.-> prim
+    projektor -.-> state
+
+    human --> prio --> graph3 --> prim
+    prim <--> evt
+    evt --> ctx --> spawn
+    spawn --> route --> cond --> verify
+    verify -->|pass / fail| state
+    state -->|feedback / replan| human
+```
 
 ---
 
@@ -43,11 +81,11 @@ without stepping on other agents or your main checkout. The durable pattern:
   directory handles between the two phases. Closing the tab first releases the locks, so
   removing the directory always succeeds. Finish with `git worktree prune`.
 
-> The reference implementation of this layer is a pair of shell scripts (`spawn-claude`
-> to create a worktree+tab, `closedown-tabs` to reap them). They are tooling that lives
-> outside this repo; the *pattern* - isolated worktree, contained process tree,
-> close-before-remove - is what matters and is reproducible with plain `git worktree` and
-> your terminal multiplexer of choice.
+> The reference implementation of this layer is a pair of shell scripts (one to
+> create a worktree+tab, one to reap them). They are tooling that lives outside this
+> repo; the *pattern* - isolated worktree, contained process tree, close-before-remove -
+> is what matters and is reproducible with plain `git worktree` and your terminal
+> multiplexer of choice.
 
 The trade-off: worktree setup costs ~200–500 ms per agent, so it is not worth it for a
 single-file edit. Spin up isolated workspaces when you are fanning out real, parallel work.
@@ -72,7 +110,7 @@ backed by MCP tools:
 The **step-by-step protocol** - exact call order, payloads, and the file-ownership rules
 that keep agents on disjoint file sets - lives in
 [Contributor conventions → Fleet coordination protocol](/projektor/contributing/conventions/). That's the operational
-home; this page is the why.
+home; the sections above are the why.
 
 ---
 
@@ -128,9 +166,55 @@ each layer looks like a curiosity; together they're a reliable multi-agent dev l
 
 ---
 
+## Why it's built this way
+
+Projektor sits between two kinds of tool that already exist:
+
+- **Jira / Notion** are mature and scalable, but human-first: agent access is
+  bolted on, the API is not the primary surface, and you cannot cheaply
+  self-host a slice of them.
+- **beads** is genuinely agent-native, but it is a git-file tracker — issues
+  stored as JSONL in the repo. That gives offline resilience and issues that
+  version alongside the code, but it is structurally per-repo and bound to git
+  merges.
+
+Projektor takes the gap between them: **agent-native like beads, deployed and
+cross-project like Jira, and cheap enough to run on serverless for a small
+project.** When you outgrow it, you swap the database, not the system. Workers
+scale compute for free; D1 is the one bottleneck, and replacing it is a swap,
+not a rewrite.
+
+| | beads (git-file) | Projektor (deployed) | Jira / Notion |
+|---|---|---|---|
+| Primary surface | agent-native | agent-native (MCP) | human-first |
+| Scope | per-repo | cross-project | cross-project |
+| Concurrency | git merge on JSONL | claims · heartbeats | human process |
+| Presence / bus | none native | registry + messages | none native |
+| Self-host cost | free (no server) | cheap (serverless) | heavy / SaaS |
+
+These are deliberate bets, not oversights:
+
+1. **A central coordinator on the write path.** A deployed tracker puts
+   Projektor's availability on every worker's critical path — the price of
+   cross-project claims and presence that beads, being offline and git-backed,
+   never pays. The bet: fleet-scale coordination is worth more than git's offline
+   resilience and the issue-versioned-with-code property.
+2. **Task↔code links by convention.** Agents cite an issue's key (e.g. `PROJ-123`)
+   in commits, exactly as humans do. That link is grep-able, not queryable - a field
+   to add later if it earns its place, not a rewrite.
+3. **Coordination, not judgment.** Design, test strategy, and the meaning of
+   "done" stay with the engineer. Projektor records the decision; it never makes
+   it.
+
+For the research this design draws on, see
+[Design principles](/projektor/philosophy/design-principles/).
+
+---
+
 ## Where to go next
 
 - **Run a single agent:** [Connect an agent](/projektor/agents/mcp-connection/) → then try the prompts in §3.
 - **Run a fleet on this repo:** [Contributor conventions](/projektor/contributing/conventions/) - the coordination
   protocol, serialized-file rules, and per-domain file ownership.
 - **Every tool, by domain:** [MCP tool catalog](/projektor/agents/tool-catalog/).
+- **The system underneath:** [Architecture](/projektor/architecture/system-design/).

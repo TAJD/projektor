@@ -1,6 +1,6 @@
 ---
 title: "How the island API convention plugin works"
-description: "A tour of IslandApiConvention, the cofferdam plugin that enforces apiFetch usage in islands (CD-69)."
+description: "A tour of IslandApiConvention, the cofferdam plugin that enforces apiFetch usage in islands."
 sidebar:
   order: 2
 ---
@@ -8,7 +8,7 @@ The [contributor conventions](/projektor/contributing/conventions/) say islands 
 the shared `apiFetch` wrapper instead of hand-rolling headers or calling `fetch()`
 directly. This page explains the mechanism that enforces that rule: a small
 [cofferdam](https://github.com/TAJD/cofferdam) plugin called `IslandApiConvention`, and
-how it replaced an older grep script (CD-69).
+how it replaced an older grep script.
 
 ## Why a cofferdam plugin instead of a grep script
 
@@ -52,8 +52,8 @@ export async function loadIssue(id: string) {
 ### `buildHeaders`: a line scan, not an AST match
 
 You'd expect "find a declaration named `buildHeaders`" to be an AST check, but the
-check-sdk's AST surface (v0) has no `VariableDeclaration` node kind yet (tracked as
-CD-78), so `const buildHeaders = (token) => ...` isn't visible to `file.ast.findAll(...)`
+check-sdk's AST surface (v0) has no `VariableDeclaration` node kind yet, so
+`const buildHeaders = (token) => ...` isn't visible to `file.ast.findAll(...)`
 at all — only `function buildHeaders(...)` is. Since most real occurrences use the
 `const`/arrow form, the plugin instead regex-matches against every raw line:
 
@@ -121,18 +121,17 @@ leaving `someClient.fetch(...)` alone.
 ```ts
 files: {
   extensions: ["ts", "tsx"],
-  pathPatterns: ["apps/web/src/islands/**/*"], // CD-70 glob workaround
+  pathPatterns: ["apps/web/src/islands/**/*"], // glob workaround, see below
 },
 ```
 
 The check only runs against files under `apps/web/src/islands`. The trailing `**/*`
-(rather than the more natural-looking `**`) works around a glob-matching bug tracked as
-CD-70 in cofferdam's own tracker: `apps/web/src/islands/**` alone never matches a file
-sitting *directly* in `islands/` — it only matches files in nested subdirectories.
-`**/*` is the workaround, since it matches both direct and nested files. If CD-70 is
-ever fixed upstream, this pattern can be simplified, but until then any new plugin
-scoped to a directory should copy this `**/*` suffix rather than assume `**` alone
-covers direct files too.
+(rather than the more natural-looking `**`) works around a glob-matching bug in
+cofferdam: `apps/web/src/islands/**` alone never matches a file sitting *directly* in
+`islands/` — it only matches files in nested subdirectories. `**/*` is the workaround,
+since it matches both direct and nested files. If that's ever fixed upstream, this
+pattern can be simplified, but until then any new plugin scoped to a directory should
+copy this `**/*` suffix rather than assume `**` alone covers direct files too.
 
 ## How it's wired in
 

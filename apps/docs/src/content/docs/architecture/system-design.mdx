@@ -102,8 +102,9 @@ flowchart TB
 REST (`/api/*`) is the SPA's **private contract** - versionless, and may change shape
 between releases without notice. MCP (`/mcp/:workspaceId`) is the **stable public
 surface** for agents. The two are usually kept at parity (see `AGENTS.md`'s
-service-layer contract), but a handful of deliberate REST↔MCP differences exist by
-design - see [Contributor conventions → Deliberate REST↔MCP parity exceptions](/projektor/contributing/conventions/).
+service-layer contract), but a small, documented subset of REST endpoints - file
+attachments, tokens, public share links, feedback submission - has no MCP
+equivalent and is safe to depend on; see [REST endpoints](/projektor/agents/rest-endpoints/).
 
 ## Request flow
 

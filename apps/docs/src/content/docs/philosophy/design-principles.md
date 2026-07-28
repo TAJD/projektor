@@ -75,7 +75,7 @@ Agent sessions, file claims, issue leases, heartbeats, channel messages:
 coordination state lives in the same durable store as the work itself, not in
 ad-hoc side channels. The issue graph is the shared memory; status changes are
 the events. (This is the thesis of
-[Where Projektor fits](/projektor/philosophy/where-projektor-fits/).)
+[Agentic workflows](/projektor/agents/agent-workflows/).)
 
 ### 4. One canonical workflow spec, looked up — not copied
 
@@ -93,13 +93,17 @@ WIP-over-time — the measurements a team needs before tuning defaults like the
 agent concurrency cap (currently a flat default of 3) against its own baseline,
 not folklore.
 
-### 6. Humans gate the exits
+### 6. Evidence is checked, not just collected
 
-Agents may pull work autonomously; they do not declare their own work done.
-Agent-completed issues land in review with a structured completion report —
-what changed, verification output, PR link — and only a human moves them to
-done. The checkpoint is enforced in the state machine, not requested in the
-prompt.
+Agents pull work autonomously, and close it autonomously too: there's no
+pre-close block waiting on a human. What replaces the gate is
+a check on the way out. Every agent-closed issue must carry a completion
+report (what changed, how it was verified), and that verification text is
+classified: a resolvable link — a PR, a CI run, a commit — passes silently;
+plain prose like "manually tested" gets flagged `needsAudit: true` for a
+human to pull later. The discipline isn't blocking the transition; it's
+making sure a transition without evidence doesn't disappear into the
+timeline unmarked.
 
 ## What this deliberately isn't
 

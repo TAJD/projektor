@@ -50,7 +50,7 @@ picking up autonomous work.
 
 - **Ready → Claimed**: may be fully autonomous. Any live agent session can call
   \`claim_issue\` without a human in the loop, subject to the WIP limit below.
-- **In Review → Done**: may also be fully autonomous (PROJ-375). An agent session can
+- **In Review → Done**: may also be fully autonomous. An agent session can
   close its own (or any) issue to \`done\` directly — there's no pre-close block waiting
   on a human. An agent-worked issue still needs a completion report before it can
   close (see below). Instead of gating the transition, projektor classifies the
@@ -70,7 +70,7 @@ completion report with:
 transition and names the missing field(s). The report is recorded as a normal issue
 comment, so it's visible in the same timeline as everything else.
 
-## Evidence audit (PROJ-375)
+## Evidence audit
 
 Every agent-initiated \`done\` transition — one that passes \`agentSessionId\` for a
 live agent session — has its \`completionReport.verification\` text classified:

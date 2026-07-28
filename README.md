@@ -23,7 +23,7 @@ you deploy your own ([why there's no login](https://tajd.github.io/projektor/gui
 
 A complete project tracker - issues, boards, sprints, a wiki - built so an AI agent
 can do everything a person can. The shape of the tool follows from that; see
-[the philosophy](https://tajd.github.io/projektor/philosophy/where-projektor-fits/).
+[Agentic workflows](https://tajd.github.io/projektor/agents/agent-workflows/).
 
 - **Issues** - Jira-style tickets: status, priority, assignee, labels, parent/child
   hierarchy, cross-issue links. Referenced as `PROJ-42`.

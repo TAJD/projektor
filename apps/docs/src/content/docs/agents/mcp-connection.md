@@ -78,6 +78,8 @@ curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
 
 `scopes` is a list of `"read"`, `"write"`, or `"*"` (full access) - e.g. `["read"]`, `["read", "write"]`, or `["*"]`. `expiresAt` is optional (unix seconds).
 
+Token minting is one of a handful of REST-only endpoints - see [REST endpoints](/projektor/agents/rest-endpoints/) for the full list.
+
 ---
 
 ## 3b. Connect the Claude app
@@ -89,7 +91,7 @@ The Claude app (desktop and web, at claude.ai) doesn't use the `claude mcp add` 
 2. **Server URL:** paste `https://<your-worker>.workers.dev/mcp/<workspace-uuid>` - the same URL shape used in §3, with the workspace UUID (not the slug) in the path.
 3. **Headers:** open the **Request headers** section of the dialog and add:
    - `Authorization` → `Bearer pk_<64 hex chars>` (enter the scheme yourself - Claude sends the value verbatim, it does not prepend `Bearer`).
-   - **No `X-Workspace-Slug` needed.** The MCP endpoint resolves the workspace from the UUID already in the server URL's path, so the app connects with the `Authorization` header alone (PROJ-348). The token stays workspace-scoped - a token minted for another workspace is still rejected regardless of the path.
+   - **No `X-Workspace-Slug` needed.** The MCP endpoint resolves the workspace from the UUID already in the server URL's path, so the app connects with the `Authorization` header alone. The token stays workspace-scoped - a token minted for another workspace is still rejected regardless of the path.
    - If the instance is behind Cloudflare Access, also add `CF-Access-Client-Id` / `CF-Access-Client-Secret` as described in [§7](#7-cloudflare-access-note).
 4. Click **Add**. Claude calls `initialize` against the URL to confirm the connection before tools become available in a conversation.
 
@@ -208,8 +210,8 @@ Content-Type: application/json
 The token is workspace-scoped - a token from workspace A is rejected for workspace B.
 
 `X-Workspace-Slug` is **optional for `POST /mcp/<workspaceId>`**: when it's absent, the
-workspace is resolved from the UUID in the path (PROJ-348, so the Claude app can connect
-with only the `Authorization` header). Every other endpoint still requires it. The
+workspace is resolved from the UUID in the path, so a client can connect with only the
+`Authorization` header. Every other endpoint still requires it. The
 token-workspace scope check is unchanged either way - it, not the header, is the security
 boundary.
 
@@ -255,6 +257,6 @@ Error codes: `-32600` invalid request, `-32601` method/tool not found, `-32602` 
 These are the load-bearing shapes the Worker enforces - verified against the source:
 
 - **MCP URL shape:** `POST /mcp/<workspaceId>` - UUID in the path, slug only in the header.
-- **Required headers:** `Authorization` is always required. `X-Workspace-Slug` is required on every non-MCP endpoint; on `POST /mcp/<workspaceId>` it is optional because the path UUID resolves the workspace (PROJ-348).
+- **Required headers:** `Authorization` is always required. `X-Workspace-Slug` is required on every non-MCP endpoint; on `POST /mcp/<workspaceId>` it is optional because the path UUID resolves the workspace.
 - **Token prefix:** `pk_` (64 hex chars); verified via SHA-256 hash lookup against D1.
 - **CORS:** both headers are in the Worker's explicit `allowHeaders` list.
