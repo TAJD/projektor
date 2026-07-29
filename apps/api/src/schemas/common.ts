@@ -21,6 +21,17 @@ export const IdSchema = z.string().min(1, "id is required");
 // crypto.randomUUID() (dashed UUID), while seeded defaults use 32-char hex
 // hashes (e.g. "ea3df70345804c3d26ebf139816cae8f"). Accept both so the seeded
 // Epic type / default statuses can actually be assigned to issues. See PROJ-69.
+//
+// PROJ-72 decision: keep the dual format (this schema) rather than migrating
+// seeded rows to real UUIDs. Normalizing would require rewriting seeded IDs
+// and every FK referencing them (issues.type_id/status_id) for a cosmetic
+// win; codifying the convention is cheap and the audited call sites
+// (issues.ts typeId/statusId) already use it correctly. Any *single-id*
+// field that can hold a task-type or task-status ID must use
+// TaxonomyIdSchema, never `.uuid()` directly. Deliberate exceptions:
+// comma-separated filter params (issues.ts statusIds/excludeTypeIds) stay
+// plain z.string() since they're split and passed straight to inArray() /
+// notInArray(), not validated as a single id shape.
 export const TaxonomyIdSchema = z.union([
 	z.string().uuid(),
 	z.string().regex(/^[0-9a-f]{32}$/i, "Invalid id"),

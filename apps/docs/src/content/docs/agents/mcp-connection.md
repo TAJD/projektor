@@ -223,12 +223,37 @@ boundary.
 {
   "jsonrpc": "2.0", "id": 1,
   "result": {
-    "protocolVersion": "2024-11-05",
+    "protocolVersion": "2025-11-25",
     "capabilities": { "tools": {} },
-    "serverInfo": { "name": "projektor", "version": "<the deployed release's version, e.g. from its git tag>" }
+    "serverInfo": { "name": "projektor", "version": "<the deployed release's version, e.g. from its git tag>" },
+    "instructions": "<one-paragraph pointer to get_workflow>"
   }
 }
 ```
+
+`protocolVersion` is `"2025-11-25"` — the latest protocol revision that still uses this
+`initialize` handshake. The 2026-07-28 spec introduced a "modern" era with no `initialize`
+method at all (version + identity travel per-request in `_meta` instead); projektor hasn't
+adopted that yet, so it doesn't claim the `"2026-07-28"` version string here.
+
+### tools/list
+
+`tools/list` results also carry cache hints per the 2026-07-28 spec (SEP-2549):
+
+```json
+{
+  "jsonrpc": "2.0", "id": 2,
+  "result": {
+    "tools": [ /* ... */ ],
+    "ttlMs": 60000,
+    "cacheScope": "private"
+  }
+}
+```
+
+`cacheScope` follows HTTP `Cache-Control` semantics (`"private"` here, since the list
+isn't currently filtered per-caller, but isn't safe for a shared/intermediary cache to
+serve across different callers either).
 
 ### tools/call
 
