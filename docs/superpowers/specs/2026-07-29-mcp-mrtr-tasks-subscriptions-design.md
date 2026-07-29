@@ -6,6 +6,99 @@ shipped in v0.4.16) and on primary-source spec pages fetched directly from
 `modelcontextprotocol.io` (not the announcement blog post) for MRTR, the Tasks extension,
 `subscriptions/listen`, and `server/discover`.
 
+## Addendum: adopt the official SDK instead of hand-rolling all four features?
+
+**This addendum supersedes the framing of everything below it as "the plan" — it's now the
+recommended primary path, with the hand-rolled designs in the rest of this doc kept as the
+documented fallback if this path stalls.** Prompted by a direct question from the repo owner:
+if the official `@modelcontextprotocol/typescript-sdk` already implements MRTR, Tasks,
+subscriptions, and the modern era correctly, why hand-roll all four ourselves?
+
+### What was verified (not assumed)
+
+Two rounds of source-level research against `github.com/modelcontextprotocol/typescript-sdk`
+(not just docs/README) confirmed:
+
+- **Workers-compatible, not Node-only.** `packages/server/src/server/streamableHttp.ts` /
+  `createMcpHandler.ts` are `Request`/`Response`-native. Node support is the adapter
+  (`toNodeHandler()`), not the primary path. A dedicated `shimsWorkerd.ts` runtime shim
+  (selected via package.json export conditions) is first-party Cloudflare Workers support,
+  with comments specifically about isolate warm-up vs. per-request billed CPU.
+- **Handles the legacy/modern split already.** `createMcpHandler()` classifies each request and
+  serves 2026-07-28 (`_meta`-envelope) traffic per-request via a single-exchange transport,
+  falling back to a documented "stateless legacy idiom" for pre-2025-11-25 traffic — this is
+  exactly PROJ-474's scope, done for us, and both paths are per-request (matches projektor's
+  model, not a persistent-process assumption).
+- **Ships `subscriptions/listen`** (SSE, pluggable event bus) out of the box — this was the
+  single biggest open risk in the PROJ-461 design below (the hand-rolled transport question).
+- **Context injection is a clean fit.** `createMcpHandler()` returns
+  `{ fetch: (request, options?: { authInfo?, parsedBody? }) => Promise<Response> }`.
+  `authInfo` is explicitly pass-through — the SDK "never populates this from request headers
+  and performs no token verification of its own." projektor computes
+  `{ workspaceId, role, authKind, scopes }` from the URL/headers exactly as it does today and
+  passes it in as `authInfo` per call. The `McpServerFactory` also receives
+  `{ era, authInfo, requestInfo: Request }` per invocation, so context that varies by request
+  (e.g. workspace-scoped tool lists) is supported.
+- **Tool registration is close to a direct fit.** `registerTool(name, { inputSchema: z.object(...),
+  outputSchema? }, handler)` — Zod (or Standard-Schema), and the handler return shape
+  (`{ content: [{ type: 'text', text }], isError? }`) matches projektor's current
+  `{ content: [{ type: "text", text: JSON.stringify(result) }] }` exactly. projektor's
+  `MCPTool { name, description, inputSchema, handler }` objects would need schema-format
+  adaptation, not a structural rewrite — the 20 tool modules in `apps/api/src/mcp/*.ts` do not
+  need to change their actual business logic.
+- **Mounting under Hono is trivial** — `fetch` is fetch-shaped and bindable:
+  `return await handler.fetch(c.req.raw, { authInfo })` from inside the existing
+  `router.post("/:workspaceId", ...)` route. No routing-ownership conflict.
+
+### Two real problems this doesn't wave away
+
+1. **Error-code contract change (real incompatibility, not cosmetic).** Per the SDK's own
+   error-handling docs, a `tools/call` handler cannot emit a custom top-level JSON-RPC error
+   code — every thrown exception is caught and converted to `{ content, isError: true }`; only
+   one special-case error type propagates as a real JSON-RPC error. projektor's `-32003`
+   (token-scope denial) and `-32000` (not-found/forbidden/conflict) codes documented in
+   `apps/docs/src/content/docs/agents/mcp-connection.md` have **no path to the wire** for
+   `tools/call` under this SDK — they'd become `isError: true` tool-result text instead, which
+   is a client-visible behavior change (any caller checking `error.code === -32003` specifically
+   would break, not just ones reading error text). Separately, the SDK's own missing-tool case
+   throws an error that resolves to `-32602` (Invalid Params), not `-32601` (Method Not Found)
+   as projektor uses today. **This needs an explicit human decision**: accept the behavior
+   change (likely fine for actual MCP clients like Claude Code, which read error text/`isError`
+   rather than branching on numeric codes — but is a real, documented contract change, and
+   `mcp-connection.md`'s error-code table would need rewriting, not just updating) — or keep a
+   thin pre-check layer in front of the SDK for the specific cases where a real JSON-RPC error
+   is required.
+2. **Package maturity — this is genuinely new, not battle-tested.** The 2026-07-28-tracking
+   package (`@modelcontextprotocol/server`, the split-out v2 line) went stable (`2.0.0`) on
+   2026-07-27 — one day before this research was done. The repo has 266 open issues and 235
+   open PRs — active development, not abandoned, but high churn is the more likely read than
+   "settled API." The older `@modelcontextprotocol/sdk` v1.x line (79 published versions) is
+   the actually mature one, but doesn't cover 2026-07-28 at all. Bundle-size impact on Workers'
+   CPU/isolate limits wasn't discoverable from registry metadata alone and would need a real
+   local install + bundle-analysis pass before committing.
+
+### Recommendation
+
+Pursue SDK adoption as the primary strategy for PROJ-458/460/461/474, but **stage it as a
+time-boxed spike, not an immediate full migration**:
+
+1. Local install + a throwaway route that mounts `createMcpHandler()` behind Hono, wired to a
+   couple of real tools (`get_issue`, `list_issues`) with real auth context passed as
+   `authInfo` — prove the integration end-to-end before touching the production route.
+2. Decide the error-code question explicitly (accept the behavior change vs. keep a thin
+   pre-check shim) — this is a call for a human, not something to default silently.
+3. Re-evaluate package maturity after a few `2.0.x` patch releases rather than adopting the
+   literal first stable release into a production auth-gated endpoint.
+4. If the spike succeeds, this collapses PROJ-458 (MRTR)/PROJ-460 (Tasks)/PROJ-461
+   (subscriptions)/PROJ-474 (modern era) into **one migration effort** that gets spec
+   correctness from the library instead of four separate hand-built implementations — directly
+   avoiding the class of mistake made earlier in this epic (the protocolVersion/cacheScope
+   corrections), since the SDK, not projektor's own code, owns those details going forward.
+5. If the spike fails or stalls (error-code migration judged unacceptable, integration friction
+   higher than expected, maturity concerns not resolved after waiting), **the hand-rolled
+   designs in the rest of this document remain the documented fallback** — nothing below this
+   addendum is invalidated, only demoted from "the plan" to "the fallback plan."
+
 ## Cross-cutting decision: these don't require the "modern" era
 
 The single biggest design question across all three tickets is whether MRTR / Tasks /
