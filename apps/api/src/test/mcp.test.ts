@@ -15,17 +15,26 @@ import {
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
 type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
 
+async function mcpFetch(
+	workspaceId: string,
+	method: string,
+	params: unknown,
+	headers: Record<string, string>
+): Promise<Response> {
+	return SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+	});
+}
+
 async function mcpCall<T>(
 	workspaceId: string,
 	method: string,
 	params: unknown,
 	headers: Record<string, string>
 ): Promise<JsonRpcResult<T> | JsonRpcError> {
-	const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
-		method: "POST",
-		headers,
-		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-	});
+	const res = await mcpFetch(workspaceId, method, params, headers);
 	return res.json();
 }
 
@@ -56,13 +65,49 @@ describe("MCP endpoint", () => {
 			serverInfo: { name: string; version: string };
 			instructions: string;
 		}>;
-		expect(res.result.protocolVersion).toBe("2024-11-05");
+		// "2025-11-25" is the latest *legacy* protocol version (initialize handshake).
+		// "2026-07-28" denotes the modern per-request `_meta` era, which has no
+		// initialize method — claiming it here while still running the legacy
+		// handshake would misrepresent what this server actually implements.
+		expect(res.result.protocolVersion).toBe("2025-11-25");
 		expect(res.result.serverInfo.name).toBe("projektor");
 		// __PROJEKTOR_VERSION__ is only injected by the release build (scripts/build-release.sh);
 		// tests run without that define, so the fallback applies.
 		expect(res.result.serverInfo.version).toBe("dev");
 		// Instructions point at the canonical workflow spec rather than restating rules (PROJ-251).
 		expect(res.result.instructions).toContain("get_workflow");
+	});
+
+	it("initialize response carries no session identifier (PROJ-452)", async () => {
+		const res = await mcpFetch(workspaceId, "initialize", {}, headers);
+		expect(res.headers.get("Mcp-Session-Id")).toBeNull();
+		const body = (await res.json()) as JsonRpcResult<Record<string, unknown>>;
+		expect(body.result).not.toHaveProperty("sessionId");
+	});
+
+	it("calls tools/list directly with no prior initialize and no session header (PROJ-452)", async () => {
+		// The 2026-07-28 spec drops the initialize/initialized handshake and
+		// Mcp-Session-Id requirement; this asserts projektor never depended on
+		// either in the first place — a fresh request with no session state
+		// attached succeeds identically to one preceded by `initialize`.
+		const res = (await mcpCall<{ tools: Array<{ name: string }> }>(
+			workspaceId,
+			"tools/list",
+			{},
+			headers
+		)) as JsonRpcResult<{ tools: Array<{ name: string }> }>;
+		expect(res.result.tools.length).toBeGreaterThan(0);
+	});
+
+	it("tools/list includes cache hints (PROJ-454)", async () => {
+		const res = (await mcpCall<{ ttlMs: number; cacheScope: string }>(
+			workspaceId,
+			"tools/list",
+			{},
+			headers
+		)) as JsonRpcResult<{ ttlMs: number; cacheScope: string }>;
+		expect(res.result.ttlMs).toBeGreaterThan(0);
+		expect(res.result.cacheScope).toBe("private");
 	});
 
 	it("tools/list returns core tools", async () => {

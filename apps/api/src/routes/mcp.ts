@@ -32,6 +32,20 @@ import { pluginRegistry } from "../plugins/registry";
 // release tarballs carry a real version string.
 const SERVER_VERSION = typeof __PROJEKTOR_VERSION__ === "string" ? __PROJEKTOR_VERSION__ : "dev";
 
+// PROJ-454: tools/list cache hint (2026-07-28 spec's cacheable-list-responses
+// addition, SEP-2549). The plugin registry has no change hook to invalidate
+// on, so this is a conservative TTL rather than an exact bound.
+const TOOLS_LIST_TTL_MS = 60_000;
+
+// "private" (HTTP Cache-Control semantics, not a projektor-specific value):
+// only the requesting client may cache this response, not a shared
+// intermediary. Correct today because tools/list is NOT filtered by token
+// scope or role (only tools/call is, below) — every caller in a workspace
+// sees the same list. If list filtering is ever added, this must become
+// per-identity, not just per-workspace, or a shared cache would leak one
+// caller's tool set to another.
+const TOOLS_LIST_CACHE_SCOPE = "private";
+
 // Surfaced to every MCP client at `initialize` (the MCP spec's optional
 // `instructions` field). Clients like Claude Code inject this into the model's
 // context. Deliberately a one-paragraph pointer, not a restatement of the rules —
@@ -49,6 +63,17 @@ const router = new Hono<HonoEnv>();
 
 // MCP endpoint: POST /mcp/{workspaceId}
 // Implements JSON-RPC 2.0 over HTTP (MCP Streamable HTTP transport)
+//
+// This is a "legacy-era" server per the 2026-07-28 spec's versioning model:
+// it still uses the initialize handshake rather than per-request `_meta`
+// (io.modelcontextprotocol/protocolVersion etc.) and has no server/discover
+// endpoint. That's fine — it was already stateless in practice (no session
+// store, no Mcp-Session-Id, no requirement that `initialize` precede other
+// calls; every request carries everything it needs from the URL/auth
+// headers) and legacy-to-legacy is a fully supported combination. Adopting
+// the "modern" per-request-metadata era is real protocol surface, not a
+// bump — tracked separately, not attempted here. See PROJ-452 and
+// docs/superpowers/specs/2026-07-29-mcp-2026-07-28-update-plan.md.
 router.post("/:workspaceId", async (c) => {
 	const workspace = c.get("workspace") as { id: string };
 	const user = c.get("user") as { id: string };
@@ -77,9 +102,13 @@ router.post("/:workspaceId", async (c) => {
 
 	switch (body.method) {
 		case "initialize":
+			// "2025-11-25" is the latest *legacy* (initialize-handshake) protocol
+			// version, not "2026-07-28" — that string denotes the modern per-request
+			// `_meta` era, which has no `initialize` method at all. Claiming it here
+			// while still running the legacy handshake would be spec-incoherent.
 			return c.json(
 				jsonRpcResult(body.id, {
-					protocolVersion: "2024-11-05",
+					protocolVersion: "2025-11-25",
 					capabilities: { tools: {} },
 					serverInfo: { name: "projektor", version: SERVER_VERSION },
 					instructions: SERVER_INSTRUCTIONS,
@@ -95,6 +124,11 @@ router.post("/:workspaceId", async (c) => {
 						description: t.description,
 						inputSchema: t.inputSchema,
 					})),
+					// PROJ-454: the tool list is workspace-scoped (core tools + the
+					// plugin registry's tools for this workspace) and changes rarely,
+					// so a short client-side cache is safe.
+					ttlMs: TOOLS_LIST_TTL_MS,
+					cacheScope: TOOLS_LIST_CACHE_SCOPE,
 				})
 			);
 		}
