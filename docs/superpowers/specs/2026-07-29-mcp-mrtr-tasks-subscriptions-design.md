@@ -8,9 +8,9 @@ shipped in v0.4.16) and on primary-source spec pages fetched directly from
 
 ## Addendum: adopt the official SDK instead of hand-rolling all four features?
 
-**This addendum supersedes the framing of everything below it as "the plan" — it's now the
-recommended primary path, with the hand-rolled designs in the rest of this doc kept as the
-documented fallback if this path stalls.** Prompted by a direct question from the repo owner:
+**This addendum reframes everything below it from "the plan" to "the documented fallback" —
+SDK adoption is a *candidate* primary path, pending a spike (see Recommendation), not yet a
+committed decision.** Prompted by a direct question from the repo owner:
 if the official `@modelcontextprotocol/typescript-sdk` already implements MRTR, Tasks,
 subscriptions, and the modern era correctly, why hand-roll all four ourselves?
 
@@ -29,26 +29,39 @@ Two rounds of source-level research against `github.com/modelcontextprotocol/typ
   falling back to a documented "stateless legacy idiom" for pre-2025-11-25 traffic — this is
   exactly PROJ-474's scope, done for us, and both paths are per-request (matches projektor's
   model, not a persistent-process assumption).
-- **Ships `subscriptions/listen`** (SSE, pluggable event bus) out of the box — this was the
-  single biggest open risk in the PROJ-461 design below (the hand-rolled transport question).
-- **Context injection is a clean fit.** `createMcpHandler()` returns
-  `{ fetch: (request, options?: { authInfo?, parsedBody? }) => Promise<Response> }`.
-  `authInfo` is explicitly pass-through — the SDK "never populates this from request headers
-  and performs no token verification of its own." projektor computes
-  `{ workspaceId, role, authKind, scopes }` from the URL/headers exactly as it does today and
-  passes it in as `authInfo` per call. The `McpServerFactory` also receives
-  `{ era, authInfo, requestInfo: Request }` per invocation, so context that varies by request
-  (e.g. workspace-scoped tool lists) is supported.
-- **Tool registration is close to a direct fit.** `registerTool(name, { inputSchema: z.object(...),
-  outputSchema? }, handler)` — Zod (or Standard-Schema), and the handler return shape
-  (`{ content: [{ type: 'text', text }], isError? }`) matches projektor's current
-  `{ content: [{ type: "text", text: JSON.stringify(result) }] }` exactly. projektor's
-  `MCPTool { name, description, inputSchema, handler }` objects would need schema-format
-  adaptation, not a structural rewrite — the 20 tool modules in `apps/api/src/mcp/*.ts` do not
-  need to change their actual business logic.
+- **Ships `subscriptions/listen`'s wire protocol** (SSE, pluggable event bus) out of the box —
+  but scope this precisely (see correction below): it removes the protocol/ack/SSE-framing
+  work, not PROJ-461's actual open blockers.
+- **Context injection is workable but not "clean" — corrected after Opus review.** The
+  original draft here overstated this. `createMcpHandler()` returns
+  `{ fetch: (request, options?: { authInfo?, parsedBody? }) => Promise<Response> }`, and
+  `authInfo` is pass-through (the SDK doesn't populate or verify it) — but `authInfo` is a
+  typed MCP `AuthInfo` shape (token/clientId/scopes), not a place to stuff Cloudflare bindings.
+  projektor's `PluginContext` (`apps/api/src/routes/mcp.ts:93-101`) is built per-request from
+  `c.env.DB/KV/R2` plus `workspaceId`/`role`/`authKind` — and `McpServerFactory`'s
+  `requestInfo: Request` carries no `env` either. The realistic integration is calling
+  `createMcpHandler()` **inside** the Hono route so its closure captures `c.env`, which means
+  re-registering all tools and recompiling all input schemas on every single request — in
+  direct tension with the `shimsWorkerd.ts` isolate-warm-up/per-request-CPU-billing comments
+  cited approvingly above. **Whether the handler can be constructed once (module scope) and
+  still receive per-request `env` some other way is the single most important open question
+  for the spike below — not yet answered.**
+- **Tool registration needs a real adapter, not "light adaptation" — corrected after Opus
+  review.** Two claims in the original draft were wrong: (a) `MCPTool.inputSchema`
+  (`packages/types/src/plugin.ts:6`) is hand-written JSON Schema (`Record<string, unknown>`)
+  across all ~90 registered tools (e.g. `apps/api/src/mcp/issues.ts:20-80`), not Zod — moving to
+  `registerTool`'s Zod/Standard-Schema expectation means converting or generating Zod schemas
+  for all ~90 tools, a real body of mechanical work, not a few files. (b) projektor's tool
+  handlers return raw domain objects (`Promise<unknown>`) — the `{ content: [{ type: "text",
+  ... }] }` wrapping happens once, centrally, in the route (`mcp.ts:154-158`), not per-handler.
+  So the SDK's expected handler return shape doesn't already match; an adapter would wrap each
+  handler's raw result the same way the current route does. Neither of these is hard, but "20
+  tool modules ... do not need to change" undersold the ~90-tool schema-conversion cost.
 - **Mounting under Hono is trivial** — `fetch` is fetch-shaped and bindable:
   `return await handler.fetch(c.req.raw, { authInfo })` from inside the existing
-  `router.post("/:workspaceId", ...)` route. No routing-ownership conflict.
+  `router.post("/:workspaceId", ...)` route. No routing-ownership conflict. (This part holds up
+  unchanged — the env-threading question above is about *what* gets constructed and *when*,
+  not whether the fetch-handoff itself works.)
 
 ### Two real problems this doesn't wave away
 
@@ -62,12 +75,16 @@ Two rounds of source-level research against `github.com/modelcontextprotocol/typ
    is a client-visible behavior change (any caller checking `error.code === -32003` specifically
    would break, not just ones reading error text). Separately, the SDK's own missing-tool case
    throws an error that resolves to `-32602` (Invalid Params), not `-32601` (Method Not Found)
-   as projektor uses today. **This needs an explicit human decision**: accept the behavior
-   change (likely fine for actual MCP clients like Claude Code, which read error text/`isError`
-   rather than branching on numeric codes — but is a real, documented contract change, and
-   `mcp-connection.md`'s error-code table would need rewriting, not just updating) — or keep a
-   thin pre-check layer in front of the SDK for the specific cases where a real JSON-RPC error
-   is required.
+   as projektor uses today. **The cost here was understated, not overstated, in the original
+   draft**: 24 assertions across 11 test files check specific `-32xxx` codes (including
+   `apps/api/src/test/errors.test.ts`, which tests `toMcpError` directly), plus the
+   `mcp-connection.md:270-278` error-code table — all of those would need rewriting, not just
+   the doc prose. **This needs an explicit human decision**: accept the behavior change (likely
+   fine for actual MCP clients like Claude Code, which read error text/`isError` rather than
+   branching on numeric codes — but is a real, documented, test-covered contract change) — or
+   keep a thin pre-check layer in front of the SDK for the specific cases where a real JSON-RPC
+   error is required. Given the test-count finding, the pre-check-shim option looks more
+   attractive than it did in the first draft of this addendum.
 2. **Package maturity — this is genuinely new, not battle-tested.** The 2026-07-28-tracking
    package (`@modelcontextprotocol/server`, the split-out v2 line) went stable (`2.0.0`) on
    2026-07-27 — one day before this research was done. The repo has 266 open issues and 235
@@ -79,25 +96,51 @@ Two rounds of source-level research against `github.com/modelcontextprotocol/typ
 
 ### Recommendation
 
-Pursue SDK adoption as the primary strategy for PROJ-458/460/461/474, but **stage it as a
-time-boxed spike, not an immediate full migration**:
+**Corrected after Opus review**: none of this has been run yet — everything above is source
+reading on GitHub, not a local install. Calling SDK adoption "the primary path" outright, while
+this section simultaneously says to *wait* for the package to mature, was self-contradictory.
+The accurate framing is: **a candidate primary path, pending a concrete, time-boxed spike** —
+not a decision, and not "the plan" until the spike passes its exit test.
 
-1. Local install + a throwaway route that mounts `createMcpHandler()` behind Hono, wired to a
-   couple of real tools (`get_issue`, `list_issues`) with real auth context passed as
-   `authInfo` — prove the integration end-to-end before touching the production route.
-2. Decide the error-code question explicitly (accept the behavior change vs. keep a thin
-   pre-check shim) — this is a call for a human, not something to default silently.
-3. Re-evaluate package maturity after a few `2.0.x` patch releases rather than adopting the
-   literal first stable release into a production auth-gated endpoint.
-4. If the spike succeeds, this collapses PROJ-458 (MRTR)/PROJ-460 (Tasks)/PROJ-461
-   (subscriptions)/PROJ-474 (modern era) into **one migration effort** that gets spec
-   correctness from the library instead of four separate hand-built implementations — directly
-   avoiding the class of mistake made earlier in this epic (the protocolVersion/cacheScope
-   corrections), since the SDK, not projektor's own code, owns those details going forward.
-5. If the spike fails or stalls (error-code migration judged unacceptable, integration friction
-   higher than expected, maturity concerns not resolved after waiting), **the hand-rolled
-   designs in the rest of this document remain the documented fallback** — nothing below this
-   addendum is invalidated, only demoted from "the plan" to "the fallback plan."
+**Spike exit test** (target: ≤1 day of work; if it can't be answered in that time, that's
+itself a signal to fall back, not to keep extending the spike):
+
+1. Local install of `@modelcontextprotocol/server` v2 in a scratch branch.
+2. Answer the env-threading question first (see correction above) — can `createMcpHandler()`
+   be constructed once and still receive per-request `c.env`/`workspaceId`/`role`/`authKind`,
+   or does it genuinely require per-request reconstruction? This determines whether the
+   isolate-warmup concern is real or moot.
+3. Wire exactly 3 real tools (`get_issue`, `list_issues`, one mutating tool e.g. `update_issue`)
+   through hand-converted Zod schemas, mounted under the existing Hono route via
+   `handler.fetch(c.req.raw, { authInfo })`.
+4. Exercise one real auth-denial case (token lacking required scope) and confirm what actually
+   reaches the wire — `isError: true` text, per the error-mapping finding above — and decide
+   right there whether that's acceptable or whether a pre-check shim is needed for
+   scope-denial specifically (given the 24-assertion/11-file test cost found above, leaning
+   toward "shim" is reasonable going in).
+5. Only if 1–4 land cleanly: re-evaluate package maturity (wait for a `2.0.x` patch or two)
+   before proposing a production cutover, and only then would this collapse PROJ-458
+   (MRTR)/PROJ-460 (Tasks)/PROJ-461 (subscriptions)/PROJ-474 (modern era) into one migration
+   effort.
+6. If the spike fails or stalls at any step, **the hand-rolled designs in the rest of this
+   document remain the documented fallback** — nothing below this addendum is invalidated by
+   pursuing the spike, only reordered.
+
+**Reconciling with PROJ-461 below**: the SDK supplies the wire protocol (framing, ack,
+SSE transport) for `subscriptions/listen`, but PROJ-461's actual open blockers — D1 has no
+change-notification mechanism to produce events from, per-token authorization filtering of the
+stream, and Cloudflare Workers' duration limits on a long-lived SSE response — are unaffected
+by which library owns the wire format. Adopting the SDK narrows PROJ-461's scope; it doesn't
+close it.
+
+**Reconciling with PROJ-474 below**: that section's standalone recommendation ("leave in
+backlog, unprioritized... don't schedule speculatively") was written assuming a hand-rolled
+modern-era implementation, where the cost/benefit genuinely didn't justify scheduling it alone.
+If the SDK spike above succeeds, PROJ-474 stops being a standalone speculative migration and
+becomes a side effect of adopting the SDK for MRTR/Tasks/subscriptions — at that point the
+"leave in backlog" recommendation no longer applies, since the modern era support comes free
+with the same migration. If the spike fails, PROJ-474's original backlog/unprioritized
+recommendation stands as written.
 
 ## Cross-cutting decision: these don't require the "modern" era
 
