@@ -1,4 +1,2980 @@
 {
   "version": 3,
-  "findings": []
+  "findings": [
+    {
+      "file": "apps/api/scripts/gen-mcp-catalog.ts",
+      "check_id": "Refactor.PreferArrayMethodOverLoop",
+      "rule_signature": "b5250d912bcc0a0ce804454144b524cd8389cd15564146c7bb5d4524963c33d1"
+    },
+    {
+      "file": "apps/api/src/auth/scopes.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "8316f978fb3925c8bac47c1c7dd8d584535057ee5585787261da47fcc289b21b"
+    },
+    {
+      "file": "apps/api/src/examples/feedback-widget-submit.ts",
+      "check_id": "Design.DuplicateExportName",
+      "rule_signature": "3ca2490bc53217dc4b91b495908ece520a46fd94c8fe1ad22c3303e721ee7bd1"
+    },
+    {
+      "file": "apps/api/src/examples/feedback-widget-submit.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3ca2490bc53217dc4b91b495908ece520a46fd94c8fe1ad22c3303e721ee7bd1"
+    },
+    {
+      "file": "apps/api/src/http/error-adapter.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/api/src/http/error-adapter.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3106e88562297943b5fd7ae55091daea86cc1334e63bea24e4f45539b6a095be"
+    },
+    {
+      "file": "apps/api/src/index.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "551454d58d7fdd26d9156d4e937d99307e8de85496a9dd6a6a406c0115f54284"
+    },
+    {
+      "file": "apps/api/src/lib/urls.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "40dd3ea685e65ce4bb6814766c23d880a70eea566f12bac6e4a9c17bea124bbb"
+    },
+    {
+      "file": "apps/api/src/mcp/agent-messages.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "56d88da63c96751fb5bdbfdc18aae437f30a451412472b977a3af6dbc3c5dd19"
+    },
+    {
+      "file": "apps/api/src/mcp/agents.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3a092810bc7139305ab212e290d57e462961155e090516a96444b7c39bb7fec3"
+    },
+    {
+      "file": "apps/api/src/mcp/catalog.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/api/src/mcp/catalog.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a4450d5da2f8b10d2c911d908cb3b531b04c17480bc9e59de99cca856d71f83c"
+    },
+    {
+      "file": "apps/api/src/mcp/code-heatmap.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2cb574028a3ddc866a48a27b9518c48dc470be9c75cce5affdc0480432718e40"
+    },
+    {
+      "file": "apps/api/src/mcp/comments.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "9f5b917ab62a37847ddbd777c09f2d8da5fcd295287acbd7e6ee4f1a4f563d16"
+    },
+    {
+      "file": "apps/api/src/mcp/custom-fields.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "32d322c957d71a0d420148464c4689b11b6df6209fbed2bbbdfafeb6e59dc829"
+    },
+    {
+      "file": "apps/api/src/mcp/error-adapter.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "be85a9c330ffc6538aa732551dcf484204cbd5323962e8c65fbe3e7a7d4dbab7"
+    },
+    {
+      "file": "apps/api/src/mcp/feedback.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "b4f3fc5726c9cefd659c470ad7844386767f67a0209d41c7d37b373f3d493ea8"
+    },
+    {
+      "file": "apps/api/src/mcp/file-claims.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "0dc2d06d21012b1bb2352e007efec52be136cadd8f6c1cf3801dbd7917f20237"
+    },
+    {
+      "file": "apps/api/src/mcp/files.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "8054450ecf29d2eb1c8a6c7ca88209f148a11bc2105e9631c3a8d311a7e4fc12"
+    },
+    {
+      "file": "apps/api/src/mcp/flow-metrics.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "377cb23288d201b2db301ced3cf60b33a0230e222adce7a1ff1845a5aa69fd26"
+    },
+    {
+      "file": "apps/api/src/mcp/groups.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "faaf4e02d33a4576b2937251707f03be307974cb044f9a620f0590405977966a"
+    },
+    {
+      "file": "apps/api/src/mcp/groups.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "ef96d02c05dd1ef2b2e0c0ab0394ccb78466c84d56f387de3a903a9de8837d04"
+    },
+    {
+      "file": "apps/api/src/mcp/issue-leases.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "5bedab6e4ddfdc39d9e62e00249c2199bf4fd825ae50d4cdbee2d359914f30cc"
+    },
+    {
+      "file": "apps/api/src/mcp/issue-links.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "14a1a55c5fe9db7d7d9083ab27703b925a7d2da582293c38e3ade19c55f393d8"
+    },
+    {
+      "file": "apps/api/src/mcp/issues.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "76868a9fd86afe827d7c3fd069cda4acc80cb8e53d1d378bae68b6a0a0728ed5"
+    },
+    {
+      "file": "apps/api/src/mcp/issues.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "f6cdc834840983f22c9c44bb4559bddccb27e4661de9ba3a010b595bdcf7f530"
+    },
+    {
+      "file": "apps/api/src/mcp/project-activity.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "e09c0211c764410b71566d00628e48774c863d0c15ea34d79efa4bbd01d0b7f4"
+    },
+    {
+      "file": "apps/api/src/mcp/projects.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "996c7d3828b360edb5403564851cf918ea8945eaa569b281105f049ecca4b8b2"
+    },
+    {
+      "file": "apps/api/src/mcp/sprints.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "d8c00cf451dc7e8e8b6486f28ae79ef2db4794760a0be7bd25ebf2366ec7ef4d"
+    },
+    {
+      "file": "apps/api/src/mcp/task-statuses.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "20ca2558d4f6af4b80fc4266fa826a5c3e04408ab67db850bf0cb128f379f7b8"
+    },
+    {
+      "file": "apps/api/src/mcp/task-types.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "19f99a4995f0e1bc73b1a8f0f1295927e8e0331b76ef978c6db8dc89827a313e"
+    },
+    {
+      "file": "apps/api/src/mcp/wiki.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "59c50380e29e000a7c15ea711dd143341301478487ace186160378d518ca0ab0"
+    },
+    {
+      "file": "apps/api/src/mcp/workflow.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "802affcc7378dfe0d05dad985a8e6cef93e8b4c1ce04b757fd4429a62c2b298f"
+    },
+    {
+      "file": "apps/api/src/mcp/workspaces.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a8674339392b91f330387f8d45919128b9335e4ff8cab954909efcefff44ebcf"
+    },
+    {
+      "file": "apps/api/src/middleware/auth.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "10e62e8c718d1c570a8b9ef79b31e7ab37e0a84eee71b522461d8a102f8fc8e3"
+    },
+    {
+      "file": "apps/api/src/middleware/auth.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "4889c940ee4ddd528bcba19b484b57efa1d11c429396c861eb3df3f5781ad32a"
+    },
+    {
+      "file": "apps/api/src/middleware/auth.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "78d591cdab6ad81df8bf4f466ed694127a0e47ac9d4c18bd407f39a95f71c0a5"
+    },
+    {
+      "file": "apps/api/src/middleware/auth.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "d2f4468c1bbf9230683056334b6bef581bdfe1d32a53a12c684edd987729b827"
+    },
+    {
+      "file": "apps/api/src/middleware/auth.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "d2f4468c1bbf9230683056334b6bef581bdfe1d32a53a12c684edd987729b827"
+    },
+    {
+      "file": "apps/api/src/middleware/auth.ts",
+      "check_id": "Refactor.CognitiveComplexity",
+      "rule_signature": "0f311fbba51513a2f6ead5ec1ab1c0f3a8e81c47cd5b72c78cecf3bddc1d8c2f"
+    },
+    {
+      "file": "apps/api/src/middleware/auth.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "0f311fbba51513a2f6ead5ec1ab1c0f3a8e81c47cd5b72c78cecf3bddc1d8c2f"
+    },
+    {
+      "file": "apps/api/src/middleware/etag.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "81b91ab174bc08070f58c0d68bd043597a50781fbe802d72ec090a06d61a501e"
+    },
+    {
+      "file": "apps/api/src/middleware/etag.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "63b32e57177b8a0daea0ef22c87522ba1c40a3d266f6ef5780c826eaaf8f0bd4"
+    },
+    {
+      "file": "apps/api/src/middleware/rate-limit.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "7b5e6bf4e45bf5fcbd2b165a8c1dfc9e2e60bc82f0b15e4b05b442240cc4a803"
+    },
+    {
+      "file": "apps/api/src/middleware/workspace.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "833ceee4f74f6a3bce25a4e10fa1c2c7fdb1fb2b8c552edf35cc3a632f464b8a"
+    },
+    {
+      "file": "apps/api/src/middleware/workspace.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "f0ef1b9d130c013f941bc55387a94c1ddbf6bfe98c4a2f1fef66dce5ec106f29"
+    },
+    {
+      "file": "apps/api/src/plugins/registry.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "43a0fcb7dd80dc3304d3ebde1be4743589e0c96e733c6cd168cd58947a5d71f5"
+    },
+    {
+      "file": "apps/api/src/routes/agent-messages.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3ac3cd5d21e20efdbcdc7d4ebf3f646fb1869c0a1d6ec4aff93cfcd655e8be5f"
+    },
+    {
+      "file": "apps/api/src/routes/agents.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "4946ffeca4f8f7dc933efaa206b9c51cd201de742a829390b2b0cc52f51768ff"
+    },
+    {
+      "file": "apps/api/src/routes/auth.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "4a34abd29f1c775938b60dd492398ad34e3b79679239fbf9f1b4b05368bce5c5"
+    },
+    {
+      "file": "apps/api/src/routes/code-heatmap.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "47de24a9d856b13776c0666ed660b04c6179eaa65e0538c2731faff3fff444d9"
+    },
+    {
+      "file": "apps/api/src/routes/comments.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2d22fee7ddd9161121aecbef252991983957d40081ef1cd85b757e77d3c57539"
+    },
+    {
+      "file": "apps/api/src/routes/custom-fields.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "372fc2c44cc20b90c12a4139e2acb73d21e491df4e131bbb2bf3f45336cb8320"
+    },
+    {
+      "file": "apps/api/src/routes/feedback-sources.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "84aedbdce151a534269b6e8bff56112668681dfaee95dcbc97659b621e6911f2"
+    },
+    {
+      "file": "apps/api/src/routes/feedback.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "6a0a28f9d94fbdd0f27ddfc26697bb085f2734a875579af1b0e365c955b5fd65"
+    },
+    {
+      "file": "apps/api/src/routes/feedback.ts",
+      "check_id": "Refactor.CognitiveComplexity",
+      "rule_signature": "93e391851a60a7eb0bd6e6a291b89512918aeb120e7ef4922609660d3c40e17e"
+    },
+    {
+      "file": "apps/api/src/routes/feedback.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "93e391851a60a7eb0bd6e6a291b89512918aeb120e7ef4922609660d3c40e17e"
+    },
+    {
+      "file": "apps/api/src/routes/file-claims.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "8136891e79f99d6a521a3582bb657d0479ba8de0e49c93766c803cee0472289c"
+    },
+    {
+      "file": "apps/api/src/routes/files.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "cf26c375b5ff47b056361576094c5187ebb6c58f2d01f36bf07ff7d66f8b940e"
+    },
+    {
+      "file": "apps/api/src/routes/files.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "171148fca1e768e54298da4c868aef937fb8ad35a1f8b00919533ae8985a5ab5"
+    },
+    {
+      "file": "apps/api/src/routes/files.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "b843c5048ca25d35ee5790c35a45d8e9e87fd9c47bafc3742be2b03abfa2e4e2"
+    },
+    {
+      "file": "apps/api/src/routes/flow-metrics.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2b9e4c0e6130a59e6c8d973e6c99dccd1cf823ad038d4c691aa528987959acb3"
+    },
+    {
+      "file": "apps/api/src/routes/groups.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3f7e80b5e5186a8e2033624dab5f271893caefccded64c8234ac8f7b8d389ef4"
+    },
+    {
+      "file": "apps/api/src/routes/issue-links.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "13d42c9be00bdf1e6392fa5c54e7bac02cfd425124b575f8eec535bec4a595f6"
+    },
+    {
+      "file": "apps/api/src/routes/issues.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "d6bc7c74cc94ccce1d09d4dd9dc0cbe5f8df4eb008a8a0f103521c46b9516a2e"
+    },
+    {
+      "file": "apps/api/src/routes/mcp.ts",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "b79f9fea697b89ca51d5fa9c20f86d9a8fcaa5c5963bf351960e82164b7e173e"
+    },
+    {
+      "file": "apps/api/src/routes/mcp.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/api/src/routes/mcp.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "5dd80c371f4166522531ffdd61bbac5c5e2d1a495975b362d7fd854b23435929"
+    },
+    {
+      "file": "apps/api/src/routes/project-activity.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "db773ef663172b0457ae1193b3b642e2d12a0f347559cb62f15e6f4995d05b07"
+    },
+    {
+      "file": "apps/api/src/routes/projects.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a9c1db57281e8ce0871358b8e966c6e41e7629113256e327d364216b3344324b"
+    },
+    {
+      "file": "apps/api/src/routes/share.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "ee5e94f337d2807d3da23baf657d41ba09d6f6cd437c55a773d3755557e3ea49"
+    },
+    {
+      "file": "apps/api/src/routes/sprints.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "e8742761ec3c159dc98ec6f99e6e8a97fd412ca241fd667c6b4fc4cf208dbfae"
+    },
+    {
+      "file": "apps/api/src/routes/task-statuses.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "0e6fbeb78f37e77f15625aecbc05496a93fdfe36335c439b01bff7ba358c826b"
+    },
+    {
+      "file": "apps/api/src/routes/task-types.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "fe34c449385102877eb0644e00367d5368ddd5c48c2cd1c9af8c619d3946984d"
+    },
+    {
+      "file": "apps/api/src/routes/wiki.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "601ec8189d22d3222237e7efed9b543769d2f199ff33b4d2614f9bc33b5d4871"
+    },
+    {
+      "file": "apps/api/src/routes/workflow.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2c0d56d9edf62144c11563bf2ff9af49bf8e46b408b63db2bfc84e11baf5bee8"
+    },
+    {
+      "file": "apps/api/src/routes/workspaces.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "b3e4c2fe3606db9489b68c86c10d0f186c6c7ba80f1be833f787b75bb63f0883"
+    },
+    {
+      "file": "apps/api/src/schemas/agent-messages.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "cd4766d1346d00100b8b76b33b1c75170510e7ad19b2a18888e53bc145728176"
+    },
+    {
+      "file": "apps/api/src/schemas/agents.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "74da0e82e423e3e0b20224e0c762edea9860131a0d9517ae41519dc9c3b22bb6"
+    },
+    {
+      "file": "apps/api/src/schemas/code-heatmap.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "f7faefe8cb097fe63fd32328feb1226e3ce70cf2faa44468fc014aebb40a2cb6"
+    },
+    {
+      "file": "apps/api/src/schemas/comments.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "0ba5419ab63fd48f3df344de8e2addf7d9e19098fdc6083b35bdc0dfc095e99c"
+    },
+    {
+      "file": "apps/api/src/schemas/common.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "352b0758df85ed28fa5f28f8c9f88540051978664a149797e0a1773453ef3bdf"
+    },
+    {
+      "file": "apps/api/src/schemas/custom-fields.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "80957ad7775b053b3011bd7483b984a24f2825637ba83bcf3b3f96359901f4bb"
+    },
+    {
+      "file": "apps/api/src/schemas/feedback.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "d586458cb75105862a0bd9019fcd322be15caf08849b5c051767de55e8429251"
+    },
+    {
+      "file": "apps/api/src/schemas/file-claims.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "0b2ed1237e9d46b75e606338ce7c3ba13db44febb4ebe813655e0e36ccc2246d"
+    },
+    {
+      "file": "apps/api/src/schemas/files.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3bfee4bffab26f4d9c363e14bade1bea7b37041406b5c98c5b61f5972fa4df09"
+    },
+    {
+      "file": "apps/api/src/schemas/files.ts",
+      "check_id": "Design.OrphanExport",
+      "rule_signature": "3bfee4bffab26f4d9c363e14bade1bea7b37041406b5c98c5b61f5972fa4df09"
+    },
+    {
+      "file": "apps/api/src/schemas/flow-metrics.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "17c0e71e8af4ae55f2101701b8c07d79d3502583140c2f58458dc0ffc47f2ca4"
+    },
+    {
+      "file": "apps/api/src/schemas/groups.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "c3fb177f397037e86d40b175f847be8696c71fc7bdcbb346f4b5e7cecc978c2d"
+    },
+    {
+      "file": "apps/api/src/schemas/groups.ts",
+      "check_id": "Design.OrphanExport",
+      "rule_signature": "c3fb177f397037e86d40b175f847be8696c71fc7bdcbb346f4b5e7cecc978c2d"
+    },
+    {
+      "file": "apps/api/src/schemas/issue-leases.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "6106239c29c061df2f4f5eb5d0ade21fc5c8b834cb51aa05f6db09a6f29bc76b"
+    },
+    {
+      "file": "apps/api/src/schemas/issues.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "92615023d3d24b83046f5ea0e1424d33edad17a985cdc65fe435c7358649985a"
+    },
+    {
+      "file": "apps/api/src/schemas/projects.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2718e97dc2eea27a3a671cfb0aad4257a87d3bb8ce34dc7601cfc0895a04f49f"
+    },
+    {
+      "file": "apps/api/src/schemas/sprints.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "28b1f4d2e6f831c1841121615e08bb916b21a29699d9fd162bc9f6fa9547e430"
+    },
+    {
+      "file": "apps/api/src/schemas/task-statuses.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "7bacbfdab46984e1526b40b135594b33e8b5442b4ce3b38b8f4f651be90035a8"
+    },
+    {
+      "file": "apps/api/src/schemas/task-types.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "8dfd447dcfbcf81fe4821f1c5b6d78f1fed9b8719e9c9375231f1b8bd79b30be"
+    },
+    {
+      "file": "apps/api/src/schemas/user-tokens.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "7e53bd15f07a7d24ae51d48e7908bea52510c159ccb862d050c03c9f1b5afd6d"
+    },
+    {
+      "file": "apps/api/src/schemas/wiki.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "565cc42a1dca058d408374ae7b98aa7644d5e2ba7716cfaf206f04a327b1c9cb"
+    },
+    {
+      "file": "apps/api/src/schemas/workspaces.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "41c31a27dca1f9086b654c40c5a6d684533c22189f014dc719486ccade58c092"
+    },
+    {
+      "file": "apps/api/src/services/access.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/api/src/services/access.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "8e3b1c6490b1f02273357ab960ecc0057267bcce937b5b6f12a43119152e4a09"
+    },
+    {
+      "file": "apps/api/src/services/access.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "6322ea33a18858114dd4970a364f932bacdc119d91669d5237d1c76c784fb9b0"
+    },
+    {
+      "file": "apps/api/src/services/activity.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "acebe3cf5e562df53d0db69a7332835811e64315a6b0fe94a476891efe0fa9d0"
+    },
+    {
+      "file": "apps/api/src/services/activity.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "ab5464a66e3e5c2e5181f1f161d6dee133c48d9d54bc16b6b8e1523f645e3269"
+    },
+    {
+      "file": "apps/api/src/services/agent-messages.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3c8ea7b5c4ad50c91dd6df71c1672340a0111889830eda121b2ef7473ae9283c"
+    },
+    {
+      "file": "apps/api/src/services/agents.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "32c2b57f6ff14f740aeb809eeacd25b77d91e1b5229b457b035beea035b23e7f"
+    },
+    {
+      "file": "apps/api/src/services/cache.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2998b3232d29e8dc5a78d97a32ce83f556f3ed31b057077503df05641dd79158"
+    },
+    {
+      "file": "apps/api/src/services/code-heatmap.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "0fc8b45ae3dc1091e380a89ee8c31ee6d02b2cdba246dd69065fc7228612dac1"
+    },
+    {
+      "file": "apps/api/src/services/code-heatmap.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "99f1ed202f1924b2d2cac46161d55ce5db3a363fdf10e66ad51214e22db2b2fb"
+    },
+    {
+      "file": "apps/api/src/services/code-heatmap.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "6095e41a23a62410d4f6aa9e2a4f22987dd325059970a78a17444950ed724629"
+    },
+    {
+      "file": "apps/api/src/services/code-heatmap.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "181797d2d5ee704732a6a08425e47d4b0bfdfa8a3bf6b915bcac39fb59a7c6f5"
+    },
+    {
+      "file": "apps/api/src/services/code-heatmap.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "b7120d8086a9561c644197fcd7709e7ca5f5fde61e514fbde6b2f30c1aa56122"
+    },
+    {
+      "file": "apps/api/src/services/code-heatmap.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "15d015906a7705970e4146dc3f7afd1a6aba16afd3fce95685e767e4e561fd39"
+    },
+    {
+      "file": "apps/api/src/services/code-heatmap.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "5925853000bb6ef1e86289c90600a41791d4c7d00fedc5d28d32ad555669f476"
+    },
+    {
+      "file": "apps/api/src/services/comments.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "3fe3fbe5c3fe591fbfb548e1eb817bc2bfc9f4cb48d707f98d880a39817e80a0"
+    },
+    {
+      "file": "apps/api/src/services/comments.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "d5609579fadfb4886bc642adf7b49cc54cd60c8b15732b235df7bdf305fd08a7"
+    },
+    {
+      "file": "apps/api/src/services/custom-fields.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "12a1f2e97fb37968a5305f656032b1807fced3df6dcc215f383a5c1ae2e3db92"
+    },
+    {
+      "file": "apps/api/src/services/custom-fields.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "c2e1c263f8bec7d2c64f00cc86a0e21590af2a270aa91d24e51f4c9532b62173"
+    },
+    {
+      "file": "apps/api/src/services/custom-fields.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "c635b241f2f03407bb2d5e68edb4f93917265c0152920965378723175797c565"
+    },
+    {
+      "file": "apps/api/src/services/definition-of-ready.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a30c3d7d9934b60238c4b876830c41430a6ccbf93e3a729f89b25c99ca898f08"
+    },
+    {
+      "file": "apps/api/src/services/errors.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/api/src/services/evidence-classification.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2833b5a8559bab98981be280710384f6c5bab689e4d7c9cc9073729dbc3aed4d"
+    },
+    {
+      "file": "apps/api/src/services/feedback-sources.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "2de0a30ef587ffcb18230ce8cc9416cc81b305c98bf84f7fc16ab9865f3ec1cf"
+    },
+    {
+      "file": "apps/api/src/services/feedback-sources.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "beb950fd0866506eeba544f0efad1d3c97ee38d2095d8317fd4eb317064b7c13"
+    },
+    {
+      "file": "apps/api/src/services/feedback-sources.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "7b78e2ac968534b2adde1d2539238b106565c9c1df0b23a58fd7b4f7e9371f3a"
+    },
+    {
+      "file": "apps/api/src/services/feedback.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "542dd5e73ab0097684ed1dafe56a2698fcda81306968f65512ae7588609ed41e"
+    },
+    {
+      "file": "apps/api/src/services/feedback.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "94f98d300c91e14febcd43fe496f3550c29970398bbfb1e565fab9a0b895beae"
+    },
+    {
+      "file": "apps/api/src/services/feedback.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "1013f9e15a7227efd57f312f35c8ac4d2d25e2b9d4c30e844a10880e91c37e6e"
+    },
+    {
+      "file": "apps/api/src/services/feedback.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "4c1ffd7daa63025de58124cc2bb0b7a5563d25083a50507efecb5bfff2d290fc"
+    },
+    {
+      "file": "apps/api/src/services/feedback.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "62da6eee5905fcc6ebfc7715d3a4db6f2a9fbaed92583abbceb92d5577049f2e"
+    },
+    {
+      "file": "apps/api/src/services/feedback.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "df564f3fb6c0d2915a82e22ec8b82241df1ce04eecf916b0f1f4f749c6d63fd5"
+    },
+    {
+      "file": "apps/api/src/services/feedback.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "d42b58d8df2ea85caf5f0c4529d1019af106f65d286713b6333f7d2564a746b5"
+    },
+    {
+      "file": "apps/api/src/services/file-claims.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "95aaf5a6d7c0b0a96b089f537524b574a4921c7d1b783bb92befd5432ac25eec"
+    },
+    {
+      "file": "apps/api/src/services/file-claims.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "041990a10e569c8542a2aa7ab9f8cda16f3d50c16a6aa516122f8b7a7853cb56"
+    },
+    {
+      "file": "apps/api/src/services/file-claims.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "687f17019415485fadd80e1f9d32cd0ee91f93e28ea3f2643b8df07926f4c67d"
+    },
+    {
+      "file": "apps/api/src/services/file-claims.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "ec0fb1da06497bd848c9229df2130d0a61bdbbfd34dddad7be1183366be5c43a"
+    },
+    {
+      "file": "apps/api/src/services/file-claims.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "afa4fa9f7f8c606ce5f888d9744d2588aac19f6540983085ea69d1c4fd4be2b1"
+    },
+    {
+      "file": "apps/api/src/services/files.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "e7ea178a8b6449dee8f25863ff70e37d457e622611756eb4f1c435e6e512f24e"
+    },
+    {
+      "file": "apps/api/src/services/files.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a00a61628a1cf2b957b5a51972a1627b3405bbc1827605c36c9eae75a96ab288"
+    },
+    {
+      "file": "apps/api/src/services/files.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "3ebe26b6a268f16ce4466792a6e165e46e4d18870c9a3ddb5266d460c3f251b3"
+    },
+    {
+      "file": "apps/api/src/services/files.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "b172b225de24e9a38b6b395802dd7c9d69a748f9b7c172366442e31794396415"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "72a23e549d099bbd49b9266bb96afba35da89e5a93a91b056a61c9326c16266f"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "9cd0d721183dce40c6720861db963a4d58d4014dbeae6726983c4540e03b3bcf"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09b58fa317194af30768504d5e2b101fd2910db43d79c02e3423b882b59d770a"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "1674ebd009f9e561cfa1f1ca26f12124cefb55c762a47d825929cb72c2cead92"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "30e9488df859aded65fdfe20151e5e4c794824b0220756f036c9250bb45bc597"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Refactor.CognitiveComplexity",
+      "rule_signature": "0acfba53c96247d3411d9ca0cf61f4271bf91d18d86d7ced249b530787371a3e"
+    },
+    {
+      "file": "apps/api/src/services/flow-metrics.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "0acfba53c96247d3411d9ca0cf61f4271bf91d18d86d7ced249b530787371a3e"
+    },
+    {
+      "file": "apps/api/src/services/groups.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "995da9898af51d84e7e5c860f06fb5d3054ad087b6bb405c671ec66d09e3ef17"
+    },
+    {
+      "file": "apps/api/src/services/groups.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "6859e1633d0c53dad47726cd8f73e03b43a7d16259b0fba1bb162e91f7f93a1b"
+    },
+    {
+      "file": "apps/api/src/services/groups.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "9b710407ee925765177d5823b9ecf20eaf17b03a249107e6d88f9a8b914f48d7"
+    },
+    {
+      "file": "apps/api/src/services/groups.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "49ac4ce3320f853f6c527e39354f68f8e4c61eb30401d570327f23d97064ee4e"
+    },
+    {
+      "file": "apps/api/src/services/issue-leases.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "f6f6d8dd888bf433a471ed4a403df74296e220ebe93ddeff4d85513a7709e429"
+    },
+    {
+      "file": "apps/api/src/services/issue-leases.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "1511d382af7d1188d43258cc8be233a520f9c0aa6b333b4d2095834bdd5e7894"
+    },
+    {
+      "file": "apps/api/src/services/issue-links.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "7a3345feccb3bd8466c036d2547b49b8c5f9a3f46c34ab1e36b7b94ed7ae998a"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Design.MaxParameters",
+      "rule_signature": "0b74b45877b1bc9eed832f71bb36df04c207ff845777bb0344807c010a0ff382"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "35436c65e1f9554f6df1de819183aa2b447dafd0a68b1f915053ef6009b668b6"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "1bd81ac8c1315d5a6e85059a32db2baa7fcf9dafd7f00f3f482e69a7cce2a828"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "1e7d5e94245ce254b618f5f8233de12f1223dc3e697781bd1a6997000def9bb1"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "570b89f79428c8b9cd216ba3c2bc96351418f4518e28132ba2d426eb5987de7e"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "5870a8b12731e893a193c5cce267fd4e06911adf16a9f4b93a94dd50bbd00f50"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "ed8da26b3cea5afe868d591210aeef3c49d50fa568b2cb4a9463a62cd9ea1408"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "1bcbe9a3b9df6b2c133ec52ccb295e26833b50879f94aa9ac0346d2d9f289987"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "1c24dda99c652c04212d1531a4ba778dbf96ed7fbde3964cb214a3e8d7c21bde"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "229a9e257778db1a96eec35a9b19bceb17ea3732514bf4edc676518dbefd58f7"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "2ac0d1e5e5682ea895470c854e561812b2fb5d8b536cca1d3963397cdb9ab1b4"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "413e8573d3f31dafbfc185b7eb69e58f9486034c1da11b67f660be0a6201639a"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "41815c2ecfa423caebff332bdc14adb696dc1c2a0fd1bf3037fc9a5213b5f6f3"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "47049d392723cd9da627fa5ffe36279db25a80094897599a332cf2d76caad43a"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "4ca08a38d6439583b08ec0bb3f3a06f6733e844359b34485b3b83f5d4ef57ba9"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "5fd13a76db8ac6cd0fe33104019e17de3da2ef9b80afdb9fac8ad8a6ee153016"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "7ffffb735826b9f4d7567805d15ed8f46fade2f09e6fa1a13bdb904bc871566a"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "8836a64747893987b86b461dfdf00cf02a7334d421917553cbde027341c1bb72"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "bd04267beb1244dcf67d048a7f86ac60efa0a1491a3f1d966307c98987e2f2c9"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "c1f0f77a6169fbe6a7c6007bd4d7546191fd768453f89f59a4f3261f8ef5af3b"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "ceb415a93a42112209edb192f948fc12fa5e10e72c7271663ac82bed21fc2fe3"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "d0c40a98d0eca022f3ef927e703b5f3eca8703932aa76d12f0ef17f3b6646392"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "d8d8b90f36ad934ab3e9040586b3a4529cbbc5f7ebd4255a4dd175089a7bd573"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "ebc833d697654d20d927d3d97ef6f6b203b5630a30962f46cdd6f2f9292c71e3"
+    },
+    {
+      "file": "apps/api/src/services/issues.ts",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "ebf2c32452f1d0543238a9d1e83228bee9689f55f690696ae4bbfe47b77920ea"
+    },
+    {
+      "file": "apps/api/src/services/project-activity.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "09f4c17149e40807549a6816a483ac242d02a591d09e83fa59ac6312267d7f54"
+    },
+    {
+      "file": "apps/api/src/services/projects.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "42d5e308759a6fecc4d49aa0d10f503d7a6179f13f21e5903ae14db11048f69f"
+    },
+    {
+      "file": "apps/api/src/services/projects.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a54a15e9699f095b88b8d3a0bc74a4835b5845d6b111537b0d225a2ea85f4daa"
+    },
+    {
+      "file": "apps/api/src/services/provisioning.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "ad1f1c0f67192b75fbab58c2d64c3dd73cb83c9105c50c97246a024c3263fb2f"
+    },
+    {
+      "file": "apps/api/src/services/provisioning.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "17279a8fba0649b35fb70939158c1933abf57a9164569156c475f137057af9d2"
+    },
+    {
+      "file": "apps/api/src/services/provisioning.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "20e47045c4b5e38cfcfe807b4a59b41fb25274fe97f65c9f2aa993ac765d449e"
+    },
+    {
+      "file": "apps/api/src/services/share.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "3b3ca0ccda35b8e713add42f3cf8278b33a6e53958790af4c93f1cd10b48734c"
+    },
+    {
+      "file": "apps/api/src/services/share.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "76325b045c3b03f253e3d094e8577a5f8880a31fed8bab907a0f14aa9e0df540"
+    },
+    {
+      "file": "apps/api/src/services/sprints.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "b405802cf46943f62fac9ffad766745fdc57d03c2cb0fa7fd5f3fb70db47fef2"
+    },
+    {
+      "file": "apps/api/src/services/sql.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "c8c7a9822d64bddef38c3ab33fbfe350604fc87702c114a1c2279fa15d3720dd"
+    },
+    {
+      "file": "apps/api/src/services/sql.ts",
+      "check_id": "Refactor.PreferArrayMethodOverLoop",
+      "rule_signature": "81afdc07d6208a0983d12b00a6ddeef26797b8a000e9d7ba3c1fadf22909825b"
+    },
+    {
+      "file": "apps/api/src/services/task-statuses.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "07dcab2a98ef19834bafe7161451a47132951901ef4e97e228148a35ee2ef3c1"
+    },
+    {
+      "file": "apps/api/src/services/task-types.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a673f4fe78a2973f42165ee7f566139f7411f3b9bfdc3fadffb71568c4479334"
+    },
+    {
+      "file": "apps/api/src/services/types.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "cb20d9ffb9e22e0bfe4a3476df69746d9e36b888b8ef6cee265ddd5ac872acb7"
+    },
+    {
+      "file": "apps/api/src/services/types.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "8b1ca4a18c807244c6bca306eac96d44cd32be8f2c7773cea1670f4bb434eeec"
+    },
+    {
+      "file": "apps/api/src/services/user-tokens.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "71359509eaa17f7e54f462e54be5e883af9c0002edcadf148c964a38029cc7f4"
+    },
+    {
+      "file": "apps/api/src/services/wiki.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "be38d7b6a45f66442c4faaabe7e5de20f362f7c64d27686b8920c13e614bbfe8"
+    },
+    {
+      "file": "apps/api/src/services/wiki.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "815c0faf2126239db60445e6fc65d3caadd7f5322424db1433bdae46b0be46c3"
+    },
+    {
+      "file": "apps/api/src/services/wiki.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "60d2722c678e51caeeef31550abdf85bd60fd946324d98e69de2d58c5279152f"
+    },
+    {
+      "file": "apps/api/src/services/wiki.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "8d77188efaf76b7c3bc9aa7845d1740677c03047341ef9c62513470ca766da97"
+    },
+    {
+      "file": "apps/api/src/services/wiki.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "940d380abed130714c330cad4eafc0dc1903d8c1ad36496ecefd373ddd6a35f8"
+    },
+    {
+      "file": "apps/api/src/services/wiki.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "75d715468c442ef6b06931e4631b9fade72a47df61dc7c64b66a24d005110268"
+    },
+    {
+      "file": "apps/api/src/services/workflow-content.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "c5b929e87a0451a9a9d09d43d1ead472f35776b5d72fe434ae0a6ef33b473f97"
+    },
+    {
+      "file": "apps/api/src/services/workflow.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "55c63276968d2dcb7b02cc201599b67f90e4060d3180c2cd2b994775a0536209"
+    },
+    {
+      "file": "apps/api/src/services/workspaces.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "1b45301a406551688339fb521719cf39aca85d4f6dc36f9a0a8ada5a61b0990e"
+    },
+    {
+      "file": "apps/api/src/services/workspaces.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "254651d8844c1ecbef94000d0ee04acc07fdbfbf08261ec58d99f9cf7d0a4299"
+    },
+    {
+      "file": "apps/api/src/services/workspaces.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "8111062e496a1d67011e9ded80c12a1f74bd1b475c20192a351d591e51294fd9"
+    },
+    {
+      "file": "apps/api/src/test/activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/agent-messages.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/agent-messages.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/agent-messages.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/agent-messages.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "2cb35bda2c34a413dbcfccfb2ec42a130ca7a62027d2d76eccccacfde5f67eef"
+    },
+    {
+      "file": "apps/api/src/test/agent-messages.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/agent-messages.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/agents.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/agents.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/agents.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/agents.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/agents.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/auth.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "3f8987320693a179cdc3acfd783cb2a01823f550cc5eb7e29010248b28d783f3"
+    },
+    {
+      "file": "apps/api/src/test/authorization.test.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "913a0267a559996dcdcfad0248b62ff913ae04251a38bb474dbcb76d7b10965b"
+    },
+    {
+      "file": "apps/api/src/test/authorization.test.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "bd49cd8b473cd980ecc6cc135b5984c3c56be14683b8de54a9b09f7968271570"
+    },
+    {
+      "file": "apps/api/src/test/cache.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/cache.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/cache.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/cache.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/cache.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "179d2e901fae3f2848bcbbb74e738ab79f155c50cd93322dd9cd0c628274a2b5"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "42e40d175f2315e46fc0e63068a7b3ab5e91ef1120367a41e5c2cfb98208c303"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "58bc0da972a5a74a7dbbfc2925734a63b8a900c601833195b9255cfc3f7470cc"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "5b17c43d1466d5e1d4146f9f210532610a6ca9f2dde4f040e072cb0db824a5c7"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "d48c83142f60d94457bb296ae57c5a2af0958c6803c679242ba2e3c653ab08f2"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/code-heatmap.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/comments.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/comments.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/comments.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/coordination-access.test.ts",
+      "check_id": "Consistency.UnusedSuppression",
+      "rule_signature": "aa36c06653fb073757abc09d3951f988e146ab3454acb881146121c9724238ef"
+    },
+    {
+      "file": "apps/api/src/test/custom-fields.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/custom-fields.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/custom-fields.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/custom-fields.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/custom-fields.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/custom-fields.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/etag.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/feedback-bulk.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "47be153ba495e2d3bf52bb3ae62c18372c6f8bc64291e000dc739f00d9244e0a"
+    },
+    {
+      "file": "apps/api/src/test/feedback-bulk.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "8af66cdd122b0897725e41f5ded08535b21db655e0aefe7583f6ccaf1b12e79c"
+    },
+    {
+      "file": "apps/api/src/test/feedback-bulk.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/feedback-bulk.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "3ceeb2161298fdb03d05e19ddd48176d3d96854845f1cdcbbe9dfe6247d04e97"
+    },
+    {
+      "file": "apps/api/src/test/feedback-summary.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "8af66cdd122b0897725e41f5ded08535b21db655e0aefe7583f6ccaf1b12e79c"
+    },
+    {
+      "file": "apps/api/src/test/feedback-summary.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "b3f6424a61b2a7190d684f47f180231eeb782f412546557bf72411733344cd6a"
+    },
+    {
+      "file": "apps/api/src/test/feedback-summary.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/feedback.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "340e34387a6ec900ec47a4fdbd38b5d09e5e7904fc2ec62db2662b9843d9fcbb"
+    },
+    {
+      "file": "apps/api/src/test/feedback.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "8af66cdd122b0897725e41f5ded08535b21db655e0aefe7583f6ccaf1b12e79c"
+    },
+    {
+      "file": "apps/api/src/test/feedback.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "8af66cdd122b0897725e41f5ded08535b21db655e0aefe7583f6ccaf1b12e79c"
+    },
+    {
+      "file": "apps/api/src/test/feedback.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/feedback.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/feedback.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/feedback.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/file-claims.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/file-claims.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/file-claims.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/file-claims.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "2cb35bda2c34a413dbcfccfb2ec42a130ca7a62027d2d76eccccacfde5f67eef"
+    },
+    {
+      "file": "apps/api/src/test/file-claims.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/file-claims.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/files.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/files.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "5191c3aedc256fcb38cf420647f2d301517a7727c85dbea81d8ebe47db1c2385"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "0635a092b410f5830bd30aa44cf99cebee41142021a648a2fb5f3e2cbd59c775"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "8ff616cbb6ccc88a9b27c8f143b756e26e73805ae6ff2c2fa35a01611ec3711a"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "8f2ad708790f04d2f2ef66030e11d4966c534a28308cbd131c946a203c0ef9b4"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/flow-metrics.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/groups.test.ts",
+      "check_id": "Consistency.UnusedSuppression",
+      "rule_signature": "7c0d83a744ab578b09260c832bf9e1c6a140269435b751270b40011267adcf25"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "bd5e3b48bcdbe70b42039202a57c677e93fa31c8b9ef327cac30f8835d1da646"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "20b85001cf729d46de9d2ddc8953f77696343968aceaf16f9d4b331d06fdee01"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "20b85001cf729d46de9d2ddc8953f77696343968aceaf16f9d4b331d06fdee01"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "2cd489e4bd721bdd423366abce4d993eb932ee106f5e2421ebbc72547c6cbe3f"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "349e9be6fc09303f244c726e3906544b93b3e00f06f869159e9042752c8c50f7"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "49f31d624ab817ba7d64db88222a6515ee8ee51f0176199dd046dabcbb71a636"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "64d45dc06286263d346598fd786b4ec5dad318d57fbf62a997e02770fe1a0f66"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "7eaae5d728d1c435ef9bbe8846dcc4bd6346f4b9810a2321947993d7e157776a"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "aee69ab97ad0231dbda2a12ec56a80b658a40719b9fb38e483d09caa4daf3289"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "b20b0988aee030e2ebc1ea5886f1f1719b2f6ce412f9cf8f9d2479de5f60892b"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "c9a4ef9d43a9d2da73a30c72c87e803eef3cf5e73274bb3b14ab96fabdbfd9e4"
+    },
+    {
+      "file": "apps/api/src/test/helpers.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "fe86a84adcf1c11650ac6868b7bdaa26dc001d005bc4b04dd6ab9c3c5f15ae5a"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "17c9576f39928ac4113ed5e0f1b2e9561749673e4fa7e50f8013fb5a7aa50476"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/issue-leases.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/issues.test.ts",
+      "check_id": "Consistency.UnusedSuppression",
+      "rule_signature": "7c0d83a744ab578b09260c832bf9e1c6a140269435b751270b40011267adcf25"
+    },
+    {
+      "file": "apps/api/src/test/issues.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/issues.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/issues.test.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "e80c8566c190e5eb2ba3328f815f3c79b3832258ebc517e27240135119114c02"
+    },
+    {
+      "file": "apps/api/src/test/issues.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/issues.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/issues.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/migrations.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/api/src/test/migrations.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3cc85807f9d6f56ed1ef29908f7794130c62134db90b2c028bb9355bd33a37f5"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Consistency.UnusedSuppression",
+      "rule_signature": "7c0d83a744ab578b09260c832bf9e1c6a140269435b751270b40011267adcf25"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "7c6dff039cb27193c9c6575c4917678822aa22e107206db1b524cce690df1940"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "d2db33711c2c700314f9df2c1e5be6fa1fd86182fdf8b89542b501844db6e7d0"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/project-activity.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/review-gating.test.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "07c6084e3df9d99f356118b8f846e73af1a4e36a541b5021812da213727ed1a4"
+    },
+    {
+      "file": "apps/api/src/test/review-gating.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/review-gating.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/review-gating.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/review-gating.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/review-gating.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/scopes.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/scopes.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/scopes.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/scopes.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/share.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "bfb379b1fed6a664364a913245b9ea6f76d0329d4872008ef8be1cb1857300bf"
+    },
+    {
+      "file": "apps/api/src/test/share.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "c505e723a046bab59e064236a2affc48889bbe974521d170ea12338c91269c92"
+    },
+    {
+      "file": "apps/api/src/test/share.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "d3a68dee26154e879f9a744654cec167a90b6bb681b6de6c069aabf349952fa2"
+    },
+    {
+      "file": "apps/api/src/test/share.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/share.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/share.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/share.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "2cb35bda2c34a413dbcfccfb2ec42a130ca7a62027d2d76eccccacfde5f67eef"
+    },
+    {
+      "file": "apps/api/src/test/share.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/sprints.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/api/src/test/sprints.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "cbb7cbf6e22b5b276816e0bfaed016c84d8343419e6d4b50bd3a0b558cf6f723"
+    },
+    {
+      "file": "apps/api/src/test/sprints.test.ts",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "b881b14dbd846c8fe68f2fcebacd32832667aadfd28b0bf6d8d1c500fbdbf620"
+    },
+    {
+      "file": "apps/api/src/test/sprints.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "05f47b4c9d8aef11fadc43b34f5fcadfbf5ec2d0a415cd5b6646087613dffa57"
+    },
+    {
+      "file": "apps/api/src/test/sprints.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "0ce7fadccf63964418cf2f20a9cc0e82da7a9a43501d24430f01e72f96e30747"
+    },
+    {
+      "file": "apps/api/src/test/sprints.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/sprints.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/sprints.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/task-statuses.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/task-statuses.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/task-statuses.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/task-statuses.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/task-types.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/task-types.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "121cac71eb171184e3f395104c6beb19a87d4548707c5e4694f3efc5f114f82a"
+    },
+    {
+      "file": "apps/api/src/test/task-types.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/task-types.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "8be4c146d2f16c84d6e03fc4cee4915bf54f1283d3bcb8e27db8c3382ef0228f"
+    },
+    {
+      "file": "apps/api/src/test/task-types.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/task-types.test.ts",
+      "check_id": "Refactor.PreferConstOverLet",
+      "rule_signature": "e9de8627336a79c8b55a244b27f5db01a2ca673d026892dc9a34285f2bc8d83c"
+    },
+    {
+      "file": "apps/api/src/test/wiki.test.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "bcaf036452faa4a2a56d012e3d5f2b251f68768858705610ec2d6f8174cb06d3"
+    },
+    {
+      "file": "apps/api/vitest.config.mts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e22d75b2935e7bd2683d47ef1e699750966886f9990db4ae0d470320e6ff9593"
+    },
+    {
+      "file": "apps/docs/src/content.config.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "00699f600cf5a0ff57479ad90a83a32a0f993732fce1b33adc551556c35d066c"
+    },
+    {
+      "file": "apps/web/e2e/global-setup.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2e740567371936ea43e2dcdcfbd44d01b76715a5a3dbe399a17ab4f23aa4ff31"
+    },
+    {
+      "file": "apps/web/e2e/global-setup.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "805ed632ed05e02197faf17b3e2399b1d5992c7dda6975650ca5c2557dc0e608"
+    },
+    {
+      "file": "apps/web/e2e/global-teardown.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "fedfb32b073778755487009b43afaae309deaaddfaecf86d6fd87aa078c4d56d"
+    },
+    {
+      "file": "apps/web/e2e/issue-attachments.spec.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/web/src/islands/AccessPending.tsx",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "23d7f9546bcd7c1846e5fdda8403b63202c7121b809593aa43c4221dc2569890"
+    },
+    {
+      "file": "apps/web/src/islands/AccountMenu.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "f5eaf989f47d570eba03a95f213f5c005ae1ff9020d1eab0703e76733c00abcc"
+    },
+    {
+      "file": "apps/web/src/islands/AccountMenu.tsx",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "d59cb6dbd25076295fae4e7a906eb04fa9e3547f24a03bfa820a80e1b7839e78"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.test.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "f62dddd9187fcdb70becafdf5bacc0e1f04fb29b8128f4c8385efd7fe1aef423"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.test.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "125c0c16dba0c64ef115c7d2a9b54450deebddc3621ee2705697c8f41f94527a"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "95ea735e25f9a9ea62bad82a9fdd3481929ee4db4d942972b385be9a084dbe42"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.MaxParameters",
+      "rule_signature": "93a6707966b816a9ee734a022ee77f77e85903a6f9751a642a8d430fbf02e495"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "3b1ed94a65c6d85e2f86b35f9dc10ceae76de4b4c5d9b05e063f168e1040c6f7"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "3b1ed94a65c6d85e2f86b35f9dc10ceae76de4b4c5d9b05e063f168e1040c6f7"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "3b1ed94a65c6d85e2f86b35f9dc10ceae76de4b4c5d9b05e063f168e1040c6f7"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "6846f57581e530ecb3f540f3b3f8f00ce264c2ea9b36fd7f2ab96c9470faeec4"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "794cc118aa627d3478de7ea288dc41975f1671b904743bc5528fe4997b0a6e0b"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "8b5bda33baba376e3031019e322eefba54d3f5fe51a0e352f6842b97b6f5bc2c"
+    },
+    {
+      "file": "apps/web/src/islands/EpicList.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "8b5bda33baba376e3031019e322eefba54d3f5fe51a0e352f6842b97b6f5bc2c"
+    },
+    {
+      "file": "apps/web/src/islands/FeedbackList.test.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "34cbc3e897650e715f9c818528b66ad94036946ff5bfaaef15eb722838026f8e"
+    },
+    {
+      "file": "apps/web/src/islands/FeedbackList.tsx",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "cb7141a20db92af80e6710d50c3d325a7106ff0468182b172d7f8848a13ca6c7"
+    },
+    {
+      "file": "apps/web/src/islands/FeedbackList.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "2f7ae76e92825d44239c627cc82418c942773fe38256c13757bcd7693216c1c8"
+    },
+    {
+      "file": "apps/web/src/islands/FeedbackSourceDetail.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "3a8d77e354bf105233bb3210ed8ac4be1e39974a6be6e16fcab1e6ae67c7b447"
+    },
+    {
+      "file": "apps/web/src/islands/FeedbackSourceDetail.tsx",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "01c8e59e8037d51731e3ee2bc5b273f0cc5fff37187b34bddc7c716050f84d1d"
+    },
+    {
+      "file": "apps/web/src/islands/FeedbackSourceGrid.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "ba06f1534eaeb78ef90683ddfda140fc25061ef341558f717b26044c48d6b654"
+    },
+    {
+      "file": "apps/web/src/islands/FeedbackSourceSettings.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "2162cff01d43d7973964499c106ab2d68bdd04956252e3f864283e448bd1428c"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.test.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "d92a8c9f22913c684d79c0967b75b36fa5746239c00a5cc52a735bcad55b2327"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "091587eabb1e49a25878b68404d6cee7486c6cdc65fe9c1e697296f6e9bff3ed"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "69e6960919a8f472c5beb3e29fa9f8c17773f3e93417cafe061e1d5d1df70dab"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "879b87c705aad9f379964cbb8a3b9af43e99a8da48450d6ef1a6fc67134f37f7"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "c8f99691b0c678760dbb714e978de119dc5a95eeb159e46bb5aeee0a2489ef64"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "f0a04320b78f52c8af4f6f07be9048e3146518b509a212353f47c834b1ea2d80"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "4b27eb458a2488337dccbfe399c5da274c983654d9adf8eb134507de3ce158f4"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Refactor.CognitiveComplexity",
+      "rule_signature": "dde0eeedf66828389b78b775756802f49cf89d3275f340637940752ca6a0f863"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "dde0eeedf66828389b78b775756802f49cf89d3275f340637940752ca6a0f863"
+    },
+    {
+      "file": "apps/web/src/islands/GroupManager.tsx",
+      "check_id": "Refactor.LongAndComplex",
+      "rule_signature": "b6aac031f755f4102f1a0713f587c03d6fcb9557854f0c0bd76edf4f3c053788"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetail.test.tsx",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "008bf29878463ef36d372ccab2a9b42f5b4019d38bb856c0006ddbe39c82a918"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetail.test.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetail.tsx",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "6ac88aa3d10c3dd3ffeaf7a8c0d292db641a62fa0a14cf0dbeaf7c38e2f16df4"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetail.tsx",
+      "check_id": "Design.MaxParameters",
+      "rule_signature": "9a2f26f8cf909556b5a9d0f4e7fb5411ac823bbbc5560349eede19f5060a9a02"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetail.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "a8ad09061f0041053bdabd3e2f8916cfa723ca8f78e4503094065f7d696c9701"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetail.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e3cb2fd7426b73967d2e23323779405248771301994b683f84de8c9a467064b1"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetailParts.tsx",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "80384035c97412b20e9b648a7327673c91c49ab59c88a3e1adbdb52069cd40c9"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetailParts.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "6ddede21125c0478bd87704abd1ff704ba8851059eac3295029f0b31c2d52876"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetailParts.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "fa37ff77761ddf735825b8afdb06d2033ae569300258ab207c2d269e8bbd4e9a"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetailParts.tsx",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "4450110d4ad7d3b07be68ed50169df320bb98b745300ef93403fb0e8094180aa"
+    },
+    {
+      "file": "apps/web/src/islands/IssueDetailParts.tsx",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "69a2119d0c7a0b29b1680362e8c44b6e2a7e33794c49d228bb647e31c6175b68"
+    },
+    {
+      "file": "apps/web/src/islands/IssueList-helpers.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "3efc9257bcdc70e3f98f3ee3223459c2edb2db46c3d9aa38e820180661aed2f1"
+    },
+    {
+      "file": "apps/web/src/islands/IssueList-helpers.ts",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "415d25f32232e031505c58ea4dc231979acad54e9eea0ae13963c8a2696896b7"
+    },
+    {
+      "file": "apps/web/src/islands/IssueList-helpers.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a1e0b15612cdd955dca0ec07472e6fd889e1953c6535f64557ff6f801854d678"
+    },
+    {
+      "file": "apps/web/src/islands/IssueList-helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "2156075a090c52aae98c62a190ddd927f50906286055f0f14dc3131c153b1ad2"
+    },
+    {
+      "file": "apps/web/src/islands/IssueList-helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "3d208c58b538834e33ba0a36e8476f8542b98d31ac2107ffff5a1c976be51ebf"
+    },
+    {
+      "file": "apps/web/src/islands/IssueList-helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "43705bbf9bcaaa875ad9d766f532c8da77ca7952a6f37a30e271564314b21331"
+    },
+    {
+      "file": "apps/web/src/islands/IssueList-helpers.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "fbc7c3504f20310aac76f81973a1961b482af65ea8e9e54496b204425a9c494b"
+    },
+    {
+      "file": "apps/web/src/islands/IssueList.test.tsx",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "cd8c6b7e95b095cc4f89a0f874950e3fdc9977c219af5b019c5c6d74ad12998d"
+    },
+    {
+      "file": "apps/web/src/islands/LazyMarkdownEditor.tsx",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "cb7141a20db92af80e6710d50c3d325a7106ff0468182b172d7f8848a13ca6c7"
+    },
+    {
+      "file": "apps/web/src/islands/MarkdownEditor.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "292896a73f66bfd407ba8e28984808080ef75142e7565c1eefad93cd91ef7816"
+    },
+    {
+      "file": "apps/web/src/islands/MarkdownEditor.tsx",
+      "check_id": "Refactor.PreferArrayMethodOverLoop",
+      "rule_signature": "d5a9405f4b56d70dba0aa0e44373b94b28d57cc2577960d06f2b949701e93526"
+    },
+    {
+      "file": "apps/web/src/islands/MetricHelp.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "0228b5cbfeca65d96e74798041192b7a1290090f42c3e1c8811acbe55d9d8e31"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.test.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.test.tsx",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "7f0bcae4d35ddaad4f9f950aeb6b0d2e2c654a802ce5b3cfd9e6d01dc3bf64b7"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.tsx",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "0a6ca40d3f7ed3dc4a716f98e43c16e9ac8a9de61fa1567a700171db20a9f719"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "04b8ee375276955ed7c065e277de4f4b6b1082c17203d35c6dd69da4ed561917"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.tsx",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "742a2db6bb8e77749b77733eb96f9fd3538160ba7433f6ce8afc630e5baaf9d9"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.tsx",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "d3d3a58b340becd9438819f3517fd89901422cf86534a3c23fadd6451726f873"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.tsx",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "e827aba210d2c46cbf7257c4692683bc289b3b59c752c388a1145a4412cb5184"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.tsx",
+      "check_id": "Refactor.PreferArrayMethodOverLoop",
+      "rule_signature": "f1da14b050653791a4127dc419dcf0b49435bcb9a0a2c7c052548b397de27be3"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.tsx",
+      "check_id": "Refactor.PreferArrayMethodOverLoop",
+      "rule_signature": "f1da14b050653791a4127dc419dcf0b49435bcb9a0a2c7c052548b397de27be3"
+    },
+    {
+      "file": "apps/web/src/islands/MetricsDashboard.tsx",
+      "check_id": "Refactor.PreferArrayMethodOverLoop",
+      "rule_signature": "f1da14b050653791a4127dc419dcf0b49435bcb9a0a2c7c052548b397de27be3"
+    },
+    {
+      "file": "apps/web/src/islands/MyIssues.test.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "a003a0c027670bb6f35c85e46c041014a846fa853fac94052b8f2bc234803d1e"
+    },
+    {
+      "file": "apps/web/src/islands/MyIssues.tsx",
+      "check_id": "Consistency.UnusedSuppression",
+      "rule_signature": "d3368ca2e06e4045f47a501bde7781376a0d6cb4cc2e718791278a95acba9ae6"
+    },
+    {
+      "file": "apps/web/src/islands/MyIssues.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "029e94492cc6a10dfbb56b907871d8db840dfe475cdd5ce83462f9407c357df5"
+    },
+    {
+      "file": "apps/web/src/islands/NewSourceModal.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "4ab3a4d65201add806966479ae52235e6c5244152e4aba117efd21312b8aede6"
+    },
+    {
+      "file": "apps/web/src/islands/ProjectFlowCharts.tsx",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "b741b8b47c2470d5500ba4608355e06015f871759f7d416f131d453d751f9a01"
+    },
+    {
+      "file": "apps/web/src/islands/ProjectFlowCharts.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "145de633dd917feade367cd114e37d4d72009c63dd92887895428697d1e2e731"
+    },
+    {
+      "file": "apps/web/src/islands/ProjectLanding.test.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "27a025c9dd399cf99f08c2963741b69c6343e2b687f30592e0d2fdf6c93584be"
+    },
+    {
+      "file": "apps/web/src/islands/ProjectLanding.test.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "6b1e7960a792e9820ed7a109a622678443ae49fe9473fb533d6b1ae8bf6d28fb"
+    },
+    {
+      "file": "apps/web/src/islands/ProjectLanding.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "9f157df2e1a163f4b15617b25c0d746d5f03f196063b4daabb79880d90bb2b0c"
+    },
+    {
+      "file": "apps/web/src/islands/Select.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "b7eae722686b4474585b33bfbae5244ab8e2f5402051a4d6df1f0c07af8e89d6"
+    },
+    {
+      "file": "apps/web/src/islands/ShareView.tsx",
+      "check_id": "Consistency.UnusedSuppression",
+      "rule_signature": "ded5204fef1c93f71c37bc76b9f8220890128f8a97d4ec46cf71ddb278fad156"
+    },
+    {
+      "file": "apps/web/src/islands/SprintManager.test.tsx",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "fd04788626e5f87b3b22b2b855bddaae2f1ee43956232d2fa57c5afa7d3f09b9"
+    },
+    {
+      "file": "apps/web/src/islands/SprintManager.test.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e6f34dffa47a2b19d130a1ea78534638ce0b904ed4990a1053a88fa69c3b0436"
+    },
+    {
+      "file": "apps/web/src/islands/SprintManager.tsx",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "07ed66ecca4c791d0672df845fa2172cfd6464643808dd9fa28139d645615c78"
+    },
+    {
+      "file": "apps/web/src/islands/SprintManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/SprintManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "f53576b1534a5f1f633f665cbcb8a81057bb3c700174ed39104852582c8f7006"
+    },
+    {
+      "file": "apps/web/src/islands/SprintManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "f53576b1534a5f1f633f665cbcb8a81057bb3c700174ed39104852582c8f7006"
+    },
+    {
+      "file": "apps/web/src/islands/SprintManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "f53576b1534a5f1f633f665cbcb8a81057bb3c700174ed39104852582c8f7006"
+    },
+    {
+      "file": "apps/web/src/islands/SprintManager.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "f53576b1534a5f1f633f665cbcb8a81057bb3c700174ed39104852582c8f7006"
+    },
+    {
+      "file": "apps/web/src/islands/TokenManager.test.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "6beef88d5e9e4ed624722689ecd11be3166e7f7b9792423386669a44ebf540a8"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.test.tsx",
+      "check_id": "Design.DuplicateTypeShape",
+      "rule_signature": "1efb37654e7ae59fa2d74a9ef00385fc5098629f4ba592950211acd5a94994d3"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "1fa21beed7e49dcda9acb0a3842cca98a1a20549c37a4286e3013b95f52b39ac"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "516f5accfa88a004fa68294a29c35c219bf3599844830ee2efb2e11a0b575cd4"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "4e93b2276f5c92f8bb8f729da6c17d9bada4244d46947a4b6f660314de26d6c3"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "605fb324ac981f4175f0770bc4f808bc6f86936eb2c976eba3b4dd75d48ec956"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "87a1dacde495d7fbf9914425a98bb1cdd59a2510e1f34d95513c7f3a6ae46415"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "90cd944f2790421f7b57343de1b7ba383dcea965275a7538a0b35a8e296c1637"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "918a4a85b0e8ed1b990b9ef4404ee434cfb7295bfa4794e8e992dfb2a02560ed"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "b511a0d673f8687e488cffb27486108bc9708cbe39a45b4d128e0d236abc2ff2"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "cb5a1db9b91c400ab37f187753c10fcad4717f05ae49115032997d8738064624"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "846c1b115634c5387e02043051f3537a7ff983acce3a1702e48e8a6b8a5cbfa7"
+    },
+    {
+      "file": "apps/web/src/islands/WikiPage.tsx",
+      "check_id": "Refactor.MutatedParameter",
+      "rule_signature": "8949438afc60eb4d8e8000159a4a71a6643bbf87925c66a6c69060395d99d4a2"
+    },
+    {
+      "file": "apps/web/src/islands/board-utils.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/web/src/islands/board-utils.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "6846f57581e530ecb3f540f3b3f8f00ce264c2ea9b36fd7f2ab96c9470faeec4"
+    },
+    {
+      "file": "apps/web/src/islands/board-utils.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "794cc118aa627d3478de7ea288dc41975f1671b904743bc5528fe4997b0a6e0b"
+    },
+    {
+      "file": "apps/web/src/islands/board-utils.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "c8515302129d3cb2831dd9ea6d97d6f381835ccd1ef8cb306fe406cd95c44c55"
+    },
+    {
+      "file": "apps/web/src/islands/board-utils.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/board-utils.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/board-utils.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/board-utils.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/charts/CodeHeatmap.tsx",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "387430287dc092d1e34930b1db4e1c56018a906fccedb49d211c57d8b9ca9586"
+    },
+    {
+      "file": "apps/web/src/islands/charts/CodeHeatmap.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "7ddc67f59bd63e16e60efdef1dbd900b4391a53d151c7adbba8f61e592c93208"
+    },
+    {
+      "file": "apps/web/src/islands/charts/CodeHeatmap.tsx",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "745fee4345b72682096d8d505a44d52cb54a71e0aa7ec6967754dfe1c1517046"
+    },
+    {
+      "file": "apps/web/src/islands/charts/UplotChart.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "946e1177e0ea707ff08e0e54b4616da96646c04fbe16800e45aef46777a7e4b5"
+    },
+    {
+      "file": "apps/web/src/islands/charts/UplotChart.tsx",
+      "check_id": "Refactor.PreferNullishCoalescing",
+      "rule_signature": "fe04d574598448cfcb32697343779ea8cf8df7f6a32ebe1ceb3ff59f0cf1ca50"
+    },
+    {
+      "file": "apps/web/src/islands/glossary-definitions.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "215395385d854a4d5f0312deed02adb56dead3db66ff263344265edb9606ebf8"
+    },
+    {
+      "file": "apps/web/src/islands/issue-detail-helpers.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "7b3fd480d020b4a93e5e7a6326bbb2b94c0a168a09b242ea690c1960fe9a5995"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/BacklogView.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "71ac2245330dd1ea8137685c4d4a4e69566564cd05fb8398b6d9c7cd5de7b6a6"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/BacklogView.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/BoardView.test.tsx",
+      "check_id": "Refactor.DuplicateBlock",
+      "rule_signature": "6f1f99eb8fa64a1d00f4472c4bd478376028375e9f3a564bbf8d565ff7c205bb"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/CreateIssueModal.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "df89fa4db7415b63552f027ac27db180a06699404ad0642ff4bb72472e7527ca"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/FiltersPopover.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "7a9ab99e4b4893c2a4064ae8bf1e69c8ae4abb8575d4b422c29fe237b00ee8db"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/HeaderRow.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "8b0e15724e64aa36b520cf02c05dacfd181b6a38eee2cf868ff2978e159adf91"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/HeaderRow.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "84e983d65367c6cde13c0cd5a8c80504f8358e2e9ce1f8d778fbfd7312e50c97"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/IssueListLayout.tsx",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/IssueListLayout.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "9cf57a49298dd1199bf3a8f84319633292440f0400c9f00e2f89663a6e93f28e"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/ListSection.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "1b482a990e9561fd2edeec5b571716c2d9aef09f32293b862b0d5bd1f9b72ee1"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/MainContent.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "5a08bf746d9874830409c19bdf7840f1b2d68f7af9af48cb8b4e6fe28a269f05"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/SavedViewsControl.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2e6ef66564f8be420bdbf61e2f7dd841617b41ddc5e7c58c4076d0e0b8e3aa00"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/SearchBox.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a9653f35bc2725e4106c3fa71002c049011e8209529274147008392b78cb232c"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/SearchBox.tsx",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "c49bb172f9aeeba887e512e7f783804f40f76b9cb24d1cc83195979969f53120"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/SprintBannerSection.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "6dc5535f1d68939cb964e19644c0f3343a2f2bd5666ca0b5f58617e4f835ab4f"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/Toolbar.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "184993429b8146d6b6a85007b2c67500b98167543c6114f40039dab5c9638fdd"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/derive.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "ffdd42fe337f583065c67cacc294df2734155df8687b5c7bfb557370110f74a8"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/derive.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "3b1ed94a65c6d85e2f86b35f9dc10ceae76de4b4c5d9b05e063f168e1040c6f7"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/derive.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "c8515302129d3cb2831dd9ea6d97d6f381835ccd1ef8cb306fe406cd95c44c55"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/derive.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/derive.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/derive.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e825f7a49cc0e5ca1bda6efbca64a7fed51951b61814bd9da5745fa4008a43ba"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/issue-render-helpers.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "8b85ee4280f6e70957b033010995e5019119fc948783182613cb4f22125d2f89"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useFilterUrlSync.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "dfc010ff12725a8e0b831e8977411eeb77e73bf62db4660a59d1e1de78924cc6"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueFetching.ts",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "3eebff6f77828bba8f624b2a07188ac8b7c2ade0be9d55f35f5eb2c3208cb32a"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueFetching.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "53b13c90c1d5a0f3a1d24ffa2c974840f98154d4a5561898930175e3f9d87e3f"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueFilters.ts",
+      "check_id": "Consistency.UnusedSuppression",
+      "rule_signature": "ea19087c6a19074a3166b6c5e0cb3824466a607e5804bc5503de42863344b71b"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueFilters.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "837bb620bf5d6229371dd9a5823d4f6d17af9248b3a1de7004b687adfb5a4088"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueListData.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "9c2774318b21d6f8c87fe2a2c71a3667bdb9832c59fa5b89cdd1c90673b1ad36"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueLookups.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "598f2ffaf0695d38951e02db0c28152307de0d16bd1acd7350342a13c1515809"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueMutations.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "328dd0d5f6e3642fb315b51184eb0807fb1cf8aa504a6d5e5509ffa0c4ac630d"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueMutations.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "c8515302129d3cb2831dd9ea6d97d6f381835ccd1ef8cb306fe406cd95c44c55"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useIssueSearch.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "f07dd53dea5b5cc055d194a638f50bfdeb566f430007225df623d616d52a5460"
+    },
+    {
+      "file": "apps/web/src/islands/issue-list/useSavedViews.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "6b6506bdab63068e619d5d13616246780a4a61760c2a8f2c3a99e973a2a44b16"
+    },
+    {
+      "file": "apps/web/src/islands/metric-definitions.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "55c016cb0294e827824dc45301bcefc287bd7bca7dbea42a1b7594014558cf46"
+    },
+    {
+      "file": "apps/web/src/islands/metric-definitions.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "1b59c41968f3de4f992e019f99c1bc5bb41dda85adc50ef059190028226f643d"
+    },
+    {
+      "file": "apps/web/src/islands/metric-definitions.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "34de5b10d518100f8bfc6ffbe0d7a9cca2cfb6c17d8bb513ad3df210560ccf2a"
+    },
+    {
+      "file": "apps/web/src/islands/metric-definitions.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "d7c4787fbaa068cb310a671cdd5a44e9e135511351f783ea8dc94f120bbd5b2a"
+    },
+    {
+      "file": "apps/web/src/islands/metric-definitions.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "df445579c999d7dec7b77d49569a1d5185ac9be1b88ad2aaa0b6fdbe1313a22b"
+    },
+    {
+      "file": "apps/web/src/islands/metrics/flow-charts.tsx",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3485e0f2779b607b487daed5e4afbc387a54b9b68b43451159166a51e26bc22a"
+    },
+    {
+      "file": "apps/web/src/islands/metrics/flow-charts.tsx",
+      "check_id": "Design.OrphanExport",
+      "rule_signature": "a05054aedd37cd24e93e32242ca84fcee7baa3d2aae4a905842f9b5d2481c885"
+    },
+    {
+      "file": "apps/web/src/islands/metrics/flow-charts.tsx",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "09540ec1ffaf91049878cbdcf95a49a82f8a85a1e01f7a1814440fcb5dac1fb7"
+    },
+    {
+      "file": "apps/web/src/islands/metrics/flow-charts.tsx",
+      "check_id": "Refactor.PreferArrayMethodOverLoop",
+      "rule_signature": "f1da14b050653791a4127dc419dcf0b49435bcb9a0a2c7c052548b397de27be3"
+    },
+    {
+      "file": "apps/web/src/islands/saved-views.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "0b7a76e437089120fb4e2c5054205f03ae878dd729f2ae4b5950ed7c79c59496"
+    },
+    {
+      "file": "apps/web/src/islands/saved-views.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "afe1e9cea33edd69dfd81ccc2ae20222b013d10f5f2b589dd0e5f2b923af3737"
+    },
+    {
+      "file": "apps/web/src/islands/saved-views.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "afe1e9cea33edd69dfd81ccc2ae20222b013d10f5f2b589dd0e5f2b923af3737"
+    },
+    {
+      "file": "apps/web/src/islands/saved-views.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e33d072b7db555c65b664fcda22c1c7aa5797d2c997afbf2f8a1c6a73aeea299"
+    },
+    {
+      "file": "apps/web/src/layouts/Base.astro",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/web/src/test/viewport.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "7a2ee0c99b4024b8e87eee66cb0a18918cf27c4af109f468aca5835fa5e6ee03"
+    },
+    {
+      "file": "apps/web/src/test/viewport.ts",
+      "check_id": "Design.OrphanExport",
+      "rule_signature": "c583243fd751a2a91e47c2cc7fdb283bb24f2005822d4a5f635f7ae0561429bf"
+    },
+    {
+      "file": "apps/web/src/utils/access-gate.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "69fffc6b4a101d11736e7de6eb549cd2847429e13f62c1ce09dd5bd1ddbe5ef0"
+    },
+    {
+      "file": "apps/web/src/utils/api-client.ts",
+      "check_id": "Design.ImportFanOutOutlier",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "apps/web/src/utils/api-client.ts",
+      "check_id": "Design.ReadonlyArrayParam",
+      "rule_signature": "e1271ad5bf1b4f57afb36e6e624ec68f5c5655494e6b573b49f6f4d845800ba9"
+    },
+    {
+      "file": "apps/web/src/utils/api-client.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "f7faa95c3cbd016bd59bcdfe6e60cf5f73d4e2e871b81b8b1692dc8cbc7d386b"
+    },
+    {
+      "file": "apps/web/src/utils/api-client.ts",
+      "check_id": "Refactor.CognitiveComplexity",
+      "rule_signature": "513ab77f15376cd3a223aa2beb875f0db710e0d1dc5e2737e6d6f0c814fca387"
+    },
+    {
+      "file": "apps/web/src/utils/api-client.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "3963e47a66a771337fd64285a30d535fed73a9a5cb92e95ceef96caa253b6900"
+    },
+    {
+      "file": "apps/web/src/utils/api-client.ts",
+      "check_id": "Refactor.CyclomaticComplexity",
+      "rule_signature": "513ab77f15376cd3a223aa2beb875f0db710e0d1dc5e2737e6d6f0c814fca387"
+    },
+    {
+      "file": "apps/web/src/utils/issue-prefetch.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "b4bd05c05af37de140884769bc3de55bd44bdfb48c3137f7d1b45f813e181a2c"
+    },
+    {
+      "file": "apps/web/src/utils/issue-url.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "a4d02c327a05b406b6daec5074229a46ff22ebb565f19e33355e60c37f7e069e"
+    },
+    {
+      "file": "apps/web/src/utils/issue-utils.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "d37288205aa2ed588d96a6b40929631bd40e30379c7e45bd5983a73df724437c"
+    },
+    {
+      "file": "apps/web/src/utils/use-fetch.ts",
+      "check_id": "Consistency.ErrorHandlingIdiom",
+      "rule_signature": "8c66b7c24e73d9b9da6933ee0829f9f8fb4e219be158d7256b20713f447b4f9c"
+    },
+    {
+      "file": "apps/web/src/utils/use-fetch.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "652929e48e76c542e9d4d89bd379d8ec4544dc3b0b7f2c24753e1e2591586244"
+    },
+    {
+      "file": "packages/db/drizzle.config.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "42c180d5df25d4067ca7189bd35f5ffc03d5c119c80e214a5fc5f39ee48ac0ea"
+    },
+    {
+      "file": "packages/db/src/schema/agent-messages.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "e59499fe245740d5b250aa8f2905116668bfc6f1d0b8af3639990fb353c898fb"
+    },
+    {
+      "file": "packages/db/src/schema/agents.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "d37a34f6fc55edb1e170d3fa9358b9b7a0a853c855f88d9d227fa79efac26de1"
+    },
+    {
+      "file": "packages/db/src/schema/attachments.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "3930e671c9e40dee2a33442c6f1055e8e8b75958ee19da8bd470754fd44beec2"
+    },
+    {
+      "file": "packages/db/src/schema/core.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "6e8d79980fba5ccc49472622f6af250f4c52d0271c3df8b665860a9b535313ae"
+    },
+    {
+      "file": "packages/db/src/schema/custom-fields.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "240bc65694f2c4d085c534b3374d692e459cb7142ca728e628b8445d09bb2870"
+    },
+    {
+      "file": "packages/db/src/schema/file-claims.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "87b24240583b48426cbfca9ebf1579e1bfccffd82ff3c1c1da40f13aab780e4b"
+    },
+    {
+      "file": "packages/db/src/schema/groups.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "806102f583890a4cd03a321bd4a081e13c41427a7353b73dc34f0ecb2cd4273f"
+    },
+    {
+      "file": "packages/db/src/schema/issue-leases.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "45c403ab188abc5ff29323d758464162c7320258535c43d940a692826b0c4de5"
+    },
+    {
+      "file": "packages/db/src/schema/issues.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "2577c0f557b2e4b591e9587374c6330c9c64de8017d5a848a682a135251a6f6f"
+    },
+    {
+      "file": "packages/db/src/schema/sprints.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "9c4a535033d89a730e574b5caa269991d9bade574a676505b96fce4a452f5ed4"
+    },
+    {
+      "file": "packages/db/src/schema/wiki.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "557d1c2bd69997a48095721767a41abbdea431efc0aed26ef4953056415e5803"
+    },
+    {
+      "file": "packages/db/src/test/helpers.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "ae154bf7b9da0b4596e049d0feb87ae72b13cbf0fc498459845770036a7fa002"
+    },
+    {
+      "file": "packages/db/src/test/migrations.test.ts",
+      "check_id": "Readability.MaxFunctionLength",
+      "rule_signature": "b1f7303dc5ce75f2b496883b68d900f81d5a8eebca4b980142bade02f0ee77c5"
+    },
+    {
+      "file": "packages/plugin-sdk/src/index.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "65da9e0c53c32aadbef5d9efa5d4a4ec578c5fe7439231df0e6feef6de85d461"
+    },
+    {
+      "file": "plugins/github/src/index.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "56a2d3ea32c9056357f9a884cf72ba97ee5777aa46de79163d5812a1e003755d"
+    },
+    {
+      "file": "plugins/island-api",
+      "check_id": "Warning.PluginLoadFailed",
+      "rule_signature": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "plugins/island-api/fixtures/apps/web/src/islands/fixture.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "0c04bdf9b5bfa6ec6873ca0cce14321896ae478d974686f6338bec5f139cbe55"
+    },
+    {
+      "file": "plugins/island-api/fixtures/apps/web/src/islands/fixture.ts",
+      "check_id": "Design.OrphanExport",
+      "rule_signature": "0c04bdf9b5bfa6ec6873ca0cce14321896ae478d974686f6338bec5f139cbe55"
+    },
+    {
+      "file": "plugins/island-api/fixtures/apps/web/src/islands/fixture.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "3dd46d5f444ea7d654c0afd72bbce0a9dbab20bb60a5e0bc222e21a0789208f5"
+    },
+    {
+      "file": "plugins/island-api/fixtures/apps/web/src/islands/fixture.ts",
+      "check_id": "Refactor.UnusedVariable",
+      "rule_signature": "28e5ebabd9d8f6e237df63da2b503785093f0229241bc7021198f63c43b93269"
+    },
+    {
+      "file": "plugins/island-api/src/index.ts",
+      "check_id": "Design.MissingTestFile",
+      "rule_signature": "07e668120f2f045bcc2bb13357b6016be9b81ce001e445239b26a1299ab04d80"
+    },
+    {
+      "file": "plugins/island-api/src/index.ts",
+      "check_id": "Design.OrphanExport",
+      "rule_signature": "07e668120f2f045bcc2bb13357b6016be9b81ce001e445239b26a1299ab04d80"
+    },
+    {
+      "file": "scripts/gen-conventions-page.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "6111ac29546b47ad18ac14617a2e60d18dcb03dba17f42c22411e0e4b54a1749"
+    },
+    {
+      "file": "scripts/gen-feedback-example-page.ts",
+      "check_id": "Readability.MaxLineLength",
+      "rule_signature": "90af7b58eaab5667e85eb67a513697a8186463e2052538591abce14bd05f06bf"
+    }
+  ]
 }
