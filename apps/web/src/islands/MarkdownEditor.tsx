@@ -48,11 +48,11 @@ function prefixLines(view: EditorView, prefix: string): boolean {
 	const tr = state.changeByRange((range) => {
 		const fromLine = state.doc.lineAt(range.from);
 		const toLine = state.doc.lineAt(range.to);
-		const changes = [];
-		for (let ln = fromLine.number; ln <= toLine.number; ln++) {
-			changes.push({ from: state.doc.line(ln).from, insert: prefix });
-		}
 		const lineCount = toLine.number - fromLine.number + 1;
+		const changes = Array.from({ length: lineCount }, (_, i) => ({
+			from: state.doc.line(fromLine.number + i).from,
+			insert: prefix,
+		}));
 		return {
 			changes,
 			range: EditorSelection.range(
