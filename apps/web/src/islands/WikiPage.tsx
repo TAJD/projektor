@@ -1205,6 +1205,7 @@ function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTM
 		const headings = Array.from(container.querySelectorAll("h1, h2, h3")) as HTMLElement[];
 		headings.forEach((h) => {
 			if (!h.id) {
+				// cofferdam-ignore: Refactor.MutatedParameter: setting a live DOM element's id is the point (anchor IDs for the ToC), not a code smell
 				h.id = (h.textContent ?? "")
 					.toLowerCase()
 					.replace(/[^a-z0-9]+/g, "-")
