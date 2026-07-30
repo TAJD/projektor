@@ -133,7 +133,7 @@ running server.
 | Tool | Description |
 |------|-------------|
 | `list_wiki_pages` | List wiki pages in the workspace, optionally filtered by parent or project |
-| `search_wiki` | Search wiki pages by keyword in title or content |
+| `search_wiki` | Full-text search over wiki pages (FTS5, BM25-ranked, title weighted above body). Returns match-anchored snippets highlighted with ** markers. type/tags/status are accepted for forward compatibility with the frontmatter (R6) and freshness (R7) work but are not yet implemented and are ignored if passed. |
 | `get_wiki_page` | Get a wiki page by slug, including full content |
 | `create_wiki_page` | Create a new wiki page |
 | `update_wiki_page` | Update a wiki page by id or slug (saves a revision when content changes). Pass baseRevisionId (the current revision id from list_wiki_revisions/get_wiki_revision, or null if the page has never been revised) for conflict-safe writes: if the page advanced since baseRevisionId, the write is rejected with a structured conflict (currentRevisionId + a unified diff) instead of silently overwriting. Omitting baseRevisionId is DEPRECATED — it keeps today's last-write-wins behavior during the transition and will be rejected in a future version. |

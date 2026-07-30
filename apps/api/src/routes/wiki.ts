@@ -31,8 +31,13 @@ router.get("/search", async (c) => {
 	const ctx = ctxFromHono(c);
 	const q = c.req.query("q") ?? "";
 	const projectId = c.req.query("projectId");
+	const limit = c.req.query("limit");
+	const offset = c.req.query("offset");
+	const updatedSince = c.req.query("updatedSince");
 	try {
-		return c.json(await wikiService.searchWiki(ctx, { query: q, projectId }));
+		return c.json(
+			await wikiService.searchWiki(ctx, { query: q, projectId, limit, offset, updatedSince })
+		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

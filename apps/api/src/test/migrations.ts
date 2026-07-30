@@ -43,6 +43,7 @@ import m0039 from "../../../../packages/db/migrations/0039_wip_cap_denials.sql?r
 import m0040 from "../../../../packages/db/migrations/0040_provisioning_removals.sql?raw";
 import m0041 from "../../../../packages/db/migrations/0041_wiki_slug_unique.sql?raw";
 import m0042 from "../../../../packages/db/migrations/0042_wiki_revision_title_summary.sql?raw";
+import m0043 from "../../../../packages/db/migrations/0043_wiki_fts.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -88,4 +89,5 @@ export const MIGRATIONS = [
 	m0040,
 	m0041,
 	m0042,
+	m0043,
 ];
