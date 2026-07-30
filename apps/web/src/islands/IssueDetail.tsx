@@ -209,14 +209,23 @@ function useEpicRelations(issue: IssueData | null, workspaceSlug: string | undef
 	return { parentEpic, childIssues };
 }
 
-function useIssueCore(
-	issueId: string,
-	readKey: string,
-	workspaceSlug: string | undefined,
-	fetchLinks: () => Promise<void>,
-	fetchAttachments: () => Promise<void>,
-	seedIssue: IssueData | null
-) {
+interface UseIssueCoreOptions {
+	issueId: string;
+	readKey: string;
+	workspaceSlug: string | undefined;
+	fetchLinks: () => Promise<void>;
+	fetchAttachments: () => Promise<void>;
+	seedIssue: IssueData | null;
+}
+
+function useIssueCore({
+	issueId,
+	readKey,
+	workspaceSlug,
+	fetchLinks,
+	fetchAttachments,
+	seedIssue,
+}: UseIssueCoreOptions) {
 	const [issue, setIssue] = useState<IssueData | null>(seedIssue);
 	const [comments, setComments] = useState<Comment[]>([]);
 	const [statuses, setStatuses] = useState<TaskStatus[]>([]);
@@ -621,7 +630,14 @@ export default function IssueDetail({
 		currentUserId,
 		fetchIssue,
 		fetchComments,
-	} = useIssueCore(issueId, readKey, workspaceSlug, fetchLinks, fetchAttachments, resolvedIssue);
+	} = useIssueCore({
+		issueId,
+		readKey,
+		workspaceSlug,
+		fetchLinks,
+		fetchAttachments,
+		seedIssue: resolvedIssue,
+	});
 
 	const { parentEpic, childIssues } = useEpicRelations(issue, workspaceSlug);
 

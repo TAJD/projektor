@@ -842,6 +842,48 @@ const LinkIcon = () => (
 	</svg>
 );
 
+function resolveAttachmentDisplay(
+	attachment: Attachment,
+	qs: string
+): {
+	icon: preact.ComponentChildren;
+	href: string | null;
+	label: string;
+	meta: string | null;
+	external: boolean;
+} {
+	if (attachment.kind === "wiki_ref" && attachment.wikiPage) {
+		return {
+			icon: <WikiIcon />,
+			href: attachment.wikiPage.url,
+			label: attachment.wikiPage.title,
+			meta: null,
+			external: false,
+		};
+	}
+	if (attachment.kind === "url" && attachment.url) {
+		return {
+			icon: <LinkIcon />,
+			href: attachment.url,
+			label: attachment.filename || attachment.url,
+			meta: null,
+			external: true,
+		};
+	}
+	if (attachment.kind === "file") {
+		return {
+			icon: <FileIcon />,
+			href: `/api/files/${attachment.id}${qs}`,
+			label: attachment.filename,
+			meta: formatBytes(attachment.size),
+			external: true,
+		};
+	}
+	// A wiki_ref whose target page was deleted, or is no longer visible to this
+	// user (project access revoked) — the join comes back empty either way.
+	return { icon: <WikiIcon />, href: null, label: "Wiki page unavailable", meta: null, external: false };
+}
+
 function AttachmentRow({
 	attachment,
 	workspaceSlug,
@@ -852,35 +894,7 @@ function AttachmentRow({
 	onDelete: () => void;
 }) {
 	const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
-
-	let icon: preact.ComponentChildren;
-	let href: string | null;
-	let label: string;
-	let meta: string | null = null;
-	let external = false;
-
-	if (attachment.kind === "wiki_ref" && attachment.wikiPage) {
-		icon = <WikiIcon />;
-		href = attachment.wikiPage.url;
-		label = attachment.wikiPage.title;
-	} else if (attachment.kind === "url" && attachment.url) {
-		icon = <LinkIcon />;
-		href = attachment.url;
-		label = attachment.filename || attachment.url;
-		external = true;
-	} else if (attachment.kind === "file") {
-		icon = <FileIcon />;
-		href = `/api/files/${attachment.id}${qs}`;
-		label = attachment.filename;
-		meta = formatBytes(attachment.size);
-		external = true;
-	} else {
-		// A wiki_ref whose target page was deleted, or is no longer visible to this
-		// user (project access revoked) — the join comes back empty either way.
-		icon = <WikiIcon />;
-		href = null;
-		label = "Wiki page unavailable";
-	}
+	const { icon, href, label, meta, external } = resolveAttachmentDisplay(attachment, qs);
 
 	return (
 		<div class="flex items-center gap-3 px-3 py-2 border border-border rounded-md bg-surface min-h-[44px]">
