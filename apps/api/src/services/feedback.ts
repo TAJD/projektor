@@ -80,7 +80,10 @@ async function insertFeedbackRow(
 	return id;
 }
 
-function resolveCorsAllowOrigin(source: SubmitSourceRow, requestOrigin: string | null): string | null {
+function resolveCorsAllowOrigin(
+	source: SubmitSourceRow,
+	requestOrigin: string | null
+): string | null {
 	const allowed = source.allowed_origins ? (JSON.parse(source.allowed_origins) as string[]) : null;
 	return allowed && requestOrigin && allowed.includes(requestOrigin) ? requestOrigin : null;
 }

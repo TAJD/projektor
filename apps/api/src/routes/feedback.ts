@@ -1,7 +1,7 @@
 import type { HonoEnv } from "@projektor/types";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
-import type { Context } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { bumpRateCounter } from "../middleware/rate-limit";
 import { ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
@@ -38,7 +38,10 @@ publicRouter.options("/submit", (c) => {
 	return c.body(null, 204, headers);
 });
 
-async function checkFeedbackRateLimit(c: Context<HonoEnv>, token: string): Promise<Response | null> {
+async function checkFeedbackRateLimit(
+	c: Context<HonoEnv>,
+	token: string
+): Promise<Response | null> {
 	// Dual-keyed rate limit (token hash + IP) — reject if either trips its bucket.
 	// Dedicated PROJ-378 env vars, not RATE_LIMIT_API_MAX/RATE_LIMIT_AUTH_MAX: this
 	// route runs outside the global rateLimitMiddleware chain (mounted before it),
