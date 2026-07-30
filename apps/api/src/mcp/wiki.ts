@@ -83,12 +83,18 @@ export const wikiTools: MCPTool[] = [
 					nullable: true,
 					description: "Parent page ID (null to unset parent, omit to leave unchanged)",
 				},
+				newSlug: {
+					type: "string",
+					description:
+						"Rename the page's slug; the old slug becomes a redirect so existing links keep resolving",
+				},
 			},
 		},
 		async handler(input, ctx) {
-			const { id, slug, ...rest } = input as {
+			const { id, slug, newSlug, ...rest } = input as {
 				id?: string;
 				slug?: string;
+				newSlug?: string;
 				title?: string;
 				content?: string;
 				parentId?: string | null;
@@ -100,7 +106,8 @@ export const wikiTools: MCPTool[] = [
 					fieldErrors: {},
 				});
 			}
-			return wikiService.updateWikiPage(ctx, idOrSlug, rest);
+			const payload = newSlug !== undefined ? { ...rest, slug: newSlug } : rest;
+			return wikiService.updateWikiPage(ctx, idOrSlug, payload);
 		},
 	},
 	{

@@ -8,6 +8,37 @@ import {
 	seedWorkspaceRoles,
 } from "./helpers";
 
+type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
+type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
+
+async function mcpCall<T>(
+	workspaceId: string,
+	name: string,
+	args: unknown,
+	headers: Record<string, string>
+): Promise<JsonRpcResult<T> | JsonRpcError> {
+	const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+		method: "POST",
+		headers,
+		body: JSON.stringify({
+			jsonrpc: "2.0",
+			id: 1,
+			method: "tools/call",
+			params: { name, arguments: args },
+		}),
+	});
+	return res.json();
+}
+
+function isMcpError(r: JsonRpcResult | JsonRpcError): r is JsonRpcError {
+	return "error" in r;
+}
+
+function mcpData<T>(r: JsonRpcResult<{ content: Array<{ text: string }> }> | JsonRpcError): T {
+	if (isMcpError(r)) throw new Error(`MCP error: ${r.error.message}`);
+	return JSON.parse(r.result.content[0].text) as T;
+}
+
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Wiki API", () => {
 	let token: string;
@@ -709,5 +740,256 @@ describe("Wiki role guards", () => {
 			headers: authHeaders(roles.owner.token, roles.workspace.slug),
 		});
 		expect(deleteRes.status).toBe(200);
+	});
+});
+
+// PROJ-483: slug uniqueness + rename redirects
+describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	it("POST /api/wiki rejects a title that slugifies to an existing page's slug (409)", async () => {
+		const first = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Operations", content: "v1" }),
+		});
+		expect(first.status).toBe(201);
+
+		const second = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Operations", content: "v2" }),
+		});
+		expect(second.status).toBe(409);
+	});
+
+	it("POST /api/wiki rejects an explicit slug that collides with an existing page (409)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Operations", content: "v1" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Ops Handbook", slug: "operations", content: "v2" }),
+		});
+		expect(res.status).toBe(409);
+	});
+
+	it("PUT /api/wiki/:slug renaming the slug creates a redirect; the old slug still resolves", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Roadmap", content: "v1" }),
+		});
+		const created = (await createRes.json()) as { slug: string };
+		expect(created.slug).toBe("roadmap");
+
+		const updateRes = await SELF.fetch("http://localhost/api/wiki/roadmap", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "product-roadmap" }),
+		});
+		expect(updateRes.status).toBe(200);
+		const updated = (await updateRes.json()) as { url: string };
+		expect(updated.url).toContain("slug=product-roadmap");
+
+		const newRes = await SELF.fetch("http://localhost/api/wiki/product-roadmap", {
+			headers: authHeaders(token, slug),
+		});
+		expect(newRes.status).toBe(200);
+
+		const oldRes = await SELF.fetch("http://localhost/api/wiki/roadmap", {
+			headers: authHeaders(token, slug),
+		});
+		expect(oldRes.status).toBe(200);
+		const oldPage = (await oldRes.json()) as { slug: string; title: string };
+		expect(oldPage.slug).toBe("product-roadmap");
+		expect(oldPage.title).toBe("Roadmap");
+	});
+
+	it("PUT /api/wiki/:slug rejects renaming to a slug already used by another page (409)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Alpha", content: "a" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Beta", content: "b" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/beta", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "alpha" }),
+		});
+		expect(res.status).toBe(409);
+	});
+
+	it("redirect chains collapse: renaming a page twice still resolves the original slug in one hop", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Docs", content: "v1" }),
+		});
+
+		await SELF.fetch("http://localhost/api/wiki/docs", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "docs-v2" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki/docs-v2", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "docs-v3" }),
+		});
+
+		const originalRes = await SELF.fetch("http://localhost/api/wiki/docs", {
+			headers: authHeaders(token, slug),
+		});
+		expect(originalRes.status).toBe(200);
+		expect(((await originalRes.json()) as { slug: string }).slug).toBe("docs-v3");
+
+		const intermediateRes = await SELF.fetch("http://localhost/api/wiki/docs-v2", {
+			headers: authHeaders(token, slug),
+		});
+		expect(intermediateRes.status).toBe(200);
+		expect(((await intermediateRes.json()) as { slug: string }).slug).toBe("docs-v3");
+	});
+
+	it("getWikiPage prefers a live page over a stale redirect for a reused slug (never ambiguous)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Old Name", content: "original" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki/old-name", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "new-name" }),
+		});
+
+		// "old-name" is now only a redirect. A new page can legitimately claim it.
+		const reclaimRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Reclaimed", slug: "old-name", content: "reclaimed" }),
+		});
+		expect(reclaimRes.status).toBe(201);
+
+		const res = await SELF.fetch("http://localhost/api/wiki/old-name", {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const page = (await res.json()) as { title: string };
+		expect(page.title).toBe("Reclaimed");
+	});
+
+	it("MCP update_wiki_page newSlug renames the slug and old slug resolves via redirect (parity with REST)", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "Handbook", content: "v1" },
+				authHeaders(token, slug)
+			)
+		);
+		expect(created.slug).toBe("handbook");
+
+		const updatedResult = mcpData<{ url: string }>(
+			await mcpCall(
+				workspaceId,
+				"update_wiki_page",
+				{ slug: "handbook", newSlug: "team-handbook" },
+				authHeaders(token, slug)
+			)
+		);
+		expect(updatedResult.url).toContain("slug=team-handbook");
+
+		const oldPage = mcpData<{ slug: string }>(
+			await mcpCall(workspaceId, "get_wiki_page", { slug: "handbook" }, authHeaders(token, slug))
+		);
+		expect(oldPage.slug).toBe("team-handbook");
+	});
+
+	it("MCP create_wiki_page rejects a colliding slug with a ConflictError (-32000)", async () => {
+		await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "Conflict Page" },
+			authHeaders(token, slug)
+		);
+		const res = await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "Conflict Page" },
+			authHeaders(token, slug)
+		);
+		expect(isMcpError(res)).toBe(true);
+		if (isMcpError(res)) expect(res.error.code).toBe(-32000);
+	});
+});
+
+// PROJ-483: exercises the dedup UPDATE statement from 0041_wiki_slug_unique.sql in
+// isolation. The migration itself runs before any tests seed data (test/setup.ts's
+// beforeAll), so by the time tests execute the unique index is already enforcing —
+// there is no way to get duplicate wiki_pages rows through the running app to
+// re-verify the migration end-to-end. Running the identical dedup SQL against a
+// scratch table shaped like the pre-migration wiki_pages table verifies the
+// algorithm's correctness directly instead.
+describe("wiki slug dedup algorithm (0041_wiki_slug_unique.sql)", () => {
+	it("keeps the oldest page's slug and appends a numeric suffix to newer duplicates", async () => {
+		await env.DB.prepare(
+			`CREATE TABLE dedup_scratch (
+				id TEXT PRIMARY KEY,
+				workspace_id TEXT NOT NULL,
+				slug TEXT NOT NULL,
+				created_at INTEGER NOT NULL
+			)`
+		).run();
+		try {
+			await env.DB.prepare(
+				"INSERT INTO dedup_scratch (id, workspace_id, slug, created_at) VALUES " +
+					"('p1', 'ws1', 'operations', 100), ('p2', 'ws1', 'operations', 200), " +
+					"('p3', 'ws1', 'operations', 300), ('p4', 'ws1', 'other', 100)"
+			).run();
+
+			await env.DB.prepare(
+				`WITH ranked AS (
+					SELECT id, ROW_NUMBER() OVER (
+						PARTITION BY workspace_id, slug ORDER BY created_at, id
+					) AS rn
+					FROM dedup_scratch
+				)
+				UPDATE dedup_scratch
+				SET slug = dedup_scratch.slug || '-' || (SELECT rn FROM ranked WHERE ranked.id = dedup_scratch.id)
+				WHERE id IN (SELECT id FROM ranked WHERE rn > 1)`
+			).run();
+
+			const { results } = await env.DB.prepare(
+				"SELECT id, slug FROM dedup_scratch ORDER BY id"
+			).all<{ id: string; slug: string }>();
+			expect(results).toEqual([
+				{ id: "p1", slug: "operations" },
+				{ id: "p2", slug: "operations-2" },
+				{ id: "p3", slug: "operations-3" },
+				{ id: "p4", slug: "other" },
+			]);
+		} finally {
+			await env.DB.prepare("DROP TABLE dedup_scratch").run();
+		}
 	});
 });

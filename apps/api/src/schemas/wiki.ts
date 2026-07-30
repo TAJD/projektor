@@ -1,16 +1,17 @@
 import { z } from "zod";
 
+const SlugSchema = z
+	.string()
+	.min(1)
+	.max(200)
+	.regex(/^[a-z0-9-/]+$/);
+
 export const CreatePageSchema = z.object({
 	title: z.string().min(1).max(300),
 	content: z.string().max(500000).optional(),
 	parentId: z.string().uuid().optional(),
 	projectId: z.string().uuid().optional(),
-	slug: z
-		.string()
-		.min(1)
-		.max(200)
-		.regex(/^[a-z0-9-/]+$/)
-		.optional(),
+	slug: SlugSchema.optional(),
 });
 
 export const UpdatePageSchema = z
@@ -18,10 +19,20 @@ export const UpdatePageSchema = z
 		title: z.string().min(1).max(300).optional(),
 		content: z.string().max(500000).optional(),
 		parentId: z.string().uuid().nullable().optional(),
+		// PROJ-483: renaming a page's slug leaves a wiki_redirects entry for the old
+		// slug so existing links/bookmarks keep resolving (services/wiki.ts).
+		slug: SlugSchema.optional(),
 	})
-	.refine((d) => d.title !== undefined || d.content !== undefined || d.parentId !== undefined, {
-		message: "At least one of title, content, or parentId must be provided",
-	});
+	.refine(
+		(d) =>
+			d.title !== undefined ||
+			d.content !== undefined ||
+			d.parentId !== undefined ||
+			d.slug !== undefined,
+		{
+			message: "At least one of title, content, parentId, or slug must be provided",
+		}
+	);
 
 export const ListPagesInputSchema = z.object({
 	parentId: z.string().optional(),

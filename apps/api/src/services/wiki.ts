@@ -18,7 +18,7 @@ import {
 	visibleProjectSqlFragment,
 } from "./access";
 import { recordActivity } from "./activity";
-import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -53,6 +53,24 @@ function slugify(title: string): string {
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-|-$/g, "");
+}
+
+// PROJ-483: wiki_pages(workspace_id, slug) is unique — surface a structured
+// ConflictError instead of letting the constraint throw a raw D1 error.
+async function assertSlugAvailable(
+	orm: ReturnType<typeof drizzle<typeof schema>>,
+	workspaceId: string,
+	slug: string,
+	excludePageId?: string
+): Promise<void> {
+	const existing = await orm
+		.select({ id: schema.wikiPages.id })
+		.from(schema.wikiPages)
+		.where(and(eq(schema.wikiPages.workspaceId, workspaceId), eq(schema.wikiPages.slug, slug)))
+		.get();
+	if (existing && existing.id !== excludePageId) {
+		throw new ConflictError(`Slug '${slug}' is already in use`);
+	}
 }
 
 async function resolvePageByIdOrSlug(
@@ -175,12 +193,13 @@ async function validateUpdatedPageParent(
 function buildWikiPageUpdateSet(
 	now: number,
 	updatedById: string,
-	fields: { title?: string; content?: string; parentId?: string | null }
+	fields: { title?: string; content?: string; parentId?: string | null; slug?: string }
 ): Record<string, unknown> {
 	const setData: Record<string, unknown> = { updatedAt: now, updatedById };
 	if (fields.title !== undefined) setData.title = fields.title;
 	if (fields.content !== undefined) setData.content = fields.content;
 	if (fields.parentId !== undefined) setData.parentId = fields.parentId;
+	if (fields.slug !== undefined) setData.slug = fields.slug;
 	return setData;
 }
 
@@ -269,21 +288,52 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	return results;
 }
 
+const wikiPageDetailColumns = {
+	id: schema.wikiPages.id,
+	slug: schema.wikiPages.slug,
+	title: schema.wikiPages.title,
+	content: schema.wikiPages.content,
+	// eslint-disable-next-line camelcase
+	parent_id: schema.wikiPages.parentId,
+	// eslint-disable-next-line camelcase
+	project_id: schema.wikiPages.projectId,
+	// eslint-disable-next-line camelcase
+	updated_at: schema.wikiPages.updatedAt,
+};
+
+// PROJ-483: a slug with no live page may still be a former slug of one — recorded in
+// wiki_redirects when the page was renamed (updateWikiPage below). Redirects always
+// point at the page's current id, so this is a single hop regardless of how many
+// times the page has been renamed since.
+async function resolveWikiPageByRedirect(
+	orm: ReturnType<typeof drizzle<typeof schema>>,
+	workspaceId: string,
+	oldSlug: string
+) {
+	const redirect = await orm
+		.select({ pageId: schema.wikiRedirects.pageId })
+		.from(schema.wikiRedirects)
+		.where(
+			and(
+				eq(schema.wikiRedirects.workspaceId, workspaceId),
+				eq(schema.wikiRedirects.oldSlug, oldSlug)
+			)
+		)
+		.get();
+	if (!redirect) return undefined;
+	return orm
+		.select(wikiPageDetailColumns)
+		.from(schema.wikiPages)
+		.where(
+			and(eq(schema.wikiPages.id, redirect.pageId), eq(schema.wikiPages.workspaceId, workspaceId))
+		)
+		.get();
+}
+
 export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 	const orm = drizzle(ctx.db, { schema });
-	const page = await orm
-		.select({
-			id: schema.wikiPages.id,
-			slug: schema.wikiPages.slug,
-			title: schema.wikiPages.title,
-			content: schema.wikiPages.content,
-			// eslint-disable-next-line camelcase
-			parent_id: schema.wikiPages.parentId,
-			// eslint-disable-next-line camelcase
-			project_id: schema.wikiPages.projectId,
-			// eslint-disable-next-line camelcase
-			updated_at: schema.wikiPages.updatedAt,
-		})
+	const direct = await orm
+		.select(wikiPageDetailColumns)
 		.from(schema.wikiPages)
 		.where(
 			and(
@@ -292,6 +342,9 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 			)
 		)
 		.get();
+	// PROJ-483: live page always wins over a redirect, so reusing an old slug for a
+	// new/renamed page never leaves getWikiPage returning an ambiguous result.
+	const page = direct ?? (await resolveWikiPageByRedirect(orm, ctx.workspaceId, slugOrId));
 	if (!page) throw new NotFoundError("Wiki page not found");
 	await assertWikiPageVisible(ctx, page.project_id);
 	return { ...page, url: wikiPagePath(page.slug, page.project_id) };
@@ -310,6 +363,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 	const slug = customSlug ?? slugify(title);
+	await assertSlugAvailable(orm, ctx.workspaceId, slug);
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
 
@@ -333,7 +387,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
 	const parsed = UpdatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { title, content, parentId } = parsed.data;
+	const { title, content, parentId, slug } = parsed.data;
 	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
 	await requireWikiWrite(ctx, page.projectId);
 	const now = Math.floor(Date.now() / 1000);
@@ -341,6 +395,13 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 
 	if (parentId !== undefined && parentId !== null) {
 		await validateUpdatedPageParent(ctx.db, parentId, ctx.workspaceId, page);
+	}
+
+	// PROJ-483: renaming the slug — check the new slug isn't already live, then leave a
+	// redirect from the old slug to this page so existing links keep resolving.
+	const isRename = slug !== undefined && slug !== page.slug;
+	if (isRename) {
+		await assertSlugAvailable(orm, ctx.workspaceId, slug, page.id);
 	}
 
 	if (content !== undefined) {
@@ -353,12 +414,30 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		});
 	}
 
-	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId });
+	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug });
 	await orm
 		.update(schema.wikiPages)
 		// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
 		.set(setData as any)
 		.where(eq(schema.wikiPages.id, page.id));
+
+	if (isRename) {
+		// Upsert: the old slug may already carry a stale redirect from an earlier rename
+		// of some other page — this rename takes ownership of it.
+		await orm
+			.insert(schema.wikiRedirects)
+			.values({
+				id: crypto.randomUUID(),
+				workspaceId: ctx.workspaceId,
+				oldSlug: page.slug,
+				pageId: page.id,
+				createdAt: now,
+			})
+			.onConflictDoUpdate({
+				target: [schema.wikiRedirects.workspaceId, schema.wikiRedirects.oldSlug],
+				set: { pageId: page.id, createdAt: now },
+			});
+	}
 
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
@@ -367,7 +446,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		diff: buildWikiPageUpdateDiff({ title, content }),
 	});
 
-	return { ok: true, url: wikiPagePath(page.slug, page.projectId) };
+	return { ok: true, url: wikiPagePath(slug ?? page.slug, page.projectId) };
 }
 
 // PROJ-238: breadth-first walk of parent_id children, chunked to stay under D1's
