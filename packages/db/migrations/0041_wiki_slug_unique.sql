@@ -1,9 +1,10 @@
 -- PROJ-483: dedupe existing (workspace_id, slug) collisions in wiki_pages before
 -- adding a uniqueness constraint. There is a known live collision (two "Operations"
 -- pages both holding slug `operations`). The oldest page (by created_at, id) keeps
--- its slug as-is; newer duplicates get a numeric suffix appended via ROW_NUMBER(),
--- e.g. `operations` -> `operations-2`, `operations-3`, ... This mirrors the
--- 0035_project_slug.sql dedup pattern for project slugs.
+-- its slug as-is; newer duplicates get a suffix derived from their own id (not a
+-- row number) so the result can never collide with another pre-existing slug —
+-- e.g. a workspace already containing `operations-2` as an unrelated page would
+-- make a plain `-2` row-number suffix collide and abort the UNIQUE INDEX below.
 WITH ranked AS (
 	SELECT
 		id,
@@ -14,7 +15,7 @@ WITH ranked AS (
 	FROM wiki_pages
 )
 UPDATE wiki_pages
-SET slug = wiki_pages.slug || '-' || (SELECT rn FROM ranked WHERE ranked.id = wiki_pages.id)
+SET slug = wiki_pages.slug || '-' || substr(wiki_pages.id, 1, 8)
 WHERE id IN (SELECT id FROM ranked WHERE rn > 1);
 
 CREATE UNIQUE INDEX `wiki_pages_workspace_slug_unique_idx` ON `wiki_pages` (`workspace_id`, `slug`);

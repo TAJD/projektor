@@ -898,6 +898,55 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(page.title).toBe("Reclaimed");
 	});
 
+	it("the same slug in two different workspaces does not conflict", async () => {
+		const other = await seedFixture();
+
+		const first = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Shared Name", content: "workspace one" }),
+		});
+		expect(first.status).toBe(201);
+
+		const second = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(other.token, other.workspace.slug),
+			body: JSON.stringify({ title: "Shared Name", content: "workspace two" }),
+		});
+		expect(second.status).toBe(201);
+		const secondPage = (await second.json()) as { slug: string };
+		expect(secondPage.slug).toBe("shared-name");
+	});
+
+	it("a redirect created in one workspace does not resolve in another workspace", async () => {
+		const other = await seedFixture();
+
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Isolated", content: "v1" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki/isolated", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "isolated-renamed" }),
+		});
+
+		// "isolated" is now a redirect in the first workspace only.
+		const crossWorkspaceRes = await SELF.fetch("http://localhost/api/wiki/isolated", {
+			headers: authHeaders(other.token, other.workspace.slug),
+		});
+		expect(crossWorkspaceRes.status).toBe(404);
+
+		// A page in the other workspace is free to use "isolated" as its own live slug.
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(other.token, other.workspace.slug),
+			body: JSON.stringify({ title: "Isolated", slug: "isolated", content: "other workspace" }),
+		});
+		expect(createRes.status).toBe(201);
+	});
+
 	it("MCP update_wiki_page newSlug renames the slug and old slug resolves via redirect (parity with REST)", async () => {
 		const created = mcpData<{ slug: string }>(
 			await mcpCall(
@@ -951,7 +1000,17 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 // scratch table shaped like the pre-migration wiki_pages table verifies the
 // algorithm's correctness directly instead.
 describe("wiki slug dedup algorithm (0041_wiki_slug_unique.sql)", () => {
-	it("keeps the oldest page's slug and appends a numeric suffix to newer duplicates", async () => {
+	const DEDUP_SQL = `WITH ranked AS (
+		SELECT id, ROW_NUMBER() OVER (
+			PARTITION BY workspace_id, slug ORDER BY created_at, id
+		) AS rn
+		FROM dedup_scratch
+	)
+	UPDATE dedup_scratch
+	SET slug = dedup_scratch.slug || '-' || substr(dedup_scratch.id, 1, 8)
+	WHERE id IN (SELECT id FROM ranked WHERE rn > 1)`;
+
+	async function withScratchTable(fn: () => Promise<void>) {
 		await env.DB.prepare(
 			`CREATE TABLE dedup_scratch (
 				id TEXT PRIMARY KEY,
@@ -961,35 +1020,55 @@ describe("wiki slug dedup algorithm (0041_wiki_slug_unique.sql)", () => {
 			)`
 		).run();
 		try {
+			await fn();
+		} finally {
+			await env.DB.prepare("DROP TABLE dedup_scratch").run();
+		}
+	}
+
+	it("keeps the oldest page's slug and appends an id-derived suffix to newer duplicates", async () => {
+		await withScratchTable(async () => {
 			await env.DB.prepare(
 				"INSERT INTO dedup_scratch (id, workspace_id, slug, created_at) VALUES " +
 					"('p1', 'ws1', 'operations', 100), ('p2', 'ws1', 'operations', 200), " +
 					"('p3', 'ws1', 'operations', 300), ('p4', 'ws1', 'other', 100)"
 			).run();
 
-			await env.DB.prepare(
-				`WITH ranked AS (
-					SELECT id, ROW_NUMBER() OVER (
-						PARTITION BY workspace_id, slug ORDER BY created_at, id
-					) AS rn
-					FROM dedup_scratch
-				)
-				UPDATE dedup_scratch
-				SET slug = dedup_scratch.slug || '-' || (SELECT rn FROM ranked WHERE ranked.id = dedup_scratch.id)
-				WHERE id IN (SELECT id FROM ranked WHERE rn > 1)`
-			).run();
+			await env.DB.prepare(DEDUP_SQL).run();
 
 			const { results } = await env.DB.prepare(
 				"SELECT id, slug FROM dedup_scratch ORDER BY id"
 			).all<{ id: string; slug: string }>();
 			expect(results).toEqual([
 				{ id: "p1", slug: "operations" },
-				{ id: "p2", slug: "operations-2" },
-				{ id: "p3", slug: "operations-3" },
+				{ id: "p2", slug: "operations-p2" },
+				{ id: "p3", slug: "operations-p3" },
 				{ id: "p4", slug: "other" },
 			]);
-		} finally {
-			await env.DB.prepare("DROP TABLE dedup_scratch").run();
-		}
+		});
+	});
+
+	it("doesn't collide with a pre-existing slug that looks like a row-number suffix", async () => {
+		// Regression case: a plain `-2` / `-3` row-number suffix would collide with an
+		// unrelated page that already happens to be named e.g. "operations-2", aborting
+		// the UNIQUE INDEX creation that follows this UPDATE. An id-derived suffix can't
+		// collide with a pre-existing slug this way.
+		await withScratchTable(async () => {
+			await env.DB.prepare(
+				"INSERT INTO dedup_scratch (id, workspace_id, slug, created_at) VALUES " +
+					"('p1', 'ws1', 'operations', 100), ('p2', 'ws1', 'operations', 200), " +
+					"('p3', 'ws1', 'operations-2', 50)"
+			).run();
+
+			await env.DB.prepare(DEDUP_SQL).run();
+
+			const { results } = await env.DB.prepare(
+				"SELECT id, slug FROM dedup_scratch ORDER BY id"
+			).all<{ id: string; slug: string }>();
+			const slugs = results.map((r) => r.slug);
+			expect(new Set(slugs).size).toBe(slugs.length);
+			expect(results.find((r) => r.id === "p1")?.slug).toBe("operations");
+			expect(results.find((r) => r.id === "p3")?.slug).toBe("operations-2");
+		});
 	});
 });

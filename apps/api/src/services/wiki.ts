@@ -79,7 +79,7 @@ async function resolvePageByIdOrSlug(
 	workspaceId: string
 ): Promise<{ id: string; slug: string; content: string; projectId: string | null }> {
 	const orm = drizzle(db, { schema });
-	const page = await orm
+	const direct = await orm
 		.select({
 			id: schema.wikiPages.id,
 			slug: schema.wikiPages.slug,
@@ -94,8 +94,20 @@ async function resolvePageByIdOrSlug(
 			)
 		)
 		.get();
-	if (!page) throw new NotFoundError("Wiki page not found");
-	return page;
+	if (direct) return direct;
+	// PROJ-483: fall back to a redirect (old slug -> page id) so operations other
+	// than getWikiPage also resolve a renamed page's previous slug rather than 404ing.
+	const redirected = await resolveWikiPageByRedirect(orm, workspaceId, idOrSlug);
+	if (redirected) {
+		return {
+			id: redirected.id,
+			slug: redirected.slug,
+			content: redirected.content,
+			// eslint-disable-next-line camelcase
+			projectId: redirected.project_id,
+		};
+	}
+	throw new NotFoundError("Wiki page not found");
 }
 
 async function validateParentDepth(
@@ -367,19 +379,29 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
 
-	await orm.insert(schema.wikiPages).values({
-		id,
-		workspaceId: ctx.workspaceId,
-		projectId: projectId ?? null,
-		slug,
-		title,
-		content: content ?? "",
-		parentId: parentId ?? null,
-		createdById: ctx.userId,
-		updatedById: ctx.userId,
-		createdAt: now,
-		updatedAt: now,
-	});
+	try {
+		await orm.insert(schema.wikiPages).values({
+			id,
+			workspaceId: ctx.workspaceId,
+			projectId: projectId ?? null,
+			slug,
+			title,
+			content: content ?? "",
+			parentId: parentId ?? null,
+			createdById: ctx.userId,
+			updatedById: ctx.userId,
+			createdAt: now,
+			updatedAt: now,
+		});
+	} catch (e) {
+		// PROJ-483: assertSlugAvailable-then-insert isn't atomic — a concurrent create
+		// can win the race between the check and this insert. Surface the resulting
+		// unique-index violation as a structured conflict, not a raw 500.
+		if (e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
+			throw new ConflictError(`Slug '${slug}' is already in use`);
+		}
+		throw e;
+	}
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
 	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug, projectId ?? null) };
 }
@@ -415,11 +437,21 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	}
 
 	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug });
-	await orm
-		.update(schema.wikiPages)
-		// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
-		.set(setData as any)
-		.where(eq(schema.wikiPages.id, page.id));
+	try {
+		await orm
+			.update(schema.wikiPages)
+			// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
+			.set(setData as any)
+			.where(eq(schema.wikiPages.id, page.id));
+	} catch (e) {
+		// PROJ-483: assertSlugAvailable-then-update isn't atomic — a concurrent rename
+		// can win the race between the check and this update. Surface the resulting
+		// unique-index violation as a structured conflict, not a raw 500.
+		if (isRename && e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
+			throw new ConflictError(`Slug '${slug}' is already in use`);
+		}
+		throw e;
+	}
 
 	if (isRename) {
 		// Upsert: the old slug may already carry a stale redirect from an earlier rename
