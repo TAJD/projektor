@@ -22,6 +22,7 @@ export default function UplotChart({ data, buildOptions, height = 220 }: Props) 
 
 		function create(el: HTMLDivElement) {
 			chartRef.current?.destroy();
+			// cofferdam-ignore: Refactor.PreferNullishCoalescing: clientWidth is legitimately 0 before layout — that's the case this falls back on, so ?? (which keeps 0) would be wrong here
 			const width = el.clientWidth || 600;
 			chartRef.current = new uPlot(buildOptions(width, height), data, el);
 		}
