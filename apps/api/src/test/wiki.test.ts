@@ -992,6 +992,215 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 	});
 });
 
+// PROJ-484: optimistic locking (baseRevisionId + conflict diff) on wiki writes
+describe("Wiki optimistic locking (PROJ-484)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	// The test env's RATE_LIMIT_API_MAX is 5 req/window (wrangler.test.toml), and these
+	// tests each fire more than that against one token — reset the counter before every
+	// request (same escape hatch as PROJ-238's nesting-depth test above).
+	async function req(url: string, opts?: RequestInit) {
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		return SELF.fetch(url, opts);
+	}
+
+	async function mcp<T>(name: string, args: unknown) {
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+	}
+
+	async function getRevisions(pageSlug: string) {
+		const res = await req(`http://localhost/api/wiki/${pageSlug}/revisions`, {
+			headers: authHeaders(token, slug),
+		});
+		return (await res.json()) as Array<{
+			id: string;
+			title: string;
+			summary: string | null;
+			created_at: number;
+		}>;
+	}
+
+	it("REST: update with no baseRevisionId still succeeds (transitional last-write-wins)", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Transitional", content: "v1" }),
+		});
+
+		const res = await req("http://localhost/api/wiki/transitional", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		expect(res.status).toBe(200);
+
+		const pageRes = await req("http://localhost/api/wiki/transitional", {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await pageRes.json()) as { content: string }).content).toBe("v2");
+	});
+
+	it("REST: update succeeds when baseRevisionId matches the current latest revision", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Locked Doc", content: "v1" }),
+		});
+		// First edit (no base yet) creates the first revision, capturing "v1".
+		await req("http://localhost/api/wiki/locked-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		const [latest] = await getRevisions("locked-doc");
+
+		const res = await req("http://localhost/api/wiki/locked-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v3", baseRevisionId: latest.id }),
+		});
+		expect(res.status).toBe(200);
+
+		const pageRes = await req("http://localhost/api/wiki/locked-doc", {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await pageRes.json()) as { content: string }).content).toBe("v3");
+	});
+
+	it("REST: update is rejected with a structured conflict when baseRevisionId is stale", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Contested Doc", content: "v1" }),
+		});
+		await req("http://localhost/api/wiki/contested-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		const [staleRevision] = await getRevisions("contested-doc");
+
+		// Someone else edits again, advancing the latest revision past staleRevision.
+		await req("http://localhost/api/wiki/contested-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v3" }),
+		});
+		const [currentLatest] = await getRevisions("contested-doc");
+		expect(currentLatest.id).not.toBe(staleRevision.id);
+
+		const res = await req("http://localhost/api/wiki/contested-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v4 (stale attempt)", baseRevisionId: staleRevision.id }),
+		});
+		expect(res.status).toBe(409);
+		const body = (await res.json()) as { error: string; currentRevisionId: string; diff: string };
+		expect(body.currentRevisionId).toBe(currentLatest.id);
+		expect(typeof body.diff).toBe("string");
+		// diff is between staleRevision's snapshot ("v1", the content before the FIRST
+		// edit) and the page's live current content ("v3", after the second edit).
+		expect(body.diff).toContain("v1");
+		expect(body.diff).toContain("v3");
+
+		// The stale write never applied.
+		const pageRes = await req("http://localhost/api/wiki/contested-doc", {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await pageRes.json()) as { content: string }).content).toBe("v3");
+	});
+
+	it("REST: revision rows get a title snapshot", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Snapshot Title", content: "v1" }),
+		});
+		await req("http://localhost/api/wiki/snapshot-title", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+
+		const [revision] = await getRevisions("snapshot-title");
+		expect(revision.title).toBe("Snapshot Title");
+	});
+
+	it("REST: summary is stored and returned when provided", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Summarized Doc", content: "v1" }),
+		});
+		await req("http://localhost/api/wiki/summarized-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2", summary: "Fixed a typo" }),
+		});
+
+		const [revision] = await getRevisions("summarized-doc");
+		expect(revision.summary).toBe("Fixed a typo");
+	});
+
+	it("MCP: update_wiki_page parity — matching baseRevisionId succeeds, stale is rejected with a structured conflict", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcp("create_wiki_page", { title: "MCP Locked Doc", content: "v1" })
+		);
+
+		await mcp("update_wiki_page", { slug: created.slug, content: "v2" });
+		const revisionsAfterFirstEdit = mcpData<Array<{ id: string }>>(
+			await mcp("list_wiki_revisions", { slug: created.slug })
+		);
+		const [staleRevision] = revisionsAfterFirstEdit;
+
+		// Matching baseRevisionId succeeds.
+		const okResult = await mcp("update_wiki_page", {
+			slug: created.slug,
+			content: "v3",
+			baseRevisionId: staleRevision.id,
+			summary: "v3 edit",
+		});
+		expect(isMcpError(okResult)).toBe(false);
+
+		const revisionsAfterSecondEdit = mcpData<Array<{ id: string; summary: string | null }>>(
+			await mcp("list_wiki_revisions", { slug: created.slug })
+		);
+		const [currentLatest] = revisionsAfterSecondEdit;
+		expect(currentLatest.id).not.toBe(staleRevision.id);
+		expect(currentLatest.summary).toBe("v3 edit");
+
+		// Stale baseRevisionId is rejected with a structured conflict.
+		const conflictResult = await mcp("update_wiki_page", {
+			slug: created.slug,
+			content: "v4 (stale attempt)",
+			baseRevisionId: staleRevision.id,
+		});
+		expect(isMcpError(conflictResult)).toBe(true);
+		if (isMcpError(conflictResult)) {
+			expect(conflictResult.error.code).toBe(-32000);
+			const parsed = JSON.parse(conflictResult.error.message) as {
+				currentRevisionId: string;
+				diff: string;
+			};
+			expect(parsed.currentRevisionId).toBe(currentLatest.id);
+			// diff is between staleRevision's snapshot ("v1") and the page's live current
+			// content ("v3", after the second — successful — edit).
+			expect(parsed.diff).toContain("v1");
+			expect(parsed.diff).toContain("v3");
+		}
+	});
+});
+
 // PROJ-483: exercises the dedup UPDATE statement from 0041_wiki_slug_unique.sql in
 // isolation. The migration itself runs before any tests seed data (test/setup.ts's
 // beforeAll), so by the time tests execute the unique index is already enforcing —

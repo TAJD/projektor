@@ -40,6 +40,10 @@ export const wikiRevisions = sqliteTable(
 			.notNull()
 			.references(() => wikiPages.id, { onDelete: "cascade" }),
 		content: text("content").notNull(),
+		// PROJ-484: page title at the time of this revision (0042_wiki_revision_title_summary.sql).
+		title: text("title").notNull().default(""),
+		// PROJ-484: optional edit message/changelog note supplied by the writer.
+		summary: text("summary"),
 		authorId: text("author_id")
 			.notNull()
 			.references(() => users.id),

@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { wikiPagePath } from "../lib/urls";
 import { IdSchema } from "../schemas/common";
 import {
@@ -77,12 +77,13 @@ async function resolvePageByIdOrSlug(
 	db: D1Database,
 	idOrSlug: string,
 	workspaceId: string
-): Promise<{ id: string; slug: string; content: string; projectId: string | null }> {
+): Promise<{ id: string; slug: string; title: string; content: string; projectId: string | null }> {
 	const orm = drizzle(db, { schema });
 	const direct = await orm
 		.select({
 			id: schema.wikiPages.id,
 			slug: schema.wikiPages.slug,
+			title: schema.wikiPages.title,
 			content: schema.wikiPages.content,
 			projectId: schema.wikiPages.projectId,
 		})
@@ -102,6 +103,7 @@ async function resolvePageByIdOrSlug(
 		return {
 			id: redirected.id,
 			slug: redirected.slug,
+			title: redirected.title,
 			content: redirected.content,
 			// eslint-disable-next-line camelcase
 			projectId: redirected.project_id,
@@ -406,14 +408,182 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug, projectId ?? null) };
 }
 
+// PROJ-484: id of the most recently created revision for a page, or null if the page
+// has never been edited (no revision row exists yet). This is the "current revision"
+// pointer optimistic-locking compares a caller's baseRevisionId against — each content
+// edit inserts a new revision snapshotting the pre-edit state, which moves this
+// pointer forward, so a stale baseRevisionId always fails the equality check below.
+// Raw SQL (not drizzle) so the ORDER BY can tiebreak on rowid: createdAt is unix
+// SECONDS (repo convention), so two edits within the same second tie on it, and only
+// rowid (monotonic insertion order) reliably picks the most recently inserted row.
+async function getLatestRevisionId(db: D1Database, pageId: string): Promise<string | null> {
+	const row = await db
+		.prepare(
+			"SELECT id FROM wiki_revisions WHERE page_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1"
+		)
+		.bind(pageId)
+		.first<{ id: string }>();
+	return row?.id ?? null;
+}
+
+// PROJ-484: content to diff a conflicting write's base against. `null` means the
+// caller read the page before it had ever been revised — the oldest revision (the
+// first edit's pre-change snapshot) holds that original content. An unknown/garbage
+// baseRevisionId can't be resolved to any content; best-effort fall back to an empty
+// base rather than erroring, since the caller already gets the authoritative
+// currentRevisionId in the conflict payload to resync from.
+async function resolveBaseContent(
+	db: D1Database,
+	pageId: string,
+	baseRevisionId: string | null
+): Promise<string> {
+	if (baseRevisionId === null) {
+		const row = await db
+			.prepare(
+				"SELECT content FROM wiki_revisions WHERE page_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1"
+			)
+			.bind(pageId)
+			.first<{ content: string }>();
+		return row?.content ?? "";
+	}
+	const row = await db
+		.prepare("SELECT content FROM wiki_revisions WHERE id = ? AND page_id = ?")
+		.bind(baseRevisionId, pageId)
+		.first<{ content: string }>();
+	return row?.content ?? "";
+}
+
+// PROJ-484: LCS-based line diff. dp is O(n*m) time/memory, which is fine for typical
+// wiki-page edits; MAX_DIFF_CELLS guards against pathological blowup on huge pages by
+// falling back to a coarse "everything replaced" edit script instead of hanging.
+const MAX_DIFF_CELLS = 4_000_000;
+
+type DiffOp = { type: "equal" | "add" | "remove"; line: string };
+
+function computeLineDiff(oldLines: string[], newLines: string[]): DiffOp[] {
+	const n = oldLines.length;
+	const m = newLines.length;
+	if (n * m > MAX_DIFF_CELLS) {
+		return [
+			...oldLines.map((line): DiffOp => ({ type: "remove", line })),
+			...newLines.map((line): DiffOp => ({ type: "add", line })),
+		];
+	}
+	const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
+	for (let i = n - 1; i >= 0; i--) {
+		for (let j = m - 1; j >= 0; j--) {
+			dp[i][j] =
+				oldLines[i] === newLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+		}
+	}
+	const ops: DiffOp[] = [];
+	let i = 0;
+	let j = 0;
+	while (i < n && j < m) {
+		if (oldLines[i] === newLines[j]) {
+			ops.push({ type: "equal", line: oldLines[i] });
+			i++;
+			j++;
+		} else if (dp[i + 1][j] >= dp[i][j + 1]) {
+			ops.push({ type: "remove", line: oldLines[i] });
+			i++;
+		} else {
+			ops.push({ type: "add", line: newLines[j] });
+			j++;
+		}
+	}
+	while (i < n) {
+		ops.push({ type: "remove", line: oldLines[i] });
+		i++;
+	}
+	while (j < m) {
+		ops.push({ type: "add", line: newLines[j] });
+		j++;
+	}
+	return ops;
+}
+
+// PROJ-484: renders a standard unified diff (`--- base` / `+++ current`, `@@ -a,b +c,d @@`
+// hunks with 3 lines of context) between a conflicting write's base content and the
+// page's current content, so an agent can see exactly what changed and rebase.
+function buildUnifiedDiff(baseContent: string, currentContent: string): string {
+	if (baseContent === currentContent) return "";
+	const oldLines = baseContent.split("\n");
+	const newLines = currentContent.split("\n");
+	const ops = computeLineDiff(oldLines, newLines);
+
+	const CONTEXT = 3;
+	const changeIdxs = ops.reduce<number[]>((acc, op, idx) => {
+		if (op.type !== "equal") acc.push(idx);
+		return acc;
+	}, []);
+	if (changeIdxs.length === 0) return "";
+
+	// Group nearby changes into hunks so their context ranges overlap into one block.
+	const groups: Array<[number, number]> = [];
+	let groupStart = changeIdxs[0];
+	let groupEnd = changeIdxs[0];
+	for (const idx of changeIdxs.slice(1)) {
+		if (idx - groupEnd <= CONTEXT * 2) {
+			groupEnd = idx;
+		} else {
+			groups.push([groupStart, groupEnd]);
+			groupStart = idx;
+			groupEnd = idx;
+		}
+	}
+	groups.push([groupStart, groupEnd]);
+
+	const hunks: string[] = [];
+	for (const [gStart, gEnd] of groups) {
+		const sliceStart = Math.max(0, gStart - CONTEXT);
+		const sliceEnd = Math.min(ops.length - 1, gEnd + CONTEXT);
+		const slice = ops.slice(sliceStart, sliceEnd + 1);
+
+		let oldStart = 1;
+		let newStart = 1;
+		for (let k = 0; k < sliceStart; k++) {
+			if (ops[k].type !== "add") oldStart++;
+			if (ops[k].type !== "remove") newStart++;
+		}
+		const oldCount = slice.filter((op) => op.type !== "add").length;
+		const newCount = slice.filter((op) => op.type !== "remove").length;
+
+		const lines = slice.map((op) => {
+			const prefix = op.type === "add" ? "+" : op.type === "remove" ? "-" : " ";
+			return `${prefix}${op.line}`;
+		});
+		hunks.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@\n${lines.join("\n")}`);
+	}
+
+	return `--- base\n+++ current\n${hunks.join("\n")}`;
+}
+
 export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
 	const parsed = UpdatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { title, content, parentId, slug } = parsed.data;
+	const { title, content, parentId, slug, baseRevisionId, summary } = parsed.data;
 	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
 	await requireWikiWrite(ctx, page.projectId);
 	const now = Math.floor(Date.now() / 1000);
 	const orm = drizzle(ctx.db, { schema });
+
+	// PROJ-484: optimistic locking. Omitting baseRevisionId keeps today's last-write-wins
+	// behavior during the transition (deprecated — see mcp/wiki.ts docs). When supplied,
+	// it must match the page's current latest revision id, or the write is rejected with
+	// a structured conflict (current revision id + a unified diff) so the caller can
+	// rebase and retry.
+	if (baseRevisionId !== undefined) {
+		const currentRevisionId = await getLatestRevisionId(ctx.db, page.id);
+		if (currentRevisionId !== baseRevisionId) {
+			const baseContent = await resolveBaseContent(ctx.db, page.id, baseRevisionId);
+			const diff = buildUnifiedDiff(baseContent, page.content);
+			throw new ConflictError(
+				"Wiki page has been modified since baseRevisionId; rebase and retry",
+				{ currentRevisionId, diff }
+			);
+		}
+	}
 
 	if (parentId !== undefined && parentId !== null) {
 		await validateUpdatedPageParent(ctx.db, parentId, ctx.workspaceId, page);
@@ -427,10 +597,15 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	}
 
 	if (content !== undefined) {
+		// PROJ-484: title snapshot is the page's title as of THIS revision (i.e. before
+		// this update applies any new title) — consistent with content, which snapshots
+		// the pre-edit value too. summary is this edit's optional changelog note.
 		await orm.insert(schema.wikiRevisions).values({
 			id: crypto.randomUUID(),
 			pageId: page.id,
 			content: page.content,
+			title: page.title,
+			summary: summary ?? null,
 			authorId: ctx.userId,
 			createdAt: now,
 		});
@@ -668,20 +843,27 @@ export async function listWikiRevisions(ctx: ServiceCtx, slug: string) {
 	if (!page) throw new NotFoundError("Wiki page not found");
 	await assertWikiPageVisible(ctx, page.projectId);
 
-	return orm
-		.select({
-			id: schema.wikiRevisions.id,
-			// eslint-disable-next-line camelcase
-			author_id: schema.wikiRevisions.authorId,
-			// eslint-disable-next-line camelcase
-			created_at: schema.wikiRevisions.createdAt,
-			// eslint-disable-next-line camelcase
-			author_name: schema.users.name,
-		})
-		.from(schema.wikiRevisions)
-		.leftJoin(schema.users, eq(schema.wikiRevisions.authorId, schema.users.id))
-		.where(eq(schema.wikiRevisions.pageId, page.id))
-		.orderBy(desc(schema.wikiRevisions.createdAt));
+	return (
+		orm
+			.select({
+				id: schema.wikiRevisions.id,
+				title: schema.wikiRevisions.title,
+				summary: schema.wikiRevisions.summary,
+				// eslint-disable-next-line camelcase
+				author_id: schema.wikiRevisions.authorId,
+				// eslint-disable-next-line camelcase
+				created_at: schema.wikiRevisions.createdAt,
+				// eslint-disable-next-line camelcase
+				author_name: schema.users.name,
+			})
+			.from(schema.wikiRevisions)
+			.leftJoin(schema.users, eq(schema.wikiRevisions.authorId, schema.users.id))
+			.where(eq(schema.wikiRevisions.pageId, page.id))
+			// PROJ-484: createdAt is unix SECONDS (repo convention), so edits within the same
+			// second tie on it; tiebreak on rowid (monotonic insertion order) so "most recent
+			// first" is actually correct, matching getLatestRevisionId's raw-SQL equivalent.
+			.orderBy(desc(schema.wikiRevisions.createdAt), desc(sql`wiki_revisions.rowid`))
+	);
 }
 
 export async function getWikiRevision(ctx: ServiceCtx, slug: string, revisionId: string) {
@@ -698,6 +880,8 @@ export async function getWikiRevision(ctx: ServiceCtx, slug: string, revisionId:
 		.select({
 			id: schema.wikiRevisions.id,
 			content: schema.wikiRevisions.content,
+			title: schema.wikiRevisions.title,
+			summary: schema.wikiRevisions.summary,
 			// eslint-disable-next-line camelcase
 			author_id: schema.wikiRevisions.authorId,
 			// eslint-disable-next-line camelcase

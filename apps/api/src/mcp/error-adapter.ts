@@ -1,4 +1,4 @@
-import { ServiceError, ValidationError } from "../services/errors";
+import { ConflictError, ServiceError, ValidationError } from "../services/errors";
 
 export function toMcpError(err: unknown): { code: number; message: string } {
 	if (err instanceof ValidationError) {
@@ -14,7 +14,18 @@ export function toMcpError(err: unknown): { code: number; message: string } {
 		switch (err.kind) {
 			case "not_found":
 			case "forbidden":
+				return { code: -32000, message: err.message };
 			case "conflict":
+				// PROJ-484: JSON-RPC errors here only carry {code, message} (routes/mcp.ts
+				// builds the response and isn't touched by this ticket), so a structured
+				// conflict (e.g. wiki's currentRevisionId + diff) is JSON-encoded into the
+				// message for callers that set `details`; plain conflicts keep a plain string.
+				if (err instanceof ConflictError && err.details) {
+					return {
+						code: -32000,
+						message: JSON.stringify({ message: err.message, ...err.details }),
+					};
+				}
 				return { code: -32000, message: err.message };
 			default:
 				console.error("[mcp] unhandled ServiceError kind in tools/call:", err.kind, err);

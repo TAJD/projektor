@@ -70,7 +70,14 @@ export const wikiTools: MCPTool[] = [
 	},
 	{
 		name: "update_wiki_page",
-		description: "Update a wiki page by id or slug (saves a revision when content changes)",
+		description:
+			"Update a wiki page by id or slug (saves a revision when content changes). Pass " +
+			"baseRevisionId (the current revision id from list_wiki_revisions/get_wiki_revision, " +
+			"or null if the page has never been revised) for conflict-safe writes: if the page " +
+			"advanced since baseRevisionId, the write is rejected with a structured conflict " +
+			"(currentRevisionId + a unified diff) instead of silently overwriting. Omitting " +
+			"baseRevisionId is DEPRECATED — it keeps today's last-write-wins behavior during the " +
+			"transition and will be rejected in a future version.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -88,6 +95,17 @@ export const wikiTools: MCPTool[] = [
 					description:
 						"Rename the page's slug; the old slug becomes a redirect so existing links keep resolving",
 				},
+				baseRevisionId: {
+					type: "string",
+					nullable: true,
+					description:
+						"Deprecated if omitted (see tool description). The revision id this edit is " +
+						"based on — null if the page has never been revised.",
+				},
+				summary: {
+					type: "string",
+					description: "Optional edit message/changelog note, recorded on the created revision",
+				},
 			},
 		},
 		async handler(input, ctx) {
@@ -98,6 +116,8 @@ export const wikiTools: MCPTool[] = [
 				title?: string;
 				content?: string;
 				parentId?: string | null;
+				baseRevisionId?: string | null;
+				summary?: string;
 			};
 			const idOrSlug = id ?? slug;
 			if (!idOrSlug) {

@@ -22,6 +22,14 @@ export const UpdatePageSchema = z
 		// PROJ-483: renaming a page's slug leaves a wiki_redirects entry for the old
 		// slug so existing links/bookmarks keep resolving (services/wiki.ts).
 		slug: SlugSchema.optional(),
+		// PROJ-484: optimistic locking. Omitted → today's last-write-wins behavior
+		// (deprecated, transitional). Provided → must match the page's current latest
+		// revision id, or the write is rejected with a structured conflict. `null` means
+		// "I read this page before it had ever been revised" (services/wiki.ts).
+		baseRevisionId: z.string().nullable().optional(),
+		// PROJ-484: optional edit message/changelog note, stored on the revision
+		// created for this write (only recorded when `content` changes).
+		summary: z.string().max(2000).optional(),
 	})
 	.refine(
 		(d) =>

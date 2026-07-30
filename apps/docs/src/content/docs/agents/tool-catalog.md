@@ -136,7 +136,7 @@ running server.
 | `search_wiki` | Search wiki pages by keyword in title or content |
 | `get_wiki_page` | Get a wiki page by slug, including full content |
 | `create_wiki_page` | Create a new wiki page |
-| `update_wiki_page` | Update a wiki page by id or slug (saves a revision when content changes) |
+| `update_wiki_page` | Update a wiki page by id or slug (saves a revision when content changes). Pass baseRevisionId (the current revision id from list_wiki_revisions/get_wiki_revision, or null if the page has never been revised) for conflict-safe writes: if the page advanced since baseRevisionId, the write is rejected with a structured conflict (currentRevisionId + a unified diff) instead of silently overwriting. Omitting baseRevisionId is DEPRECATED — it keeps today's last-write-wins behavior during the transition and will be rejected in a future version. |
 | `delete_wiki_page` | Delete a wiki page by slug (not allowed for viewers). By default any child pages are promoted to the deleted page's parent; pass cascade=true to delete the whole subtree instead. |
 | `wiki_tree` | Get the wiki page hierarchy as a nested tree, optionally filtered by project |
 | `list_wiki_revisions` | List revision history for a wiki page |
