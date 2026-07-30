@@ -1549,7 +1549,6 @@ describe("Issues MCP — typeId", () => {
 	});
 });
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issues MCP — list_issues filter parity (PROJ-243)", () => {
 	let token: string;
 	let slug: string;

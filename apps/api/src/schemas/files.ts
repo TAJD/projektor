@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+// cofferdam-ignore: Design.OrphanExport: exported for schema-module consistency, used only within this file today
 export const EntityTypeSchema = z.enum(["issue", "wiki_page"]);
 
 export const ListAttachmentsSchema = z.object({
