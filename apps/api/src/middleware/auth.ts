@@ -268,22 +268,27 @@ export async function verifyJwtPayload(
 	return valid ? { email: decoded.payload.email } : null;
 }
 
-async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | null> {
-	// Pre-screen without keys: avoids a JWKS fetch for obviously-invalid tokens.
-	// Mirrors the order of checks in verifyJwtPayload so early exits fire first.
-	const parts = jwt.split(".");
-	if (parts.length !== 3) return null;
+// Pre-screen without keys: avoids a JWKS fetch for obviously-invalid tokens.
+// Mirrors the order of checks in verifyJwtPayload so early exits fire first.
+function preScreenCfAccessJwt(parts: string[], env: Env): boolean {
 	try {
 		const hdr = JSON.parse(base64urlDecode(parts[0]));
-		if (hdr.alg !== "RS256") return null;
+		if (hdr.alg !== "RS256") return false;
 		const pld = JSON.parse(base64urlDecode(parts[1]));
-		if (pld.exp < Math.floor(Date.now() / 1000)) return null;
+		if (pld.exp < Math.floor(Date.now() / 1000)) return false;
 		const aud = Array.isArray(pld.aud) ? pld.aud : [pld.aud];
-		if (!aud.includes(env.CF_ACCESS_AUDIENCE)) return null;
-		if (pld.iss !== `https://${env.CF_ACCESS_TEAM_DOMAIN}`) return null;
+		if (!aud.includes(env.CF_ACCESS_AUDIENCE)) return false;
+		if (pld.iss !== `https://${env.CF_ACCESS_TEAM_DOMAIN}`) return false;
+		return true;
 	} catch {
-		return null;
+		return false;
 	}
+}
+
+async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | null> {
+	const parts = jwt.split(".");
+	if (parts.length !== 3) return null;
+	if (!preScreenCfAccessJwt(parts, env)) return null;
 	// All field checks passed — now fetch keys and verify the signature.
 	const keys = await getCfAccessKeysOrUnavailable(env);
 	let result = await verifyJwtPayload(
