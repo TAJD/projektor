@@ -49,8 +49,21 @@ export const ListPagesInputSchema = z.object({
 
 export const SearchWikiInputSchema = z.object({
 	query: z.string(),
-	limit: z.number().int().min(1).max(50).optional().default(10),
+	limit: z.coerce.number().int().min(1).max(50).optional().default(10),
+	offset: z.coerce.number().int().min(0).optional().default(0),
 	projectId: z.string().uuid().optional(),
+	// Unix seconds — only pages updated at/after this time are returned.
+	updatedSince: z.coerce.number().int().nonnegative().optional(),
+	// PROJ-486: `type`/`tags`/`status` are frontmatter/verification concepts that belong
+	// to R6 (PROJ-488, frontmatter metadata) and R7 (PROJ-489, freshness model) — neither
+	// has landed, so wiki_pages has no type/tags/status/freshness columns yet. Accepted
+	// here so the API shape is forward-compatible and R6/R7 won't need to change this
+	// schema later; services/wiki.ts#searchWiki no-ops them today rather than rejecting
+	// the request, since blocking search on an unimplemented filter would be more
+	// surprising than silently ignoring it.
+	type: z.string().optional(),
+	tags: z.array(z.string()).optional(),
+	status: z.string().optional(),
 });
 
 export const DeleteWikiPageOptionsSchema = z.object({

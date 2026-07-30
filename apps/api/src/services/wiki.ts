@@ -266,40 +266,80 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug, r.project_id) }));
 }
 
+// PROJ-486: FTS5 MATCH treats bare input as query syntax (AND/OR/NOT, column filters,
+// prefix "*", etc). Wrap each whitespace-separated token in double quotes so raw user
+// text is always treated as a literal phrase search, mirroring services/issues.ts's
+// sanitizeFtsQuery for issues_fts.
+function sanitizeWikiFtsQuery(q: string): string {
+	return q
+		.trim()
+		.split(/\s+/)
+		.filter((t) => Boolean(t) && /\w/.test(t))
+		.map((t) => `"${t.replace(/"/g, '""')}"`)
+		.join(" ");
+}
+
+// PROJ-486: title is weighted well above content and tags so a title match ranks
+// above a match buried deep in body content — bm25() weight args are positional,
+// one per wiki_fts column (page_id, workspace_id, title, content, tags); the first
+// two are UNINDEXED so their weight is irrelevant, left at 0 for clarity.
+const WIKI_FTS_BM25_WEIGHTS = "0, 0, 10.0, 1.0, 5.0";
+
 export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	const parsed = SearchWikiInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { query, limit, projectId } = parsed.data;
-	if (!query) return [];
+	const { query, limit, offset, projectId, updatedSince } = parsed.data;
+	// PROJ-486: `type`/`tags`/`status` are accepted by the schema for forward
+	// compatibility with R6/R7 but intentionally unused here — see schemas/wiki.ts.
+
+	const ftsQuery = sanitizeWikiFtsQuery(query);
+	if (!ftsQuery) return [];
+
 	if (projectId) {
 		// PROJ-311: searching a specific project the user can't see returns nothing.
 		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
 			return [];
 		}
-		const { results } = await ctx.db
-			.prepare(
-				`SELECT id, slug, title, project_id, substr(content, 1, 250) as excerpt
-         FROM wiki_pages
-         WHERE workspace_id = ? AND project_id = ? AND (title LIKE ? OR content LIKE ?)
-         ORDER BY updated_at DESC LIMIT ?`
-			)
-			.bind(ctx.workspaceId, projectId, `%${query}%`, `%${query}%`, limit)
-			.all();
-		return results;
 	}
-	// PROJ-311: across the workspace, exclude project-scoped pages the user isn't granted.
-	const visible = visibleProjectSqlFragment(ctx, "project_id");
-	const visClause = visible ? ` AND (project_id IS NULL OR ${visible.sql})` : "";
+
+	let q = `SELECT p.id, p.slug, p.title, p.project_id,
+              snippet(wiki_fts, -1, '**', '**', '…', 24) as excerpt,
+              bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}) as rank
+            FROM wiki_fts
+            JOIN wiki_pages p ON p.id = wiki_fts.page_id
+            WHERE wiki_fts MATCH ? AND wiki_fts.workspace_id = ?`;
+	const params: unknown[] = [ftsQuery, ctx.workspaceId];
+
+	if (projectId) {
+		q += " AND p.project_id = ?";
+		params.push(projectId);
+	} else {
+		// PROJ-311: across the workspace, exclude project-scoped pages the user isn't granted.
+		const visible = visibleProjectSqlFragment(ctx, "p.project_id");
+		if (visible) {
+			q += ` AND (p.project_id IS NULL OR ${visible.sql})`;
+			params.push(...visible.params);
+		}
+	}
+
+	if (updatedSince !== undefined) {
+		q += " AND p.updated_at >= ?";
+		params.push(updatedSince);
+	}
+
+	// PROJ-486: bm25() alone ties on equal-rank rows, which makes LIMIT/OFFSET
+	// paging non-deterministic (duplicate/skip results across pages) — break
+	// ties by page id for a stable order.
+	q += ` ORDER BY bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}), p.id LIMIT ? OFFSET ?`;
+	params.push(limit, offset);
+
 	const { results } = await ctx.db
-		.prepare(
-			`SELECT id, slug, title, project_id, substr(content, 1, 250) as excerpt
-       FROM wiki_pages
-       WHERE workspace_id = ? AND (title LIKE ? OR content LIKE ?)${visClause}
-       ORDER BY updated_at DESC LIMIT ?`
-		)
-		.bind(ctx.workspaceId, `%${query}%`, `%${query}%`, ...(visible ? visible.params : []), limit)
+		.prepare(q)
+		.bind(...params)
 		.all();
-	return results;
+	// PROJ-489 (R7, not landed): no freshness model exists yet, so freshness is
+	// omitted-as-null rather than fabricated.
+	return (results as Array<Record<string, unknown>>).map((r) => ({ ...r, freshness: null }));
 }
 
 const wikiPageDetailColumns = {
@@ -404,6 +444,13 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		}
 		throw e;
 	}
+	// PROJ-486: tags is left empty until R6 (PROJ-488) populates it from frontmatter.
+	await ctx.db
+		.prepare(
+			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
+		)
+		.bind(id, ctx.workspaceId, title, content ?? "", "")
+		.run();
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
 	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug, projectId ?? null) };
 }
@@ -585,6 +632,50 @@ function buildUnifiedDiff(baseContent: string, currentContent: string): string {
 	return `--- base\n+++ current\n${hunks.join("\n")}`;
 }
 
+// PROJ-486: mirrors issues.ts's reindexIssueFts — delete-then-reinsert the wiki_fts
+// mirror row after a title/content edit. Re-reads the page rather than trusting the
+// caller's partial `data` so a title-only or content-only update still reindexes the
+// unchanged field's current value, not a stale/empty one.
+async function reindexWikiFts(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle<typeof schema>>,
+	id: string,
+	data: { title?: string; content?: string }
+): Promise<void> {
+	if (data.title === undefined && data.content === undefined) return;
+
+	const current = await orm
+		.select({ title: schema.wikiPages.title, content: schema.wikiPages.content })
+		.from(schema.wikiPages)
+		.where(and(eq(schema.wikiPages.id, id), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!current) return;
+
+	await ctx.db
+		.prepare("DELETE FROM wiki_fts WHERE page_id = ? AND workspace_id = ?")
+		.bind(id, ctx.workspaceId)
+		.run();
+	await ctx.db
+		.prepare(
+			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
+		)
+		.bind(id, ctx.workspaceId, current.title, current.content, "")
+		.run();
+}
+
+// PROJ-486: chunked so a cascade delete of a large subtree stays under D1's 100-bound
+// parameter cap (services/sql.ts#inChunks).
+async function deleteWikiFtsEntries(ctx: ServiceCtx, pageIds: string[]): Promise<void> {
+	await inChunks(pageIds, async (chunk) => {
+		const placeholders = chunk.map(() => "?").join(",");
+		await ctx.db
+			.prepare(`DELETE FROM wiki_fts WHERE page_id IN (${placeholders}) AND workspace_id = ?`)
+			.bind(...chunk, ctx.workspaceId)
+			.run();
+		return [];
+	});
+}
+
 export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
 	const parsed = UpdatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -657,6 +748,8 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		}
 		throw e;
 	}
+
+	await reindexWikiFts(ctx, orm, page.id, { title, content });
 
 	if (isRename) {
 		// Upsert: the old slug may already carry a stale redirect from an earlier rename
@@ -793,6 +886,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 			await orm.delete(schema.wikiPages).where(inArray(schema.wikiPages.id, chunk));
 			return [];
 		});
+		await deleteWikiFtsEntries(ctx, allIds);
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
@@ -812,6 +906,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 
 	await deleteWikiPageAttachments(ctx, orm, [page.id]);
 	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
+	await deleteWikiFtsEntries(ctx, [page.id]);
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: page.id, action: "deleted" });
 	return { ok: true, deletedCount: 1 };
 }

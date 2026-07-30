@@ -20,14 +20,30 @@ export const wikiTools: MCPTool[] = [
 	},
 	{
 		name: "search_wiki",
-		description: "Search wiki pages by keyword in title or content",
+		description:
+			"Full-text search over wiki pages (FTS5, BM25-ranked, title weighted above body). " +
+			"Returns match-anchored snippets highlighted with ** markers. type/tags/status are " +
+			"accepted for forward compatibility with the frontmatter (R6) and freshness (R7) " +
+			"work but are not yet implemented and are ignored if passed.",
 		inputSchema: {
 			type: "object",
 			required: ["query"],
 			properties: {
 				query: { type: "string" },
 				limit: { type: "number", default: 10 },
+				offset: { type: "number", default: 0 },
 				projectId: { type: "string", description: "Restrict search to this project ID" },
+				updatedSince: {
+					type: "number",
+					description: "Unix seconds — only return pages updated at or after this time",
+				},
+				type: { type: "string", description: "Not yet supported (R6, PROJ-488); ignored" },
+				tags: {
+					type: "array",
+					items: { type: "string" },
+					description: "Not yet supported (R6, PROJ-488); ignored",
+				},
+				status: { type: "string", description: "Not yet supported (R7, PROJ-489); ignored" },
 			},
 		},
 		async handler(input, ctx) {

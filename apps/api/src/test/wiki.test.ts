@@ -204,6 +204,39 @@ describe("Wiki API", () => {
 		expect(results[0].title).toBe("Deployment Guide");
 	});
 
+	// PROJ-486: freshness (R7, PROJ-489) hasn't landed — the field is present but null,
+	// never fabricated.
+	it("GET /api/wiki/search returns freshness: null (R7 not yet implemented)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Freshness Placeholder Page", content: "wrangler" }),
+		});
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=wrangler", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{ freshness: unknown }>;
+		expect(results.length).toBeGreaterThan(0);
+		for (const r of results) expect(r.freshness).toBeNull();
+	});
+
+	// PROJ-486: type/tags/status are accepted for R6/R7 forward compatibility but not
+	// yet implemented — passing them must not error or change results.
+	it("GET /api/wiki/search ignores unsupported type/status filters instead of erroring", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Noop Filter Page", content: "wrangler" }),
+		});
+		const res = await SELF.fetch(
+			"http://localhost/api/wiki/search?q=wrangler&type=guide&status=fresh",
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toContain("Noop Filter Page");
+	});
+
 	it("accepts a custom slug", async () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
@@ -278,19 +311,261 @@ describe("Wiki API", () => {
 		expect(await res.json()).toEqual([]);
 	});
 
-	it("GET /api/wiki/search excerpt is at most 250 chars", async () => {
-		const longContent = "x".repeat(1000);
+	// PROJ-486: replaces the old "first 250 chars" excerpt with an FTS5 snippet()
+	// that is anchored to the actual match and highlighted with ** markers.
+	it("GET /api/wiki/search snippet is match-anchored and highlighted", async () => {
+		const filler = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod ".repeat(
+			20
+		);
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
-			body: JSON.stringify({ title: "Long Page", content: longContent }),
+			body: JSON.stringify({
+				title: "Deep Match Page",
+				content: `${filler} needle-term ${filler}`,
+			}),
 		});
-		const res = await SELF.fetch("http://localhost/api/wiki/search?q=Long+Page", {
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=needle-term", {
 			headers: authHeaders(token, slug),
 		});
 		const results = (await res.json()) as Array<{ excerpt: string }>;
 		expect(results).toHaveLength(1);
-		expect(results[0].excerpt.length).toBeLessThanOrEqual(250);
+		// The match is buried deep in a long page; a static first-250-chars excerpt
+		// would never contain it, but a match-anchored snippet does.
+		expect(results[0].excerpt).toContain("needle");
+		expect(results[0].excerpt).toContain("**");
+	});
+
+	// PROJ-486: BM25 ranking with a title-weight boost — a query matching only the
+	// title of one page should rank it above a page where the term only appears deep
+	// in a long body.
+	it("GET /api/wiki/search ranks a title match above a buried body match", async () => {
+		const filler = "lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod ".repeat(
+			20
+		);
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Unrelated Page",
+				content: `${filler} zylophone ${filler}`,
+			}),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Zylophone Guide", content: "short body, no repeat term" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=zylophone", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results).toHaveLength(2);
+		expect(results[0].title).toBe("Zylophone Guide");
+	});
+
+	it("GET /api/wiki/search supports limit/offset pagination", async () => {
+		for (let i = 0; i < 3; i++) {
+			await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title: `Paginated Page ${i}`, content: "shared-search-term" }),
+			});
+		}
+		const page1 = await SELF.fetch(
+			"http://localhost/api/wiki/search?q=shared-search-term&limit=2",
+			{
+				headers: authHeaders(token, slug),
+			}
+		);
+		const page1Results = (await page1.json()) as Array<{ id: string }>;
+		expect(page1Results).toHaveLength(2);
+
+		const page2 = await SELF.fetch(
+			"http://localhost/api/wiki/search?q=shared-search-term&limit=2&offset=2",
+			{ headers: authHeaders(token, slug) }
+		);
+		const page2Results = (await page2.json()) as Array<{ id: string }>;
+		expect(page2Results).toHaveLength(1);
+		expect(page2Results.map((r) => r.id)).not.toContain(page1Results[0].id);
+		expect(page2Results.map((r) => r.id)).not.toContain(page1Results[1].id);
+	});
+
+	it("GET /api/wiki/search paginates deterministically when results tie in rank", async () => {
+		// All three pages below match equally (same term, same content shape), so bm25()
+		// alone ties -- pagination must fall back to a stable tiebreaker (page id) rather
+		// than duplicating or dropping rows across pages. Distinct titles avoid PROJ-483
+		// slug-collision 409s; the rate_limit reset avoids tripping the 5-req/window cap
+		// (RATE_LIMIT_API_MAX) across the create + fetch calls below.
+		for (let i = 0; i < 3; i++) {
+			const createRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					title: `Tie Rank Page ${i}`,
+					content: "tie-rank-search-term",
+				}),
+			});
+			expect(createRes.status).toBe(201);
+		}
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+
+		const fetchAll = () =>
+			SELF.fetch("http://localhost/api/wiki/search?q=tie-rank-search-term&limit=2", {
+				headers: authHeaders(token, slug),
+			}).then((r) => r.json() as Promise<Array<{ id: string }>>);
+
+		const first = await fetchAll();
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const second = await fetchAll();
+		expect(first.map((r) => r.id)).toEqual(second.map((r) => r.id));
+
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const page2 = await SELF.fetch(
+			"http://localhost/api/wiki/search?q=tie-rank-search-term&limit=2&offset=2",
+			{ headers: authHeaders(token, slug) }
+		);
+		const page2Results = (await page2.json()) as Array<{ id: string }>;
+		const allIds = [...first.map((r) => r.id), ...page2Results.map((r) => r.id)];
+		expect(new Set(allIds).size).toBe(allIds.length);
+		expect(allIds).toHaveLength(3);
+	});
+
+	it("GET /api/wiki/search updatedSince filters out pages updated before the cutoff", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Stale Match Page", content: "freshness-cutoff-term" }),
+		});
+		const created = (await createRes.json()) as { id: string };
+		const pageRow = await env.DB.prepare("SELECT updated_at FROM wiki_pages WHERE id = ?")
+			.bind(created.id)
+			.first<{ updated_at: number }>();
+		const cutoff = (pageRow?.updated_at ?? 0) + 1000;
+
+		const res = await SELF.fetch(
+			`http://localhost/api/wiki/search?q=freshness-cutoff-term&updatedSince=${cutoff}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(await res.json()).toEqual([]);
+
+		const resAll = await SELF.fetch("http://localhost/api/wiki/search?q=freshness-cutoff-term", {
+			headers: authHeaders(token, slug),
+		});
+		const allResults = (await resAll.json()) as Array<{ id: string }>;
+		expect(allResults).toHaveLength(1);
+	});
+
+	it("GET /api/wiki/search never returns another workspace's pages", async () => {
+		const other = await seedFixture();
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(other.token, other.workspace.slug),
+			body: JSON.stringify({ title: "Other Workspace Page", content: "cross-tenant-term" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "This Workspace Page", content: "cross-tenant-term" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=cross-tenant-term", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results).toHaveLength(1);
+		expect(results[0].title).toBe("This Workspace Page");
+	});
+
+	// PROJ-486: the wiki_fts mirror table must track create/update/delete of wiki_pages.
+	describe("wiki_fts index stays in sync", () => {
+		it("a newly created page is searchable immediately", async () => {
+			await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title: "Sync Create Page", content: "sync-create-term" }),
+			});
+			const res = await SELF.fetch("http://localhost/api/wiki/search?q=sync-create-term", {
+				headers: authHeaders(token, slug),
+			});
+			expect(await res.json()).toHaveLength(1);
+		});
+
+		it("an updated page's new content becomes searchable and old content stops matching", async () => {
+			const createRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title: "Sync Update Page", content: "before-update-term" }),
+			});
+			const created = (await createRes.json()) as { slug: string };
+
+			await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+				method: "PUT",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ content: "after-update-term" }),
+			});
+
+			const oldRes = await SELF.fetch("http://localhost/api/wiki/search?q=before-update-term", {
+				headers: authHeaders(token, slug),
+			});
+			expect(await oldRes.json()).toEqual([]);
+
+			const newRes = await SELF.fetch("http://localhost/api/wiki/search?q=after-update-term", {
+				headers: authHeaders(token, slug),
+			});
+			expect(await newRes.json()).toHaveLength(1);
+		});
+
+		it("a deleted page is no longer searchable", async () => {
+			// Deleting a workspace-level page requires admin/owner (services/wiki.ts).
+			const owner = await seedFixture({ role: "owner" });
+			const createRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(owner.token, owner.workspace.slug),
+				body: JSON.stringify({ title: "Sync Delete Page", content: "sync-delete-term" }),
+			});
+			const created = (await createRes.json()) as { slug: string };
+
+			await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+				method: "DELETE",
+				headers: authHeaders(owner.token, owner.workspace.slug),
+			});
+
+			const res = await SELF.fetch("http://localhost/api/wiki/search?q=sync-delete-term", {
+				headers: authHeaders(owner.token, owner.workspace.slug),
+			});
+			expect(await res.json()).toEqual([]);
+		});
+
+		it("a cascade-deleted subtree's pages are no longer searchable", async () => {
+			const owner = await seedFixture({ role: "owner" });
+			const parentRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(owner.token, owner.workspace.slug),
+				body: JSON.stringify({ title: "Sync Cascade Parent", content: "root" }),
+			});
+			const parent = (await parentRes.json()) as { id: string; slug: string };
+			await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(owner.token, owner.workspace.slug),
+				body: JSON.stringify({
+					title: "Sync Cascade Child",
+					content: "sync-cascade-term",
+					parentId: parent.id,
+				}),
+			});
+
+			await SELF.fetch(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+				method: "DELETE",
+				headers: authHeaders(owner.token, owner.workspace.slug),
+			});
+
+			const res = await SELF.fetch("http://localhost/api/wiki/search?q=sync-cascade-term", {
+				headers: authHeaders(owner.token, owner.workspace.slug),
+			});
+			expect(await res.json()).toEqual([]);
+		});
 	});
 
 	it("PUT /api/wiki/:slug title-only update does not create a revision", async () => {

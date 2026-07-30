@@ -149,6 +149,22 @@ function TreeNodeItem({
 	);
 }
 
+// PROJ-486: search excerpts come back with `**match**` markers from the
+// backend's FTS5 snippet() highlighting — split and render as <mark> instead
+// of showing the literal asterisks.
+function renderHighlightedExcerpt(excerpt: string) {
+	const parts = excerpt.split(/(\*\*[^*]*\*\*)/g).filter((part) => part !== "");
+	return parts.map((part, i) =>
+		part.startsWith("**") && part.endsWith("**") ? (
+			<mark key={i} class="bg-accent/30 text-inherit rounded-sm">
+				{part.slice(2, -2)}
+			</mark>
+		) : (
+			<span key={i}>{part}</span>
+		)
+	);
+}
+
 const SEARCH_RESULT_BUTTON_CLASS = [
 	"block w-full text-left py-[0.375rem] px-2 rounded border-none cursor-pointer text-sm",
 	"bg-transparent text-text-base hover:bg-border focus-visible:outline-2",
@@ -173,7 +189,9 @@ function SearchResultsList({
 					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
 						<span class="font-medium">{r.title}</span>
 						{r.excerpt && (
-							<span class="block text-[0.75rem] text-text-muted truncate">{r.excerpt}</span>
+							<span class="block text-[0.75rem] text-text-muted truncate">
+								{renderHighlightedExcerpt(r.excerpt)}
+							</span>
 						)}
 					</button>
 				</li>
