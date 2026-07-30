@@ -881,7 +881,13 @@ function resolveAttachmentDisplay(
 	}
 	// A wiki_ref whose target page was deleted, or is no longer visible to this
 	// user (project access revoked) — the join comes back empty either way.
-	return { icon: <WikiIcon />, href: null, label: "Wiki page unavailable", meta: null, external: false };
+	return {
+		icon: <WikiIcon />,
+		href: null,
+		label: "Wiki page unavailable",
+		meta: null,
+		external: false,
+	};
 }
 
 function AttachmentRow({
