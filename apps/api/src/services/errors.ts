@@ -31,7 +31,13 @@ export class ForbiddenError extends ServiceError {
 
 export class ConflictError extends ServiceError {
 	readonly kind = "conflict" as const;
-	constructor(message = "Conflict") {
+	// PROJ-484: `details` carries structured, client-facing extra fields (e.g. wiki's
+	// optimistic-lock conflict: currentRevisionId + a unified diff) beyond the plain
+	// message. Optional so every pre-existing plain-message ConflictError is unaffected.
+	constructor(
+		message = "Conflict",
+		public readonly details?: Record<string, unknown>
+	) {
 		super(message);
 	}
 }

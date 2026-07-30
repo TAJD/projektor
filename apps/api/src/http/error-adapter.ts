@@ -20,7 +20,9 @@ export function serviceErrToResponse(c: Context<HonoEnv>, err: unknown) {
 		return c.json({ error: err.message }, 403);
 	}
 	if (err instanceof ConflictError) {
-		return c.json({ error: err.message }, 409);
+		// PROJ-484: structured conflicts (e.g. wiki's currentRevisionId + diff) are
+		// spread alongside `error` so REST callers get them as plain top-level fields.
+		return c.json({ error: err.message, ...(err.details ?? {}) }, 409);
 	}
 	if (err instanceof PayloadTooLargeError) {
 		return c.json({ error: err.message }, 413);
