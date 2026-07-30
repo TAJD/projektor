@@ -1108,9 +1108,10 @@ describe("Wiki optimistic locking (PROJ-484)", () => {
 		const body = (await res.json()) as { error: string; currentRevisionId: string; diff: string };
 		expect(body.currentRevisionId).toBe(currentLatest.id);
 		expect(typeof body.diff).toBe("string");
-		// diff is between staleRevision's snapshot ("v1", the content before the FIRST
-		// edit) and the page's live current content ("v3", after the second edit).
-		expect(body.diff).toContain("v1");
+		// staleRevision snapshots the pre-edit content of the FIRST edit ("v1"), i.e. the
+		// content the caller actually had once that edit landed is the NEXT revision's
+		// snapshot ("v2"). The diff base is therefore "v2", not staleRevision's own "v1".
+		expect(body.diff).toContain("v2");
 		expect(body.diff).toContain("v3");
 
 		// The stale write never applied.
@@ -1150,6 +1151,20 @@ describe("Wiki optimistic locking (PROJ-484)", () => {
 
 		const [revision] = await getRevisions("summarized-doc");
 		expect(revision.summary).toBe("Fixed a typo");
+	});
+
+	it("REST: update is rejected with a validation error when baseRevisionId doesn't belong to the page", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Garbage Base Doc", content: "v1" }),
+		});
+		const res = await req("http://localhost/api/wiki/garbage-base-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2", baseRevisionId: crypto.randomUUID() }),
+		});
+		expect(res.status).toBe(400);
 	});
 
 	it("MCP: update_wiki_page parity — matching baseRevisionId succeeds, stale is rejected with a structured conflict", async () => {
@@ -1193,9 +1208,10 @@ describe("Wiki optimistic locking (PROJ-484)", () => {
 				diff: string;
 			};
 			expect(parsed.currentRevisionId).toBe(currentLatest.id);
-			// diff is between staleRevision's snapshot ("v1") and the page's live current
-			// content ("v3", after the second — successful — edit).
-			expect(parsed.diff).toContain("v1");
+			// staleRevision snapshots the pre-edit content of the FIRST edit ("v1"); the
+			// content the caller actually had is the NEXT revision's snapshot ("v2"), which
+			// is the correct diff base — not staleRevision's own "v1".
+			expect(parsed.diff).toContain("v2");
 			expect(parsed.diff).toContain("v3");
 		}
 	});

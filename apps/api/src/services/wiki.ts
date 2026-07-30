@@ -416,6 +416,12 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 // Raw SQL (not drizzle) so the ORDER BY can tiebreak on rowid: createdAt is unix
 // SECONDS (repo convention), so two edits within the same second tie on it, and only
 // rowid (monotonic insertion order) reliably picks the most recently inserted row.
+// TOCTOU note: this read, the later revision insert, and the page update are not
+// wrapped in one transaction/batch, so two concurrent writers who both read the same
+// baseRevisionId can both pass this check and both succeed (last one wins on the page
+// row, though each still gets its own revision snapshot). Acceptable for now — same
+// class of race already accepted elsewhere in this file (slug availability, issue
+// numbering) — but note it here since "optimistic locking" implies stronger.
 async function getLatestRevisionId(db: D1Database, pageId: string): Promise<string | null> {
 	const row = await db
 		.prepare(
@@ -426,16 +432,20 @@ async function getLatestRevisionId(db: D1Database, pageId: string): Promise<stri
 	return row?.id ?? null;
 }
 
-// PROJ-484: content to diff a conflicting write's base against. `null` means the
-// caller read the page before it had ever been revised — the oldest revision (the
-// first edit's pre-change snapshot) holds that original content. An unknown/garbage
-// baseRevisionId can't be resolved to any content; best-effort fall back to an empty
-// base rather than erroring, since the caller already gets the authoritative
-// currentRevisionId in the conflict payload to resync from.
+// PROJ-484: content to diff a conflicting write's base against. Revisions snapshot
+// PRE-edit content, so the content the caller actually had for revision pointer R is
+// held by the NEXT-newer revision's snapshot (R's own `content` column is the state
+// *before* R, i.e. one edit further back) — falling back to the page's live content
+// when R is the latest revision. `null` means the caller read the page before it had
+// ever been revised, so the oldest revision's snapshot (the first edit's pre-change
+// content) is the base. An unknown/garbage baseRevisionId doesn't belong to this page
+// and can't be resolved to any content, so it's rejected rather than silently diffed
+// against an empty string (which would render as "everything added").
 async function resolveBaseContent(
 	db: D1Database,
 	pageId: string,
-	baseRevisionId: string | null
+	baseRevisionId: string | null,
+	currentContent: string
 ): Promise<string> {
 	if (baseRevisionId === null) {
 		const row = await db
@@ -446,17 +456,33 @@ async function resolveBaseContent(
 			.first<{ content: string }>();
 		return row?.content ?? "";
 	}
-	const row = await db
-		.prepare("SELECT content FROM wiki_revisions WHERE id = ? AND page_id = ?")
+	const baseRow = await db
+		.prepare(
+			"SELECT created_at as createdAt, rowid FROM wiki_revisions WHERE id = ? AND page_id = ?"
+		)
 		.bind(baseRevisionId, pageId)
+		.first<{ createdAt: number; rowid: number }>();
+	if (!baseRow) {
+		throw new ValidationError({
+			formErrors: ["baseRevisionId does not belong to this page"],
+			fieldErrors: {},
+		});
+	}
+	const nextRow = await db
+		.prepare(
+			`SELECT content FROM wiki_revisions
+			 WHERE page_id = ? AND (created_at > ? OR (created_at = ? AND rowid > ?))
+			 ORDER BY created_at ASC, rowid ASC LIMIT 1`
+		)
+		.bind(pageId, baseRow.createdAt, baseRow.createdAt, baseRow.rowid)
 		.first<{ content: string }>();
-	return row?.content ?? "";
+	return nextRow?.content ?? currentContent;
 }
 
 // PROJ-484: LCS-based line diff. dp is O(n*m) time/memory, which is fine for typical
 // wiki-page edits; MAX_DIFF_CELLS guards against pathological blowup on huge pages by
 // falling back to a coarse "everything replaced" edit script instead of hanging.
-const MAX_DIFF_CELLS = 4_000_000;
+const MAX_DIFF_CELLS = 1_000_000;
 
 type DiffOp = { type: "equal" | "add" | "remove"; line: string };
 
@@ -576,7 +602,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	if (baseRevisionId !== undefined) {
 		const currentRevisionId = await getLatestRevisionId(ctx.db, page.id);
 		if (currentRevisionId !== baseRevisionId) {
-			const baseContent = await resolveBaseContent(ctx.db, page.id, baseRevisionId);
+			const baseContent = await resolveBaseContent(ctx.db, page.id, baseRevisionId, page.content);
 			const diff = buildUnifiedDiff(baseContent, page.content);
 			throw new ConflictError(
 				"Wiki page has been modified since baseRevisionId; rebase and retry",
@@ -596,6 +622,10 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		await assertSlugAvailable(orm, ctx.workspaceId, slug, page.id);
 	}
 
+	// PROJ-484: a revision snapshots a CONTENT edit; a title-only update (content
+	// undefined) has nothing to diff against later, so it doesn't create a revision row
+	// and any `summary` passed alongside a title-only update is silently dropped rather
+	// than stored somewhere with no corresponding snapshot.
 	if (content !== undefined) {
 		// PROJ-484: title snapshot is the page's title as of THIS revision (i.e. before
 		// this update applies any new title) — consistent with content, which snapshots

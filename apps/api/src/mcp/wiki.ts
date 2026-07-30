@@ -96,8 +96,7 @@ export const wikiTools: MCPTool[] = [
 						"Rename the page's slug; the old slug becomes a redirect so existing links keep resolving",
 				},
 				baseRevisionId: {
-					type: "string",
-					nullable: true,
+					type: ["string", "null"],
 					description:
 						"Deprecated if omitted (see tool description). The revision id this edit is " +
 						"based on — null if the page has never been revised.",
