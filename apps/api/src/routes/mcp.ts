@@ -200,6 +200,7 @@ function jsonRpcResult(id: unknown, result: unknown) {
 }
 
 function jsonRpcError(id: unknown, code: number, message: string) {
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: this returns a JSON-RPC error object per spec (jsonrpc 2.0), not a code-style error-shaped return
 	return { jsonrpc: "2.0", id, error: { code, message } };
 }
 

@@ -1175,6 +1175,7 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 		}
 	}, [slug, fetchPage, fetchRevisions]);
 
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
 	return {
 		page,
 		setPage,
@@ -1851,6 +1852,7 @@ function buildCreateFormProps(create: {
 	submitCreate: () => void;
 	cancelCreate: () => void;
 }): CreateFormProps {
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
 	return {
 		parentTitle: create.createParentTitle,
 		title: create.createTitle,

@@ -189,6 +189,7 @@ function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
 			.finally(() => setLoading(false));
 	}, [projectId, workspaceSlug, range.since, range.until, range.granularity]);
 
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
 	return { projectId, metrics, loading, error };
 }
 
