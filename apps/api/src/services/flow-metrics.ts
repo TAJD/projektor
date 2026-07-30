@@ -203,12 +203,40 @@ function buildArrivalVsCompletion(
 	return buckets;
 }
 
+// An issue's CFD band at a given sample instant is the furthest stage it has reached
+// by then (done > in_review > in_progress > backlog/todo), or excluded entirely if it
+// wasn't created yet. Order of checks matters: this is what makes the done band
+// monotonic non-decreasing (an issue never leaves it) once it's reached.
+type CfdBand = "excluded" | "backlogTodo" | "inProgress" | "inReview" | "done";
+
+function classifyCfdBand(issue: FlowIssueRow, sampleAt: number): CfdBand {
+	if (issue.createdAt > sampleAt) return "excluded";
+	if (issue.doneAt !== null && issue.doneAt <= sampleAt) return "done";
+	if (issue.inReviewAt !== null && issue.inReviewAt <= sampleAt) return "inReview";
+	if (issue.claimedAt !== null && issue.claimedAt <= sampleAt) return "inProgress";
+	return "backlogTodo";
+}
+
+function countCfdBands(
+	issues: FlowIssueRow[],
+	sampleAt: number
+): { backlogTodo: number; inProgress: number; inReview: number; done: number } {
+	let backlogTodo = 0;
+	let inProgress = 0;
+	let inReview = 0;
+	let done = 0;
+	for (const i of issues) {
+		const band = classifyCfdBand(i, sampleAt);
+		if (band === "done") done++;
+		else if (band === "inReview") inReview++;
+		else if (band === "inProgress") inProgress++;
+		else if (band === "backlogTodo") backlogTodo++;
+	}
+	return { backlogTodo, inProgress, inReview, done };
+}
+
 // PROJ-329: cumulative flow diagram bands, sampled at each bucket's end (clamped to
-// `until`/`now`) from the write-once transition timestamps. An issue's band at the
-// sample instant is the furthest stage it has reached by then (done > in_review >
-// in_progress > backlog/todo); the done band is therefore monotonic non-decreasing
-// (an issue never leaves it), which is what makes CFD bands readable as a choke-point
-// signal.
+// `until`/`now`) from the write-once transition timestamps.
 //
 // PROJ-377: sampling at the bucket's *end* (not its start) matters for the always-
 // partial current bucket — a bucket-start sample lands before any activity in that
@@ -241,23 +269,9 @@ function buildCfdOverTime(
 	}> = [];
 	for (let t = firstBucket; t <= until; t += bucketSize) {
 		const sampleAt = Math.min(t + bucketSize - 1, until, now);
-		let backlogTodo = 0;
-		let inProgress = 0;
-		let inReview = 0;
-		let done = 0;
-		for (const i of issues) {
-			if (i.createdAt > sampleAt) continue;
-			if (i.doneAt !== null && i.doneAt <= sampleAt) done++;
-			else if (i.inReviewAt !== null && i.inReviewAt <= sampleAt) inReview++;
-			else if (i.claimedAt !== null && i.claimedAt <= sampleAt) inProgress++;
-			else backlogTodo++;
-		}
 		buckets.push({
 			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
-			backlogTodo,
-			inProgress,
-			inReview,
-			done,
+			...countCfdBands(issues, sampleAt),
 		});
 	}
 	return buckets;
