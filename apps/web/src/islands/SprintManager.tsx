@@ -321,6 +321,7 @@ function useSprintData(workspaceSlug: string | undefined) {
 		if (projectId) fetchSprints(projectId);
 	}, [projectId, fetchSprints]);
 
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
 	return { projectId, project, sprints, loading, error, fetchSprints };
 }
 
