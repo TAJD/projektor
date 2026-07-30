@@ -392,6 +392,46 @@ describe("Wiki API", () => {
 		expect(page2Results.map((r) => r.id)).not.toContain(page1Results[1].id);
 	});
 
+	it("GET /api/wiki/search paginates deterministically when results tie in rank", async () => {
+		// All three pages below match equally (same term, same content shape), so bm25()
+		// alone ties -- pagination must fall back to a stable tiebreaker (page id) rather
+		// than duplicating or dropping rows across pages. Distinct titles avoid PROJ-483
+		// slug-collision 409s; the rate_limit reset avoids tripping the 5-req/window cap
+		// (RATE_LIMIT_API_MAX) across the create + fetch calls below.
+		for (let i = 0; i < 3; i++) {
+			const createRes = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					title: `Tie Rank Page ${i}`,
+					content: "tie-rank-search-term",
+				}),
+			});
+			expect(createRes.status).toBe(201);
+		}
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+
+		const fetchAll = () =>
+			SELF.fetch("http://localhost/api/wiki/search?q=tie-rank-search-term&limit=2", {
+				headers: authHeaders(token, slug),
+			}).then((r) => r.json() as Promise<Array<{ id: string }>>);
+
+		const first = await fetchAll();
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const second = await fetchAll();
+		expect(first.map((r) => r.id)).toEqual(second.map((r) => r.id));
+
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const page2 = await SELF.fetch(
+			"http://localhost/api/wiki/search?q=tie-rank-search-term&limit=2&offset=2",
+			{ headers: authHeaders(token, slug) }
+		);
+		const page2Results = (await page2.json()) as Array<{ id: string }>;
+		const allIds = [...first.map((r) => r.id), ...page2Results.map((r) => r.id)];
+		expect(new Set(allIds).size).toBe(allIds.length);
+		expect(allIds).toHaveLength(3);
+	});
+
 	it("GET /api/wiki/search updatedSince filters out pages updated before the cutoff", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",

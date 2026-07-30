@@ -327,7 +327,10 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 		params.push(updatedSince);
 	}
 
-	q += ` ORDER BY bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}) LIMIT ? OFFSET ?`;
+	// PROJ-486: bm25() alone ties on equal-rank rows, which makes LIMIT/OFFSET
+	// paging non-deterministic (duplicate/skip results across pages) — break
+	// ties by page id for a stable order.
+	q += ` ORDER BY bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}), p.id LIMIT ? OFFSET ?`;
 	params.push(limit, offset);
 
 	const { results } = await ctx.db
