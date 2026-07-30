@@ -377,6 +377,7 @@ function BugShareChart({
 							const maxTicks = Math.max(2, Math.floor(u.width / 70));
 							const stride = Math.max(1, Math.ceil(n / maxTicks));
 							const idxs: number[] = [];
+							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map over a fixed-length source
 							for (let i = 0; i < n; i += stride) idxs.push(i);
 							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
 							return idxs;
@@ -444,6 +445,7 @@ function ReviewLatencyChart({ data }: { data: FlowMetrics["reviewLatencyOverTime
 							const maxTicks = Math.max(2, Math.floor(u.width / 70));
 							const stride = Math.max(1, Math.ceil(n / maxTicks));
 							const idxs: number[] = [];
+							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map over a fixed-length source
 							for (let i = 0; i < n; i += stride) idxs.push(i);
 							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
 							return idxs;
@@ -572,6 +574,7 @@ function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsComple
 							const maxTicks = Math.max(2, Math.floor(u.width / 70));
 							const stride = Math.max(1, Math.ceil(n / maxTicks));
 							const idxs: number[] = [];
+							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map over a fixed-length source
 							for (let i = 0; i < n; i += stride) idxs.push(i);
 							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
 							return idxs;

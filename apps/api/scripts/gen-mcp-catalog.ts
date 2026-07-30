@@ -57,9 +57,7 @@ for (const group of groups) {
 		body.push("");
 		body.push("| Tool | Description |");
 		body.push("|------|-------------|");
-		for (const t of d.tools) {
-			body.push(`| \`${escapeCell(t.name)}\` | ${escapeCell(t.description)} |`);
-		}
+		body.push(...d.tools.map((t) => `| \`${escapeCell(t.name)}\` | ${escapeCell(t.description)} |`));
 		body.push("");
 	}
 }
