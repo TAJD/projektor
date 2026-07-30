@@ -177,7 +177,6 @@ function CustomFieldsSection({ fields }: { fields: SharedIssue["customFields"] }
 	);
 }
 
-// cofferdam-ignore: Design.OrphanExport: imported by pages/share/view.astro — cofferdam doesn't parse .astro imports
 export default function ShareView() {
 	const [issue, setIssue] = useState<SharedIssue | null>(null);
 	const [loading, setLoading] = useState(true);

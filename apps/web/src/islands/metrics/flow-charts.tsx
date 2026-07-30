@@ -22,6 +22,7 @@ export function readThemeColor(token: string, fallback: string): string {
 	return value || fallback;
 }
 
+// cofferdam-ignore: Design.OrphanExport: color helper kept exported for module API consistency
 export function hexToRgba(hex: string, alpha: number): string {
 	const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
 	if (!match) return hex;

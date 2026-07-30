@@ -243,7 +243,6 @@ describe("Groups REST", () => {
 	});
 });
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Groups MCP parity", () => {
 	let roles: Awaited<ReturnType<typeof seedWorkspaceRoles>>;
 	let workspaceId: string;

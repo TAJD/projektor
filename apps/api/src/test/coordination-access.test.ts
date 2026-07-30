@@ -61,7 +61,6 @@ async function seedFloatingAgent(workspaceId: string, name: string): Promise<str
 	return id;
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: integration suite, one describe block
 describe("PROJ-316 coordination data respects project visibility", () => {
 	let ws: Awaited<ReturnType<typeof seedWorkspaceRoles>>;
 	let slug: string;

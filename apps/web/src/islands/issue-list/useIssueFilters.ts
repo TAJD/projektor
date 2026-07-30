@@ -62,7 +62,6 @@ export function useIssueFilters() {
 	};
 
 	function applyFilters(filters: SavedViewFilters) {
-		// cofferdam-ignore: Refactor.DuplicateBlock: sequential field-copy statements, not duplicated logic
 		setFilterStatuses(filters.statuses);
 		setFilterPriorities(filters.priorities);
 		setFilterProject(filters.project);
