@@ -2194,6 +2194,297 @@ describe("Wiki optimistic locking (PROJ-484)", () => {
 	});
 });
 
+// PROJ-492 (R10): revision diff endpoint + restore-via-update_wiki_page. Restore is
+// deliberately NOT a dedicated endpoint — it's a client-side convenience that reads an
+// old revision's content and re-submits it through update_wiki_page/PUT with a
+// baseRevisionId, so it gets normal optimistic-locking/frontmatter/FTS/link-reindex
+// treatment for free (see PR description for the design rationale).
+describe("Wiki revision diff (PROJ-492)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	async function req(url: string, opts?: RequestInit) {
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		return SELF.fetch(url, opts);
+	}
+
+	async function mcp<T>(name: string, args: unknown) {
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+	}
+
+	async function getRevisions(pageSlug: string) {
+		const res = await req(`http://localhost/api/wiki/${pageSlug}/revisions`, {
+			headers: authHeaders(token, slug),
+		});
+		return (await res.json()) as Array<{ id: string; created_at: number }>;
+	}
+
+	it("REST: diff against current defaults when `against` is omitted", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Diffable Doc", content: "line one\nline two" }),
+		});
+		await req("http://localhost/api/wiki/diffable-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "line one\nline THREE" }),
+		});
+		const [latest] = await getRevisions("diffable-doc");
+
+		const res = await req(`http://localhost/api/wiki/diffable-doc/revisions/${latest.id}/diff`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { from: string; to: string; diff: string };
+		expect(body.from).toBe(latest.id);
+		expect(body.to).toBe("current");
+		expect(body.diff).toContain("-line two");
+		expect(body.diff).toContain("+line THREE");
+	});
+
+	it("REST: diff between two explicit revisions", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Multi Rev Doc", content: "v1" }),
+		});
+		await req("http://localhost/api/wiki/multi-rev-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		await req("http://localhost/api/wiki/multi-rev-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v3" }),
+		});
+		const [v2Revision, v1Revision] = await getRevisions("multi-rev-doc");
+
+		const res = await req(
+			`http://localhost/api/wiki/multi-rev-doc/revisions/${v1Revision.id}/diff?against=${v2Revision.id}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { diff: string };
+		expect(body.diff).toContain("-v1");
+		expect(body.diff).toContain("+v2");
+	});
+
+	it("REST: identical revisions diff to an empty string", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Unchanged Doc", content: "same" }),
+		});
+		await req("http://localhost/api/wiki/unchanged-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "same" }),
+		});
+		const [latest] = await getRevisions("unchanged-doc");
+
+		const res = await req(
+			`http://localhost/api/wiki/unchanged-doc/revisions/${latest.id}/diff?against=current`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as { diff: string }).diff).toBe("");
+	});
+
+	it("REST: an unknown `against` revision id 404s", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Unknown Against Doc", content: "v1" }),
+		});
+		await req("http://localhost/api/wiki/unknown-against-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		const [latest] = await getRevisions("unknown-against-doc");
+
+		const res = await req(
+			`http://localhost/api/wiki/unknown-against-doc/revisions/${latest.id}/diff?against=${crypto.randomUUID()}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(404);
+	});
+
+	it("REST: an unknown revisionId 404s", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "No Such Revision Doc", content: "v1" }),
+		});
+
+		const res = await req(
+			`http://localhost/api/wiki/no-such-revision-doc/revisions/${crypto.randomUUID()}/diff`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(404);
+	});
+
+	it("MCP: get_wiki_revision_diff parity with REST", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcp("create_wiki_page", { title: "MCP Diff Doc", content: "alpha" })
+		);
+		await mcp("update_wiki_page", { slug: created.slug, content: "beta" });
+		const [latest] = mcpData<Array<{ id: string }>>(
+			await mcp("list_wiki_revisions", { slug: created.slug })
+		);
+
+		const result = mcpData<{ from: string; to: string; diff: string }>(
+			await mcp("get_wiki_revision_diff", { slug: created.slug, revisionId: latest.id })
+		);
+		expect(result.to).toBe("current");
+		expect(result.diff).toContain("-alpha");
+		expect(result.diff).toContain("+beta");
+	});
+
+	it("restore is a plain update_wiki_page call with the old revision's content — creates a new revision, never rewrites history", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Restorable Doc", content: "original content" }),
+		});
+		await req("http://localhost/api/wiki/restorable-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "mistaken edit" }),
+		});
+		const [latest] = await getRevisions("restorable-doc");
+
+		// Fetch the old revision's content (what the restore UI does) and resubmit it.
+		const revRes = await req(`http://localhost/api/wiki/restorable-doc/revisions/${latest.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const oldRevision = (await revRes.json()) as { content: string };
+		expect(oldRevision.content).toBe("original content");
+
+		const restoreRes = await req("http://localhost/api/wiki/restorable-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				content: oldRevision.content,
+				baseRevisionId: latest.id,
+				summary: `Restored from revision ${latest.id}`,
+			}),
+		});
+		expect(restoreRes.status).toBe(200);
+
+		const pageRes = await req("http://localhost/api/wiki/restorable-doc", {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await pageRes.json()) as { content: string }).content).toBe("original content");
+
+		// Restoring created a NEW (third) revision snapshotting the pre-restore "mistaken
+		// edit" content — it never rewrote or deleted the original "original content"
+		// revision, which is still present in history.
+		const revisions = await getRevisions("restorable-doc");
+		expect(revisions.length).toBe(2);
+		expect(revisions[0].id).not.toBe(latest.id);
+		expect(revisions.map((r) => r.id)).toContain(latest.id);
+	});
+
+	it("restore with a baseRevisionId that went stale while history was open is a 409, not a silent overwrite", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Raced Restore Doc", content: "original content" }),
+		});
+		await req("http://localhost/api/wiki/raced-restore-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "mistaken edit" }),
+		});
+		// What the restore UI froze when the history panel loaded.
+		const [staleLatest] = await getRevisions("raced-restore-doc");
+
+		// Someone else saves before the user clicks Restore.
+		await req("http://localhost/api/wiki/raced-restore-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "a colleague's edit" }),
+		});
+
+		const restoreRes = await req("http://localhost/api/wiki/raced-restore-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				content: "original content",
+				baseRevisionId: staleLatest.id,
+				summary: "Restored from an old revision",
+			}),
+		});
+		expect(restoreRes.status).toBe(409);
+		const conflict = (await restoreRes.json()) as { currentRevisionId: string; diff: string };
+		expect(conflict.currentRevisionId).not.toBe(staleLatest.id);
+
+		// The colleague's edit survives untouched and no restore revision was written.
+		const pageRes = await req("http://localhost/api/wiki/raced-restore-doc", {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await pageRes.json()) as { content: string }).content).toBe("a colleague's edit");
+		expect((await getRevisions("raced-restore-doc")).length).toBe(2);
+	});
+
+	it("restoring a revision whose frontmatter no longer validates fails cleanly — 400, no partial write", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Legacy Frontmatter Doc", content: "first body" }),
+		});
+		await req("http://localhost/api/wiki/legacy-frontmatter-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "second body" }),
+		});
+		const [latest] = await getRevisions("legacy-frontmatter-doc");
+
+		// Simulate a snapshot taken before R6's frontmatter validation existed, carrying a
+		// `status` value outside today's closed enum. Written straight to the revision row
+		// because the API (correctly) refuses to create such content in the first place.
+		await env.DB.prepare("UPDATE wiki_revisions SET content = ? WHERE id = ?")
+			.bind("---\nstatus: archived\n---\n\nlegacy body", latest.id)
+			.run();
+
+		const revRes = await req(
+			`http://localhost/api/wiki/legacy-frontmatter-doc/revisions/${latest.id}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const oldRevision = (await revRes.json()) as { content: string };
+
+		const restoreRes = await req("http://localhost/api/wiki/legacy-frontmatter-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				content: oldRevision.content,
+				baseRevisionId: latest.id,
+				summary: "Restored from a legacy revision",
+			}),
+		});
+		expect(restoreRes.status).toBe(400);
+
+		// The live page is untouched and no half-written revision was left behind.
+		const pageRes = await req("http://localhost/api/wiki/legacy-frontmatter-doc", {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await pageRes.json()) as { content: string }).content).toBe("second body");
+		expect((await getRevisions("legacy-frontmatter-doc")).length).toBe(1);
+	});
+});
+
 // PROJ-490: section-addressed patch operations (R8). Disjoint-section writes must
 // never conflict — that's the headline behavior a naive whole-page baseRevisionId
 // check would break.

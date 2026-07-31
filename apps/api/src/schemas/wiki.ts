@@ -129,6 +129,12 @@ export const SearchWikiInputSchema = z.object({
 	status: WikiStatusFilterSchema,
 });
 
+// PROJ-492 (R10): `against` is either another revision id or the literal string
+// "current" (default) meaning the page's live content.
+export const WikiRevisionDiffInputSchema = z.object({
+	against: z.string().min(1).optional().default("current"),
+});
+
 export const DeleteWikiPageOptionsSchema = z.object({
 	// Default (false): children are promoted to the deleted page's parent. true: the
 	// deleted page's entire subtree is removed too.

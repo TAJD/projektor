@@ -252,6 +252,7 @@ interface WikiRevision {
 	author_id: string | null;
 	author_name: string | null;
 	created_at: number;
+	summary: string | null;
 }
 
 interface Attachment {
@@ -1053,14 +1054,126 @@ function DraftRestoreBanner({
 	);
 }
 
+// PROJ-492 (R10): renders the server's unified diff text (--- base / +++ current, @@
+// hunks, +/- lines) with per-line coloring. An empty diff means the two sides are
+// identical (services/wiki.ts#buildUnifiedDiff returns "" in that case).
+function RevisionDiffView({ diff }: { diff: string }) {
+	if (diff === "") {
+		return <p class="mt-2 mb-1 text-[0.75rem] text-text-muted italic">No changes.</p>;
+	}
+	return (
+		<pre class="mt-2 mb-1 p-2 bg-surface border border-border rounded-md text-[0.75rem] overflow-x-auto leading-snug whitespace-pre-wrap">
+			{diff.split("\n").map((line, i) => {
+				const cls = line.startsWith("+")
+					? "text-green-600"
+					: line.startsWith("-")
+						? "text-red-600"
+						: "text-text-muted";
+				return (
+					<div key={`${i}-${line}`} class={cls}>
+						{line.length > 0 ? line : " "}
+					</div>
+				);
+			})}
+		</pre>
+	);
+}
+
+function RevisionRow({
+	revision,
+	workspaceSlug,
+	pageSlug,
+	onRestore,
+	restoring,
+}: {
+	revision: WikiRevision;
+	workspaceSlug: string | undefined;
+	pageSlug: string;
+	onRestore: (revision: WikiRevision) => void;
+	restoring: boolean;
+}) {
+	const [diffOpen, setDiffOpen] = useState(false);
+	const [diff, setDiff] = useState<string | null>(null);
+	const [diffError, setDiffError] = useState<string | null>(null);
+	const [diffLoading, setDiffLoading] = useState(false);
+
+	async function toggleDiff() {
+		if (diffOpen) {
+			setDiffOpen(false);
+			return;
+		}
+		setDiffOpen(true);
+		if (diff !== null || diffLoading) return;
+		setDiffLoading(true);
+		setDiffError(null);
+		try {
+			const result = await apiFetch<{ diff: string }>(
+				`/api/wiki/${encodeURIComponent(pageSlug)}/revisions/${revision.id}/diff?against=current`,
+				{ workspaceSlug }
+			);
+			setDiff(result.diff);
+		} catch (e) {
+			setDiffError(String(e));
+		} finally {
+			setDiffLoading(false);
+		}
+	}
+
+	return (
+		<li class="py-[0.375rem] border-b border-border text-[0.8rem] text-text-muted">
+			<div class="flex items-center flex-wrap gap-2">
+				<span>
+					<strong class="text-text-base">{revision.author_name ?? "Unknown"}</strong>
+					{" — "}
+					{new Date(revision.created_at * 1000).toLocaleString()}
+				</span>
+				<button
+					type="button"
+					onClick={toggleDiff}
+					class="btn btn-outline btn-sm text-text-muted py-0 px-2"
+				>
+					{diffOpen ? "Hide diff" : "Diff vs current"}
+				</button>
+				<button
+					type="button"
+					onClick={() => onRestore(revision)}
+					disabled={restoring}
+					class="btn btn-outline btn-sm text-text-muted py-0 px-2"
+				>
+					{restoring ? "Restoring…" : "Restore"}
+				</button>
+			</div>
+			{revision.summary && <p class="mt-1 mb-0 italic">{revision.summary}</p>}
+			{diffOpen &&
+				(diffLoading ? (
+					<p class="mt-2 mb-1 text-[0.75rem]">Loading diff…</p>
+				) : diffError ? (
+					<p role="alert" class="mt-2 mb-1 text-[0.75rem] text-[var(--danger-text)]">
+						{diffError}
+					</p>
+				) : (
+					<RevisionDiffView diff={diff ?? ""} />
+				))}
+		</li>
+	);
+}
+
 function RevisionsHistory({
 	revisions,
 	showHistory,
 	onToggle,
+	workspaceSlug,
+	pageSlug,
+	onRestore,
+	restoringId,
 }: {
 	revisions: WikiRevision[];
 	showHistory: boolean;
 	onToggle: () => void;
+	workspaceSlug: string | undefined;
+	pageSlug: string;
+	onRestore: (revision: WikiRevision) => void;
+	restoringId: string | null;
 }) {
 	if (revisions.length === 0) return null;
 	return (
@@ -1071,14 +1184,14 @@ function RevisionsHistory({
 			{showHistory && (
 				<ul class="mt-3 list-none p-0">
 					{revisions.map((r) => (
-						<li
+						<RevisionRow
 							key={r.id}
-							class="py-[0.375rem] border-b border-border text-[0.8rem] text-text-muted"
-						>
-							<strong class="text-text-base">{r.author_name ?? "Unknown"}</strong>
-							{" — "}
-							{new Date(r.created_at * 1000).toLocaleString()}
-						</li>
+							revision={r}
+							workspaceSlug={workspaceSlug}
+							pageSlug={pageSlug}
+							onRestore={onRestore}
+							restoring={restoringId === r.id}
+						/>
 					))}
 				</ul>
 			)}
@@ -1272,6 +1385,8 @@ interface PageArticleProps {
 	revisions: WikiRevision[];
 	showHistory: boolean;
 	onToggleHistory: () => void;
+	onRestoreRevision: (revision: WikiRevision) => void;
+	restoringRevisionId: string | null;
 	attachments: Attachment[];
 	workspaceSlug?: string;
 	uploadFormOpen: boolean;
@@ -1427,6 +1542,10 @@ function PageArticle(props: PageArticleProps) {
 					revisions={props.revisions}
 					showHistory={props.showHistory}
 					onToggle={props.onToggleHistory}
+					workspaceSlug={props.workspaceSlug}
+					pageSlug={page.slug}
+					onRestore={props.onRestoreRevision}
+					restoringId={props.restoringRevisionId}
 				/>
 
 				<AttachmentsPanel
@@ -2157,6 +2276,63 @@ function useWikiEditing(
 	};
 }
 
+// PROJ-492 (R10): one-click restore is a client-side convenience — it reads the old
+// revision's content, then resubmits it through the SAME update_wiki_page write path as
+// a normal edit (baseRevisionId + summary), so it gets ordinary optimistic-locking/
+// frontmatter/FTS/link-reindex treatment for free and creates a new revision rather than
+// rewriting history. No dedicated restore endpoint.
+function useWikiRestore(
+	workspaceSlug: string | undefined,
+	page: WikiPageData | null,
+	latestRevisionId: string | null | undefined,
+	fetchPage: (s: string) => Promise<void>,
+	fetchRevisions: (s: string) => Promise<void>
+) {
+	const [restoringId, setRestoringId] = useState<string | null>(null);
+
+	async function restore(revision: WikiRevision) {
+		if (!page) return;
+		const when = new Date(revision.created_at * 1000).toLocaleString();
+		if (
+			!window.confirm(
+				`Restore this page to the version from ${when}? This creates a new revision — no history is lost.`
+			)
+		) {
+			return;
+		}
+		setRestoringId(revision.id);
+		try {
+			const old = await apiFetch<{ content: string }>(
+				`/api/wiki/${encodeURIComponent(page.slug)}/revisions/${revision.id}`,
+				{ workspaceSlug }
+			);
+			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
+				method: "PUT",
+				workspaceSlug,
+				body: {
+					content: old.content,
+					baseRevisionId: latestRevisionId ?? null,
+					summary: `Restored from revision dated ${when}`,
+				},
+			});
+			await fetchPage(page.slug);
+			await fetchRevisions(page.slug);
+		} catch (e) {
+			if (String(e).endsWith("failed: 409")) {
+				alert(
+					"This page was changed by someone else since you loaded it. Reload the page before restoring."
+				);
+			} else {
+				alert(`Restore failed: ${String(e)}`);
+			}
+		} finally {
+			setRestoringId(null);
+		}
+	}
+
+	return { restoringId, restore };
+}
+
 // PROJ-237: re-parent a page from the page menu. Backend validation (cycle guard,
 // workspace scoping) already exists on PUT /api/wiki/:slug — this is UI-only.
 function useMovePage(
@@ -2620,6 +2796,8 @@ function buildArticleProps(article: {
 	revisions: WikiRevision[];
 	showHistory: boolean;
 	setShowHistory: (updater: (h: boolean) => boolean) => void;
+	onRestoreRevision: (revision: WikiRevision) => void;
+	restoringRevisionId: string | null;
 	attach: ReturnType<typeof useWikiAttachments>;
 	workspaceSlug: string | undefined;
 	move: ReturnType<typeof useMovePage>;
@@ -2655,6 +2833,8 @@ function buildArticleProps(article: {
 		revisions: article.revisions,
 		showHistory: article.showHistory,
 		onToggleHistory: () => article.setShowHistory((h) => !h),
+		onRestoreRevision: article.onRestoreRevision,
+		restoringRevisionId: article.restoringRevisionId,
 		attachments: article.attach.attachments,
 		workspaceSlug: article.workspaceSlug,
 		uploadFormOpen: article.attach.uploadFormOpen,
@@ -2714,6 +2894,13 @@ export default function WikiPage({
 	const wikiTemplates = useWikiTemplates(workspaceSlug);
 	const move = useMovePage(workspaceSlug, pageData.page, pageData.fetchPage, fetchTree);
 	const verify = useWikiVerify(workspaceSlug, pageData.page, pageData.fetchPage);
+	const restoreState = useWikiRestore(
+		workspaceSlug,
+		pageData.page,
+		pageData.revisionsLoaded ? (pageData.revisions[0]?.id ?? null) : undefined,
+		pageData.fetchPage,
+		pageData.fetchRevisions
+	);
 
 	const { navigateTo, startCreate, submitCreate, deletePage } = createWikiActions({
 		workspaceSlug,
@@ -2785,6 +2972,8 @@ export default function WikiPage({
 		revisions: pageData.revisions,
 		showHistory: pageData.showHistory,
 		setShowHistory: pageData.setShowHistory,
+		onRestoreRevision: restoreState.restore,
+		restoringRevisionId: restoreState.restoringId,
 		attach,
 		workspaceSlug,
 		move,

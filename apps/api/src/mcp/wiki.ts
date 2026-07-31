@@ -379,6 +379,35 @@ export const wikiTools: MCPTool[] = [
 		},
 	},
 	{
+		name: "get_wiki_revision_diff",
+		description:
+			"Server-side unified diff between one revision (revisionId) and either another " +
+			"revision or the page's current content. `against` is a revision id or the literal " +
+			'string "current" (default when omitted). Same unified diff format as ' +
+			"update_wiki_page/patch_wiki_page's conflict responses (--- base / +++ current, " +
+			"@@ hunk headers).",
+		inputSchema: {
+			type: "object",
+			required: ["slug", "revisionId"],
+			properties: {
+				slug: { type: "string" },
+				revisionId: { type: "string" },
+				against: {
+					type: "string",
+					description: 'Another revision id, or "current" (default)',
+				},
+			},
+		},
+		async handler(input, ctx) {
+			const { slug, revisionId, against } = input as {
+				slug: string;
+				revisionId: string;
+				against?: string;
+			};
+			return wikiService.getWikiRevisionDiff(ctx as ServiceCtx, slug, revisionId, { against });
+		},
+	},
+	{
 		name: "verify_wiki_page",
 		description:
 			"Stamp a wiki page as freshly verified — sets its frontmatter verified_at to now and " +
