@@ -1616,6 +1616,20 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 		expect(backlinks.map((b) => b.slug)).toEqual(["gamma"]);
 	});
 
+	it("an absolute cross-host URL is never indexed as a same-workspace link", async () => {
+		const target = await createPage("Epsilon", "contents");
+		await createPage(
+			"Zeta",
+			`[external](https://example.com/wiki/${target.slug}) and [also](//other-host/wiki/${target.slug})`
+		);
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${target.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		const backlinks = (await res.json()) as Array<{ slug: string }>;
+		expect(backlinks).toEqual([]);
+	});
+
 	it("an unresolved [[Target]] is stored as a broken link, not a backlink", async () => {
 		await createPage("Delta", "see [[Nonexistent Page]] for details");
 

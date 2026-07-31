@@ -203,7 +203,9 @@ export const wikiTools: MCPTool[] = [
 		name: "list_broken_wiki_links",
 		description:
 			"List unresolved wiki links in the workspace — [[Target]]/URL links whose target " +
-			"title or slug didn't match any page at write time. Useful as a maintenance queue.",
+			"title or slug didn't match any page at write time. Useful as a maintenance queue. " +
+			"Note: a broken link does not auto-re-resolve if the missing page is created later — " +
+			"only backfill_wiki_links (or re-saving the linking page) re-resolves it.",
 		inputSchema: {
 			type: "object",
 			properties: {

@@ -23,6 +23,7 @@ import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 import {
 	backlinksForResolvedPage,
+	clearIncomingLinkTargets,
 	countBacklinkSources,
 	deleteWikiLinksForPages,
 	reindexWikiLinks,
@@ -930,9 +931,10 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 			return [];
 		});
 		await deleteWikiFtsEntries(ctx, allIds);
-		// PROJ-407-style defensive cleanup: mirror the FK's ON DELETE CASCADE at the app
-		// level too, since D1 doesn't guarantee FK enforcement on every connection.
+		// PROJ-407-style defensive cleanup: mirror the FK's ON DELETE CASCADE/SET NULL at
+		// the app level too, since D1 doesn't guarantee FK enforcement on every connection.
 		await deleteWikiLinksForPages(ctx, allIds);
+		await clearIncomingLinkTargets(ctx, allIds);
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
@@ -955,6 +957,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
 	await deleteWikiFtsEntries(ctx, [page.id]);
 	await deleteWikiLinksForPages(ctx, [page.id]);
+	await clearIncomingLinkTargets(ctx, [page.id]);
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: page.id, action: "deleted" });
 	return { ok: true, deletedCount: 1, linkedByCount };
 }

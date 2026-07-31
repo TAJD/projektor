@@ -14,6 +14,7 @@ import { wikiPagePath } from "../lib/urls";
 import { ListBrokenWikiLinksInputSchema } from "../schemas/wiki";
 import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
 import { ForbiddenError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 type Orm = ReturnType<typeof drizzle<typeof schema>>;
@@ -29,12 +30,16 @@ const MD_LINK_RE = /\[[^\]]*\]\(([^)\s]+)\)/g;
 type ParsedLinkTarget = { kind: "title"; title: string } | { kind: "slug"; slug: string };
 
 function extractWikiSlugFromUrl(url: string): string | null {
-	// Only relative or same-origin-rooted URLs are treated as same-workspace links —
-	// an absolute cross-origin URL is never a link to a page in this workspace.
-	const pathAndQuery = url.replace(/^https?:\/\/[^/]+/, "");
-	const pathMatch = pathAndQuery.match(/^\/wiki\/([a-z0-9-/]+)/i);
+	// Only relative, path-rooted URLs are treated as same-workspace links. An absolute
+	// URL (http://, https://, //host/...) is never resolved here — we have no reliable
+	// request origin at parse time to compare it against, so treating "strip whatever
+	// origin is present" as "same workspace" would wrongly index links to other hosts
+	// as same-workspace links (even a same-origin absolute URL is written as relative
+	// by the app, so this doesn't lose any real link).
+	if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(url)) return null;
+	const pathMatch = url.match(/^\/wiki\/([a-z0-9-/]+)/i);
 	if (pathMatch) return decodeURIComponent(pathMatch[1]);
-	const queryMatch = pathAndQuery.match(/[?&]slug=([^&]+)/);
+	const queryMatch = url.match(/[?&]slug=([^&]+)/);
 	if (queryMatch) return decodeURIComponent(queryMatch[1]);
 	return null;
 }
@@ -52,22 +57,39 @@ export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
 	return targets;
 }
 
-async function resolveTitleTarget(
+// Resolves all title-kind targets in one query (rather than one round trip per link),
+// matched case-insensitively. Page titles aren't unique like slugs are (PROJ-483 only
+// enforces slug uniqueness); when more than one page shares a (lowercased) title, this
+// picks whichever row the query happens to return first — an arbitrary but stable-ish
+// match, not a documented/guaranteed one. Undocumented behavior, not a bug: titles were
+// never meant to be a stable identifier, slugs are.
+async function resolveTitleTargets(
 	orm: Orm,
 	workspaceId: string,
-	title: string
-): Promise<string | null> {
-	const row = await orm
-		.select({ id: schema.wikiPages.id })
-		.from(schema.wikiPages)
-		.where(
-			and(
-				eq(schema.wikiPages.workspaceId, workspaceId),
-				sql`lower(${schema.wikiPages.title}) = lower(${title})`
+	titles: string[]
+): Promise<Map<string, string>> {
+	const byLower = new Map<string, string>();
+	if (titles.length === 0) return byLower;
+	const lowered = [...new Set(titles.map((t) => t.toLowerCase()))];
+	const rows = await inChunks(lowered, (chunk) =>
+		orm
+			.select({ id: schema.wikiPages.id, title: schema.wikiPages.title })
+			.from(schema.wikiPages)
+			.where(
+				and(
+					eq(schema.wikiPages.workspaceId, workspaceId),
+					sql`lower(${schema.wikiPages.title}) IN (${sql.join(
+						chunk.map((t) => sql`${t}`),
+						sql`, `
+					)})`
+				)
 			)
-		)
-		.get();
-	return row?.id ?? null;
+	);
+	for (const row of rows) {
+		const key = row.title.toLowerCase();
+		if (!byLower.has(key)) byLower.set(key, row.id);
+	}
+	return byLower;
 }
 
 async function resolveSlugTarget(
@@ -110,17 +132,31 @@ async function resolveLinkTargets(
 	// Dedupe by resolved page id (or the raw unresolved key) so a page linking to the
 	// same target multiple times only gets one wiki_links row.
 	const resolved = new Map<string, ResolvedLink>();
+
+	// Title-kind targets resolve in one batched query instead of one round trip per
+	// link (a page with N distinct title-links previously made N sequential queries).
+	const titleTargets = targets.filter(
+		(t): t is Extract<ParsedLinkTarget, { kind: "title" }> => t.kind === "title"
+	);
+	const titleMatches = await resolveTitleTargets(
+		orm,
+		workspaceId,
+		titleTargets.map((t) => t.title)
+	);
+	for (const t of titleTargets) {
+		const targetPageId = titleMatches.get(t.title.toLowerCase()) ?? null;
+		const key = targetPageId ?? `title:${t.title.toLowerCase()}`;
+		if (!resolved.has(key)) resolved.set(key, { targetPageId, targetTitle: t.title });
+	}
+
+	// Slug-kind targets (from same-workspace wiki URLs) each need a redirect-fallback
+	// lookup, so they stay sequential rather than batched.
 	for (const t of targets) {
-		if (t.kind === "title") {
-			const targetPageId = await resolveTitleTarget(orm, workspaceId, t.title);
-			const key = targetPageId ?? `title:${t.title.toLowerCase()}`;
-			if (!resolved.has(key)) resolved.set(key, { targetPageId, targetTitle: t.title });
-		} else {
-			const found = await resolveSlugTarget(orm, workspaceId, t.slug);
-			const key = found?.id ?? `slug:${t.slug.toLowerCase()}`;
-			if (!resolved.has(key)) {
-				resolved.set(key, { targetPageId: found?.id ?? null, targetTitle: found?.title ?? t.slug });
-			}
+		if (t.kind !== "slug") continue;
+		const found = await resolveSlugTarget(orm, workspaceId, t.slug);
+		const key = found?.id ?? `slug:${t.slug.toLowerCase()}`;
+		if (!resolved.has(key)) {
+			resolved.set(key, { targetPageId: found?.id ?? null, targetTitle: found?.title ?? t.slug });
 		}
 	}
 	return [...resolved.values()];
@@ -195,9 +231,7 @@ export async function backfillWikiLinks(ctx: ServiceCtx): Promise<{ pagesProcess
 // level for D1 connections that enforce FKs, but PROJ-407 established that isn't
 // guaranteed for every connection — mirrors deleteWikiPageAttachments's rationale).
 export async function deleteWikiLinksForPages(ctx: ServiceCtx, pageIds: string[]): Promise<void> {
-	const CHUNK = 90;
-	for (let i = 0; i < pageIds.length; i += CHUNK) {
-		const chunk = pageIds.slice(i, i + CHUNK);
+	await inChunks(pageIds, async (chunk) => {
 		const placeholders = chunk.map(() => "?").join(",");
 		await ctx.db
 			.prepare(
@@ -205,7 +239,29 @@ export async function deleteWikiLinksForPages(ctx: ServiceCtx, pageIds: string[]
 			)
 			.bind(...chunk, ctx.workspaceId)
 			.run();
-	}
+		return [];
+	});
+}
+
+// Called from services/wiki.ts's deleteWikiPage alongside deleteWikiLinksForPages —
+// the same app-level-mirrors-the-FK rationale (PROJ-407), but for the *incoming* side.
+// ON DELETE SET NULL on target_page_id already guarantees this at the DB level for
+// connections that enforce FKs; this is the defensive fallback for connections that
+// don't, so a deleted page's id never lingers as a dangling target_page_id (which
+// would make the link invisible to list_broken_wiki_links, since that only looks for
+// target_page_id IS NULL). Only nulls target_page_id — target_title is left untouched
+// so the link still shows up as broken with its original display text.
+export async function clearIncomingLinkTargets(ctx: ServiceCtx, pageIds: string[]): Promise<void> {
+	await inChunks(pageIds, async (chunk) => {
+		const placeholders = chunk.map(() => "?").join(",");
+		await ctx.db
+			.prepare(
+				`UPDATE wiki_links SET target_page_id = NULL WHERE target_page_id IN (${placeholders}) AND workspace_id = ?`
+			)
+			.bind(...chunk, ctx.workspaceId)
+			.run();
+		return [];
+	});
 }
 
 // PROJ-485: count of distinct pages that link to any page in `pageIds`, for delete
@@ -214,18 +270,25 @@ export async function deleteWikiLinksForPages(ctx: ServiceCtx, pageIds: string[]
 export async function countBacklinkSources(ctx: ServiceCtx, pageIds: string[]): Promise<number> {
 	if (pageIds.length === 0) return 0;
 	const orm = drizzle(ctx.db, { schema });
-	const rows = await orm
-		.select({ sourcePageId: schema.wikiLinks.sourcePageId })
-		.from(schema.wikiLinks)
-		.where(
-			and(
-				eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
-				inArray(schema.wikiLinks.targetPageId, pageIds)
+	const rows = await inChunks(pageIds, (chunk) =>
+		orm
+			.select({ sourcePageId: schema.wikiLinks.sourcePageId })
+			.from(schema.wikiLinks)
+			.where(
+				and(
+					eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
+					inArray(schema.wikiLinks.targetPageId, chunk)
+				)
 			)
-		)
-		.groupBy(schema.wikiLinks.sourcePageId);
+			.groupBy(schema.wikiLinks.sourcePageId)
+	);
 	// Exclude self-links (a page linking to itself isn't "another page" linking here).
-	return rows.filter((r) => !pageIds.includes(r.sourcePageId)).length;
+	// Dedup across chunks too, since a source page could link to targets that land in
+	// different chunks and otherwise be counted more than once.
+	const distinctSources = new Set(
+		rows.map((r) => r.sourcePageId).filter((id) => !pageIds.includes(id))
+	);
+	return distinctSources.size;
 }
 
 // PROJ-485: best-effort citing context for a backlink — the raw text surrounding the
