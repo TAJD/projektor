@@ -17,7 +17,14 @@ export class ValidationError extends ServiceError {
 
 export class NotFoundError extends ServiceError {
 	readonly kind = "not_found" as const;
-	constructor(message = "Not found") {
+	// PROJ-490: `details` mirrors ConflictError's — structured, client-facing extra
+	// fields (e.g. patch_wiki_page's currentHeadings list on a heading-not-found miss)
+	// beyond the plain message. Optional so every pre-existing plain-message
+	// NotFoundError is unaffected.
+	constructor(
+		message = "Not found",
+		public readonly details?: Record<string, unknown>
+	) {
 		super(message);
 	}
 }

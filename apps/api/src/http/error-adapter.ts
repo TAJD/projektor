@@ -14,7 +14,9 @@ export function serviceErrToResponse(c: Context<HonoEnv>, err: unknown) {
 		return c.json({ error: err.issues }, 400);
 	}
 	if (err instanceof NotFoundError) {
-		return c.json({ error: err.message }, 404);
+		// PROJ-490: structured not-found details (e.g. patch_wiki_page's currentHeadings)
+		// are spread alongside `error`, same convention as ConflictError below.
+		return c.json({ error: err.message, ...(err.details ?? {}) }, 404);
 	}
 	if (err instanceof ForbiddenError) {
 		return c.json({ error: err.message }, 403);

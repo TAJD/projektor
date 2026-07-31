@@ -160,6 +160,16 @@ router.post("/:slug/verify", async (c) => {
 	}
 });
 
+router.patch("/:slug", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const body = await c.req.json();
+		return c.json(await wikiService.patchWikiPage(ctx, c.req.param("slug"), body));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
 router.delete("/:slug", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {

@@ -1,4 +1,4 @@
-import { ConflictError, ServiceError, ValidationError } from "../services/errors";
+import { ConflictError, NotFoundError, ServiceError, ValidationError } from "../services/errors";
 
 export function toMcpError(err: unknown): { code: number; message: string } {
 	if (err instanceof ValidationError) {
@@ -13,6 +13,17 @@ export function toMcpError(err: unknown): { code: number; message: string } {
 		// leak its message to clients by default. (PROJ-204)
 		switch (err.kind) {
 			case "not_found":
+				// PROJ-490: mirrors the conflict case below — structured not-found details
+				// (e.g. patch_wiki_page's currentHeadings) are JSON-encoded into the
+				// message for callers that set `details`; plain not-found errors keep a
+				// plain string.
+				if (err instanceof NotFoundError && err.details) {
+					return {
+						code: -32000,
+						message: JSON.stringify({ message: err.message, ...err.details }),
+					};
+				}
+				return { code: -32000, message: err.message };
 			case "forbidden":
 				return { code: -32000, message: err.message };
 			case "conflict":
