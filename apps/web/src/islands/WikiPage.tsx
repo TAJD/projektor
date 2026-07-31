@@ -1494,7 +1494,8 @@ function useWikiEditing(
 	workspaceSlug: string | undefined,
 	page: WikiPageData | null,
 	fetchPage: (s: string) => Promise<void>,
-	fetchRevisions: (s: string) => Promise<void>
+	fetchRevisions: (s: string) => Promise<void>,
+	latestRevisionId: string | null
 ) {
 	const [editing, setEditing] = useState(false);
 	const [editTitle, setEditTitle] = useState("");
@@ -1506,6 +1507,12 @@ function useWikiEditing(
 		content: string;
 		savedAt: number;
 	} | null>(null);
+	// PROJ-507: the revision id of the content the user actually started editing,
+	// frozen at startEdit() time — sent back as baseRevisionId so the server can
+	// detect a concurrent edit landing between load and save (PROJ-484's optimistic
+	// lock). Using the live `latestRevisionId` at save time instead would defeat the
+	// check, since it tracks whatever the page's latest revision is *right now*.
+	const [baseRevisionId, setBaseRevisionId] = useState<string | null>(null);
 
 	const skipLeaveFlushRef = useDraftAutosave(editing, editTitle, editContent, page, draftBanner);
 
@@ -1513,6 +1520,7 @@ function useWikiEditing(
 		if (!page) return;
 		setSaveError(null);
 		setDraftBanner(null);
+		setBaseRevisionId(latestRevisionId);
 		setEditTitle(page.title);
 		setEditContent(page.content);
 		try {
@@ -1562,7 +1570,7 @@ function useWikiEditing(
 			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
 				method: "PUT",
 				workspaceSlug,
-				body: { title: editTitle, content: editContent },
+				body: { title: editTitle, content: editContent, baseRevisionId },
 			});
 			try {
 				localStorage.removeItem(draftKey(page.id));
@@ -1574,7 +1582,17 @@ function useWikiEditing(
 			skipLeaveFlushRef.current = true;
 			setEditing(false);
 		} catch (e) {
-			setSaveError(`Save failed: ${String(e)}`);
+			// PROJ-507: a 409 means someone else saved this page after we loaded it
+			// (PROJ-484's optimistic lock rejected our stale baseRevisionId) — surface
+			// that distinctly rather than the generic failure message, so the user
+			// knows to reload instead of retrying the same save.
+			if (String(e).includes("409")) {
+				setSaveError(
+					"This page was changed by someone else since you loaded it. Reload the page before saving to avoid overwriting their changes."
+				);
+			} else {
+				setSaveError(`Save failed: ${String(e)}`);
+			}
 		} finally {
 			setSaving(false);
 		}
@@ -2068,7 +2086,8 @@ export default function WikiPage({
 		workspaceSlug,
 		pageData.page,
 		pageData.fetchPage,
-		pageData.fetchRevisions
+		pageData.fetchRevisions,
+		pageData.revisions[0]?.id ?? null
 	);
 	const createForm = useCreatePageForm(workspaceSlug, projectId, fetchTree);
 	const move = useMovePage(workspaceSlug, pageData.page, pageData.fetchPage, fetchTree);

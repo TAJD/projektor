@@ -411,3 +411,88 @@ describe("draft autosave (PROJ-227) — restore banner", () => {
 		expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
 	});
 });
+
+// PROJ-507: PROJ-484 added optimistic locking to PUT /api/wiki/:slug (an optional
+// baseRevisionId that must match the page's current latest revision, else a 409), but
+// the save path here never sent it — silently defeating the whole feature. These
+// tests cover that the loaded revision id is now sent, and that a 409 is surfaced
+// rather than swallowed.
+describe("optimistic locking (PROJ-507)", () => {
+	const REVISION = { id: "rev-1", author_id: "u1", author_name: "Ann", created_at: 500 };
+
+	function mockFetchWikiWithRevision(putResponse: { ok: boolean; status?: number }) {
+		return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([REVISION]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (init?.method === "PUT") {
+				return putResponse.ok
+					? Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) })
+					: Promise.resolve({ ok: false, status: putResponse.status });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+	}
+
+	it("sends the loaded revision's id as baseRevisionId on save", async () => {
+		const fetchMock = mockFetchWikiWithRevision({ ok: true });
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		await waitFor(() => {
+			const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+			expect(putCall).toBeTruthy();
+			expect(JSON.parse(putCall?.[1].body)).toMatchObject({ baseRevisionId: "rev-1" });
+		});
+	});
+
+	it("sends baseRevisionId: null when the page has never been revised", async () => {
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (init?.method === "PUT") {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		await waitFor(() => {
+			const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+			expect(putCall).toBeTruthy();
+			expect(JSON.parse(putCall?.[1].body)).toMatchObject({ baseRevisionId: null });
+		});
+	});
+
+	it("surfaces a conflict message instead of silently clobbering on a 409", async () => {
+		const fetchMock = mockFetchWikiWithRevision({ ok: false, status: 409 });
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		expect(await screen.findByText(/changed by someone else since you loaded it/i)).toBeTruthy();
+		// Still in edit mode — the save was rejected, not applied.
+		expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+	});
+});
