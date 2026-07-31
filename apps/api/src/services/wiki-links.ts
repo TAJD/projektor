@@ -38,10 +38,19 @@ function extractWikiSlugFromUrl(url: string): string | null {
 	// by the app, so this doesn't lose any real link).
 	if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(url)) return null;
 	const pathMatch = url.match(/^\/wiki\/([a-z0-9-/]+)/i);
-	if (pathMatch) return decodeURIComponent(pathMatch[1]);
-	const queryMatch = url.match(/[?&]slug=([^&]+)/);
-	if (queryMatch) return decodeURIComponent(queryMatch[1]);
-	return null;
+	const queryMatch = pathMatch ? null : url.match(/[?&]slug=([^&]+)/);
+	const raw = pathMatch?.[1] ?? queryMatch?.[1];
+	if (!raw) return null;
+	try {
+		// PROJ-510: a malformed percent-escape (e.g. a bare `%` not followed by two hex
+		// digits) makes decodeURIComponent throw. This runs mid-reindex, after the page's
+		// content/old wiki_links rows have already been committed — an uncaught throw here
+		// would 500 the request with wiki_links left deleted and never repopulated. Treat
+		// an undecodable URL as "not a wiki link" instead of propagating the exception.
+		return decodeURIComponent(raw);
+	} catch {
+		return null;
+	}
 }
 
 export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
@@ -172,6 +181,16 @@ const LINK_INSERT_CHUNK_SIZE = 15;
  * Recompute a page's outgoing wiki_links rows from its current content: delete-then-
  * reinsert, mirroring services/wiki.ts's reindexWikiFts. Call after every content write
  * (create or update) — never partially, since a stale row would misreport backlinks.
+ *
+ * PROJ-510: this delete-then-reinsert is NOT in the same D1 transaction/batch as the
+ * page content write in services/wiki.ts (there is no db.batch(...) wrapping either) —
+ * callers await each statement sequentially. If something throws between the delete and
+ * the reinsert, the page's content is already committed but wiki_links is left empty
+ * until the next successful save. extractWikiSlugFromUrl's parse errors are now handled
+ * defensively (never throw), which closes the only known trigger, but the underlying gap
+ * is unaddressed — wrapping content write + link reindex in one transaction would touch
+ * createWikiPage/updateWikiPage's other sequential writes (revisions, FTS, redirects) and
+ * was judged out of scope here; tracked as a follow-up.
  */
 export async function reindexWikiLinks(
 	ctx: ServiceCtx,

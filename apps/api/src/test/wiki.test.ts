@@ -1678,6 +1678,25 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 		expect(backlinks).toEqual([]);
 	});
 
+	it("PROJ-510: a malformed %-escape in a markdown link URL doesn't crash the write, and other links on the page still index", async () => {
+		const runbook = await createPage("Runbook Eta", "how to page");
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Theta",
+				content: "see [[Runbook Eta]] and [bad](/wiki?slug=100%) for details",
+			}),
+		});
+		expect(res.status).toBe(201);
+
+		const backlinksRes = await SELF.fetch(`http://localhost/api/wiki/${runbook.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		const backlinks = (await backlinksRes.json()) as Array<{ slug: string }>;
+		expect(backlinks.map((b) => b.slug)).toEqual(["theta"]);
+	});
+
 	it("an unresolved [[Target]] is stored as a broken link, not a backlink", async () => {
 		await createPage("Delta", "see [[Nonexistent Page]] for details");
 
