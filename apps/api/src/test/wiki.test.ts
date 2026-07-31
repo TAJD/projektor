@@ -220,19 +220,24 @@ describe("Wiki API", () => {
 		for (const r of results) expect(r.freshness).toBeNull();
 	});
 
-	// PROJ-486: type/tags/status are accepted for R6/R7 forward compatibility but not
-	// yet implemented — passing them must not error or change results.
-	it("GET /api/wiki/search rejects a type/status value outside the well-known enum (PROJ-488)", async () => {
+	// PROJ-513: `type` is freeform (per the PRD) — an arbitrary value like "guide" is a
+	// valid filter, just one that (correctly) matches nothing here. `status` stays a
+	// closed enum, so an unrecognized value there is still rejected.
+	it("GET /api/wiki/search accepts an arbitrary type filter but rejects an unknown status (PROJ-513)", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
 			body: JSON.stringify({ title: "Noop Filter Page", content: "wrangler" }),
 		});
-		const res = await SELF.fetch(
-			"http://localhost/api/wiki/search?q=wrangler&type=guide&status=fresh",
+		const okRes = await SELF.fetch("http://localhost/api/wiki/search?q=wrangler&type=guide", {
+			headers: authHeaders(token, slug),
+		});
+		expect(okRes.status).toBe(200);
+		const badStatusRes = await SELF.fetch(
+			"http://localhost/api/wiki/search?q=wrangler&status=fresh",
 			{ headers: authHeaders(token, slug) }
 		);
-		expect(res.status).toBe(400);
+		expect(badStatusRes.status).toBe(400);
 	});
 
 	it("accepts a custom slug", async () => {
@@ -1407,27 +1412,32 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 		expect(created.status).toBeNull();
 	});
 
-	it("REST POST /api/wiki rejects an unrecognized `type` enum value with 400", async () => {
+	// PROJ-513: `type` is freeform per the PRD — a value outside the well-known
+	// runbook/adr/spec/note set is accepted and stored as-is, not rejected.
+	it("REST POST /api/wiki accepts a `type` value outside the well-known set (PROJ-513)", async () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
 			body: JSON.stringify({
-				title: "Bad Type",
+				title: "Freeform Type",
 				content: "---\ntype: whitepaper\n---\nbody",
 			}),
 		});
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(201);
+		const created = (await res.json()) as { type: string | null };
+		expect(created.type).toBe("whitepaper");
 	});
 
-	it("MCP create_wiki_page rejects an unrecognized `type` enum value (-32602), parity with REST", async () => {
-		const res = await mcpCall(
-			workspaceId,
-			"create_wiki_page",
-			{ title: "Bad Type Mcp", content: "---\ntype: whitepaper\n---\nbody" },
-			authHeaders(token, slug)
+	it("MCP create_wiki_page accepts a `type` value outside the well-known set, parity with REST (PROJ-513)", async () => {
+		const created = mcpData<{ type: string | null }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "Freeform Type Mcp", content: "---\ntype: whitepaper\n---\nbody" },
+				authHeaders(token, slug)
+			)
 		);
-		expect(isMcpError(res)).toBe(true);
-		if (isMcpError(res)) expect(res.error.code).toBe(-32602);
+		expect(created.type).toBe("whitepaper");
 	});
 
 	it("rejects an invalid `status` enum value with a structured error", async () => {
@@ -1590,7 +1600,9 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 		const res = await mcpCall(
 			workspaceId,
 			"update_wiki_page",
-			{ slug: created.slug, content: "---\ntype: not-a-real-type\n---\nbody" },
+			// PROJ-513: `type` is freeform now, so use an invalid `status` (still a closed
+			// enum) to exercise the same "invalid frontmatter on update" path.
+			{ slug: created.slug, content: "---\nstatus: not-a-real-status\n---\nbody" },
 			authHeaders(token, slug)
 		);
 		expect(isMcpError(res)).toBe(true);

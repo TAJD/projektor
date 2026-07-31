@@ -46,12 +46,17 @@ export const UpdatePageSchema = z
 // (services/wiki-frontmatter.ts). `.strict()` — an unrecognized key (a typo like
 // `stauts:`) is a validation error rather than a silently-ignored no-op, matching the
 // ticket's "invalid frontmatter -> structured error, never silently ignored or dropped".
-// `type`/`status` are enforced as closed enums here (not the freeform text the DB column
-// allows) per the ticket's explicit acceptance criteria — see the PR description for the
-// design-decision writeup against the PRD's softer "freeform" language for `type`.
+// This value is real and worth keeping even as the schema grows (R7/R9 extend the key
+// set below rather than opening it up to arbitrary keys).
+//
+// PROJ-513: `type` is freeform text per the PRD ("well-known" values are suggestions,
+// not a closed set — WIKI_WELL_KNOWN_TYPES below is what the UI/MCP hint as options).
+// `status` stays a closed enum: the PRD gives it as an exhaustive lifecycle, not examples.
+export const WIKI_WELL_KNOWN_TYPES = ["runbook", "adr", "spec", "note"] as const;
+
 export const WikiFrontmatterSchema = z
 	.object({
-		type: z.enum(["runbook", "adr", "spec", "note"]).optional(),
+		type: z.string().min(1).max(50).optional(),
 		tags: z.array(z.string().min(1).max(50)).max(50).optional(),
 		status: z.enum(["draft", "current", "stale", "deprecated"]).optional(),
 		// Normalized to unix seconds by services/wiki-frontmatter.ts before this schema
@@ -79,7 +84,9 @@ const TagsFilterSchema = z.preprocess((v) => {
 	return v;
 }, z.array(z.string()).max(50).optional());
 
-const WikiTypeFilterSchema = z.enum(["runbook", "adr", "spec", "note"]).optional();
+// PROJ-513: freeform, matching WikiFrontmatterSchema.type — any string filters, since
+// `type` isn't a closed set.
+const WikiTypeFilterSchema = z.string().min(1).max(50).optional();
 const WikiStatusFilterSchema = z.enum(["draft", "current", "stale", "deprecated"]).optional();
 
 export const ListPagesInputSchema = z.object({
