@@ -952,3 +952,110 @@ describe("WikiPage — create page template picker (PROJ-491)", () => {
 		expect(screen.queryByRole("combobox", { name: /Seed content from template/i })).toBeNull();
 	});
 });
+
+// PROJ-492 (R10): revision diff view + one-click restore.
+describe("revision history: diff view + restore (PROJ-492)", () => {
+	const REVISION_WITH_SUMMARY = {
+		id: "rev-old",
+		author_id: "u1",
+		author_name: "Ann",
+		created_at: 500,
+		summary: "Fixed a typo",
+	};
+
+	function mockFetchWithRevision(opts: {
+		diff?: { from: string; to: string; diff: string };
+		oldRevisionContent?: string;
+		putResponse?: { ok: boolean; status?: number };
+	}) {
+		return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/diff")) {
+				return Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve(
+							opts.diff ?? { from: "rev-old", to: "current", diff: "-old line\n+new line" }
+						),
+				});
+			}
+			if (/\/revisions\/rev-old$/.test(u)) {
+				return Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve({
+							...REVISION_WITH_SUMMARY,
+							content: opts.oldRevisionContent ?? "old content",
+						}),
+				});
+			}
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([REVISION_WITH_SUMMARY]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (init?.method === "PUT") {
+				const putResponse = opts.putResponse ?? { ok: true };
+				return putResponse.ok
+					? Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) })
+					: Promise.resolve({ ok: false, status: putResponse.status });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+	}
+
+	it("shows the revision's summary in the history list", async () => {
+		vi.stubGlobal("fetch", mockFetchWithRevision({}));
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: /History/i }));
+		expect(await screen.findByText("Fixed a typo")).toBeTruthy();
+	});
+
+	it("fetches and renders the diff against current when 'Diff vs current' is clicked", async () => {
+		vi.stubGlobal("fetch", mockFetchWithRevision({}));
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: /History/i }));
+		fireEvent.click(await screen.findByRole("button", { name: "Diff vs current" }));
+
+		expect(await screen.findByText("-old line")).toBeTruthy();
+		expect(screen.getByText("+new line")).toBeTruthy();
+	});
+
+	it("restore re-submits the old revision's content through update_wiki_page and refreshes the page", async () => {
+		vi.spyOn(window, "confirm").mockReturnValue(true);
+		const fetchMock = mockFetchWithRevision({ oldRevisionContent: "the original content" });
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: /History/i }));
+		fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+
+		await waitFor(() => {
+			const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+			expect(putCall).toBeTruthy();
+			expect(JSON.parse(putCall?.[1].body)).toMatchObject({
+				content: "the original content",
+				baseRevisionId: "rev-old",
+			});
+		});
+	});
+
+	it("does not restore when the confirm dialog is dismissed", async () => {
+		vi.spyOn(window, "confirm").mockReturnValue(false);
+		const fetchMock = mockFetchWithRevision({});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: /History/i }));
+		fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+
+		expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+	});
+});

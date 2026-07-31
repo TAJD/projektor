@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**97 tools across 21 domains.**
+**98 tools across 21 domains.**
 
 ## Coordination
 
@@ -145,6 +145,7 @@ running server.
 | `backfill_wiki_links` | One-time (idempotent, safe to re-run) recompute of the wiki_links graph for every existing page in the workspace. Owner/admin only. |
 | `list_wiki_revisions` | List revision history for a wiki page |
 | `get_wiki_revision` | Get the content of a specific wiki revision by its ID |
+| `get_wiki_revision_diff` | Server-side unified diff between one revision (revisionId) and either another revision or the page's current content. `against` is a revision id or the literal string "current" (default when omitted). Same unified diff format as update_wiki_page/patch_wiki_page's conflict responses (--- base / +++ current, @@ hunk headers). |
 | `verify_wiki_page` | Stamp a wiki page as freshly verified — sets its frontmatter verified_at to now and verified_by to the CALLING user's email (never caller-supplied). Rewrites the page's frontmatter block (creating one if it had none) and records a revision, same as any other content edit — including its conflict check, so a concurrent edit racing the stamp is rejected rather than reverted. Not allowed for viewers. |
 | `list_stale_pages` | Maintenance queue of wiki pages that need re-verification: computed-stale (verify_interval elapsed since verified_at), unverified (verify_interval declared but never verified), or explicitly status: stale\|deprecated. Same rule search_wiki uses to demote results (R7). |
 | `list_wiki_templates` | List pages flagged as templates (frontmatter `template: true`) — the picker create_wiki_page's `templateSlug` draws from. Templates are conventionally workspace-global (living under a workspace 'Templates' page) but a project-scoped template is allowed and follows the same project-visibility rule as any other project-scoped page. |

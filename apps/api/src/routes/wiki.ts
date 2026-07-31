@@ -125,6 +125,19 @@ router.get("/:slug/revisions/:revisionId", async (c) => {
 	}
 });
 
+router.get("/:slug/revisions/:revisionId/diff", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(
+			await wikiService.getWikiRevisionDiff(ctx, c.req.param("slug"), c.req.param("revisionId"), {
+				against: c.req.query("against"),
+			})
+		);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
 router.get("/:slug/revisions", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {

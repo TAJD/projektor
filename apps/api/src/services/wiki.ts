@@ -12,6 +12,7 @@ import {
 	PatchWikiPageInputSchema,
 	SearchWikiInputSchema,
 	UpdatePageSchema,
+	WikiRevisionDiffInputSchema,
 } from "../schemas/wiki";
 import {
 	canWriteProject,
@@ -849,7 +850,7 @@ function computeLineDiff(oldLines: string[], newLines: string[]): DiffOp[] {
 // PROJ-484: renders a standard unified diff (`--- base` / `+++ current`, `@@ -a,b +c,d @@`
 // hunks with 3 lines of context) between a conflicting write's base content and the
 // page's current content, so an agent can see exactly what changed and rebase.
-function buildUnifiedDiff(baseContent: string, currentContent: string): string {
+export function buildUnifiedDiff(baseContent: string, currentContent: string): string {
 	if (baseContent === currentContent) return "";
 	const oldLines = baseContent.split("\n");
 	const newLines = currentContent.split("\n");
@@ -1850,4 +1851,48 @@ export async function getWikiRevision(ctx: ServiceCtx, idOrSlug: string, revisio
 	if (!revision) throw new NotFoundError("Revision not found");
 
 	return revision;
+}
+
+// PROJ-492 (R10): server-side unified diff between one revision (`revisionId`) and either
+// another revision or the page's current content (`against`, defaulting to "current").
+// Reuses buildUnifiedDiff (PROJ-484) — same format as update_wiki_page/patch_wiki_page's
+// conflict responses, so the UI/agent can render both with one diff renderer. Each
+// revision's own `content` column already IS the snapshot at that point in time (unlike
+// resolveBaseContent's off-by-one lookahead, which exists only to answer "what did the
+// caller actually have"), so both sides are read directly with no shifting.
+export async function getWikiRevisionDiff(
+	ctx: ServiceCtx,
+	idOrSlug: string,
+	revisionId: string,
+	input: unknown
+) {
+	const parsed = WikiRevisionDiffInputSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { against } = parsed.data;
+
+	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
+	await assertWikiPageVisible(ctx, page.projectId);
+	const orm = drizzle(ctx.db, { schema });
+
+	const fromRevision = await orm
+		.select({ content: schema.wikiRevisions.content })
+		.from(schema.wikiRevisions)
+		.where(and(eq(schema.wikiRevisions.id, revisionId), eq(schema.wikiRevisions.pageId, page.id)))
+		.get();
+	if (!fromRevision) throw new NotFoundError("Revision not found");
+
+	let toContent: string;
+	if (against === "current") {
+		toContent = page.content;
+	} else {
+		const toRevision = await orm
+			.select({ content: schema.wikiRevisions.content })
+			.from(schema.wikiRevisions)
+			.where(and(eq(schema.wikiRevisions.id, against), eq(schema.wikiRevisions.pageId, page.id)))
+			.get();
+		if (!toRevision) throw new NotFoundError("Revision not found");
+		toContent = toRevision.content;
+	}
+
+	return { from: revisionId, to: against, diff: buildUnifiedDiff(fromRevision.content, toContent) };
 }
