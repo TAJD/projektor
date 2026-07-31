@@ -1141,15 +1141,44 @@ export async function listStaleWikiPages(ctx: ServiceCtx, input: unknown) {
 // line up to the next heading of ANY level (or end of document). Headings are
 // addressed by their exact trimmed text; nested subheadings become their own
 // separate sections rather than being folded into their parent's — flat and
-// predictable, and it's what makes findSection a simple linear lookup.
+// predictable, and it's what makes the heading lookup a simple linear scan.
 const ATX_HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+
+// PROJ-490: a `#` at the start of a line is only a heading in ordinary block context.
+// Two other blocks routinely contain lines that look exactly like one and must be
+// skipped, or section boundaries land inside them and a patch shreds the page:
+//   - fenced code blocks — `# install deps` in a ```bash block is the single most
+//     common line in a runbook, the PRD's headline page type;
+//   - the leading YAML frontmatter block — `# a yaml comment` sits before any real
+//     heading, so "patching" it would rewrite the metadata block itself.
+const FENCE_RE = /^\s{0,3}(`{3,}|~{3,})/;
+const FRONTMATTER_DELIM_RE = /^---\s*$/;
 
 type HeadingSection = { heading: string; level: number; startLine: number; endLine: number };
 
 function parseHeadingSections(content: string): HeadingSection[] {
 	const lines = content.split("\n");
 	const headings: Array<{ level: number; heading: string; startLine: number }> = [];
+	let fence: string | null = null;
+	// A frontmatter block only counts when `---` is the very first line.
+	let inFrontmatter = lines.length > 0 && FRONTMATTER_DELIM_RE.test(lines[0]);
 	lines.forEach((line, idx) => {
+		if (inFrontmatter) {
+			if (idx > 0 && FRONTMATTER_DELIM_RE.test(line)) inFrontmatter = false;
+			return;
+		}
+		const fenceMatch = FENCE_RE.exec(line);
+		if (fence !== null) {
+			// A closing fence must use the same character and be at least as long.
+			if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) {
+				fence = null;
+			}
+			return;
+		}
+		if (fenceMatch) {
+			fence = fenceMatch[1];
+			return;
+		}
 		const m = ATX_HEADING_RE.exec(line);
 		if (m) headings.push({ level: m[1].length, heading: m[2].trim(), startLine: idx });
 	});
@@ -1161,9 +1190,9 @@ function parseHeadingSections(content: string): HeadingSection[] {
 	}));
 }
 
-function findSection(sections: HeadingSection[], heading: string): HeadingSection | undefined {
+function findSections(sections: HeadingSection[], heading: string): HeadingSection[] {
 	const target = heading.trim();
-	return sections.find((s) => s.heading === target);
+	return sections.filter((s) => s.heading === target);
 }
 
 function extractSectionText(content: string, section: HeadingSection): string {
@@ -1218,7 +1247,7 @@ function applySectionOp(
 	} else if (op.op === "replace_section") {
 		newBodyLines = op.text.trim() === "" ? [] : op.text.split("\n");
 	} else {
-		const trimmedBody = trimLeadingBlankLines(bodyLines);
+		const trimmedBody = trimTrailingBlankLines(trimLeadingBlankLines(bodyLines));
 		newBodyLines =
 			trimmedBody.length > 0 ? [...op.text.split("\n"), "", ...trimmedBody] : op.text.split("\n");
 	}
@@ -1274,12 +1303,28 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 		newContent = appendToPageEnd(currentContent, data.text);
 	} else {
 		const currentSections = parseHeadingSections(currentContent);
-		const currentSection = findSection(currentSections, data.heading);
-		if (!currentSection) {
+		const currentMatches = findSections(currentSections, data.heading);
+		if (currentMatches.length === 0) {
 			throw new NotFoundError(`Heading '${data.heading}' not found`, {
 				currentHeadings: currentSections.map((s) => s.heading),
 			});
 		}
+		// PROJ-490: heading text is the whole address, so a page carrying the same
+		// heading twice (a "## Notes" under two different parents, or an H1 and H2 that
+		// read the same) has no unambiguous target. Silently taking the first match
+		// would write to a section the caller never looked at — rejected instead, per
+		// the PRD's "integrity over convenience" principle.
+		if (currentMatches.length > 1) {
+			throw new ValidationError({
+				formErrors: [
+					`Heading '${data.heading}' is ambiguous — it appears ${currentMatches.length} times ` +
+						`(levels ${currentMatches.map((s) => `h${s.level}`).join(", ")}); ` +
+						"patch operations need a unique heading",
+				],
+				fieldErrors: {},
+			});
+		}
+		const currentSection = currentMatches[0];
 
 		const currentRevisionId = await getLatestRevisionId(ctx.db, page.id);
 		if (currentRevisionId !== data.baseRevisionId) {
@@ -1289,8 +1334,12 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 				data.baseRevisionId,
 				currentContent
 			);
-			const baseSection = findSection(parseHeadingSections(baseContent), data.heading);
-			const baseSectionText = baseSection ? extractSectionText(baseContent, baseSection) : "";
+			// A heading that was absent — or ambiguous — at base but resolves uniquely
+			// now means the section itself changed shape underneath the caller, so the
+			// empty base text below (correctly) trips the conflict check.
+			const baseMatches = findSections(parseHeadingSections(baseContent), data.heading);
+			const baseSectionText =
+				baseMatches.length === 1 ? extractSectionText(baseContent, baseMatches[0]) : "";
 			const currentSectionText = extractSectionText(currentContent, currentSection);
 			if (baseSectionText !== currentSectionText) {
 				throw new ConflictError(

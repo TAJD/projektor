@@ -200,7 +200,10 @@ export const wikiTools: MCPTool[] = [
 		description:
 			"Section-addressed patch operations on a wiki page's markdown, by id or slug. " +
 			"Sections are addressed by exact heading text (a `#`..`######` line and everything " +
-			"up to the next heading). Ops: append_to_section (add text at the end of the " +
+			"up to the next heading; `#` lines inside fenced code blocks or the YAML " +
+			"frontmatter block are not headings). A heading that appears more than once on " +
+			"the page is ambiguous and rejected — patch targets must be unique. " +
+			"Ops: append_to_section (add text at the end of the " +
 			"section's body), replace_section (replace the section's body, heading kept), " +
 			"insert_after_heading (insert text directly under the heading, before the " +
 			"existing body), append_to_page (append at the very end of the document, no " +

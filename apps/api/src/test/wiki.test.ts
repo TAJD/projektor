@@ -2571,6 +2571,134 @@ describe("Wiki patch operations (PROJ-490)", () => {
 			expect(parsed.currentHeadings).toEqual(["Alpha", "Beta"]);
 		}
 	});
+
+	// PROJ-490: `#` lines only start a section in ordinary block context. A shell
+	// comment in a fenced code block is the most common line in a runbook — treating
+	// it as a heading would end the enclosing section mid-fence and a replace would
+	// eat the opening fence, leaving an orphaned closing one.
+	it("REST: a `#` line inside a fenced code block is not a heading", async () => {
+		const content = "## Setup\n\n```bash\n# install deps\npnpm i\n```\n\n## Usage\nUse it.\n";
+		await createPage("patch-fenced", "Patch Fenced", content);
+
+		const missing = await req("http://localhost/api/wiki/patch-fenced", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "append_to_section",
+				heading: "install deps",
+				text: "x",
+				baseRevisionId: null,
+			}),
+		});
+		expect(missing.status).toBe(404);
+		const body = (await missing.json()) as { currentHeadings: string[] };
+		expect(body.currentHeadings).toEqual(["Setup", "Usage"]);
+
+		const res = await req("http://localhost/api/wiki/patch-fenced", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "replace_section",
+				heading: "Setup",
+				text: "Replaced.",
+				baseRevisionId: null,
+			}),
+		});
+		expect(res.status).toBe(200);
+		const page = await getPage("patch-fenced");
+		// The whole fenced block belonged to Setup, so it goes with the replaced body —
+		// intact, not shredded into an orphan closing fence.
+		expect(page.content).not.toContain("pnpm i");
+		expect(page.content).not.toContain("```");
+		expect(page.content).toContain("## Setup\nReplaced.");
+		expect(page.content).toContain("## Usage\nUse it.");
+	});
+
+	it("REST: a `#` line inside the YAML frontmatter block is not a heading", async () => {
+		const content =
+			"---\ntype: runbook\n# a yaml comment\nstatus: current\n---\n\n## Alpha\nAlpha body.\n";
+		await createPage("patch-fm-comment", "Patch FM Comment", content);
+		const res = await req("http://localhost/api/wiki/patch-fm-comment", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "append_to_section",
+				heading: "a yaml comment",
+				text: "x",
+				baseRevisionId: null,
+			}),
+		});
+		expect(res.status).toBe(404);
+		const body = (await res.json()) as { currentHeadings: string[] };
+		expect(body.currentHeadings).toEqual(["Alpha"]);
+	});
+
+	it("REST: a heading appearing twice is rejected as ambiguous rather than silently patching the first", async () => {
+		const content = "# Notes\nOne.\n\n## Other\nx\n\n## Notes\nTwo.\n";
+		await createPage("patch-ambiguous", "Patch Ambiguous", content);
+		const res = await req("http://localhost/api/wiki/patch-ambiguous", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "replace_section",
+				heading: "Notes",
+				text: "Replaced.",
+				baseRevisionId: null,
+			}),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { formErrors: string[] } };
+		expect(body.error.formErrors.join(" ")).toContain("ambiguous");
+		// Nothing was written.
+		expect((await getPage("patch-ambiguous")).content).toBe(content);
+	});
+
+	it("REST: repeated insert_after_heading does not accumulate blank lines", async () => {
+		await createPage("patch-blanklines", "Patch Blank Lines", TWO_SECTIONS);
+		for (const text of ["First.", "Second."]) {
+			const revRes = await req("http://localhost/api/wiki/patch-blanklines/revisions", {
+				headers: authHeaders(token, slug),
+			});
+			const revisions = (await revRes.json()) as Array<{ id: string }>;
+			const res = await req("http://localhost/api/wiki/patch-blanklines", {
+				method: "PATCH",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					op: "insert_after_heading",
+					heading: "Alpha",
+					text,
+					baseRevisionId: revisions[0]?.id ?? null,
+				}),
+			});
+			expect(res.status).toBe(200);
+		}
+		const page = await getPage("patch-blanklines");
+		expect(page.content).not.toContain("\n\n\n");
+		expect(page.content).toContain("## Alpha\nSecond.\n\nFirst.\n\nAlpha body.");
+	});
+
+	it("REST: patch does not stamp verified_at as a side effect", async () => {
+		const content = "---\ntype: runbook\n---\n\n## Alpha\nAlpha body.\n";
+		await createPage("patch-no-verify", "Patch No Verify", content);
+		const res = await req("http://localhost/api/wiki/patch-no-verify", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "append_to_section",
+				heading: "Alpha",
+				text: "More.",
+				baseRevisionId: null,
+			}),
+		});
+		expect(res.status).toBe(200);
+		const row = await env.DB.prepare(
+			"SELECT verified_at, verified_by FROM wiki_pages WHERE slug = ?"
+		)
+			.bind("patch-no-verify")
+			.first<{ verified_at: number | null; verified_by: string | null }>();
+		expect(row?.verified_at).toBeNull();
+		expect(row?.verified_by).toBeNull();
+	});
 });
 
 // PROJ-483: exercises the dedup UPDATE statement from 0041_wiki_slug_unique.sql in
