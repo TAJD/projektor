@@ -1062,6 +1062,30 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(res.status).toBe(409);
 	});
 
+	it("POST /api/wiki rejects the reserved slug 'view' (PROJ-487, 400)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "View", content: "v1" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("PUT /api/wiki/:slug rejects renaming to the reserved slug 'view' (PROJ-487, 400)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Gamma", content: "g" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/gamma", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "view" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
 	it("PUT /api/wiki/:slug renaming the slug creates a redirect; the old slug still resolves", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",

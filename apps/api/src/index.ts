@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serviceErrToResponse } from "./http/error-adapter";
+import { injectWikiMetadata, resolveWikiPageForSsr } from "./lib/wiki-ssr";
 import { authMiddleware } from "./middleware/auth";
 import { etagMiddleware } from "./middleware/etag";
 import { rateLimitMiddleware } from "./middleware/rate-limit";
@@ -284,6 +285,29 @@ app.route("/api/file-claims", fileClaimsRouter);
 app.route("/api/agent-messages", agentMessagesRouter);
 app.route("/api/workflow", workflowRouter);
 
+// PROJ-487 fix-up: /wiki is a static asset (wiki/index.html) that Cloudflare serves
+// directly without ever invoking the Worker — so the legacy `?slug=` query param can
+// only be turned into a real HTTP redirect if this exact path is added to
+// `run_worker_first` in the wrangler config (see scripts/release-assets/wrangler.example.toml).
+// With that in place, this handler issues a genuine 301 to the canonical /wiki/:slug
+// path (resolving through PROJ-483's slug/redirect logic, so a stale slug redirects
+// straight to the current one rather than chaining). If the request can't be
+// authenticated/scoped to a workspace (e.g. no session, or a deployment with no
+// resolvable workspace for a bare navigation), this falls back to serving the plain
+// landing page rather than erroring — the client-side WikiPage island still handles
+// `?slug=` today as a fallback.
+app.get("/wiki", async (c) => {
+	const assets = c.env.ASSETS;
+	if (!assets) return c.notFound();
+	const legacySlug = c.req.query("slug");
+	const shell = () => assets.fetch(new Request(new URL("/wiki/index.html", c.req.url).toString()));
+	if (!legacySlug) return shell();
+
+	const page = await resolveWikiPageForSsr(c, legacySlug);
+	if (!page) return shell();
+	return c.redirect(page.url, 301);
+});
+
 // SPA fallback — paths with no matching static asset fall through here.
 // Only active in production where the ASSETS binding is present.
 // Issue pretty-URL paths (/projects/KEY/issues/N/title-slug) get the issue-detail
@@ -292,21 +316,34 @@ app.route("/api/workflow", workflowRouter);
 // page so its ProjectLanding/ProjectNav islands can resolve it the same way.
 // Wiki pretty-URL paths (/wiki/:slug, PROJ-487) get the wiki-view page so its
 // WikiPage island can resolve the page from the URL path client-side — /wiki itself
-// (no slug) has its own static asset and never reaches this fallback.
+// (no slug) is handled by the dedicated route above and never reaches this fallback.
 // Everything else gets the homepage.
 app.get("*", async (c) => {
 	if (!c.env.ASSETS) return c.notFound();
 	const { pathname } = new URL(c.req.url);
+	const wikiSlugMatch = /^\/wiki\/([^/]+)/.exec(pathname);
 	const fallbackPath = /^\/projects\/[^/]+\/issues\/\d+\//.test(pathname)
 		? "/issues/view/index.html"
 		: /^\/projects\/view\/[^/]+/.test(pathname)
 			? "/projects/view/index.html"
 			: /^\/share\//.test(pathname)
 				? "/share/view/index.html"
-				: /^\/wiki\/[^/]+/.test(pathname)
+				: wikiSlugMatch
 					? "/wiki/view/index.html"
 					: "/index.html";
-	return c.env.ASSETS.fetch(new Request(new URL(fallbackPath, c.req.url).toString()));
+	const response = await c.env.ASSETS.fetch(
+		new Request(new URL(fallbackPath, c.req.url).toString())
+	);
+	// PROJ-487 fix-up: best-effort server-injected <title>/OG metadata for a resolved,
+	// authenticated wiki page — see lib/wiki-ssr.ts for why this can't be a build-time
+	// Astro SSR adapter, and why it's scoped to authenticated requests only (the wiki
+	// has no public/unauthenticated share path — see the PRD's public-wiki-sharing
+	// non-goal, PROJ-482). Any failure here just serves the unmodified static shell.
+	if (wikiSlugMatch) {
+		const page = await resolveWikiPageForSsr(c, decodeURIComponent(wikiSlugMatch[1]));
+		if (page) return injectWikiMetadata(response, page, new URL(pathname, c.req.url).toString());
+	}
+	return response;
 });
 
 async function sha256hex(s: string): Promise<string> {

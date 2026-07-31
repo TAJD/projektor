@@ -130,12 +130,12 @@ describe("ProjectLanding", () => {
 		expect(screen.getByText("Cumulative flow")).toBeTruthy();
 	});
 
-	it("recent-wiki links preserve projectId so the destination stays scoped (PROJ-352)", async () => {
+	it("recent-wiki links preserve projectId so the destination stays scoped (PROJ-352, PROJ-487)", async () => {
 		history.replaceState(null, "", "?id=p1");
 		mockFetchProject([ISSUE], [WIKI_PAGE]);
 		render(<ProjectLanding />);
 		const link = (await screen.findByText("Getting Started")).closest("a");
-		expect(link?.getAttribute("href")).toBe("/wiki/getting-started");
+		expect(link?.getAttribute("href")).toBe("/wiki/getting-started?projectId=p1");
 	});
 
 	// PROJ-376: pretty project URLs (/projects/view/<slug>) resolve via the path,

@@ -63,6 +63,11 @@ function slugify(title: string): string {
 		.replace(/^-|-$/g, "");
 }
 
+// PROJ-487: "view" is the shell path segment the Worker's pretty-URL fallback serves
+// static assets from (/wiki/view/index.html) — a page slugged "view" would collide
+// with it and never resolve. Reserved outright rather than special-cased in routing.
+const RESERVED_WIKI_SLUGS = new Set(["view"]);
+
 // PROJ-483: wiki_pages(workspace_id, slug) is unique — surface a structured
 // ConflictError instead of letting the constraint throw a raw D1 error.
 async function assertSlugAvailable(
@@ -71,6 +76,12 @@ async function assertSlugAvailable(
 	slug: string,
 	excludePageId?: string
 ): Promise<void> {
+	if (RESERVED_WIKI_SLUGS.has(slug)) {
+		throw new ValidationError({
+			formErrors: [`Slug '${slug}' is reserved and cannot be used`],
+			fieldErrors: {},
+		});
+	}
 	const existing = await orm
 		.select({ id: schema.wikiPages.id })
 		.from(schema.wikiPages)

@@ -8,9 +8,12 @@ import pkg from '../../package.json';
 
 interface Props {
   title?: string;
+  description?: string;
 }
-const { title = 'Projektor' } = Astro.props;
+const { title = 'Projektor', description = 'Projektor — project management for humans and agents.' } =
+  Astro.props;
 const appVersion = pkg.version;
+const ogUrl = Astro.url.toString();
 
 const path = Astro.url.pathname;
 const isActive = (href: string): boolean =>
@@ -35,6 +38,11 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.json" />
     <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={ogUrl} />
+    <meta property="og:type" content="website" />
     <ClientRouter />
     <!-- PROJ-418: @vite-pwa/astro's generateSW strategy builds dist/sw.js and
          dist/registerSW.js but never references either from a rendered page -

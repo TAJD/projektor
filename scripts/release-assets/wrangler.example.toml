@@ -11,12 +11,17 @@ compatibility_date = "__COMPAT_DATE__"
 compatibility_flags = ["nodejs_compat"]   # required: the bundled worker imports node:stream / node:events
 
 # ─── Static Assets (pre-built Astro frontend, shipped in the artifact) ─────────
-#   - /api/* and /mcp/*  → always the Worker (run_worker_first)
-#   - everything else     → static assets, asset-first
+#   - /api/*, /mcp/*  → always the Worker (run_worker_first)
+#   - /wiki (exact)    → always the Worker too (PROJ-487): it's a static asset
+#     (wiki/index.html) that would otherwise never reach the Worker, so the legacy
+#     `?slug=` query param could never become a real HTTP redirect. /wiki/:slug
+#     subpaths don't need to be listed here — they have no matching static asset,
+#     so Cloudflare already falls through to the Worker for those.
+#   - everything else  → static assets, asset-first
 [assets]
 directory = "./vendor/web"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/mcp/*"]
+run_worker_first = ["/api/*", "/mcp/*", "/wiki"]
 
 # ─── D1 Database ───────────────────────────────────────────────
 # Create with: wrangler d1 create projektor
