@@ -39,6 +39,10 @@ export const wikiPages = sqliteTable(
 			.notNull()
 			.$defaultFn(() => []),
 		verifyInterval: integer("verify_interval"),
+		// PROJ-491 (R9): denormalized from frontmatter `template: true` (services/
+		// wiki-frontmatter.ts). Marks a page as a reusable template (conventionally
+		// living under a workspace "Templates" page) rather than regular content.
+		isTemplate: integer("is_template", { mode: "boolean" }).notNull().default(false),
 	},
 	(t) => ({
 		wsSlugIdx: index("wiki_pages_workspace_slug_idx").on(t.workspaceId, t.slug),
@@ -49,6 +53,11 @@ export const wikiPages = sqliteTable(
 		// PROJ-488: type/status filtering (listWikiPages/searchWiki).
 		workspaceTypeIdx: index("wiki_pages_workspace_type_idx").on(t.workspaceId, t.type),
 		workspaceStatusIdx: index("wiki_pages_workspace_status_idx").on(t.workspaceId, t.status),
+		// PROJ-491: template picker / search+staleness exclusion filter on this flag.
+		workspaceTemplateIdx: index("wiki_pages_workspace_template_idx").on(
+			t.workspaceId,
+			t.isTemplate
+		),
 	})
 );
 

@@ -13,6 +13,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import { seedDefaultTaskStatuses } from "./task-statuses";
 import { seedDefaultTaskTypes } from "./task-types";
 import type { ServiceCtx } from "./types";
+import { seedDefaultWikiTemplates } from "./wiki";
 
 async function sha256hex(s: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -62,6 +63,7 @@ export async function createWorkspace(db: D1Database, userId: string, input: unk
 	await seedDefaultTaskTypes(db, id);
 	await seedDefaultTaskStatuses(db, id);
 	await seedDefaultCustomFields(db, id);
+	await seedDefaultWikiTemplates(db, id, userId);
 
 	return { id, name, slug };
 }

@@ -7,6 +7,7 @@ import {
 	DeleteWikiPageOptionsSchema,
 	ListPagesInputSchema,
 	ListStaleWikiPagesInputSchema,
+	ListWikiTemplatesInputSchema,
 	type PatchWikiPageInput,
 	PatchWikiPageInputSchema,
 	SearchWikiInputSchema,
@@ -28,6 +29,7 @@ import { computeFreshness } from "./wiki-freshness";
 import {
 	parseWikiFrontmatter,
 	stampWikiFrontmatterVerification,
+	stripTemplateFlag,
 	type WikiFrontmatterMeta,
 } from "./wiki-frontmatter";
 import {
@@ -270,6 +272,7 @@ function buildWikiPageUpdateSet(
 		setData.verifiedBy = fields.meta.verifiedBy;
 		setData.owners = fields.meta.owners;
 		setData.verifyInterval = fields.meta.verifyInterval;
+		setData.isTemplate = fields.meta.isTemplate;
 	}
 	return setData;
 }
@@ -367,6 +370,8 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 			owners: schema.wikiPages.owners,
 			// eslint-disable-next-line camelcase
 			verify_interval: schema.wikiPages.verifyInterval,
+			// eslint-disable-next-line camelcase
+			is_template: schema.wikiPages.isTemplate,
 		})
 		.from(schema.wikiPages)
 		.where(and(...conditions))
@@ -427,7 +432,10 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
               bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}) as rank
             FROM wiki_fts
             JOIN wiki_pages p ON p.id = wiki_fts.page_id
-            WHERE wiki_fts MATCH ? AND wiki_fts.workspace_id = ?`;
+            -- PROJ-491 (R9): templates are a picker-only concern (list_wiki_templates), not
+            -- search results — excluded unconditionally rather than behind an opt-in filter.
+            WHERE wiki_fts MATCH ? AND wiki_fts.workspace_id = ?
+              AND p.is_template = 0`;
 	const params: unknown[] = [ftsQuery, ctx.workspaceId];
 
 	if (projectId) {
@@ -526,6 +534,8 @@ const wikiPageDetailColumns = {
 	owners: schema.wikiPages.owners,
 	// eslint-disable-next-line camelcase
 	verify_interval: schema.wikiPages.verifyInterval,
+	// eslint-disable-next-line camelcase
+	is_template: schema.wikiPages.isTemplate,
 };
 
 // PROJ-483: a slug with no live page may still be a former slug of one — recorded in
@@ -611,16 +621,48 @@ export async function getWikiBacklinks(ctx: ServiceCtx, slugOrId: string): Promi
 // module, matching every other domain function's entry point.
 export { backfillWikiLinks, listBrokenWikiLinks } from "./wiki-links";
 
+// PROJ-491 (R9): resolves create_wiki_page's `templateSlug` to seed content — the target
+// must exist and carry frontmatter `template: true`, or this throws a ValidationError
+// rather than silently falling back to blank content. Strips the `template` flag itself
+// out of the seeded content (a page created from a template isn't itself a template).
+async function resolveTemplateContent(ctx: ServiceCtx, templateSlug: string): Promise<string> {
+	let template: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>;
+	try {
+		template = await resolvePageByIdOrSlug(ctx.db, templateSlug, ctx.workspaceId);
+	} catch (e) {
+		if (e instanceof NotFoundError) {
+			throw new ValidationError({
+				formErrors: [`templateSlug '${templateSlug}' does not resolve to an existing page`],
+				fieldErrors: {},
+			});
+		}
+		throw e;
+	}
+	await assertWikiPageVisible(ctx, template.projectId);
+	const meta = parseWikiFrontmatter(template.content);
+	if (!meta.isTemplate) {
+		throw new ValidationError({
+			formErrors: [`Page '${templateSlug}' is not a template (missing frontmatter template: true)`],
+			fieldErrors: {},
+		});
+	}
+	return stripTemplateFlag(template.content);
+}
+
 export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	const parsed = CreatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { title, content, parentId, projectId, slug: customSlug } = parsed.data;
+	const { title, parentId, projectId, slug: customSlug, templateSlug } = parsed.data;
 
 	await requireWikiWrite(ctx, projectId ?? null);
 
 	if (parentId) {
 		await validateNewPageParent(ctx.db, parentId, ctx.workspaceId, projectId);
 	}
+
+	const content = templateSlug
+		? await resolveTemplateContent(ctx, templateSlug)
+		: (parsed.data.content ?? "");
 
 	const orm = drizzle(ctx.db, { schema });
 	const slug = customSlug ?? slugify(title);
@@ -651,6 +693,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 			verifiedBy: meta.verifiedBy,
 			owners: meta.owners,
 			verifyInterval: meta.verifyInterval,
+			isTemplate: meta.isTemplate,
 		});
 	} catch (e) {
 		// PROJ-483: assertSlugAvailable-then-insert isn't atomic — a concurrent create
@@ -1090,6 +1133,9 @@ export async function listStaleWikiPages(ctx: ServiceCtx, input: unknown) {
 	const conditions = [
 		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
 		staleWikiPageCondition(now),
+		// PROJ-491 (R9): a template shouldn't show up in the maintenance queue — it isn't
+		// content that needs re-verification, it's a skeleton other pages are seeded from.
+		eq(schema.wikiPages.isTemplate, false),
 	];
 	if (projectId) {
 		conditions.push(eq(schema.wikiPages.projectId, projectId));
@@ -1387,6 +1433,169 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 	});
 
 	return { ok: true, url: wikiPagePath(page.slug) };
+}
+
+// PROJ-491 (R9): the template picker — pages carrying frontmatter `template: true`,
+// visible to the caller. Deliberately not filtered by the search/staleness exclusion
+// above (this IS the discovery path templates are meant to be found through).
+export async function listWikiTemplates(ctx: ServiceCtx, input: unknown) {
+	const parsed = ListWikiTemplatesInputSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId } = parsed.data;
+
+	if (projectId) {
+		// PROJ-311: same as searchWiki/listStaleWikiPages — a project the caller can't
+		// see returns nothing.
+		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+			return [];
+		}
+	}
+
+	const orm = drizzle(ctx.db, { schema });
+	const conditions = [
+		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+		eq(schema.wikiPages.isTemplate, true),
+	];
+	if (projectId) {
+		conditions.push(eq(schema.wikiPages.projectId, projectId));
+	} else {
+		const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
+		if (visible) {
+			const cond = or(isNull(schema.wikiPages.projectId), visible);
+			if (cond) conditions.push(cond);
+		}
+	}
+
+	const rows = await orm
+		.select({
+			id: schema.wikiPages.id,
+			slug: schema.wikiPages.slug,
+			title: schema.wikiPages.title,
+			// eslint-disable-next-line camelcase
+			project_id: schema.wikiPages.projectId,
+			type: schema.wikiPages.type,
+		})
+		.from(schema.wikiPages)
+		.where(and(...conditions))
+		.orderBy(asc(schema.wikiPages.title));
+
+	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug) }));
+}
+
+// PROJ-491 (R9): seeds the built-in templates (runbook, adr, spec) for a newly created
+// workspace, under a "Templates" parent page — same content the 0047 migration backfills
+// for pre-existing workspaces (kept in sync by hand, same as seedDefaultTaskTypes/0016 for
+// task types). Authored as the workspace's creator (the only user guaranteed to exist yet).
+export async function seedDefaultWikiTemplates(
+	db: D1Database,
+	workspaceId: string,
+	userId: string
+): Promise<void> {
+	const orm = drizzle(db, { schema });
+	const now = Math.floor(Date.now() / 1000);
+
+	const parentId = crypto.randomUUID();
+	await orm.insert(schema.wikiPages).values({
+		id: parentId,
+		workspaceId,
+		projectId: null,
+		slug: "templates",
+		title: "Templates",
+		content: "",
+		parentId: null,
+		createdById: userId,
+		updatedById: userId,
+		createdAt: now,
+		updatedAt: now,
+	});
+
+	const templates: Array<{ slug: string; title: string; type: string; body: string }> = [
+		{
+			slug: "templates-runbook",
+			title: "Runbook Template",
+			type: "runbook",
+			body: [
+				"# Runbook: [Title]",
+				"",
+				"## Purpose",
+				"",
+				"What this runbook is for and when to use it.",
+				"",
+				"## Preconditions",
+				"",
+				"-",
+				"",
+				"## Steps",
+				"",
+				"1.",
+				"2.",
+				"3.",
+				"",
+				"## Rollback",
+				"",
+				"## Verification",
+				"",
+			].join("\n"),
+		},
+		{
+			slug: "templates-adr",
+			title: "ADR Template",
+			type: "adr",
+			body: [
+				"# ADR NNNN: [Title]",
+				"",
+				"## Status",
+				"",
+				"Proposed",
+				"",
+				"## Context",
+				"",
+				"## Decision",
+				"",
+				"## Consequences",
+				"",
+			].join("\n"),
+		},
+		{
+			slug: "templates-spec",
+			title: "Spec Template",
+			type: "spec",
+			body: [
+				"# [Feature] Spec",
+				"",
+				"## Problem",
+				"",
+				"## Goals",
+				"",
+				"## Non-goals",
+				"",
+				"## Design",
+				"",
+				"## Open questions",
+				"",
+			].join("\n"),
+		},
+	];
+
+	for (const t of templates) {
+		const content = `---\ntype: ${t.type}\nstatus: draft\ntemplate: true\n---\n${t.body}`;
+		await orm.insert(schema.wikiPages).values({
+			id: crypto.randomUUID(),
+			workspaceId,
+			projectId: null,
+			slug: t.slug,
+			title: t.title,
+			content,
+			parentId,
+			createdById: userId,
+			updatedById: userId,
+			createdAt: now,
+			updatedAt: now,
+			type: t.type,
+			status: "draft",
+			isTemplate: true,
+		});
+	}
 }
 
 // PROJ-238: breadth-first walk of parent_id children, chunked to stay under D1's
