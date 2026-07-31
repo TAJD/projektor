@@ -11,7 +11,12 @@ router.get("/", async (c) => {
 	try {
 		const projectId = c.req.query("projectId");
 		const parentId = c.req.query("parentId");
-		return c.json(await wikiService.listWikiPages(ctx, { parentId, projectId }));
+		const type = c.req.query("type");
+		const status = c.req.query("status");
+		const tags = c.req.query("tags");
+		return c.json(
+			await wikiService.listWikiPages(ctx, { parentId, projectId, type, status, tags })
+		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -34,9 +39,21 @@ router.get("/search", async (c) => {
 	const limit = c.req.query("limit");
 	const offset = c.req.query("offset");
 	const updatedSince = c.req.query("updatedSince");
+	const type = c.req.query("type");
+	const status = c.req.query("status");
+	const tags = c.req.query("tags");
 	try {
 		return c.json(
-			await wikiService.searchWiki(ctx, { query: q, projectId, limit, offset, updatedSince })
+			await wikiService.searchWiki(ctx, {
+				query: q,
+				projectId,
+				limit,
+				offset,
+				updatedSince,
+				type,
+				status,
+				tags,
+			})
 		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);

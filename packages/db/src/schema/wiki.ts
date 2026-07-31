@@ -22,6 +22,23 @@ export const wikiPages = sqliteTable(
 			.references(() => users.id),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
+		// PROJ-488 (R6): denormalized from optional YAML frontmatter parsed on write
+		// (services/wiki-frontmatter.ts). `type`/`status` are freeform TEXT — the
+		// well-known enum values are enforced at the Zod layer, not a DB CHECK
+		// constraint, so this column never blocks a write the schema layer would allow.
+		type: text("type"),
+		tags: text("tags", { mode: "json" })
+			.$type<string[]>()
+			.notNull()
+			.$defaultFn(() => []),
+		status: text("status"),
+		verifiedAt: integer("verified_at"),
+		verifiedBy: text("verified_by"),
+		owners: text("owners", { mode: "json" })
+			.$type<string[]>()
+			.notNull()
+			.$defaultFn(() => []),
+		verifyInterval: integer("verify_interval"),
 	},
 	(t) => ({
 		wsSlugIdx: index("wiki_pages_workspace_slug_idx").on(t.workspaceId, t.slug),
@@ -29,6 +46,9 @@ export const wikiPages = sqliteTable(
 		wsSlugUniqueIdx: uniqueIndex("wiki_pages_workspace_slug_unique_idx").on(t.workspaceId, t.slug),
 		parentIdx: index("wiki_pages_parent_idx").on(t.parentId),
 		projectIdx: index("wiki_pages_project_id_idx").on(t.projectId),
+		// PROJ-488: type/status filtering (listWikiPages/searchWiki).
+		workspaceTypeIdx: index("wiki_pages_workspace_type_idx").on(t.workspaceId, t.type),
+		workspaceStatusIdx: index("wiki_pages_workspace_status_idx").on(t.workspaceId, t.status),
 	})
 );
 
