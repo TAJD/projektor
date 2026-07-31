@@ -6,6 +6,10 @@
 -- services/wiki.ts#seedDefaultWikiTemplates (called by createWorkspace) — kept in sync by
 -- hand, same as seedDefaultTaskTypes/0016 already are for task types.
 --
+-- The parent is slugged 'page-templates', not 'templates': GET /api/wiki/templates is the
+-- template-picker endpoint and is registered before the /:slug catch-all, so a page
+-- slugged 'templates' would be shadowed by it (see RESERVED_WIKI_SLUGS in services/wiki.ts).
+--
 -- wiki_pages.created_by_id/updated_by_id are NOT NULL FKs to users, and a data migration
 -- has no request-scoped actor to attribute the write to — authored as the workspace's
 -- owner (MIN(user_id) picks a single deterministic owner if more than one row has that
@@ -16,7 +20,7 @@ INSERT INTO wiki_pages (
 	type, tags, status, verified_at, verified_by, owners, verify_interval, is_template
 )
 SELECT
-	lower(hex(randomblob(16))), w.id, NULL, 'templates', 'Templates', '', NULL,
+	lower(hex(randomblob(16))), w.id, NULL, 'page-templates', 'Templates', '', NULL,
 	owner.user_id, owner.user_id, strftime('%s', 'now'), strftime('%s', 'now'),
 	NULL, '[]', NULL, NULL, NULL, '[]', NULL, 0
 FROM workspaces w
@@ -26,7 +30,7 @@ JOIN (
 	WHERE role = 'owner'
 	GROUP BY workspace_id
 ) owner ON owner.workspace_id = w.id
-WHERE NOT EXISTS (SELECT 1 FROM wiki_pages WHERE workspace_id = w.id AND slug = 'templates');
+WHERE NOT EXISTS (SELECT 1 FROM wiki_pages WHERE workspace_id = w.id AND slug = 'page-templates');
 
 INSERT INTO wiki_pages (
 	id, workspace_id, project_id, slug, title, content, parent_id,
@@ -69,7 +73,7 @@ JOIN (
 	WHERE role = 'owner'
 	GROUP BY workspace_id
 ) owner ON owner.workspace_id = w.id
-JOIN wiki_pages parent ON parent.workspace_id = w.id AND parent.slug = 'templates'
+JOIN wiki_pages parent ON parent.workspace_id = w.id AND parent.slug = 'page-templates'
 WHERE NOT EXISTS (
 	SELECT 1 FROM wiki_pages WHERE workspace_id = w.id AND slug = 'templates-runbook'
 );
@@ -107,7 +111,7 @@ JOIN (
 	WHERE role = 'owner'
 	GROUP BY workspace_id
 ) owner ON owner.workspace_id = w.id
-JOIN wiki_pages parent ON parent.workspace_id = w.id AND parent.slug = 'templates'
+JOIN wiki_pages parent ON parent.workspace_id = w.id AND parent.slug = 'page-templates'
 WHERE NOT EXISTS (
 	SELECT 1 FROM wiki_pages WHERE workspace_id = w.id AND slug = 'templates-adr'
 );
@@ -145,7 +149,7 @@ JOIN (
 	WHERE role = 'owner'
 	GROUP BY workspace_id
 ) owner ON owner.workspace_id = w.id
-JOIN wiki_pages parent ON parent.workspace_id = w.id AND parent.slug = 'templates'
+JOIN wiki_pages parent ON parent.workspace_id = w.id AND parent.slug = 'page-templates'
 WHERE NOT EXISTS (
 	SELECT 1 FROM wiki_pages WHERE workspace_id = w.id AND slug = 'templates-spec'
 );

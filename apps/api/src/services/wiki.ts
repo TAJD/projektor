@@ -79,7 +79,13 @@ function slugify(title: string): string {
 // with it and never resolve. "index" collides the same way: Static Assets' default
 // html_handling maps /wiki/index -> /wiki/index.html, so it never reaches the Worker
 // either. Both reserved outright rather than special-cased in routing.
-const RESERVED_WIKI_SLUGS = new Set(["view", "index"]);
+//
+// PROJ-491: "templates" collides the same way at the API layer — GET /api/wiki/templates
+// is the template-picker endpoint (routes/wiki.ts), registered before the /:slug
+// catch-all, so a page slugged "templates" would be shadowed by it and never load. The
+// seeded Templates parent page therefore uses "page-templates" (seedDefaultWikiTemplates
+// / migration 0047).
+const RESERVED_WIKI_SLUGS = new Set(["view", "index", "templates"]);
 
 // PROJ-483: wiki_pages(workspace_id, slug) is unique — surface a structured
 // ConflictError instead of letting the constraint throw a raw D1 error.
@@ -1483,7 +1489,8 @@ export async function listWikiTemplates(ctx: ServiceCtx, input: unknown) {
 }
 
 // PROJ-491 (R9): seeds the built-in templates (runbook, adr, spec) for a newly created
-// workspace, under a "Templates" parent page — same content the 0047 migration backfills
+// workspace, under a "Templates" parent page (slugged "page-templates" — see
+// RESERVED_WIKI_SLUGS) — same content the 0047 migration backfills
 // for pre-existing workspaces (kept in sync by hand, same as seedDefaultTaskTypes/0016 for
 // task types). Authored as the workspace's creator (the only user guaranteed to exist yet).
 export async function seedDefaultWikiTemplates(
@@ -1499,7 +1506,7 @@ export async function seedDefaultWikiTemplates(
 		id: parentId,
 		workspaceId,
 		projectId: null,
-		slug: "templates",
+		slug: "page-templates",
 		title: "Templates",
 		content: "",
 		parentId: null,

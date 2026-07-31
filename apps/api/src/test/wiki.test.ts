@@ -3657,6 +3657,15 @@ describe("Wiki page templates (PROJ-491)", () => {
 		expect(results.map((r) => r.title)).toEqual(["Runbook Template"]);
 	});
 
+	it("rejects a page slugged 'templates' — it would be shadowed by GET /api/wiki/templates", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Templates", slug: "templates", content: "" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
 	it("MCP list_wiki_templates has parity with REST", async () => {
 		await createTemplate();
 
@@ -3700,8 +3709,21 @@ describe("Wiki built-in template seeding on workspace creation (PROJ-491)", () =
 		]);
 
 		const treeRes = await SELF.fetch("http://localhost/api/wiki/tree", { headers: newHeaders });
-		const tree = (await treeRes.json()) as Array<{ title: string; children: unknown[] }>;
+		const tree = (await treeRes.json()) as Array<{
+			title: string;
+			slug: string;
+			children: unknown[];
+		}>;
 		const templatesNode = tree.find((n) => n.title === "Templates");
 		expect(templatesNode?.children.length).toBe(3);
+
+		// The seeded parent must stay reachable by slug: GET /api/wiki/templates is the
+		// template-list endpoint, so a parent slugged "templates" would be shadowed by it
+		// and the page would never render.
+		const parentRes = await SELF.fetch(`http://localhost/api/wiki/${templatesNode?.slug}`, {
+			headers: newHeaders,
+		});
+		expect(parentRes.status).toBe(200);
+		expect(((await parentRes.json()) as { title: string }).title).toBe("Templates");
 	});
 });
