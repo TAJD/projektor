@@ -2396,6 +2396,93 @@ describe("Wiki revision diff (PROJ-492)", () => {
 		expect(revisions[0].id).not.toBe(latest.id);
 		expect(revisions.map((r) => r.id)).toContain(latest.id);
 	});
+
+	it("restore with a baseRevisionId that went stale while history was open is a 409, not a silent overwrite", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Raced Restore Doc", content: "original content" }),
+		});
+		await req("http://localhost/api/wiki/raced-restore-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "mistaken edit" }),
+		});
+		// What the restore UI froze when the history panel loaded.
+		const [staleLatest] = await getRevisions("raced-restore-doc");
+
+		// Someone else saves before the user clicks Restore.
+		await req("http://localhost/api/wiki/raced-restore-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "a colleague's edit" }),
+		});
+
+		const restoreRes = await req("http://localhost/api/wiki/raced-restore-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				content: "original content",
+				baseRevisionId: staleLatest.id,
+				summary: "Restored from an old revision",
+			}),
+		});
+		expect(restoreRes.status).toBe(409);
+		const conflict = (await restoreRes.json()) as { currentRevisionId: string; diff: string };
+		expect(conflict.currentRevisionId).not.toBe(staleLatest.id);
+
+		// The colleague's edit survives untouched and no restore revision was written.
+		const pageRes = await req("http://localhost/api/wiki/raced-restore-doc", {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await pageRes.json()) as { content: string }).content).toBe("a colleague's edit");
+		expect((await getRevisions("raced-restore-doc")).length).toBe(2);
+	});
+
+	it("restoring a revision whose frontmatter no longer validates fails cleanly — 400, no partial write", async () => {
+		await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Legacy Frontmatter Doc", content: "first body" }),
+		});
+		await req("http://localhost/api/wiki/legacy-frontmatter-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "second body" }),
+		});
+		const [latest] = await getRevisions("legacy-frontmatter-doc");
+
+		// Simulate a snapshot taken before R6's frontmatter validation existed, carrying a
+		// `status` value outside today's closed enum. Written straight to the revision row
+		// because the API (correctly) refuses to create such content in the first place.
+		await env.DB.prepare("UPDATE wiki_revisions SET content = ? WHERE id = ?")
+			.bind("---\nstatus: archived\n---\n\nlegacy body", latest.id)
+			.run();
+
+		const revRes = await req(
+			`http://localhost/api/wiki/legacy-frontmatter-doc/revisions/${latest.id}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const oldRevision = (await revRes.json()) as { content: string };
+
+		const restoreRes = await req("http://localhost/api/wiki/legacy-frontmatter-doc", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				content: oldRevision.content,
+				baseRevisionId: latest.id,
+				summary: "Restored from a legacy revision",
+			}),
+		});
+		expect(restoreRes.status).toBe(400);
+
+		// The live page is untouched and no half-written revision was left behind.
+		const pageRes = await req("http://localhost/api/wiki/legacy-frontmatter-doc", {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await pageRes.json()) as { content: string }).content).toBe("second body");
+		expect((await getRevisions("legacy-frontmatter-doc")).length).toBe(1);
+	});
 });
 
 // PROJ-490: section-addressed patch operations (R8). Disjoint-section writes must

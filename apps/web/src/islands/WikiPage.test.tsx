@@ -1058,4 +1058,19 @@ describe("revision history: diff view + restore (PROJ-492)", () => {
 
 		expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
 	});
+
+	it("surfaces a distinct message when the page changed since history was loaded (409)", async () => {
+		vi.spyOn(window, "confirm").mockReturnValue(true);
+		const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+		vi.stubGlobal("fetch", mockFetchWithRevision({ putResponse: { ok: false, status: 409 } }));
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: /History/i }));
+		fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+
+		await waitFor(() => {
+			expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining("changed by someone else"));
+		});
+	});
 });
