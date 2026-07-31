@@ -1190,6 +1190,11 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [revisions, setRevisions] = useState<WikiRevision[]>([]);
+	// PROJ-507: whether `revisions` reflects a completed fetch for this page. An empty
+	// list means two very different things to the optimistic lock — "this page has never
+	// been revised" (baseRevisionId: null) vs "we don't know yet" — and conflating them
+	// makes a legitimate save look like a conflict.
+	const [revisionsLoaded, setRevisionsLoaded] = useState(false);
 	const [showHistory, setShowHistory] = useState(false);
 	const contentRef = useRef<HTMLDivElement>(null);
 
@@ -1198,8 +1203,6 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 			if (!s) return;
 			setLoading(true);
 			setError(null);
-			setRevisions([]);
-			setShowHistory(false);
 			try {
 				setPage(
 					await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, { workspaceSlug })
@@ -1223,6 +1226,7 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 					}
 				);
 				setRevisions(Array.isArray(data) ? data : []);
+				setRevisionsLoaded(true);
 			} catch {
 				// non-fatal
 			}
@@ -1230,7 +1234,13 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 		[workspaceSlug]
 	);
 
+	// Revisions belong to the page the `slug` prop points at, so they're reset when it
+	// changes — not on every fetchPage(), which also runs as a same-page refresh (after
+	// a save or a move) and would leave the list empty until something refetched it.
 	useEffect(() => {
+		setRevisions([]);
+		setRevisionsLoaded(false);
+		setShowHistory(false);
 		if (slug) {
 			fetchPage(slug);
 			fetchRevisions(slug);
@@ -1244,6 +1254,7 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 		error,
 		setError,
 		revisions,
+		revisionsLoaded,
 		fetchRevisions,
 		showHistory,
 		setShowHistory,
@@ -1494,7 +1505,8 @@ function useWikiEditing(
 	workspaceSlug: string | undefined,
 	page: WikiPageData | null,
 	fetchPage: (s: string) => Promise<void>,
-	fetchRevisions: (s: string) => Promise<void>
+	fetchRevisions: (s: string) => Promise<void>,
+	latestRevisionId: string | null | undefined
 ) {
 	const [editing, setEditing] = useState(false);
 	const [editTitle, setEditTitle] = useState("");
@@ -1506,6 +1518,15 @@ function useWikiEditing(
 		content: string;
 		savedAt: number;
 	} | null>(null);
+	// PROJ-507: the revision id of the content the user actually started editing,
+	// frozen at startEdit() time — sent back as baseRevisionId so the server can
+	// detect a concurrent edit landing between load and save (PROJ-484's optimistic
+	// lock). Using the live `latestRevisionId` at save time instead would defeat the
+	// check, since it tracks whatever the page's latest revision is *right now*.
+	// `undefined` (revisions not loaded when editing started) omits the field, which
+	// the server treats as the transitional last-write-wins path — sending `null` there
+	// would instead assert "this page has no revisions" and fail every save.
+	const [baseRevisionId, setBaseRevisionId] = useState<string | null | undefined>(undefined);
 
 	const skipLeaveFlushRef = useDraftAutosave(editing, editTitle, editContent, page, draftBanner);
 
@@ -1513,6 +1534,7 @@ function useWikiEditing(
 		if (!page) return;
 		setSaveError(null);
 		setDraftBanner(null);
+		setBaseRevisionId(latestRevisionId);
 		setEditTitle(page.title);
 		setEditContent(page.content);
 		try {
@@ -1562,7 +1584,7 @@ function useWikiEditing(
 			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
 				method: "PUT",
 				workspaceSlug,
-				body: { title: editTitle, content: editContent },
+				body: { title: editTitle, content: editContent, baseRevisionId },
 			});
 			try {
 				localStorage.removeItem(draftKey(page.id));
@@ -1574,7 +1596,19 @@ function useWikiEditing(
 			skipLeaveFlushRef.current = true;
 			setEditing(false);
 		} catch (e) {
-			setSaveError(`Save failed: ${String(e)}`);
+			// PROJ-507: a 409 means someone else saved this page after we loaded it
+			// (PROJ-484's optimistic lock rejected our stale baseRevisionId) — surface
+			// that distinctly rather than the generic failure message, so the user
+			// knows to reload instead of retrying the same save.
+			// Match the tail of apiFetch's message, not a bare "409" — the request path is
+			// part of it, and slugs like "proj-409-notes" would otherwise read as conflicts.
+			if (String(e).endsWith("failed: 409")) {
+				setSaveError(
+					"This page was changed by someone else since you loaded it. Reload the page before saving to avoid overwriting their changes."
+				);
+			} else {
+				setSaveError(`Save failed: ${String(e)}`);
+			}
 		} finally {
 			setSaving(false);
 		}
@@ -2068,7 +2102,8 @@ export default function WikiPage({
 		workspaceSlug,
 		pageData.page,
 		pageData.fetchPage,
-		pageData.fetchRevisions
+		pageData.fetchRevisions,
+		pageData.revisionsLoaded ? (pageData.revisions[0]?.id ?? null) : undefined
 	);
 	const createForm = useCreatePageForm(workspaceSlug, projectId, fetchTree);
 	const move = useMovePage(workspaceSlug, pageData.page, pageData.fetchPage, fetchTree);
