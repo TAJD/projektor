@@ -65,8 +65,10 @@ function slugify(title: string): string {
 
 // PROJ-487: "view" is the shell path segment the Worker's pretty-URL fallback serves
 // static assets from (/wiki/view/index.html) — a page slugged "view" would collide
-// with it and never resolve. Reserved outright rather than special-cased in routing.
-const RESERVED_WIKI_SLUGS = new Set(["view"]);
+// with it and never resolve. "index" collides the same way: Static Assets' default
+// html_handling maps /wiki/index -> /wiki/index.html, so it never reaches the Worker
+// either. Both reserved outright rather than special-cased in routing.
+const RESERVED_WIKI_SLUGS = new Set(["view", "index"]);
 
 // PROJ-483: wiki_pages(workspace_id, slug) is unique — surface a structured
 // ConflictError instead of letting the constraint throw a raw D1 error.
