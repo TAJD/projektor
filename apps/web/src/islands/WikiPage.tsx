@@ -269,14 +269,18 @@ interface Props {
 	slug?: string;
 }
 
+// PROJ-495 (R13): shape of a saved server-side draft (services/wiki-drafts.ts#getWikiDraft).
+interface ServerDraft {
+	title: string;
+	content: string;
+	baseRevisionId: string | null;
+	updatedAt: number;
+}
+
 function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function draftKey(pageId: string): string {
-	return `wiki-draft:${pageId}`;
 }
 
 function flattenTree(nodes: TreeNode[], parentId: string | null = null): Record<string, FlatEntry> {
@@ -1026,12 +1030,14 @@ function PageHeader({
 	);
 }
 
+// PROJ-495 (R13): the draft lives server-side now, so this can surface on any device —
+// not just after a crash on the same browser.
 function DraftRestoreBanner({
-	savedAt,
+	updatedAt,
 	onRestore,
 	onDiscard,
 }: {
-	savedAt: number;
+	updatedAt: number;
 	onRestore: () => void;
 	onDiscard: () => void;
 }) {
@@ -1041,7 +1047,7 @@ function DraftRestoreBanner({
 	].join(" ");
 	return (
 		<div class={bannerClass}>
-			<span>Restore unsaved draft from {new Date(savedAt).toLocaleString()}?</span>
+			<span>Restore unsaved draft from {new Date(updatedAt * 1000).toLocaleString()}?</span>
 			<div class="flex gap-2 shrink-0">
 				<button type="button" onClick={onRestore} class="btn btn-primary btn-sm">
 					Restore
@@ -1403,7 +1409,7 @@ interface PageArticleProps {
 	onCancelMove: () => void;
 	latestRevision: WikiRevision | null;
 	saveError: string | null;
-	draftBanner: { title: string; content: string; savedAt: number } | null;
+	draftBanner: ServerDraft | null;
 	onRestoreDraft: () => void;
 	onDiscardDraft: () => void;
 	editContent: string;
@@ -1532,7 +1538,7 @@ function PageArticleMeta(
 
 			{props.editing && props.draftBanner && (
 				<DraftRestoreBanner
-					savedAt={props.draftBanner.savedAt}
+					updatedAt={props.draftBanner.updatedAt}
 					onRestore={props.onRestoreDraft}
 					onDiscard={props.onDiscardDraft}
 				/>
@@ -2137,41 +2143,54 @@ function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageDat
 	};
 }
 
-function useDraftAutosave(
+// PROJ-495 (R13): server-side per-user draft autosave, replacing the PROJ-227
+// localStorage version so an in-progress edit survives a device switch, not just a
+// same-browser crash. Same ~1s debounce cadence as before; debouncing stays entirely
+// client-side (no server-side throttling) so this is just a plain PUT on a timer.
+function useServerDraftAutosave(
+	workspaceSlug: string | undefined,
 	editing: boolean,
 	editTitle: string,
 	editContent: string,
 	page: WikiPageData | null,
-	draftBanner: { title: string; content: string; savedAt: number } | null
+	draftBanner: ServerDraft | null,
+	baseRevisionId: string | null | undefined
 ) {
 	// Latest edit state for the flush-on-leave effect below, since its cleanup
 	// closure would otherwise only see the values from when `editing` last changed.
-	const latestDraftStateRef = useRef({ editTitle, editContent, page, draftBanner });
-	latestDraftStateRef.current = { editTitle, editContent, page, draftBanner };
+	const latestDraftStateRef = useRef({ editTitle, editContent, page, draftBanner, baseRevisionId });
+	latestDraftStateRef.current = { editTitle, editContent, page, draftBanner, baseRevisionId };
 
 	// save() clears the draft itself right before leaving edit mode; set this to
 	// suppress the flush below so it doesn't resurrect the just-cleared draft.
 	const skipLeaveFlushRef = useRef(false);
 
-	// PROJ-227: debounced draft autosave to localStorage while editing
+	function saveDraft(
+		slug: string,
+		title: string,
+		content: string,
+		base: string | null | undefined
+	) {
+		// Best-effort: a failed autosave shouldn't interrupt editing or surface an
+		// error — the explicit Save button remains the source of truth.
+		apiFetch(`/api/wiki/${encodeURIComponent(slug)}/draft`, {
+			method: "PUT",
+			workspaceSlug,
+			body: { title, content, baseRevisionId: base ?? null },
+		}).catch(() => {});
+	}
+
 	useEffect(() => {
 		if (!editing || !page || draftBanner) return;
 		const timer = setTimeout(() => {
-			try {
-				localStorage.setItem(
-					draftKey(page.id),
-					JSON.stringify({ title: editTitle, content: editContent, savedAt: Date.now() })
-				);
-			} catch {
-				// non-fatal
-			}
+			saveDraft(page.slug, editTitle, editContent, baseRevisionId);
 		}, 1000);
 		return () => clearTimeout(timer);
-	}, [editing, editTitle, editContent, page, draftBanner]);
+	}, [editing, editTitle, editContent, page, draftBanner, baseRevisionId]);
 
-	// Flush any not-yet-debounced edits to localStorage when leaving edit mode
-	// via navigation (not just Save/Cancel), so a quick click-away doesn't drop
-	// the last <1s of keystrokes from the safety-net draft.
+	// Flush any not-yet-debounced edits when leaving edit mode via navigation (not
+	// just Save/Cancel), so a quick click-away doesn't drop the last <1s of
+	// keystrokes from the safety-net draft.
 	useEffect(() => {
 		const wasEditing = editing;
 		return () => {
@@ -2185,16 +2204,10 @@ function useDraftAutosave(
 				editContent: c,
 				page: p,
 				draftBanner: db,
+				baseRevisionId: b,
 			} = latestDraftStateRef.current;
 			if (!p || db) return;
-			try {
-				localStorage.setItem(
-					draftKey(p.id),
-					JSON.stringify({ title: t, content: c, savedAt: Date.now() })
-				);
-			} catch {
-				// non-fatal
-			}
+			saveDraft(p.slug, t, c, b);
 		};
 	}, [editing]);
 
@@ -2213,11 +2226,7 @@ function useWikiEditing(
 	const [editContent, setEditContent] = useState("");
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
-	const [draftBanner, setDraftBanner] = useState<{
-		title: string;
-		content: string;
-		savedAt: number;
-	} | null>(null);
+	const [draftBanner, setDraftBanner] = useState<ServerDraft | null>(null);
 	// PROJ-507: the revision id of the content the user actually started editing,
 	// frozen at startEdit() time — sent back as baseRevisionId so the server can
 	// detect a concurrent edit landing between load and save (PROJ-484's optimistic
@@ -2226,48 +2235,73 @@ function useWikiEditing(
 	// `undefined` (revisions not loaded when editing started) omits the field, which
 	// the server treats as the transitional last-write-wins path — sending `null` there
 	// would instead assert "this page has no revisions" and fail every save.
+	// PROJ-495: this same value is what the draft autosave stamps as its own
+	// baseRevisionId, and restoring a draft snaps it back to the draft's own
+	// baseRevisionId — so publishing a restored draft conflict-checks against what the
+	// draft actually started from, not whatever the page's latest revision happens to
+	// be now.
 	const [baseRevisionId, setBaseRevisionId] = useState<string | null | undefined>(undefined);
 
-	const skipLeaveFlushRef = useDraftAutosave(editing, editTitle, editContent, page, draftBanner);
+	const skipLeaveFlushRef = useServerDraftAutosave(
+		workspaceSlug,
+		editing,
+		editTitle,
+		editContent,
+		page,
+		draftBanner,
+		baseRevisionId
+	);
 
-	function startEdit() {
+	// PROJ-495: draft is fetched from the server (not just a local check) so it
+	// restores across devices, not only after a same-browser crash. Editing opens
+	// immediately with the published content; the restore banner appears once the
+	// fetch resolves, matching the R10 diff/choice pattern of offering rather than
+	// silently applying.
+	async function startEdit() {
 		if (!page) return;
 		setSaveError(null);
 		setDraftBanner(null);
 		setBaseRevisionId(latestRevisionId);
 		setEditTitle(page.title);
 		setEditContent(page.content);
+		setEditing(true);
 		try {
-			const raw = localStorage.getItem(draftKey(page.id));
-			if (raw) {
-				const draft = JSON.parse(raw);
-				if (draft && typeof draft.savedAt === "number" && draft.savedAt > page.updated_at * 1000) {
-					setDraftBanner(draft);
-				}
+			const draft = await apiFetch<ServerDraft | null>(
+				`/api/wiki/${encodeURIComponent(page.slug)}/draft`,
+				{ workspaceSlug }
+			);
+			// A draft older than the page's current published content was superseded
+			// by a publish (this user's or someone else's) since it was saved — not
+			// worth offering to restore.
+			if (draft && draft.updatedAt > page.updated_at) {
+				setDraftBanner(draft);
 			}
 		} catch {
 			// non-fatal — treat as no draft
 		}
-		setEditing(true);
 	}
 
 	function restoreDraft() {
 		if (!draftBanner) return;
 		setEditTitle(draftBanner.title);
 		setEditContent(draftBanner.content);
+		setBaseRevisionId(draftBanner.baseRevisionId);
 		setDraftBanner(null);
 	}
 
-	function discardDraft() {
+	async function discardDraft() {
 		if (!page) return;
-		try {
-			localStorage.removeItem(draftKey(page.id));
-		} catch {
-			// non-fatal
-		}
 		setEditTitle(page.title);
 		setEditContent(page.content);
 		setDraftBanner(null);
+		try {
+			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}/draft`, {
+				method: "DELETE",
+				workspaceSlug,
+			});
+		} catch {
+			// non-fatal
+		}
 	}
 
 	function cancelEdit() {
@@ -2287,7 +2321,10 @@ function useWikiEditing(
 				body: { title: editTitle, content: editContent, baseRevisionId },
 			});
 			try {
-				localStorage.removeItem(draftKey(page.id));
+				await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}/draft`, {
+					method: "DELETE",
+					workspaceSlug,
+				});
 			} catch {
 				// non-fatal
 			}
@@ -2843,7 +2880,7 @@ function buildArticleProps(article: {
 	verifyError: string | null;
 	latestRevision: WikiRevision | null;
 	saveError: string | null;
-	draftBanner: { title: string; content: string; savedAt: number } | null;
+	draftBanner: ServerDraft | null;
 	restoreDraft: () => void;
 	discardDraft: () => void;
 	editContent: string;

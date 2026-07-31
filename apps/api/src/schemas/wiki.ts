@@ -234,3 +234,15 @@ export const ListWikiChangesInputSchema = z.object({
 	projectId: z.string().uuid().optional(),
 	watchedOnly: BooleanQueryParam.optional().default(false),
 });
+
+// PROJ-495 (R13): server-side per-user draft, replacing the PROJ-227 localStorage
+// autosave. title/content are both required (a draft is always a full snapshot of the
+// editor state, not a partial patch) — baseRevisionId is optional/nullable with the
+// same convention as UpdatePageSchema: omitted keeps the caller's prior baseRevisionId
+// unset (unusual — the client always sends it), `null` means "the page had no
+// revisions yet when the draft was started".
+export const SaveWikiDraftInputSchema = z.object({
+	title: z.string().min(1).max(300),
+	content: z.string().max(500000),
+	baseRevisionId: z.string().nullable().optional(),
+});

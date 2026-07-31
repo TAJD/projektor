@@ -4493,3 +4493,235 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		expect(changes.changes.some((c) => c.pageId === page.id && c.action === "created")).toBe(true);
 	});
 });
+
+describe("Wiki server-side drafts (PROJ-495)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture({ role: "admin" });
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	async function req(url: string, opts?: RequestInit) {
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		return SELF.fetch(url, opts);
+	}
+
+	async function createPage(pageSlug: string, title: string, content = "") {
+		const res = await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title, content, slug: pageSlug }),
+		});
+		expect(res.status).toBe(201);
+		return (await res.json()) as { id: string; slug: string };
+	}
+
+	it("REST: no draft returns null, saving upserts, discarding clears it", async () => {
+		const page = await createPage("draft-page", "Draft Page", "original content");
+
+		const empty = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(empty.status).toBe(200);
+		expect(await empty.json()).toBeNull();
+
+		const saveRes = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Draft Page", content: "draft v1", baseRevisionId: null }),
+		});
+		expect(saveRes.status).toBe(200);
+
+		let getRes = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(await getRes.json()).toMatchObject({ title: "Draft Page", content: "draft v1" });
+
+		// Saving again upserts in place — no accumulation of draft rows.
+		await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Draft Page", content: "draft v2", baseRevisionId: null }),
+		});
+		getRes = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(await getRes.json()).toMatchObject({ content: "draft v2" });
+
+		const discardRes = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(discardRes.status).toBe(200);
+		getRes = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(await getRes.json()).toBeNull();
+	});
+
+	it("drafts are per-user — one user's draft is invisible to another", async () => {
+		const page = await createPage("draft-per-user", "Draft Per User", "content");
+		const other = await seedUser(`other-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		await seedMember(workspaceId, other.id, "admin");
+		const otherToken = await seedToken(workspaceId, other.id);
+
+		await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Draft Per User", content: "mine", baseRevisionId: null }),
+		});
+
+		const otherGet = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			headers: authHeaders(otherToken, slug),
+		});
+		expect(await otherGet.json()).toBeNull();
+	});
+
+	it("publishing the draft's content through the normal update path works, and discarding after publish clears it", async () => {
+		const page = await createPage("draft-publish", "Draft Publish", "v0");
+		const pageRes = await req(`http://localhost/api/wiki/${page.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const pageBody = (await pageRes.json()) as { updated_at: number };
+
+		const revRes = await req(`http://localhost/api/wiki/${page.slug}/revisions`, {
+			headers: authHeaders(token, slug),
+		});
+		const revisions = (await revRes.json()) as Array<{ id: string }>;
+		const baseRevisionId = revisions[0]?.id ?? null;
+
+		await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Draft Publish", content: "draft content", baseRevisionId }),
+		});
+
+		// Publish reuses the EXISTING conflict-checked update path — not a separate
+		// draft-publish endpoint — with the draft's own baseRevisionId.
+		const publishRes = await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "draft content", baseRevisionId }),
+		});
+		expect(publishRes.status).toBe(200);
+		expect(pageBody.updated_at).toBeDefined();
+
+		const discardRes = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(discardRes.status).toBe(200);
+		const getRes = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(await getRes.json()).toBeNull();
+	});
+
+	it("a stale baseRevisionId on publish still hits the normal 409 conflict — no separate draft conflict mechanism", async () => {
+		const page = await createPage("draft-conflict", "Draft Conflict", "v0");
+
+		// Someone else's edit advances the page's latest revision past what the draft
+		// was based on.
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "someone else's edit" }),
+		});
+
+		const publishRes = await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "stale draft content", baseRevisionId: null }),
+		});
+		expect(publishRes.status).toBe(409);
+	});
+
+	it("deleting a page (cascade or not) cleans up its draft rows", async () => {
+		const parent = await createPage("draft-delete-parent", "Draft Delete Parent", "content");
+		const child = (await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Draft Delete Child",
+				content: "content",
+				slug: "draft-delete-child",
+				parentId: parent.id,
+			}),
+		}).then((r) => r.json())) as { id: string; slug: string };
+
+		await req(`http://localhost/api/wiki/${parent.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Draft Delete Parent",
+				content: "draft",
+				baseRevisionId: null,
+			}),
+		});
+		await req(`http://localhost/api/wiki/${child.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Draft Delete Child", content: "draft", baseRevisionId: null }),
+		});
+
+		const rows = await env.DB.prepare("SELECT page_id FROM wiki_drafts WHERE workspace_id = ?")
+			.bind(workspaceId)
+			.all();
+		expect(rows.results.length).toBe(2);
+
+		const delRes = await req(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(delRes.status).toBe(200);
+
+		const rowsAfter = await env.DB.prepare("SELECT page_id FROM wiki_drafts WHERE workspace_id = ?")
+			.bind(workspaceId)
+			.all();
+		expect(rowsAfter.results.length).toBe(0);
+	});
+
+	it("validation: title and content are required on save", async () => {
+		const page = await createPage("draft-validation", "Draft Validation", "content");
+		const res = await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("MCP: save_wiki_draft / get_wiki_draft / discard_wiki_draft mirror the REST behavior", async () => {
+		async function mcp<T>(name: string, args: unknown) {
+			await env.DB.prepare("DELETE FROM rate_limit").run();
+			return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+		}
+		const page = await createPage("mcp-draft", "MCP Draft", "content");
+
+		const saveRes = await mcp("save_wiki_draft", {
+			slug: page.slug,
+			title: "MCP Draft",
+			content: "mcp draft content",
+			baseRevisionId: null,
+		});
+		expect(isMcpError(saveRes)).toBe(false);
+
+		const draft = mcpData<{ content: string } | null>(
+			await mcp("get_wiki_draft", { slug: page.slug })
+		);
+		expect(draft).toMatchObject({ content: "mcp draft content" });
+
+		const discardRes = await mcp("discard_wiki_draft", { slug: page.slug });
+		expect(isMcpError(discardRes)).toBe(false);
+
+		const afterDiscard = mcpData<{ content: string } | null>(
+			await mcp("get_wiki_draft", { slug: page.slug })
+		);
+		expect(afterDiscard).toBeNull();
+	});
+});

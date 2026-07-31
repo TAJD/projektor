@@ -49,6 +49,7 @@ import m0045 from "../../../../packages/db/migrations/0045_wiki_frontmatter.sql?
 import m0046 from "../../../../packages/db/migrations/0046_wiki_page_templates.sql?raw";
 import m0047 from "../../../../packages/db/migrations/0047_seed_wiki_templates.sql?raw";
 import m0048 from "../../../../packages/db/migrations/0048_wiki_watchers.sql?raw";
+import m0049 from "../../../../packages/db/migrations/0049_wiki_drafts.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -100,4 +101,5 @@ export const MIGRATIONS = [
 	m0046,
 	m0047,
 	m0048,
+	m0049,
 ];

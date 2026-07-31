@@ -191,3 +191,36 @@ export const wikiNotifications = sqliteTable(
 		userIdx: index("wiki_notifications_user_idx").on(t.workspaceId, t.userId, t.createdAt),
 	})
 );
+
+// PROJ-495 (R13): per-user scratch draft, one row per (page, user) — saveWikiDraft
+// upserts on the unique index below rather than accumulating draft history.
+// baseRevisionId is nullable (no FK to wiki_revisions — a revision can itself be
+// deleted independently) and carries the same "page had no revisions yet" convention
+// as wiki_pages/UpdatePageSchema's baseRevisionId, so publish can hand it straight to
+// updateWikiPage's existing optimistic-locking check.
+export const wikiDrafts = sqliteTable(
+	"wiki_drafts",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		pageId: text("page_id")
+			.notNull()
+			.references(() => wikiPages.id, { onDelete: "cascade" }),
+		title: text("title").notNull(),
+		content: text("content").notNull(),
+		baseRevisionId: text("base_revision_id"),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	(t) => ({
+		userPageUniqueIdx: uniqueIndex("wiki_drafts_user_page_idx").on(
+			t.workspaceId,
+			t.userId,
+			t.pageId
+		),
+	})
+);

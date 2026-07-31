@@ -26,6 +26,7 @@ import { recordActivity } from "./activity";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
+import { deleteWikiDraftsForPages } from "./wiki-drafts";
 import { computeFreshness } from "./wiki-freshness";
 import {
 	parseWikiFrontmatter,
@@ -1819,6 +1820,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		await deleteWikiLinksForPages(ctx, allIds);
 		await clearIncomingLinkTargets(ctx, allIds);
 		await deleteWikiWatchersForPages(ctx, allIds);
+		await deleteWikiDraftsForPages(ctx, allIds);
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
@@ -1854,6 +1856,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 	await deleteWikiLinksForPages(ctx, [page.id]);
 	await clearIncomingLinkTargets(ctx, [page.id]);
 	await deleteWikiWatchersForPages(ctx, [page.id]);
+	await deleteWikiDraftsForPages(ctx, [page.id]);
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
 		entityId: page.id,
