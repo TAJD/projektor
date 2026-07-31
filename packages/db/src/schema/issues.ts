@@ -214,6 +214,14 @@ export const activity = sqliteTable(
 	(t) => ({
 		wsIdx: index("activity_workspace_idx").on(t.workspaceId),
 		entityIdx: index("activity_entity_idx").on(t.entityType, t.entityId),
+		// PROJ-493 (R11): list_wiki_changes filters entity_type='wiki_page' AND
+		// created_at >= since within a workspace — an indexed range scan instead of a
+		// full scan of the workspace's activity rows.
+		wsEntityCreatedIdx: index("activity_workspace_entity_created_idx").on(
+			t.workspaceId,
+			t.entityType,
+			t.createdAt
+		),
 	})
 );
 

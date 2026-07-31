@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BooleanQueryParam } from "./common";
 
 const SlugSchema = z
 	.string()
@@ -197,4 +198,39 @@ export type PatchWikiPageInput = z.infer<typeof PatchWikiPageInputSchema>;
 // one project's templates rather than restricting the picker to workspace-only pages.
 export const ListWikiTemplatesInputSchema = z.object({
 	projectId: z.string().uuid().optional(),
+});
+
+// PROJ-493 (R11): watch a page, or its whole current+future subtree.
+export const WatchWikiPageInputSchema = z.object({
+	subtree: z.boolean().optional().default(false),
+});
+
+export const ListWikiNotificationsInputSchema = z.object({
+	unreadOnly: BooleanQueryParam.optional().default(false),
+	limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+	offset: z.coerce.number().int().min(0).optional().default(0),
+});
+
+export const MarkWikiNotificationsReadInputSchema = z
+	.object({
+		ids: z.array(z.string()).max(200).optional(),
+		all: z.boolean().optional().default(false),
+	})
+	.refine((d) => d.all || (d.ids !== undefined && d.ids.length > 0), {
+		message: "Either `all: true` or a non-empty `ids` array must be provided",
+	});
+
+// PROJ-493 (R11): list_wiki_changes — cheap delta polling for agents. `since` is
+// EXCLUSIVE (changes strictly after that unix-second timestamp); poll again with the
+// response's own `nextSince` value, not a locally-computed timestamp, to avoid missing
+// or double-delivering changes that land on the same second as the cutoff. Defaults to
+// every wiki page the caller can currently see (matching list_wiki_pages/search_wiki
+// visibility) rather than only watched pages — see services/wiki-watchers.ts for why.
+// Pass watchedOnly=true to narrow to pages the caller is (directly or via subtree)
+// watching.
+export const ListWikiChangesInputSchema = z.object({
+	since: z.coerce.number().int().nonnegative(),
+	limit: z.coerce.number().int().min(1).max(500).optional().default(100),
+	projectId: z.string().uuid().optional(),
+	watchedOnly: BooleanQueryParam.optional().default(false),
 });

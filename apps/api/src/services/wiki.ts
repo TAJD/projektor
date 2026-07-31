@@ -41,6 +41,11 @@ import {
 	reindexWikiLinks,
 	type WikiBacklink,
 } from "./wiki-links";
+import {
+	deleteWikiWatchersForPages,
+	notifyCascadeDescendantWatchers,
+	notifyWikiWatchers,
+} from "./wiki-watchers";
 
 type TreeNode = { id: string; slug: string; title: string; url: string; children: TreeNode[] };
 
@@ -123,6 +128,7 @@ async function resolvePageByIdOrSlug(
 	content: string;
 	projectId: string | null;
 	parentId: string | null;
+	isTemplate: boolean;
 }> {
 	const orm = drizzle(db, { schema });
 	const direct = await orm
@@ -133,6 +139,7 @@ async function resolvePageByIdOrSlug(
 			content: schema.wikiPages.content,
 			projectId: schema.wikiPages.projectId,
 			parentId: schema.wikiPages.parentId,
+			isTemplate: schema.wikiPages.isTemplate,
 		})
 		.from(schema.wikiPages)
 		.where(
@@ -156,6 +163,8 @@ async function resolvePageByIdOrSlug(
 			projectId: redirected.project_id,
 			// eslint-disable-next-line camelcase
 			parentId: redirected.parent_id,
+			// eslint-disable-next-line camelcase
+			isTemplate: redirected.is_template,
 		};
 	}
 	throw new NotFoundError("Wiki page not found");
@@ -723,6 +732,18 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	// PROJ-485: parse [[Target]]/URL links out of the new page's content into wiki_links.
 	await reindexWikiLinks(ctx, orm, id, content ?? "");
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
+	// PROJ-493 (R11): a subtree watcher on an ancestor is notified of a page newly
+	// created underneath them (there's no possible DIRECT watch on `id` yet — it didn't
+	// exist until this insert). Template pages never notify (see wiki-watchers.ts).
+	if (!meta.isTemplate) {
+		await notifyWikiWatchers(ctx, {
+			pageId: id,
+			parentId: parentId ?? null,
+			slug,
+			title,
+			action: "created",
+		});
+	}
 	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug), ...meta };
 }
 
@@ -1063,6 +1084,20 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		action: "updated",
 		diff: buildWikiPageUpdateDiff({ title, content }),
 	});
+
+	// PROJ-493 (R11): covers plain edits, verify_wiki_page, and restore (both routed
+	// through this function). meta is only recomputed when content changed — otherwise
+	// fall back to the page's existing isTemplate, which this write left untouched.
+	const isTemplate = meta?.isTemplate ?? page.isTemplate;
+	if (!isTemplate) {
+		await notifyWikiWatchers(ctx, {
+			pageId: page.id,
+			parentId: parentId !== undefined ? parentId : page.parentId,
+			slug: slug ?? page.slug,
+			title: title ?? page.title,
+			action: "updated",
+		});
+	}
 
 	return { ok: true, url: wikiPagePath(slug ?? page.slug) };
 }
@@ -1439,6 +1474,19 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 		diff: buildWikiPageUpdateDiff({ content: newContent }),
 	});
 
+	// PROJ-493 (R11): meta is always reparsed from newContent above (patches only touch
+	// section bodies, so template status can't itself change here, but the check stays
+	// consistent with the other write paths).
+	if (!meta.isTemplate) {
+		await notifyWikiWatchers(ctx, {
+			pageId: page.id,
+			parentId: page.parentId,
+			slug: page.slug,
+			title: page.title,
+			action: "updated",
+		});
+	}
+
 	return { ok: true, url: wikiPagePath(page.slug) };
 }
 
@@ -1698,9 +1746,22 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 
 	const orm = drizzle(ctx.db, { schema });
 	const resolved = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
-	const page = { id: resolved.id, projectId: resolved.projectId, parentId: resolved.parentId };
+	const page = {
+		id: resolved.id,
+		slug: resolved.slug,
+		title: resolved.title,
+		projectId: resolved.projectId,
+		parentId: resolved.parentId,
+		isTemplate: resolved.isTemplate,
+	};
 
 	await requireWikiDelete(ctx, page.projectId);
+
+	// PROJ-493 (R11): slug/title/projectId are captured here (not read off the row after
+	// delete, which no longer exists) so list_wiki_changes can still report what a
+	// "deleted" event was about, and still enforce the workspace-scoping/project-
+	// visibility invariant for it — see wiki-watchers.ts#extractDeletedPageInfo.
+	const deleteDiffBase = { slug: page.slug, title: page.title, projectId: page.projectId };
 
 	if (cascade) {
 		const descendantIds = await collectDescendantIds(ctx.db, page.id, ctx.workspaceId);
@@ -1709,6 +1770,41 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		// count would read as 0 once the pages are gone. Non-blocking: surfaced as info on
 		// the response, matching the PRD's "delete warnings" (not a hard block).
 		const linkedByCount = await countBacklinkSources(ctx, allIds);
+		// PROJ-493: notify BEFORE deleting the page rows — wiki_watchers.page_id is
+		// ON DELETE CASCADE, so a watcher's own watch row (including the root page's
+		// watchers this notifies) would otherwise already be gone by the time
+		// notifyWikiWatchers queries the table.
+		if (!page.isTemplate) {
+			await notifyWikiWatchers(ctx, {
+				pageId: page.id,
+				parentId: page.parentId,
+				slug: page.slug,
+				title: page.title,
+				action: "deleted",
+			});
+		}
+		// PROJ-493: subtree watchers rooted at/above the cascade root got the single
+		// notification above, but someone watching one of the DESCENDANTS directly would
+		// otherwise hear nothing at all before their watch row disappeared with the page.
+		if (descendantIds.length > 0) {
+			const descendants = await inChunks(descendantIds, (chunk) =>
+				orm
+					.select({
+						id: schema.wikiPages.id,
+						slug: schema.wikiPages.slug,
+						title: schema.wikiPages.title,
+						isTemplate: schema.wikiPages.isTemplate,
+					})
+					.from(schema.wikiPages)
+					.where(
+						and(
+							inArray(schema.wikiPages.id, chunk),
+							eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+						)
+					)
+			);
+			await notifyCascadeDescendantWatchers(ctx, descendants);
+		}
 		await inChunks(allIds, async (chunk) => {
 			await deleteWikiPageAttachments(ctx, orm, chunk);
 			return [];
@@ -1722,11 +1818,12 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		// the app level too, since D1 doesn't guarantee FK enforcement on every connection.
 		await deleteWikiLinksForPages(ctx, allIds);
 		await clearIncomingLinkTargets(ctx, allIds);
+		await deleteWikiWatchersForPages(ctx, allIds);
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
 			action: "deleted",
-			diff: { cascade: true, deletedCount: allIds.length },
+			diff: { ...deleteDiffBase, cascade: true, deletedCount: allIds.length },
 		});
 		return { ok: true, deletedCount: allIds.length, linkedByCount };
 	}
@@ -1740,12 +1837,29 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		.where(eq(schema.wikiPages.parentId, page.id));
 
 	const linkedByCount = await countBacklinkSources(ctx, [page.id]);
+	// PROJ-493: notify BEFORE deleting the page row — see the cascade branch above for why
+	// (wiki_watchers.page_id is ON DELETE CASCADE).
+	if (!page.isTemplate) {
+		await notifyWikiWatchers(ctx, {
+			pageId: page.id,
+			parentId: page.parentId,
+			slug: page.slug,
+			title: page.title,
+			action: "deleted",
+		});
+	}
 	await deleteWikiPageAttachments(ctx, orm, [page.id]);
 	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
 	await deleteWikiFtsEntries(ctx, [page.id]);
 	await deleteWikiLinksForPages(ctx, [page.id]);
 	await clearIncomingLinkTargets(ctx, [page.id]);
-	await recordActivity(ctx, { entityType: "wiki_page", entityId: page.id, action: "deleted" });
+	await deleteWikiWatchersForPages(ctx, [page.id]);
+	await recordActivity(ctx, {
+		entityType: "wiki_page",
+		entityId: page.id,
+		action: "deleted",
+		diff: deleteDiffBase,
+	});
 	return { ok: true, deletedCount: 1, linkedByCount };
 }
 

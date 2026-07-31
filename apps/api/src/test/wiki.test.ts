@@ -5,8 +5,10 @@ import {
 	authHeaders,
 	seedFixture,
 	seedGroupGrant,
+	seedMember,
 	seedProject,
 	seedToken,
+	seedUser,
 	seedWorkspaceRoles,
 } from "./helpers";
 
@@ -4016,5 +4018,478 @@ describe("Wiki built-in template seeding on workspace creation (PROJ-491)", () =
 		});
 		expect(parentRes.status).toBe(200);
 		expect(((await parentRes.json()) as { title: string }).title).toBe("Templates");
+	});
+});
+
+// PROJ-493 (R11): watch/unwatch per page or subtree, per-user notifications, and the
+// list_wiki_changes delta feed.
+describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
+	let token: string;
+	let userId: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		// admin: several tests (cascade delete, delta-delete) delete workspace-level
+		// pages, which requireWikiDelete restricts to admin/owner.
+		const fixture = await seedFixture({ role: "admin" });
+		token = fixture.token;
+		userId = fixture.user.id;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	async function req(url: string, opts?: RequestInit) {
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		return SELF.fetch(url, opts);
+	}
+
+	async function createPage(pageSlug: string, title: string, content = "") {
+		const res = await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title, content, slug: pageSlug }),
+		});
+		expect(res.status).toBe(201);
+		return (await res.json()) as { id: string; slug: string };
+	}
+
+	async function createChildPage(
+		pageSlug: string,
+		title: string,
+		content: string,
+		parentId: string
+	) {
+		const res = await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title, content, slug: pageSlug, parentId }),
+		});
+		expect(res.status).toBe(201);
+		return (await res.json()) as { id: string; slug: string };
+	}
+
+	async function seedWatcher(role = "member") {
+		const user = await seedUser(`watcher-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		await seedMember(workspaceId, user.id, role);
+		const watcherToken = await seedToken(workspaceId, user.id);
+		return { user, token: watcherToken };
+	}
+
+	async function notifications(watcherToken: string, query = "") {
+		const res = await req(`http://localhost/api/wiki/notifications${query}`, {
+			headers: authHeaders(watcherToken, slug),
+		});
+		expect(res.status).toBe(200);
+		return (await res.json()) as Array<{
+			id: string;
+			pageId: string;
+			slug: string;
+			title: string;
+			action: string;
+			actorId: string | null;
+		}>;
+	}
+
+	it("REST: watch/unwatch a page, watching again upserts the subtree flag instead of duplicating", async () => {
+		const page = await createPage("watch-me", "Watch Me", "content");
+
+		const watchRes = await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ subtree: false }),
+		});
+		expect(watchRes.status).toBe(200);
+
+		let watches = (await (
+			await req("http://localhost/api/wiki/watches", { headers: authHeaders(token, slug) })
+		).json()) as Array<{ pageId: string; subtree: boolean }>;
+		const initial = watches.filter((w) => w.pageId === page.id);
+		expect(initial.length).toBe(1);
+		expect(initial[0]).toMatchObject({ pageId: page.id, subtree: false });
+
+		// Watching the same page again with a different subtree flag upserts, not duplicates.
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ subtree: true }),
+		});
+		watches = (await (
+			await req("http://localhost/api/wiki/watches", { headers: authHeaders(token, slug) })
+		).json()) as Array<{ pageId: string; subtree: boolean }>;
+		expect(watches.filter((w) => w.pageId === page.id).length).toBe(1);
+		expect(watches.find((w) => w.pageId === page.id)?.subtree).toBe(true);
+
+		const unwatchRes = await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(unwatchRes.status).toBe(200);
+		watches = (await (
+			await req("http://localhost/api/wiki/watches", { headers: authHeaders(token, slug) })
+		).json()) as Array<{ pageId: string; subtree: boolean }>;
+		expect(watches.some((w) => w.pageId === page.id)).toBe(false);
+	});
+
+	it("a direct watcher is notified when someone else edits the page, never for their own edit", async () => {
+		const page = await createPage("direct-watch", "Direct Watch", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ content: "self edit" }),
+		});
+		expect(await notifications(watcher.token)).toEqual([]);
+
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "other edit" }),
+		});
+		const notifs = await notifications(watcher.token);
+		expect(notifs.length).toBe(1);
+		expect(notifs[0]).toMatchObject({ action: "updated", pageId: page.id, actorId: userId });
+	});
+
+	it("unwatching stops further notifications", async () => {
+		const page = await createPage("unwatch-stop", "Unwatch Stop", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "DELETE",
+			headers: authHeaders(watcher.token, slug),
+		});
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "after unwatch" }),
+		});
+		expect(await notifications(watcher.token)).toEqual([]);
+	});
+
+	it("subtree watch covers a page created now under it AND a later edit to that descendant", async () => {
+		const parent = await createPage("parent-page", "Parent Page", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${parent.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ subtree: true }),
+		});
+
+		const child = await createChildPage("child-page", "Child Page", "child", parent.id);
+		let notifs = await notifications(watcher.token);
+		expect(notifs.some((n) => n.action === "created" && n.pageId === child.id)).toBe(true);
+
+		await req(`http://localhost/api/wiki/${child.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "child v2" }),
+		});
+		notifs = await notifications(watcher.token);
+		expect(notifs.filter((n) => n.pageId === child.id).length).toBe(2);
+	});
+
+	it("a direct-only (non-subtree) watch on the parent does NOT notify for a descendant's changes", async () => {
+		const parent = await createPage("parent-narrow", "Parent Narrow", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${parent.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ subtree: false }),
+		});
+		await createChildPage("child-narrow", "Child Narrow", "child", parent.id);
+		expect(await notifications(watcher.token)).toEqual([]);
+	});
+
+	it("template pages never generate watcher notifications", async () => {
+		const page = await createPage(
+			"watch-template",
+			"Watch Template",
+			"---\ntemplate: true\n---\nbody"
+		);
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "---\ntemplate: true\n---\nedited" }),
+		});
+		expect(await notifications(watcher.token)).toEqual([]);
+	});
+
+	it("a cascade delete generates a single 'deleted' notification for the root page, not one per descendant", async () => {
+		const parent = await createPage("cascade-parent", "Cascade Parent", "content");
+		await createChildPage("cascade-child", "Cascade Child", "child", parent.id);
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${parent.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ subtree: true }),
+		});
+
+		const delRes = await req(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(delRes.status).toBe(200);
+
+		const notifs = await notifications(watcher.token);
+		const deleteNotifs = notifs.filter((n) => n.action === "deleted");
+		expect(deleteNotifs.length).toBe(1);
+		expect(deleteNotifs[0]).toMatchObject({ pageId: parent.id, slug: "cascade-parent" });
+	});
+
+	it("a cascade delete notifies someone watching a DESCENDANT directly, and clears their watch row", async () => {
+		const parent = await createPage("cascade-root", "Cascade Root", "content");
+		const child = await createChildPage("cascade-kid", "Cascade Kid", "child", parent.id);
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${child.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+
+		const delRes = await req(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(delRes.status).toBe(200);
+
+		const deleteNotifs = (await notifications(watcher.token)).filter((n) => n.action === "deleted");
+		expect(deleteNotifs.length).toBe(1);
+		expect(deleteNotifs[0]).toMatchObject({ pageId: child.id, slug: "cascade-kid" });
+
+		// No dangling watch row left pointing at a page that no longer exists.
+		const watchesRes = await req("http://localhost/api/wiki/watches", {
+			headers: authHeaders(watcher.token, slug),
+		});
+		expect(await watchesRes.json()).toEqual([]);
+		const orphaned = await env.DB.prepare(
+			"SELECT COUNT(*) AS c FROM wiki_watchers WHERE page_id = ?"
+		)
+			.bind(child.id)
+			.first<{ c: number }>();
+		expect(orphaned?.c).toBe(0);
+	});
+
+	it("unreadOnly=false / watchedOnly=false are honored as false, not coerced true", async () => {
+		const page = await createPage("bool-param", "Bool Param", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		await req("http://localhost/api/wiki/notifications/read", {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ all: true }),
+		});
+
+		expect((await notifications(watcher.token, "?unreadOnly=true")).length).toBe(0);
+		expect((await notifications(watcher.token, "?unreadOnly=false")).length).toBe(1);
+
+		// The watcher watches nothing but `page`; watchedOnly=false must not narrow.
+		await createPage("bool-unwatched", "Bool Unwatched", "other");
+		const res = await req(`http://localhost/api/wiki/changes?since=${t0}&watchedOnly=false`, {
+			headers: authHeaders(watcher.token, slug),
+		});
+		const body = (await res.json()) as { changes: Array<{ slug: string | null }> };
+		expect(body.changes.map((c) => c.slug)).toContain("bool-unwatched");
+	});
+
+	it("mark_wiki_notifications_read: by explicit ids, then all:true", async () => {
+		const page = await createPage("read-flag", "Read Flag", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v3" }),
+		});
+
+		const unread = await notifications(watcher.token, "?unreadOnly=true");
+		expect(unread.length).toBe(2);
+
+		await req("http://localhost/api/wiki/notifications/read", {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ ids: [unread[0].id] }),
+		});
+		expect((await notifications(watcher.token, "?unreadOnly=true")).length).toBe(1);
+
+		await req("http://localhost/api/wiki/notifications/read", {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ all: true }),
+		});
+		expect((await notifications(watcher.token, "?unreadOnly=true")).length).toBe(0);
+	});
+
+	it("list_wiki_changes: since is exclusive, nextSince advances, default scope isn't limited to watched pages", async () => {
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+		const page = await createPage("delta-doc", "Delta Doc", "content");
+
+		const res = await req(`http://localhost/api/wiki/changes?since=${t0}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as {
+			changes: Array<{ action: string; pageId: string }>;
+			nextSince: number;
+		};
+		expect(body.changes.some((c) => c.pageId === page.id && c.action === "created")).toBe(true);
+		expect(body.nextSince).toBeGreaterThanOrEqual(t0);
+
+		const empty = (await (
+			await req(`http://localhost/api/wiki/changes?since=${body.nextSince}`, {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as { changes: unknown[] };
+		expect(empty.changes).toEqual([]);
+	});
+
+	it("list_wiki_changes reports a deleted page's slug/title even though the row is gone", async () => {
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+		const page = await createPage("delta-delete", "Delta Delete", "content");
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+
+		const body = (await (
+			await req(`http://localhost/api/wiki/changes?since=${t0}`, {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as { changes: Array<{ action: string; slug: string | null; title: string | null }> };
+		const deleteEvent = body.changes.find((c) => c.action === "deleted");
+		expect(deleteEvent).toMatchObject({ slug: "delta-delete", title: "Delta Delete" });
+	});
+
+	it("list_wiki_changes hides changes to a project-scoped page the caller can't see", async () => {
+		const project = await seedProject(workspaceId, `PRJ${crypto.randomUUID().slice(0, 4)}`);
+		await seedGroupGrant(workspaceId, userId, project.id);
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+
+		const created = await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Restricted",
+				content: "secret",
+				projectId: project.id,
+				slug: "restricted-delta",
+			}),
+		});
+		expect(created.status).toBe(201);
+
+		// A workspace viewer with no grant on `project` shouldn't see this change.
+		const outsider = await seedWatcher("viewer");
+		const body = (await (
+			await req(`http://localhost/api/wiki/changes?since=${t0}`, {
+				headers: authHeaders(outsider.token, slug),
+			})
+		).json()) as { changes: Array<{ slug: string | null }> };
+		expect(body.changes.some((c) => c.slug === "restricted-delta")).toBe(false);
+
+		// The grantee (the creator) does see it.
+		const ownBody = (await (
+			await req(`http://localhost/api/wiki/changes?since=${t0}`, {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as { changes: Array<{ slug: string | null }> };
+		expect(ownBody.changes.some((c) => c.slug === "restricted-delta")).toBe(true);
+	});
+
+	it("list_wiki_changes watchedOnly=true narrows to watched pages, including via a subtree watch", async () => {
+		const parent = await createPage("watched-scope-parent", "Watched Scope Parent", "content");
+		const other = await createPage("unwatched-scope", "Unwatched Scope", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${parent.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ subtree: true }),
+		});
+
+		const child = await createChildPage(
+			"watched-scope-child",
+			"Watched Scope Child",
+			"child",
+			parent.id
+		);
+		await req(`http://localhost/api/wiki/${other.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+
+		const body = (await (
+			await req("http://localhost/api/wiki/changes?since=0&watchedOnly=true", {
+				headers: authHeaders(watcher.token, slug),
+			})
+		).json()) as { changes: Array<{ pageId: string }> };
+		const pageIds = body.changes.map((c) => c.pageId);
+		expect(pageIds).toContain(child.id);
+		expect(pageIds).not.toContain(other.id);
+	});
+
+	it("MCP: watch_wiki_page / list_wiki_watches / list_wiki_changes mirror the REST behavior", async () => {
+		// Several MCP calls back-to-back would otherwise trip the same per-token rate
+		// limit that req() clears for REST calls above.
+		async function mcp<T>(name: string, args: unknown) {
+			await env.DB.prepare("DELETE FROM rate_limit").run();
+			return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+		}
+
+		// Captured before createPage — since is exclusive and page creation's own
+		// activity row must land after this cutoff, not before it (a slow full-suite
+		// run can otherwise push several real seconds between here and list_wiki_changes).
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+		const page = await createPage("mcp-watch", "MCP Watch", "content");
+
+		const watchRes = await mcp("watch_wiki_page", { slug: page.slug });
+		expect(isMcpError(watchRes)).toBe(false);
+
+		const watches = mcpData<Array<{ pageId: string }>>(await mcp("list_wiki_watches", {}));
+		expect(watches.some((w) => w.pageId === page.id)).toBe(true);
+
+		const unwatchRes = await mcp("unwatch_wiki_page", { slug: page.slug });
+		expect(isMcpError(unwatchRes)).toBe(false);
+		const watchesAfter = mcpData<Array<{ pageId: string }>>(await mcp("list_wiki_watches", {}));
+		expect(watchesAfter.some((w) => w.pageId === page.id)).toBe(false);
+
+		const changes = mcpData<{ changes: Array<{ pageId: string; action: string }> }>(
+			await mcp("list_wiki_changes", { since: t0 })
+		);
+		expect(changes.changes.some((c) => c.pageId === page.id && c.action === "created")).toBe(true);
 	});
 });

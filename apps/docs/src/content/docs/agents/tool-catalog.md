@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**98 tools across 21 domains.**
+**104 tools across 21 domains.**
 
 ## Coordination
 
@@ -149,6 +149,12 @@ running server.
 | `verify_wiki_page` | Stamp a wiki page as freshly verified — sets its frontmatter verified_at to now and verified_by to the CALLING user's email (never caller-supplied). Rewrites the page's frontmatter block (creating one if it had none) and records a revision, same as any other content edit — including its conflict check, so a concurrent edit racing the stamp is rejected rather than reverted. Not allowed for viewers. |
 | `list_stale_pages` | Maintenance queue of wiki pages that need re-verification: computed-stale (verify_interval elapsed since verified_at), unverified (verify_interval declared but never verified), or explicitly status: stale\|deprecated. Same rule search_wiki uses to demote results (R7). |
 | `list_wiki_templates` | List pages flagged as templates (frontmatter `template: true`) — the picker create_wiki_page's `templateSlug` draws from. Templates are conventionally workspace-global (living under a workspace 'Templates' page) but a project-scoped template is allowed and follows the same project-visibility rule as any other project-scoped page. |
+| `watch_wiki_page` | Watch a wiki page by id or slug — its changes (create is n/a here since the page already exists, update/patch/verify/restore/delete) will generate a per-user notification (list_wiki_notifications). Pass subtree=true to also watch every page currently OR LATER nested under this one (resolved dynamically by walking the page hierarchy at notify time, not a one-time snapshot). Calling this again for the same page updates the subtree flag rather than creating a duplicate watch. Template pages (frontmatter template: true) never generate notifications even if watched directly or via a subtree. |
+| `unwatch_wiki_page` | Stop watching a wiki page by id or slug (a no-op if not currently watched). |
+| `list_wiki_watches` | List the pages the calling user is currently watching. |
+| `list_wiki_notifications` | List the calling user's wiki watch notifications (newest first). Each entry records the page (denormalized slug/title, so a notification about a page that's since been deleted still shows what it was about), the action (created\|updated\|deleted), the actor, and whether it's been read. |
+| `mark_wiki_notifications_read` | Mark wiki notifications as read, by id, or all: true for every unread one. |
+| `list_wiki_changes` | Cheap delta feed of wiki page changes since a unix-seconds timestamp — for agents polling 'what changed' instead of re-fetching/re-searching the whole wiki. Backed by the existing activity log (no extra write-path cost). `since` is EXCLUSIVE; poll again using the response's `nextSince`, not a locally-computed timestamp, so changes landing on the same second as the cutoff are never missed or double-delivered. Defaults to every wiki page the caller can see (same visibility as list_wiki_pages/search_wiki) — pass watchedOnly=true to narrow to pages the caller is watching (directly or via a subtree watch). A `deleted` entry's slug/title/projectId reflect the page as it was just before deletion (the row itself is gone). |
 
 ### Attachments
 

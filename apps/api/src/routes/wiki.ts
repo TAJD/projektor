@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { ctxFromHono } from "../services/types";
 import * as wikiService from "../services/wiki";
+import * as wikiWatchersService from "../services/wiki-watchers";
 
 const router = new Hono<HonoEnv>();
 
@@ -105,6 +106,56 @@ router.post("/backfill-links", async (c) => {
 	}
 });
 
+// PROJ-493 (R11): must be registered before the /:slug catch-all below, same as every
+// other fixed-path route above.
+router.get("/watches", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiWatchersService.listWikiWatches(ctx));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.get("/notifications", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const unreadOnly = c.req.query("unreadOnly");
+		const limit = c.req.query("limit");
+		const offset = c.req.query("offset");
+		return c.json(
+			await wikiWatchersService.listWikiNotifications(ctx, { unreadOnly, limit, offset })
+		);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.post("/notifications/read", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const body = await c.req.json().catch(() => ({}));
+		return c.json(await wikiWatchersService.markWikiNotificationsRead(ctx, body));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.get("/changes", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const since = c.req.query("since");
+		const limit = c.req.query("limit");
+		const projectId = c.req.query("projectId");
+		const watchedOnly = c.req.query("watchedOnly");
+		return c.json(
+			await wikiWatchersService.listWikiChanges(ctx, { since, limit, projectId, watchedOnly })
+		);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
 router.get("/:slug/backlinks", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
@@ -180,6 +231,25 @@ router.post("/:slug/verify", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(await wikiService.verifyWikiPage(ctx, c.req.param("slug")));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.post("/:slug/watch", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const body = await c.req.json().catch(() => ({}));
+		return c.json(await wikiWatchersService.watchWikiPage(ctx, c.req.param("slug"), body));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.delete("/:slug/watch", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiWatchersService.unwatchWikiPage(ctx, c.req.param("slug")));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
