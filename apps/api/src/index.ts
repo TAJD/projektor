@@ -1,4 +1,5 @@
 import type { Env, HonoEnv } from "@projektor/types";
+import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -230,6 +231,17 @@ app.use("/api/issue-links/*", authMiddleware, workspaceMiddleware);
 app.use("/api/wiki", authMiddleware, workspaceMiddleware);
 app.use("/api/wiki/*", authMiddleware, workspaceMiddleware);
 app.use("/mcp/*", authMiddleware, workspaceMiddleware);
+// PROJ-494: an inline image embedded in rendered wiki content (`<img src="/api/files/:id?workspace=...">`)
+// is a plain browser subresource load — it can't attach the X-Workspace-Slug header apiFetch
+// normally sends, so GET here also accepts `?workspace=` as a resolution fallback (see
+// middleware/workspace.ts). Scoped to GET only; POST/DELETE always go through apiFetch, which
+// already sends the header.
+const allowFilesQueryWorkspaceFallback = async (c: Context<HonoEnv>, next: Next) => {
+	if (c.req.method === "GET") c.set("allowQueryWorkspaceFallback", true);
+	await next();
+};
+app.use("/api/files", allowFilesQueryWorkspaceFallback);
+app.use("/api/files/*", allowFilesQueryWorkspaceFallback);
 app.use("/api/files", authMiddleware, workspaceMiddleware);
 app.use("/api/files/*", authMiddleware, workspaceMiddleware);
 app.use("/api/task-types", authMiddleware, workspaceMiddleware);

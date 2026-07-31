@@ -77,16 +77,31 @@ async function missingWorkspaceResponse(
 }
 
 // Workspace resolved from the X-Workspace-Slug header, or (opt-in) the Host header's
-// subdomain. See WORKSPACE_SUBDOMAIN_ROUTING in packages/types/src/env.ts. (PROJ-267)
+// subdomain, or (opt-in, PROJ-494) a `?workspace=` query param. See
+// WORKSPACE_SUBDOMAIN_ROUTING in packages/types/src/env.ts. (PROJ-267)
 // PROJ-348: falls back to the MCP path's workspace UUID when no slug was resolved.
 // The token-workspace-scope check in workspaceMiddleware is unchanged and remains
 // the security boundary — a token minted for another workspace is still rejected there.
+//
+// PROJ-494: the query-param fallback exists for GET requests a browser makes as a
+// subresource load (an inline `<img src="/api/files/:id?workspace=...">` in rendered
+// wiki content) — those can't attach a custom header the way apiFetch does. It's the
+// lowest-precedence source and only consulted when index.ts has explicitly opted the
+// route in via allowQueryWorkspaceFallback (GET on /api/files* only) — see AGENTS.md's
+// workspace-scoping invariant and the PROJ-494 PR description for why this is scoped
+// that narrowly rather than applied to workspaceMiddleware generally.
 function resolveWorkspaceTarget(
 	c: Context<HonoEnv>,
 	headerSlug: string | undefined,
 	routingEnabled: boolean
 ): { slug: string | undefined; mcpWorkspaceId: string | undefined } {
-	const slug = headerSlug ?? (routingEnabled ? c.req.header("host")?.split(".")[0] : undefined);
+	const queryFallback = c.get("allowQueryWorkspaceFallback")
+		? (c.req.query("workspace") ?? undefined)
+		: undefined;
+	const slug =
+		headerSlug ??
+		(routingEnabled ? c.req.header("host")?.split(".")[0] : undefined) ??
+		queryFallback;
 	const mcpWorkspaceId = slug ? undefined : mcpWorkspaceIdFromPath(c.req.path);
 	return { slug, mcpWorkspaceId };
 }

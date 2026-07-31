@@ -5,6 +5,7 @@ interface Props {
 	value: string;
 	onChange: (value: string) => void;
 	minHeight?: string;
+	onImageFile?: (file: File) => Promise<string | null>;
 }
 
 // PROJ-431: MarkdownEditor pulls in CodeMirror — 486 KiB raw / 168 KiB gzip, 76% of

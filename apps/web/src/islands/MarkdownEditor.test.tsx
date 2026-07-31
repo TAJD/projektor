@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import MarkdownEditor from "./MarkdownEditor";
+import MarkdownEditor, { PASTE_IMAGE_TYPES } from "./MarkdownEditor";
 
 describe("MarkdownEditor", () => {
 	it("renders the formatting toolbar with core buttons", () => {
@@ -151,5 +151,105 @@ describe("MarkdownEditor — mobile ergonomics (PROJ-431)", () => {
 		expect(source).toMatch(
 			/"@media \(min-width: 640px\)":\s*\{\s*"\.cm-content":\s*\{\s*fontSize:\s*"0\.875rem"\s*\}/
 		);
+	});
+});
+
+// ─── PROJ-494: paste/drag-drop image upload ────────────────────────────────
+
+function findCmContent(container: Element): HTMLElement {
+	const el = container.querySelector(".cm-content");
+	if (!el) throw new Error("cm-content not found");
+	return el as HTMLElement;
+}
+
+describe("MarkdownEditor — inline image paste/drop (PROJ-494)", () => {
+	it("mirrors the backend's INLINE_TYPES (SVG excluded)", () => {
+		expect([...PASTE_IMAGE_TYPES].sort()).toEqual([
+			"image/gif",
+			"image/jpeg",
+			"image/png",
+			"image/webp",
+		]);
+	});
+
+	it("uploads a pasted image via onImageFile and inserts markdown at the cursor", async () => {
+		const onChange = vi.fn();
+		const onImageFile = vi.fn().mockResolvedValue("/api/files/abc123");
+		const { container } = render(
+			<MarkdownEditor value="" onChange={onChange} onImageFile={onImageFile} />
+		);
+		const file = new File(["fake"], "screenshot.png", { type: "image/png" });
+		const clipboardData = {
+			items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+			files: [file],
+			getData: () => "",
+		};
+		fireEvent.paste(findCmContent(container), { clipboardData });
+
+		await waitFor(() => expect(onImageFile).toHaveBeenCalledWith(file));
+		await waitFor(() =>
+			expect(onChange).toHaveBeenCalledWith(
+				expect.stringContaining("![screenshot.png](/api/files/abc123)")
+			)
+		);
+	});
+
+	it("ignores a pasted file whose type isn't an inline-renderable image", async () => {
+		const onImageFile = vi.fn();
+		const { container } = render(
+			<MarkdownEditor value="" onChange={() => {}} onImageFile={onImageFile} />
+		);
+		const file = new File(["data"], "doc.pdf", { type: "application/pdf" });
+		const clipboardData = {
+			items: [{ kind: "file", type: "application/pdf", getAsFile: () => file }],
+			files: [file],
+			getData: () => "",
+		};
+		fireEvent.paste(findCmContent(container), { clipboardData });
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(onImageFile).not.toHaveBeenCalled();
+	});
+
+	it("does not intercept paste when onImageFile is not provided", () => {
+		const { container } = render(<MarkdownEditor value="" onChange={() => {}} />);
+		const file = new File(["fake"], "a.png", { type: "image/png" });
+		const clipboardData = {
+			items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+			files: [file],
+			getData: () => "",
+		};
+		expect(() => fireEvent.paste(findCmContent(container), { clipboardData })).not.toThrow();
+	});
+
+	it("uploads a dropped image via onImageFile and inserts markdown", async () => {
+		const onChange = vi.fn();
+		const onImageFile = vi.fn().mockResolvedValue("/api/files/xyz789");
+		const { container } = render(
+			<MarkdownEditor value="" onChange={onChange} onImageFile={onImageFile} />
+		);
+		const file = new File(["fake"], "drop.gif", { type: "image/gif" });
+		const dataTransfer = { files: [file], items: [], getData: () => "" };
+		fireEvent.drop(findCmContent(container), { dataTransfer, clientX: 0, clientY: 0 });
+
+		await waitFor(() => expect(onImageFile).toHaveBeenCalledWith(file));
+		await waitFor(() =>
+			expect(onChange).toHaveBeenCalledWith(
+				expect.stringContaining("![drop.gif](/api/files/xyz789)")
+			)
+		);
+	});
+
+	it("ignores a dropped file whose type isn't an inline-renderable image", async () => {
+		const onImageFile = vi.fn();
+		const { container } = render(
+			<MarkdownEditor value="" onChange={() => {}} onImageFile={onImageFile} />
+		);
+		const file = new File(["data"], "doc.zip", { type: "application/zip" });
+		const dataTransfer = { files: [file], items: [], getData: () => "" };
+		fireEvent.drop(findCmContent(container), { dataTransfer, clientX: 0, clientY: 0 });
+
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(onImageFile).not.toHaveBeenCalled();
 	});
 });

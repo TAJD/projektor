@@ -1074,3 +1074,91 @@ describe("revision history: diff view + restore (PROJ-492)", () => {
 		});
 	});
 });
+
+// PROJ-494: inline image paste/drag upload + attachment referenced/orphaned badge.
+describe("WikiPage — inline images & attachment badges (PROJ-494)", () => {
+	const REFERENCED_ID = "att-referenced";
+	const ORPHAN_ID = "att-orphan";
+	const PAGE_WITH_IMAGE = {
+		...PAGE,
+		content: `See ![screenshot](/api/files/${REFERENCED_ID}?workspace=acme) here.`,
+	};
+	const ATTACHMENTS = [
+		{
+			id: REFERENCED_ID,
+			filename: "screenshot.png",
+			contentType: "image/png",
+			size: 1024,
+			createdAt: 1,
+		},
+		{ id: ORPHAN_ID, filename: "old.txt", contentType: "text/plain", size: 512, createdAt: 2 },
+	];
+
+	function mockFetchWithAttachments(uploadSpy?: (form: FormData) => void) {
+		return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/api/files")) {
+				if (init?.method === "POST") {
+					uploadSpy?.(init.body as FormData);
+					return Promise.resolve({ ok: true, json: () => Promise.resolve({ id: "att-new" }) });
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(ATTACHMENTS) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE_WITH_IMAGE) });
+		});
+	}
+
+	it("badges an attachment referenced in the page content as 'In page'", async () => {
+		vi.stubGlobal("fetch", mockFetchWithAttachments());
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		await screen.findByText("screenshot.png");
+		const referencedRow = screen.getByText("screenshot.png").closest("div");
+		expect(referencedRow?.textContent).toContain("In page");
+	});
+
+	it("badges an attachment not referenced in the content as 'Unreferenced'", async () => {
+		vi.stubGlobal("fetch", mockFetchWithAttachments());
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		await screen.findByText("old.txt");
+		const orphanRow = screen.getByText("old.txt").closest("div");
+		expect(orphanRow?.textContent).toContain("Unreferenced");
+	});
+
+	it("uploads a pasted image via the existing attachment endpoint and inserts a markdown ref", async () => {
+		const uploadSpy = vi.fn();
+		const fetchMock = mockFetchWithAttachments(uploadSpy);
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		const content = await waitFor(() => {
+			const el = document.querySelector(".cm-content");
+			if (!el) throw new Error("cm-content not found");
+			return el as HTMLElement;
+		});
+
+		const file = new File(["fake"], "pasted.png", { type: "image/png" });
+		const clipboardData = {
+			items: [{ kind: "file", type: "image/png", getAsFile: () => file }],
+			files: [file],
+			getData: () => "",
+		};
+		fireEvent.paste(content, { clipboardData });
+
+		await waitFor(() => expect(uploadSpy).toHaveBeenCalled());
+		const form = uploadSpy.mock.calls[0][0] as FormData;
+		expect(form.get("entityType")).toBe("wiki_page");
+		expect(form.get("entityId")).toBe(PAGE.id);
+	});
+});
