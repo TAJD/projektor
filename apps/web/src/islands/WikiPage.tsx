@@ -14,6 +14,13 @@ interface ProjectOption {
 	name: string;
 }
 
+// PROJ-489 (R7): computed/derived at read time, never stored — null when the page has
+// no verify_interval/status frontmatter signal at all.
+interface WikiFreshness {
+	state: "fresh" | "stale" | "unverified";
+	staleSince: number | null;
+}
+
 interface SearchResult {
 	id: string;
 	slug: string;
@@ -24,6 +31,9 @@ interface SearchResult {
 	type: string | null;
 	status: string | null;
 	tags: string[];
+	// PROJ-489 (R7): search demotes stale/deprecated results — surfaced here so the UI
+	// can show why a result ranks low.
+	freshness: WikiFreshness | null;
 }
 
 interface WikiPageData {
@@ -41,6 +51,16 @@ interface WikiPageData {
 	verified_by: string | null;
 	owners: string[];
 	verify_interval: number | null;
+	// PROJ-489 (R7): computed freshness, surfaced in the page header.
+	freshness: WikiFreshness | null;
+}
+
+// PROJ-489 (R7): the list_stale_pages maintenance queue shape.
+interface StalePageItem {
+	id: string;
+	slug: string;
+	title: string;
+	freshness: WikiFreshness | null;
 }
 
 // PROJ-488: shape returned by GET /api/wiki (listWikiPages) — used for the sidebar's
@@ -93,6 +113,31 @@ function WikiStatusPill({ status }: { status: string }) {
 	);
 }
 
+// PROJ-489 (R7): "fresh" renders nothing — only stale/unverified pages need a visual
+// nudge; a page with no freshness signal at all (`null`) also renders nothing (handled
+// by the caller, not this component).
+const WIKI_FRESHNESS_BADGE_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+	stale: { bg: "var(--priority-high-bg)", color: "var(--priority-high-text)", label: "Stale" },
+	unverified: {
+		bg: "var(--priority-low-bg)",
+		color: "var(--priority-low-text)",
+		label: "Unverified",
+	},
+};
+
+function WikiFreshnessBadge({ state }: { state: WikiFreshness["state"] }) {
+	const style = WIKI_FRESHNESS_BADGE_STYLE[state];
+	if (!style) return null;
+	return (
+		<span
+			class="inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold uppercase tracking-wide"
+			style={{ background: style.bg, color: style.color }}
+		>
+			{style.label}
+		</span>
+	);
+}
+
 const WIKI_TAG_CHIP_CLASS =
 	"inline-flex items-center px-2 py-[0.1rem] mr-1 mb-1 rounded-full text-[0.72rem] " +
 	"bg-bg border border-border text-text-base";
@@ -113,14 +158,29 @@ function TagChips({ tags }: { tags: string[] | undefined | null }) {
 // PROJ-488: header card summarizing a page's frontmatter metadata (type/status/tags/
 // owners/verification). Omitted entirely for a page with no frontmatter at all, so
 // pages predating this feature (or that simply don't use it) render exactly as before.
-function WikiMetadataCard({ page }: { page: WikiPageData }) {
+//
+// PROJ-489 (R7): the Verify button/freshness badge only render when the page has opted
+// into verification tracking (a verify_interval or a status set) — a page with neither
+// has freshness: null and nothing meaningful to verify against.
+function WikiMetadataCard({
+	page,
+	onVerify,
+	verifying,
+	verifyError,
+}: {
+	page: WikiPageData;
+	onVerify: () => void;
+	verifying: boolean;
+	verifyError: string | null;
+}) {
 	const hasMetadata =
 		Boolean(page.type) ||
 		Boolean(page.status) ||
 		page.tags.length > 0 ||
 		page.owners.length > 0 ||
 		Boolean(page.verified_at);
-	if (!hasMetadata) return null;
+	const hasVerificationSignal = Boolean(page.verify_interval) || Boolean(page.status);
+	if (!hasMetadata && !hasVerificationSignal) return null;
 
 	return (
 		<div class="flex flex-wrap items-center gap-2 mb-4 p-3 border border-border rounded-lg bg-surface text-[0.8rem] text-text-muted">
@@ -130,12 +190,30 @@ function WikiMetadataCard({ page }: { page: WikiPageData }) {
 				</span>
 			)}
 			{page.status && <WikiStatusPill status={page.status} />}
+			{page.freshness && page.freshness.state !== "fresh" && (
+				<WikiFreshnessBadge state={page.freshness.state} />
+			)}
 			<TagChips tags={page.tags} />
 			{page.owners.length > 0 && <span>Owners: {page.owners.join(", ")}</span>}
 			{page.verified_at && (
 				<span>
 					Verified {new Date(page.verified_at * 1000).toLocaleDateString()}
 					{page.verified_by ? ` by ${page.verified_by}` : ""}
+				</span>
+			)}
+			{hasVerificationSignal && (
+				<button
+					type="button"
+					class="btn btn-outline btn-sm"
+					onClick={onVerify}
+					disabled={verifying}
+				>
+					{verifying ? "Verifying…" : "Verify"}
+				</button>
+			)}
+			{verifyError && (
+				<span role="alert" class="text-[var(--danger-text)]">
+					{verifyError}
 				</span>
 			)}
 		</div>
@@ -300,15 +378,54 @@ function SearchResultsList({
 				<li key={r.id}>
 					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
 						<span class="font-medium">{r.title}</span>
-						{(r.type || r.status || (r.tags?.length ?? 0) > 0) && (
+						{(r.type ||
+							r.status ||
+							(r.tags?.length ?? 0) > 0 ||
+							(r.freshness && r.freshness.state !== "fresh")) && (
 							<span class="block mt-[0.15rem]">
 								{r.status && <WikiStatusPill status={r.status} />}
+								{r.freshness && r.freshness.state !== "fresh" && (
+									<WikiFreshnessBadge state={r.freshness.state} />
+								)}
 								<TagChips tags={r.tags} />
 							</span>
 						)}
 						{r.excerpt && (
 							<span class="block text-[0.75rem] text-text-muted truncate">
 								{renderHighlightedExcerpt(r.excerpt)}
+							</span>
+						)}
+					</button>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+// PROJ-489 (R7): the list_stale_pages maintenance queue — a simple flat list, matching
+// FilteredPagesList's styling below (no existing "maintenance queue" UI precedent to
+// follow elsewhere in this codebase).
+function StalePagesList({
+	loading,
+	results,
+	onSelect,
+}: {
+	loading: boolean;
+	results: StalePageItem[];
+	onSelect: (slug: string) => void;
+}) {
+	if (loading) return <p class="text-[0.8rem] text-text-muted m-0">Loading…</p>;
+	if (results.length === 0)
+		return <p class="text-[0.8rem] text-text-muted m-0">Nothing needs verification</p>;
+	return (
+		<ul class="list-none m-0 p-0">
+			{results.map((r) => (
+				<li key={r.id}>
+					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
+						<span class="font-medium">{r.title}</span>
+						{r.freshness && (
+							<span class="block mt-[0.15rem]">
+								<WikiFreshnessBadge state={r.freshness.state} />
 							</span>
 						)}
 					</button>
@@ -488,6 +605,10 @@ function WikiSidebar({
 	hasActiveFilters,
 	filteredResults,
 	filteredLoading,
+	staleOpen,
+	onToggleStale,
+	stalePages,
+	staleLoading,
 }: {
 	workspaceSlug: string | undefined;
 	projectId: string;
@@ -509,6 +630,10 @@ function WikiSidebar({
 	hasActiveFilters: boolean;
 	filteredResults: WikiListItem[];
 	filteredLoading: boolean;
+	staleOpen: boolean;
+	onToggleStale: (open: boolean) => void;
+	stalePages: StalePageItem[];
+	staleLoading: boolean;
 }) {
 	const asideClass = [
 		"w-[240px] shrink-0 bg-surface border-r border-border p-4 overflow-y-auto",
@@ -558,6 +683,19 @@ function WikiSidebar({
 			) : (
 				<PageTreeList loading={treeLoading} tree={pageTree} slug={slug} onNavigate={onNavigate} />
 			)}
+			<details
+				class="mt-3 pt-3 border-t border-border"
+				open={staleOpen}
+				// biome-ignore lint/suspicious/noExplicitAny: Preact's JSX types don't declare onToggle on <details>
+				onToggle={((e: any) => onToggleStale(e.currentTarget.open)) as any}
+			>
+				<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">
+					Needs verification
+				</summary>
+				<div class="pt-2">
+					<StalePagesList loading={staleLoading} results={stalePages} onSelect={onNavigate} />
+				</div>
+			</details>
 		</aside>
 	);
 }
@@ -1059,6 +1197,10 @@ interface PageArticleProps {
 	onStartEdit: () => void;
 	onStartCreateChild: (pageId: string) => void;
 	onDelete: () => void;
+	// PROJ-489 (R7): the metadata header card's Verify button.
+	onVerify: () => void;
+	verifying: boolean;
+	verifyError: string | null;
 	moving: boolean;
 	moveOptions: SelectOption[];
 	moveTargetId: string;
@@ -1110,6 +1252,9 @@ function PageArticleMeta(
 		| "onStartEdit"
 		| "onStartCreateChild"
 		| "onDelete"
+		| "onVerify"
+		| "verifying"
+		| "verifyError"
 		| "moving"
 		| "moveOptions"
 		| "moveTargetId"
@@ -1156,7 +1301,14 @@ function PageArticleMeta(
 				onDelete={props.onDelete}
 			/>
 
-			{!props.editing && <WikiMetadataCard page={props.page} />}
+			{!props.editing && (
+				<WikiMetadataCard
+					page={props.page}
+					onVerify={props.onVerify}
+					verifying={props.verifying}
+					verifyError={props.verifyError}
+				/>
+			)}
 
 			{props.moving && (
 				<MovePageForm
@@ -1383,6 +1535,36 @@ function useWikiTree(workspaceSlug: string | undefined, projectId: string) {
 	}, [fetchTree]);
 
 	return { pageTree, pageMap, treeLoading, fetchTree };
+}
+
+// PROJ-489 (R7): the list_stale_pages maintenance queue, shown as a collapsible section
+// in the sidebar — fetched lazily (only once expanded) since most sessions won't open it.
+function useWikiStalePages(workspaceSlug: string | undefined, projectId: string) {
+	const [staleOpen, setStaleOpen] = useState(false);
+	const [stalePages, setStalePages] = useState<StalePageItem[]>([]);
+	const [staleLoading, setStaleLoading] = useState(false);
+
+	useEffect(() => {
+		if (!staleOpen) return;
+		let cancelled = false;
+		setStaleLoading(true);
+		const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+		apiFetch<StalePageItem[]>(`/api/wiki/stale-pages${qs}`, { workspaceSlug })
+			.then((data) => {
+				if (!cancelled) setStalePages(Array.isArray(data) ? data : []);
+			})
+			.catch(() => {
+				if (!cancelled) setStalePages([]);
+			})
+			.finally(() => {
+				if (!cancelled) setStaleLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [staleOpen, workspaceSlug, projectId]);
+
+	return { staleOpen, setStaleOpen, stalePages, staleLoading };
 }
 
 // PROJ-488: type/status/tags filters shared between the sidebar's filtered browse view
@@ -1978,6 +2160,37 @@ function useMovePage(
 	};
 }
 
+// PROJ-489 (R7): stamps verified_at/verified_by (server resolves the CALLING user's
+// identity — nothing to pass here) and refetches the page so the header reflects the
+// new freshness state immediately.
+function useWikiVerify(
+	workspaceSlug: string | undefined,
+	page: WikiPageData | null,
+	fetchPage: (s: string) => Promise<void>
+) {
+	const [verifying, setVerifying] = useState(false);
+	const [verifyError, setVerifyError] = useState<string | null>(null);
+
+	async function verifyPage() {
+		if (!page) return;
+		setVerifying(true);
+		setVerifyError(null);
+		try {
+			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}/verify`, {
+				method: "POST",
+				workspaceSlug,
+			});
+			await fetchPage(page.slug);
+		} catch (e) {
+			setVerifyError(`Verify failed: ${String(e)}`);
+		} finally {
+			setVerifying(false);
+		}
+	}
+
+	return { verifying, verifyError, verifyPage };
+}
+
 function useCreatePageForm(
 	workspaceSlug: string | undefined,
 	projectId: string,
@@ -2201,6 +2414,7 @@ function WikiPageShell(props: {
 	onNavigate: (slug: string) => void;
 	onCreate: () => void;
 	filters: ReturnType<typeof useWikiFilters>;
+	stale: ReturnType<typeof useWikiStalePages>;
 	mainContentProps: {
 		creating: boolean;
 		createProps: CreateFormProps;
@@ -2235,6 +2449,10 @@ function WikiPageShell(props: {
 				hasActiveFilters={props.filters.hasActiveFilters}
 				filteredResults={props.filters.filteredResults}
 				filteredLoading={props.filters.filteredLoading}
+				staleOpen={props.stale.staleOpen}
+				onToggleStale={props.stale.setStaleOpen}
+				stalePages={props.stale.stalePages}
+				staleLoading={props.stale.staleLoading}
 			/>
 
 			<main class="flex-1 p-8 min-w-0">
@@ -2314,6 +2532,9 @@ function buildArticleProps(article: {
 	startEdit: () => void;
 	startCreate: (parentId: string | null) => void;
 	deletePage: () => void;
+	onVerify: () => void;
+	verifying: boolean;
+	verifyError: string | null;
 	latestRevision: WikiRevision | null;
 	saveError: string | null;
 	draftBanner: { title: string; content: string; savedAt: number } | null;
@@ -2346,6 +2567,9 @@ function buildArticleProps(article: {
 		onStartEdit: article.startEdit,
 		onStartCreateChild: article.startCreate,
 		onDelete: article.deletePage,
+		onVerify: article.onVerify,
+		verifying: article.verifying,
+		verifyError: article.verifyError,
 		latestRevision: article.latestRevision,
 		saveError: article.saveError,
 		draftBanner: article.draftBanner,
@@ -2389,6 +2613,7 @@ export default function WikiPage({
 	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp, slugProp);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
 	const filters = useWikiFilters(workspaceSlug, projectId);
+	const stale = useWikiStalePages(workspaceSlug, projectId);
 	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(
 		workspaceSlug,
 		projectId,
@@ -2413,6 +2638,7 @@ export default function WikiPage({
 	);
 	const createForm = useCreatePageForm(workspaceSlug, projectId, fetchTree);
 	const move = useMovePage(workspaceSlug, pageData.page, pageData.fetchPage, fetchTree);
+	const verify = useWikiVerify(workspaceSlug, pageData.page, pageData.fetchPage);
 
 	const { navigateTo, startCreate, submitCreate, deletePage } = createWikiActions({
 		workspaceSlug,
@@ -2467,6 +2693,9 @@ export default function WikiPage({
 		startEdit,
 		startCreate,
 		deletePage,
+		onVerify: verify.verifyPage,
+		verifying: verify.verifying,
+		verifyError: verify.verifyError,
 		latestRevision,
 		saveError: editState.saveError,
 		draftBanner: editState.draftBanner,
@@ -2500,6 +2729,7 @@ export default function WikiPage({
 			onNavigate={navigateTo}
 			onCreate={() => startCreate(null)}
 			filters={filters}
+			stale={stale}
 			mainContentProps={{
 				creating: createForm.creating,
 				createProps,

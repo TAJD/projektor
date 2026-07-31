@@ -1,4 +1,4 @@
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { WikiFrontmatterSchema } from "../schemas/wiki";
 import { ValidationError } from "./errors";
 
@@ -102,4 +102,33 @@ export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
 		owners: d.owners ?? [],
 		verifyInterval: d.verify_interval ?? null,
 	};
+}
+
+// PROJ-489 (R7): markdown + frontmatter is the canonical source (PRD principle 1) — the
+// denormalized wiki_pages.verified_at/verified_by columns exist purely for filtering, so
+// verify_wiki_page must stamp the *content's* frontmatter block, not just those columns.
+// Otherwise the next content-only edit would re-parse the page's still-stale frontmatter
+// (parseWikiFrontmatter above) and silently wipe out the verification stamp. Preserves
+// every other existing frontmatter key untouched; adds a frontmatter block (with only
+// verified_at/verified_by) to a page that previously had none at all.
+export function stampWikiFrontmatterVerification(
+	content: string,
+	verifiedAtSeconds: number,
+	verifiedBy: string
+): string {
+	const match = FRONTMATTER_RE.exec(content);
+	const rest = match ? content.slice(match[0].length) : content;
+
+	let raw: Record<string, unknown> = {};
+	if (match) {
+		const parsedRaw = parseYaml(match[1]);
+		if (parsedRaw && typeof parsedRaw === "object" && !Array.isArray(parsedRaw)) {
+			raw = { ...(parsedRaw as Record<string, unknown>) };
+		}
+	}
+	raw.verified_at = new Date(verifiedAtSeconds * 1000).toISOString();
+	raw.verified_by = verifiedBy;
+
+	const yamlText = stringifyYaml(raw).trimEnd();
+	return `---\n${yamlText}\n---\n${rest}`;
 }

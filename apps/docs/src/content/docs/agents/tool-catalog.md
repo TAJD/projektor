@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**93 tools across 21 domains.**
+**95 tools across 21 domains.**
 
 ## Coordination
 
@@ -133,7 +133,7 @@ running server.
 | Tool | Description |
 |------|-------------|
 | `list_wiki_pages` | List wiki pages in the workspace, optionally filtered by parent, project, frontmatter type/status, or tags (any-of match) |
-| `search_wiki` | Full-text search over wiki pages (FTS5, BM25-ranked, title weighted above body). Returns match-anchored snippets highlighted with ** markers. type/status/tags filter on the denormalized frontmatter columns (R6); status here is unrelated to the freshness/staleness ranking work (R7, PROJ-489), which hasn't landed yet. |
+| `search_wiki` | Full-text search over wiki pages (FTS5, BM25-ranked, title weighted above body). Returns match-anchored snippets highlighted with ** markers, plus a computed `freshness` ({state, staleSince} or null if the page has no verify_interval/status signal) per result. type/status/tags filter on the denormalized frontmatter columns (R6). Results are demoted (ranked below everything else, ties broken by bm25 within each tier) when the page is computed-stale/unverified OR has an explicit status: stale\|deprecated (R7). |
 | `get_wiki_page` | Get a wiki page by slug, including full content |
 | `create_wiki_page` | Create a new wiki page. `content` may start with an optional YAML frontmatter block (`---\ntype: runbook\ntags: [foo]\nstatus: draft\n---\n...`) — type (freeform; well-known values runbook\|adr\|spec\|note), tags[], status (draft\|current\|stale\|deprecated), verified_at, verified_by, owners[], verify_interval (days) are parsed and denormalized for filtering. Invalid frontmatter (bad status/enum value, wrong field type, unrecognized key) is rejected with a structured validation error, not silently ignored. |
 | `update_wiki_page` | Update a wiki page by id or slug (saves a revision when content changes). Pass baseRevisionId (the current revision id from list_wiki_revisions/get_wiki_revision, or null if the page has never been revised) for conflict-safe writes: if the page advanced since baseRevisionId, the write is rejected with a structured conflict (currentRevisionId + a unified diff) instead of silently overwriting. Omitting baseRevisionId is DEPRECATED — it keeps today's last-write-wins behavior during the transition and will be rejected in a future version. `content` may include a YAML frontmatter block (see create_wiki_page); it's re-parsed on every content edit, replacing the page's previously-stored metadata. Omitting `content` leaves the page's existing frontmatter metadata unchanged. |
@@ -144,6 +144,8 @@ running server.
 | `backfill_wiki_links` | One-time (idempotent, safe to re-run) recompute of the wiki_links graph for every existing page in the workspace. Owner/admin only. |
 | `list_wiki_revisions` | List revision history for a wiki page |
 | `get_wiki_revision` | Get the content of a specific wiki revision by its ID |
+| `verify_wiki_page` | Stamp a wiki page as freshly verified — sets its frontmatter verified_at to now and verified_by to the CALLING user's email (never caller-supplied). Rewrites the page's frontmatter block (creating one if it had none) and records a revision, same as any other content edit. Not allowed for viewers. |
+| `list_stale_pages` | Maintenance queue of wiki pages that need re-verification: computed-stale (verify_interval elapsed since verified_at), unverified (verify_interval declared but never verified), or explicitly status: stale\|deprecated. Same rule search_wiki uses to demote results (R7). |
 
 ### Attachments
 

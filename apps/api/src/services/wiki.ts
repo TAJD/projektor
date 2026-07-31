@@ -6,6 +6,7 @@ import {
 	CreatePageSchema,
 	DeleteWikiPageOptionsSchema,
 	ListPagesInputSchema,
+	ListStaleWikiPagesInputSchema,
 	SearchWikiInputSchema,
 	UpdatePageSchema,
 } from "../schemas/wiki";
@@ -21,7 +22,12 @@ import { recordActivity } from "./activity";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
-import { parseWikiFrontmatter, type WikiFrontmatterMeta } from "./wiki-frontmatter";
+import { computeFreshness } from "./wiki-freshness";
+import {
+	parseWikiFrontmatter,
+	stampWikiFrontmatterVerification,
+	type WikiFrontmatterMeta,
+} from "./wiki-frontmatter";
 import {
 	backlinksForResolvedPage,
 	clearIncomingLinkTargets,
@@ -289,6 +295,26 @@ function tagsFilterCondition(tags: string[]) {
 	)}))`;
 }
 
+// PROJ-489 (R7): a page is "stale" for maintenance-queue/ranking-demotion purposes when
+// EITHER an explicit `status: stale|deprecated` is set, OR a `verify_interval` was
+// declared and the page is either never-verified or overdue. This is the SQL-side
+// mirror of computeFreshness's stale/unverified branches (services/wiki-freshness.ts) —
+// kept in lockstep by hand since this needs to run inside SQL (ORDER BY / WHERE) rather
+// than per-row in JS. `now` is passed in as a bound parameter (not `strftime('%s','now')`)
+// so ranking and the freshness computed for the same response agree on one instant.
+function staleWikiPageCondition(now: number) {
+	return sql`(
+		${schema.wikiPages.status} IN ('stale', 'deprecated')
+		OR (
+			${schema.wikiPages.verifyInterval} IS NOT NULL
+			AND (
+				${schema.wikiPages.verifiedAt} IS NULL
+				OR (${schema.wikiPages.verifiedAt} + ${schema.wikiPages.verifyInterval} * 86400) <= ${now}
+			)
+		)
+	)`;
+}
+
 export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 	const parsed = ListPagesInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -435,18 +461,28 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 		params.push(...tags);
 	}
 
+	// PROJ-489 (R7): demote computed-stale/unverified/explicitly-stale-or-deprecated pages
+	// below everything else, THEN rank by bm25 within each tier. `now` is bound once and
+	// reused below for the freshness computed on each returned row, so the ordering and
+	// the displayed freshness state always agree.
+	const now = Math.floor(Date.now() / 1000);
 	// PROJ-486: bm25() alone ties on equal-rank rows, which makes LIMIT/OFFSET
 	// paging non-deterministic (duplicate/skip results across pages) — break
 	// ties by page id for a stable order.
-	q += ` ORDER BY bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}), p.id LIMIT ? OFFSET ?`;
-	params.push(limit, offset);
+	q += ` ORDER BY (CASE WHEN (
+	              p.status IN ('stale', 'deprecated')
+	              OR (
+	                p.verify_interval IS NOT NULL
+	                AND (p.verified_at IS NULL OR (p.verified_at + p.verify_interval * 86400) <= ?)
+	              )
+	            ) THEN 1 ELSE 0 END),
+	          bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}), p.id LIMIT ? OFFSET ?`;
+	params.push(now, limit, offset);
 
 	const { results } = await ctx.db
 		.prepare(q)
 		.bind(...params)
 		.all();
-	// PROJ-489 (R7, not landed): no freshness model exists yet, so freshness is
-	// omitted-as-null rather than fabricated.
 	return (results as Array<Record<string, unknown>>).map((r) => ({
 		...r,
 		// PROJ-488: this is a raw D1 query, so the JSON-array columns come back as the
@@ -455,7 +491,14 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 		// tags/owners with the same shape.
 		tags: decodeJsonArrayColumn(r.tags),
 		owners: decodeJsonArrayColumn(r.owners),
-		freshness: null,
+		// PROJ-489 (R7): null when the page has no verify_interval/status signal at all —
+		// never fabricated (services/wiki-freshness.ts).
+		freshness: computeFreshness({
+			verifiedAt: r.verified_at as number | null,
+			verifyInterval: r.verify_interval as number | null,
+			status: r.status as string | null,
+			now,
+		}),
 	}));
 }
 
@@ -529,7 +572,16 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 	const page = direct ?? (await resolveWikiPageByRedirect(orm, ctx.workspaceId, slugOrId));
 	if (!page) throw new NotFoundError("Wiki page not found");
 	await assertWikiPageVisible(ctx, page.project_id);
-	return { ...page, url: wikiPagePath(page.slug) };
+	return {
+		...page,
+		url: wikiPagePath(page.slug),
+		// PROJ-489 (R7): computed/derived, not a stored column — surfaced for the page header.
+		freshness: computeFreshness({
+			verifiedAt: page.verified_at,
+			verifyInterval: page.verify_interval,
+			status: page.status,
+		}),
+	};
 }
 
 // PROJ-485: "what links here" — pages that link to `slugOrId` via a resolved wiki_links
@@ -961,6 +1013,117 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	});
 
 	return { ok: true, url: wikiPagePath(slug ?? page.slug) };
+}
+
+// PROJ-489 (R7): stamps verified_at/verified_by using the CALLING user's identity —
+// never a caller-supplied value, so an agent can't backdate/forge another user's
+// verification. Frontmatter (not just the denormalized columns) is the canonical source
+// (PRD principle 1), so this rewrites the page's content frontmatter block and routes
+// through updateWikiPage's normal content-write path (revision snapshot, frontmatter
+// re-parse into columns, FTS/link reindex, activity log) rather than UPDATE-ing the
+// verified_at/verified_by columns directly — that would drift out of sync with content
+// the moment someone next makes an unrelated content-only edit (parseWikiFrontmatter
+// would re-parse the page's still-stale frontmatter and silently wipe the stamp).
+export async function verifyWikiPage(ctx: ServiceCtx, idOrSlug: string) {
+	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
+	await requireWikiWrite(ctx, page.projectId);
+
+	const orm = drizzle(ctx.db, { schema });
+	const user = await orm
+		.select({ email: schema.users.email })
+		.from(schema.users)
+		.where(eq(schema.users.id, ctx.userId))
+		.get();
+	if (!user) throw new NotFoundError("Calling user not found");
+
+	const now = Math.floor(Date.now() / 1000);
+	const newContent = stampWikiFrontmatterVerification(page.content, now, user.email);
+	await updateWikiPage(ctx, page.id, { content: newContent, summary: "Verified" });
+
+	// Re-derive from the same frontmatter just written, so the response matches exactly
+	// what a subsequent read would parse back out (rather than re-fetching the page).
+	const meta = parseWikiFrontmatter(newContent);
+	return {
+		ok: true,
+		verifiedAt: meta.verifiedAt,
+		verifiedBy: meta.verifiedBy,
+		url: wikiPagePath(page.slug),
+		freshness: computeFreshness({
+			verifiedAt: meta.verifiedAt,
+			verifyInterval: meta.verifyInterval,
+			status: meta.status,
+			now,
+		}),
+	};
+}
+
+// PROJ-489 (R7): the maintenance queue — pages that are computed-stale (verify_interval
+// elapsed), unverified (verify_interval declared but never verified), or explicitly
+// `status: stale|deprecated`. Same condition as searchWiki's ranking demotion
+// (staleWikiPageCondition above), so "what search demotes" and "what this queue lists"
+// never disagree.
+export async function listStaleWikiPages(ctx: ServiceCtx, input: unknown) {
+	const parsed = ListStaleWikiPagesInputSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, limit, offset } = parsed.data;
+
+	if (projectId) {
+		// PROJ-311: same as searchWiki — querying a project the caller can't see returns nothing.
+		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+			return [];
+		}
+	}
+
+	const orm = drizzle(ctx.db, { schema });
+	const now = Math.floor(Date.now() / 1000);
+	const conditions = [
+		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+		staleWikiPageCondition(now),
+	];
+	if (projectId) {
+		conditions.push(eq(schema.wikiPages.projectId, projectId));
+	} else {
+		// PROJ-311: workspace-wide, exclude project-scoped pages the caller isn't granted.
+		const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
+		if (visible) {
+			const cond = or(isNull(schema.wikiPages.projectId), visible);
+			if (cond) conditions.push(cond);
+		}
+	}
+
+	const rows = await orm
+		.select({
+			id: schema.wikiPages.id,
+			slug: schema.wikiPages.slug,
+			title: schema.wikiPages.title,
+			// eslint-disable-next-line camelcase
+			project_id: schema.wikiPages.projectId,
+			status: schema.wikiPages.status,
+			// eslint-disable-next-line camelcase
+			verified_at: schema.wikiPages.verifiedAt,
+			// eslint-disable-next-line camelcase
+			verified_by: schema.wikiPages.verifiedBy,
+			// eslint-disable-next-line camelcase
+			verify_interval: schema.wikiPages.verifyInterval,
+			// eslint-disable-next-line camelcase
+			updated_at: schema.wikiPages.updatedAt,
+		})
+		.from(schema.wikiPages)
+		.where(and(...conditions))
+		.orderBy(asc(schema.wikiPages.updatedAt))
+		.limit(limit)
+		.offset(offset);
+
+	return rows.map((r) => ({
+		...r,
+		url: wikiPagePath(r.slug),
+		freshness: computeFreshness({
+			verifiedAt: r.verified_at,
+			verifyInterval: r.verify_interval,
+			status: r.status,
+			now,
+		}),
+	}));
 }
 
 // PROJ-238: breadth-first walk of parent_id children, chunked to stay under D1's

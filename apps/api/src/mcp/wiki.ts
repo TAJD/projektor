@@ -46,9 +46,12 @@ export const wikiTools: MCPTool[] = [
 		name: "search_wiki",
 		description:
 			"Full-text search over wiki pages (FTS5, BM25-ranked, title weighted above body). " +
-			"Returns match-anchored snippets highlighted with ** markers. type/status/tags filter " +
-			"on the denormalized frontmatter columns (R6); status here is unrelated to the " +
-			"freshness/staleness ranking work (R7, PROJ-489), which hasn't landed yet.",
+			"Returns match-anchored snippets highlighted with ** markers, plus a computed " +
+			"`freshness` ({state, staleSince} or null if the page has no verify_interval/status " +
+			"signal) per result. type/status/tags filter on the denormalized frontmatter columns " +
+			"(R6). Results are demoted (ranked below everything else, ties broken by bm25 within " +
+			"each tier) when the page is computed-stale/unverified OR has an explicit " +
+			"status: stale|deprecated (R7).",
 		inputSchema: {
 			type: "object",
 			required: ["query"],
@@ -300,6 +303,47 @@ export const wikiTools: MCPTool[] = [
 		async handler(input, ctx) {
 			const { slug, revisionId } = input as { slug: string; revisionId: string };
 			return wikiService.getWikiRevision(ctx as ServiceCtx, slug, revisionId);
+		},
+	},
+	{
+		name: "verify_wiki_page",
+		description:
+			"Stamp a wiki page as freshly verified — sets its frontmatter verified_at to now and " +
+			"verified_by to the CALLING user's email (never caller-supplied). Rewrites the page's " +
+			"frontmatter block (creating one if it had none) and records a revision, same as any " +
+			"other content edit. Not allowed for viewers.",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: {
+				slug: { type: "string", description: "Page ID or slug" },
+			},
+		},
+		async handler(input, ctx) {
+			const { slug } = input as { slug: string };
+			return wikiService.verifyWikiPage(ctx as ServiceCtx, slug);
+		},
+	},
+	{
+		name: "list_stale_pages",
+		description:
+			"Maintenance queue of wiki pages that need re-verification: computed-stale " +
+			"(verify_interval elapsed since verified_at), unverified (verify_interval declared but " +
+			"never verified), or explicitly status: stale|deprecated. Same rule search_wiki uses to " +
+			"demote results (R7).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: {
+					type: "string",
+					description: "Restrict to pages belonging to this project ID",
+				},
+				limit: { type: "number", default: 50 },
+				offset: { type: "number", default: 0 },
+			},
+		},
+		async handler(input, ctx) {
+			return wikiService.listStaleWikiPages(ctx, input);
 		},
 	},
 ];
