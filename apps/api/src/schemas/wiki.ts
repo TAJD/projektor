@@ -123,3 +123,11 @@ export const DeleteWikiPageOptionsSchema = z.object({
 export const ListBrokenWikiLinksInputSchema = z.object({
 	projectId: z.string().uuid().optional(),
 });
+
+// PROJ-489 (R7): the maintenance queue of computed-stale/unverified/explicitly stale-or-
+// deprecated pages (services/wiki.ts#listStaleWikiPages).
+export const ListStaleWikiPagesInputSchema = z.object({
+	projectId: z.string().uuid().optional(),
+	limit: z.coerce.number().int().min(1).max(200).optional().default(50),
+	offset: z.coerce.number().int().min(0).optional().default(0),
+});

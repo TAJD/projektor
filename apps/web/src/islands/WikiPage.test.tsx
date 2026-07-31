@@ -10,6 +10,11 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WikiPage from "./WikiPage";
 
+interface WikiFreshness {
+	state: "fresh" | "stale" | "unverified";
+	staleSince: number | null;
+}
+
 interface WikiPageData {
 	id: string;
 	slug: string;
@@ -24,6 +29,7 @@ interface WikiPageData {
 	verified_by: string | null;
 	owners: string[];
 	verify_interval: number | null;
+	freshness: WikiFreshness | null;
 }
 
 const PAGE: WikiPageData = {
@@ -40,6 +46,7 @@ const PAGE: WikiPageData = {
 	verified_by: null,
 	owners: [],
 	verify_interval: null,
+	freshness: null,
 };
 
 function mockFetchWiki(page: WikiPageData | null, ok = true, status = 404) {
@@ -719,5 +726,143 @@ describe("WikiPage frontmatter metadata (PROJ-488)", () => {
 				)
 			).toBe(true);
 		});
+	});
+});
+
+// PROJ-489 (R7): Verify button + computed staleness badge in the metadata header card.
+describe("WikiPage freshness model (PROJ-489)", () => {
+	const STALE_PAGE: WikiPageData = {
+		...PAGE,
+		verify_interval: 30,
+		verified_at: 1_000_000,
+		freshness: { state: "stale", staleSince: 1_000_000 + 30 * 86400 },
+	};
+
+	const FRESH_PAGE: WikiPageData = {
+		...PAGE,
+		verify_interval: 365,
+		verified_at: 1_000_000,
+		freshness: { state: "fresh", staleSince: null },
+	};
+
+	it("renders a Verify button and a Stale badge for a computed-stale page", async () => {
+		mockFetchWiki(STALE_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(screen.getByRole("button", { name: "Verify" })).toBeTruthy();
+		expect(screen.getByText("Stale")).toBeTruthy();
+	});
+
+	it("does not render a staleness badge for a fresh page", async () => {
+		mockFetchWiki(FRESH_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(screen.getByRole("button", { name: "Verify" })).toBeTruthy();
+		expect(screen.queryByText("Stale")).toBeNull();
+		expect(screen.queryByText("Unverified")).toBeNull();
+	});
+
+	it("renders no Verify button for a page with no verification signal at all", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(screen.queryByRole("button", { name: "Verify" })).toBeNull();
+	});
+
+	it("clicking Verify POSTs to /verify and refetches the page", async () => {
+		let verifyCalled = false;
+		const verifiedPage: WikiPageData = {
+			...STALE_PAGE,
+			verified_at: 2_000_000,
+			verified_by: "me@example.com",
+			freshness: { state: "fresh", staleSince: null },
+		};
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/verify") && init?.method === "POST") {
+				verifyCalled = true;
+				return Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve({
+							ok: true,
+							verifiedAt: 2_000_000,
+							verifiedBy: "me@example.com",
+							freshness: { state: "fresh", staleSince: null },
+						}),
+				});
+			}
+			return Promise.resolve({
+				ok: true,
+				json: () => Promise.resolve(verifyCalled ? verifiedPage : STALE_PAGE),
+			});
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+		await waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(
+					([u, init]) => String(u).includes("/verify") && init?.method === "POST"
+				)
+			).toBe(true);
+		});
+		await waitFor(() => {
+			expect(screen.queryByText("Stale")).toBeNull();
+		});
+	});
+
+	it("renders a staleness badge in search results for a stale match", async () => {
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/api/wiki/search")) {
+				return Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve([
+							{
+								id: "w2",
+								slug: "stale-runbook",
+								title: "Stale Runbook",
+								project_id: null,
+								excerpt: null,
+								type: null,
+								status: null,
+								tags: [],
+								freshness: { state: "stale", staleSince: 123 },
+							},
+						]),
+				});
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.input(screen.getByLabelText(/Search wiki pages/i), {
+			target: { value: "runbook" },
+		});
+
+		expect(await screen.findByText("Stale Runbook")).toBeTruthy();
+		expect(screen.getByText("Stale")).toBeTruthy();
 	});
 });

@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { computeFreshness } from "../services/wiki-freshness";
 import {
 	authHeaders,
 	seedFixture,
@@ -204,9 +205,10 @@ describe("Wiki API", () => {
 		expect(results[0].title).toBe("Deployment Guide");
 	});
 
-	// PROJ-486: freshness (R7, PROJ-489) hasn't landed — the field is present but null,
-	// never fabricated.
-	it("GET /api/wiki/search returns freshness: null (R7 not yet implemented)", async () => {
+	// PROJ-489 (R7): a page with no verify_interval/status frontmatter signal at all gets
+	// `freshness: null` — never fabricated. (R7 landed; full freshness behavior is
+	// exercised in the "Wiki freshness model (PROJ-489)" describe block below.)
+	it("GET /api/wiki/search returns freshness: null for a page with no verification signal", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
@@ -2607,5 +2609,362 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 			authHeaders(member.token, member.workspace.slug)
 		);
 		expect(isMcpError(result)).toBe(true);
+	});
+});
+
+// PROJ-489 (R7): verification stamps + computed staleness surfacing.
+describe("computeFreshness (PROJ-489)", () => {
+	it("returns null when the page has neither verify_interval nor status", () => {
+		expect(computeFreshness({ verifiedAt: null, verifyInterval: null, status: null })).toBeNull();
+	});
+
+	it("returns 'unverified' when verify_interval is set but verified_at is null", () => {
+		expect(
+			computeFreshness({ verifiedAt: null, verifyInterval: 30, status: null, now: 1_000_000 })
+		).toEqual({ state: "unverified", staleSince: null });
+	});
+
+	it("returns 'fresh' when verify_interval hasn't elapsed since verified_at", () => {
+		const now = 1_000_000;
+		const verifiedAt = now - 10 * 86400; // 10 days ago
+		expect(computeFreshness({ verifiedAt, verifyInterval: 30, status: null, now })).toEqual({
+			state: "fresh",
+			staleSince: null,
+		});
+	});
+
+	it("returns 'stale' with staleSince once verify_interval has elapsed since verified_at", () => {
+		const now = 1_000_000;
+		const verifiedAt = now - 40 * 86400; // 40 days ago
+		const dueAt = verifiedAt + 30 * 86400;
+		expect(computeFreshness({ verifiedAt, verifyInterval: 30, status: null, now })).toEqual({
+			state: "stale",
+			staleSince: dueAt,
+		});
+	});
+
+	it("treats an explicit status: stale as stale regardless of verify_interval", () => {
+		expect(
+			computeFreshness({ verifiedAt: null, verifyInterval: null, status: "stale", now: 1_000_000 })
+		).toEqual({ state: "stale", staleSince: null });
+	});
+
+	it("treats an explicit status: deprecated as stale even when verify_interval hasn't elapsed yet", () => {
+		const now = 1_000_000;
+		const verifiedAt = now - 1 * 86400; // verified yesterday
+		expect(
+			computeFreshness({ verifiedAt, verifyInterval: 365, status: "deprecated", now })
+		).toEqual({ state: "stale", staleSince: null });
+	});
+
+	it("treats status: current with no verify_interval as fresh", () => {
+		expect(
+			computeFreshness({
+				verifiedAt: null,
+				verifyInterval: null,
+				status: "current",
+				now: 1_000_000,
+			})
+		).toEqual({ state: "fresh", staleSince: null });
+	});
+});
+
+describe("Wiki freshness model (PROJ-489)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let userEmail: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+		userEmail = fixture.user.email;
+	});
+
+	const today = () => new Date().toISOString().slice(0, 10);
+
+	function overdueContent(intervalDays = 30) {
+		return [
+			"---",
+			`verify_interval: ${intervalDays}`,
+			"verified_at: 2020-01-01",
+			"---",
+			"# Overdue page",
+		].join("\n");
+	}
+
+	function freshContent(intervalDays = 365) {
+		return [
+			"---",
+			`verify_interval: ${intervalDays}`,
+			`verified_at: ${today()}`,
+			"---",
+			"# Fresh page",
+		].join("\n");
+	}
+
+	function unverifiedContent(intervalDays = 30) {
+		return ["---", `verify_interval: ${intervalDays}`, "---", "# Never verified page"].join("\n");
+	}
+
+	function explicitStatusContent(status: "stale" | "deprecated") {
+		return ["---", `status: ${status}`, "---", "# Explicitly flagged page"].join("\n");
+	}
+
+	it("REST GET /api/wiki/:slug returns computed freshness in the page header", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Overdue Runbook", content: overdueContent() }),
+		});
+		const created = (await createRes.json()) as { slug: string };
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const page = (await res.json()) as { freshness: { state: string; staleSince: number | null } };
+		expect(page.freshness.state).toBe("stale");
+		expect(page.freshness.staleSince).not.toBeNull();
+	});
+
+	it("REST POST /api/wiki/:slug/verify stamps verified_at/verified_by using the CALLING user's identity", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Needs Verification", content: overdueContent() }),
+		});
+		const created = (await createRes.json()) as { slug: string };
+
+		const verifyRes = await SELF.fetch(`http://localhost/api/wiki/${created.slug}/verify`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(verifyRes.status).toBe(200);
+		const verified = (await verifyRes.json()) as {
+			verifiedBy: string;
+			verifiedAt: number;
+			freshness: { state: string };
+		};
+		expect(verified.verifiedBy).toBe(userEmail);
+		// The page was overdue (verified_at 2020-01-01); verifying it now resets the clock.
+		expect(verified.freshness.state).toBe("fresh");
+
+		// The stamp is written into the page's frontmatter (not just the denormalized
+		// columns), so a subsequent read reflects it without needing an unrelated edit.
+		const pageRes = await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const page = (await pageRes.json()) as { verified_by: string; content: string };
+		expect(page.verified_by).toBe(userEmail);
+		expect(page.content).toContain(`verified_by: ${userEmail}`);
+	});
+
+	it("verify_wiki_page records a revision, same as any other content edit", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Revision Check", content: overdueContent() }),
+		});
+		const created = (await createRes.json()) as { slug: string };
+
+		const before = await SELF.fetch(`http://localhost/api/wiki/${created.slug}/revisions`, {
+			headers: authHeaders(token, slug),
+		});
+		const beforeRevisions = (await before.json()) as unknown[];
+
+		await SELF.fetch(`http://localhost/api/wiki/${created.slug}/verify`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+
+		const after = await SELF.fetch(`http://localhost/api/wiki/${created.slug}/revisions`, {
+			headers: authHeaders(token, slug),
+		});
+		const afterRevisions = (await after.json()) as unknown[];
+		expect(afterRevisions.length).toBe(beforeRevisions.length + 1);
+	});
+
+	// PROJ-489: verifying rewrites the whole content (frontmatter stamp + body), so it must
+	// stamp the CURRENT content — a stale read would silently revert the edit before it.
+	it("POST /api/wiki/:slug/verify stamps on top of the latest content, never a stale snapshot", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Edited Then Verified", content: overdueContent() }),
+		});
+		const created = (await createRes.json()) as { slug: string };
+
+		await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: `${overdueContent()}\n\nBrand new paragraph.` }),
+		});
+
+		await SELF.fetch(`http://localhost/api/wiki/${created.slug}/verify`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+
+		const pageRes = await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const page = (await pageRes.json()) as { content: string; verified_by: string };
+		expect(page.content).toContain("Brand new paragraph.");
+		expect(page.verified_by).toBe(userEmail);
+	});
+
+	it("POST /api/wiki/:slug/verify is rejected for a viewer", async () => {
+		const roles = await seedWorkspaceRoles();
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ title: "Viewer Guard", content: overdueContent() }),
+		});
+		const created = (await createRes.json()) as { slug: string };
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${created.slug}/verify`, {
+			method: "POST",
+			headers: authHeaders(roles.viewer.token, roles.workspace.slug),
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("MCP verify_wiki_page stamps verified_at/verified_by, parity with REST", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "MCP Verify Target", content: overdueContent() },
+				authHeaders(token, slug)
+			)
+		);
+
+		const result = mcpData<{ verifiedBy: string; freshness: { state: string } }>(
+			await mcpCall(
+				workspaceId,
+				"verify_wiki_page",
+				{ slug: created.slug },
+				authHeaders(token, slug)
+			)
+		);
+		expect(result.verifiedBy).toBe(userEmail);
+		expect(result.freshness.state).toBe("fresh");
+	});
+
+	it("GET /api/wiki/search demotes a computed-stale page below a fresh page matching the same query", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Stale Deploy Guide",
+				content: `${overdueContent()}\ndeploy keyword`,
+			}),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Fresh Deploy Guide",
+				content: `${freshContent()}\ndeploy keyword`,
+			}),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=deploy", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{
+			title: string;
+			freshness: { state: string } | null;
+		}>;
+		expect(results.map((r) => r.title)).toEqual(["Fresh Deploy Guide", "Stale Deploy Guide"]);
+		expect(results[0].freshness?.state).toBe("fresh");
+		expect(results[1].freshness?.state).toBe("stale");
+	});
+
+	it("GET /api/wiki/search demotes an explicitly status: deprecated page too", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Deprecated Onboarding",
+				content: `${explicitStatusContent("deprecated")}\nonboardingkeyword`,
+			}),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Current Onboarding", content: "onboardingkeyword" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=onboardingkeyword", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toEqual(["Current Onboarding", "Deprecated Onboarding"]);
+	});
+
+	it("GET /api/wiki/stale-pages lists computed-stale, unverified, and explicitly stale/deprecated pages, excluding fresh ones", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Overdue Page", content: overdueContent() }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Never Verified Page", content: unverifiedContent() }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Explicitly Stale Page",
+				content: explicitStatusContent("stale"),
+			}),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Fresh Page", content: freshContent() }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "No Signal Page", content: "plain markdown" }),
+		});
+
+		// PROJ-489: 5 creates already used up this token's test-env rate limit
+		// (wrangler.test.toml RATE_LIMIT_API_MAX=5) — reset before the read below.
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const res = await SELF.fetch("http://localhost/api/wiki/stale-pages", {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const results = (await res.json()) as Array<{ title: string }>;
+		const titles = results.map((r) => r.title).sort();
+		expect(titles).toEqual(["Explicitly Stale Page", "Never Verified Page", "Overdue Page"]);
+	});
+
+	it("MCP list_stale_pages returns the same result shape as REST", async () => {
+		await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "MCP Overdue Page", content: overdueContent() },
+			authHeaders(token, slug)
+		);
+		await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "MCP Fresh Page", content: freshContent() },
+			authHeaders(token, slug)
+		);
+
+		const result = mcpData<Array<{ title: string }>>(
+			await mcpCall(workspaceId, "list_stale_pages", {}, authHeaders(token, slug))
+		);
+		expect(result.map((r) => r.title)).toContain("MCP Overdue Page");
+		expect(result.map((r) => r.title)).not.toContain("MCP Fresh Page");
 	});
 });

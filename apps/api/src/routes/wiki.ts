@@ -70,6 +70,20 @@ router.get("/broken-links", async (c) => {
 	}
 });
 
+// PROJ-489 (R7): must be registered before the /:slug catch-all below, same as
+// /tree, /search, /broken-links above.
+router.get("/stale-pages", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const projectId = c.req.query("projectId");
+		const limit = c.req.query("limit");
+		const offset = c.req.query("offset");
+		return c.json(await wikiService.listStaleWikiPages(ctx, { projectId, limit, offset }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
 router.post("/backfill-links", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
@@ -132,6 +146,15 @@ router.put("/:slug", async (c) => {
 	try {
 		const body = await c.req.json();
 		return c.json(await wikiService.updateWikiPage(ctx, c.req.param("slug"), body));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.post("/:slug/verify", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiService.verifyWikiPage(ctx, c.req.param("slug")));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
