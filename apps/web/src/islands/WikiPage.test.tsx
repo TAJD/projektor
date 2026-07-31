@@ -495,4 +495,112 @@ describe("optimistic locking (PROJ-507)", () => {
 		// Still in edit mode — the save was rejected, not applied.
 		expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
 	});
+
+	it("reports an unrelated failure generically even when the slug contains 409", async () => {
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([REVISION]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (init?.method === "PUT") {
+				return Promise.resolve({ ok: false, status: 500 });
+			}
+			return Promise.resolve({
+				ok: true,
+				json: () => Promise.resolve({ ...PAGE, slug: "proj-409-notes" }),
+			});
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="proj-409-notes" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		expect(await screen.findByText(/Save failed/i)).toBeTruthy();
+		expect(screen.queryByText(/changed by someone else/i)).toBeNull();
+	});
+
+	// Sending `null` for "we haven't loaded the revisions yet" would assert the page has
+	// never been revised, and the server would reject every save on an already-revised
+	// page as a conflict. Omit the field instead.
+	it("omits baseRevisionId when the revision list hasn't loaded yet", async () => {
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return new Promise(() => {});
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (init?.method === "PUT") {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		await waitFor(() => {
+			const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+			expect(putCall).toBeTruthy();
+			expect(Object.keys(JSON.parse(putCall?.[1].body))).not.toContain("baseRevisionId");
+		});
+		// Let the post-save refetches settle so they don't render after teardown.
+		await screen.findByRole("button", { name: "Edit" });
+	});
+
+	// A move refetches the page; the revision list must survive that, or the next save
+	// looks like an unrevised page and gets rejected as a conflict.
+	it("still sends baseRevisionId after a move has refreshed the page", async () => {
+		const OTHER_PAGE_NODE = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([REVISION]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([OTHER_PAGE_NODE]) });
+			}
+			if (init?.method === "PUT") {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Move" }));
+		fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
+		fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
+		const moveButtons = screen.getAllByRole("button", { name: "Move" });
+		fireEvent.click(moveButtons[moveButtons.length - 1]);
+		// The move's page refetch is what used to wipe the revision list — wait for it to
+		// land before editing, or the test races past the bug.
+		await waitFor(() => {
+			const pageGets = fetchMock.mock.calls.filter(
+				([u, init]) => init?.method !== "PUT" && String(u).endsWith("/api/wiki/my-page")
+			);
+			expect(pageGets).toHaveLength(2);
+		});
+
+		fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		await waitFor(() => {
+			const puts = fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT");
+			expect(puts).toHaveLength(2);
+			expect(JSON.parse(puts[1][1].body)).toMatchObject({ baseRevisionId: "rev-1" });
+		});
+		// Let the post-save refetches settle so they don't render after teardown.
+		await screen.findByRole("button", { name: "Edit" });
+	});
 });
