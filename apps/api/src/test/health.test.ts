@@ -61,4 +61,14 @@ describe("SPA catch-all (ASSETS absent in test env)", () => {
 		const res = await SELF.fetch("http://localhost/health");
 		expect(res.status).toBe(200);
 	});
+
+	it("returns 404 for /wiki/:slug pretty-URL paths (ASSETS absent in test env)", async () => {
+		const res = await SELF.fetch("http://localhost/wiki/some-page");
+		expect(res.status).toBe(404);
+	});
+
+	it("returns 404 for the legacy /wiki?slug= redirect route (ASSETS absent in test env)", async () => {
+		const res = await SELF.fetch("http://localhost/wiki?slug=some-page");
+		expect(res.status).toBe(404);
+	});
 });

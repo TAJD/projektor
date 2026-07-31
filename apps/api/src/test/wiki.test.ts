@@ -81,13 +81,13 @@ describe("Wiki API", () => {
 				body: JSON.stringify({ title: "Weekly Updates", content: "index" }),
 			});
 			const created = (await createRes.json()) as { url: string };
-			expect(created.url).toBe("/wiki?slug=weekly-updates");
+			expect(created.url).toBe("/wiki/weekly-updates");
 
 			const getRes = await SELF.fetch("http://localhost/api/wiki/weekly-updates", {
 				headers: authHeaders(token, slug),
 			});
 			const fetched = (await getRes.json()) as { url: string };
-			expect(fetched.url).toBe("/wiki?slug=weekly-updates");
+			expect(fetched.url).toBe("/wiki/weekly-updates");
 
 			const updateRes = await SELF.fetch("http://localhost/api/wiki/weekly-updates", {
 				method: "PUT",
@@ -95,22 +95,22 @@ describe("Wiki API", () => {
 				body: JSON.stringify({ content: "index v2" }),
 			});
 			const updated = (await updateRes.json()) as { url: string };
-			expect(updated.url).toBe("/wiki?slug=weekly-updates");
+			expect(updated.url).toBe("/wiki/weekly-updates");
 
 			const listRes = await SELF.fetch("http://localhost/api/wiki", {
 				headers: authHeaders(token, slug),
 			});
 			const list = (await listRes.json()) as Array<{ slug: string; url: string }>;
-			expect(list.find((p) => p.slug === "weekly-updates")?.url).toBe("/wiki?slug=weekly-updates");
+			expect(list.find((p) => p.slug === "weekly-updates")?.url).toBe("/wiki/weekly-updates");
 
 			const treeRes = await SELF.fetch("http://localhost/api/wiki/tree", {
 				headers: authHeaders(token, slug),
 			});
 			const tree = (await treeRes.json()) as Array<{ slug: string; url: string }>;
-			expect(tree.find((p) => p.slug === "weekly-updates")?.url).toBe("/wiki?slug=weekly-updates");
+			expect(tree.find((p) => p.slug === "weekly-updates")?.url).toBe("/wiki/weekly-updates");
 		});
 
-		it("includes projectId in the url when the page is scoped to a project", async () => {
+		it("does not include projectId in the url when the page is scoped to a project (slugs are workspace-unique, PROJ-483)", async () => {
 			const project = await seedProject(workspaceId);
 			await seedGroupGrant(workspaceId, userId, project.id);
 			const createRes = await SELF.fetch("http://localhost/api/wiki", {
@@ -119,7 +119,7 @@ describe("Wiki API", () => {
 				body: JSON.stringify({ title: "Project Notes", content: "notes", projectId: project.id }),
 			});
 			const created = (await createRes.json()) as { url: string };
-			expect(created.url).toBe(`/wiki?slug=project-notes&projectId=${project.id}`);
+			expect(created.url).toBe("/wiki/project-notes");
 		});
 	});
 
@@ -1062,6 +1062,54 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(res.status).toBe(409);
 	});
 
+	it("POST /api/wiki rejects the reserved slug 'view' (PROJ-487, 400)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "View", content: "v1" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("PUT /api/wiki/:slug rejects renaming to the reserved slug 'view' (PROJ-487, 400)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Gamma", content: "g" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/gamma", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "view" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("POST /api/wiki rejects the reserved slug 'index' (PROJ-487, 400)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Index", content: "v1" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("PUT /api/wiki/:slug rejects renaming to the reserved slug 'index' (PROJ-487, 400)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Delta", content: "d" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/delta", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "index" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
 	it("PUT /api/wiki/:slug renaming the slug creates a redirect; the old slug still resolves", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
@@ -1078,7 +1126,7 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		});
 		expect(updateRes.status).toBe(200);
 		const updated = (await updateRes.json()) as { url: string };
-		expect(updated.url).toContain("slug=product-roadmap");
+		expect(updated.url).toBe("/wiki/product-roadmap");
 
 		const newRes = await SELF.fetch("http://localhost/api/wiki/product-roadmap", {
 			headers: authHeaders(token, slug),
@@ -1241,7 +1289,7 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 				authHeaders(token, slug)
 			)
 		);
-		expect(updatedResult.url).toContain("slug=team-handbook");
+		expect(updatedResult.url).toBe("/wiki/team-handbook");
 
 		const oldPage = mcpData<{ slug: string }>(
 			await mcpCall(workspaceId, "get_wiki_page", { slug: "handbook" }, authHeaders(token, slug))

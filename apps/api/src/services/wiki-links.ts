@@ -362,7 +362,7 @@ export async function backlinksForResolvedPage(
 		pageId: r.pageId,
 		slug: r.slug,
 		title: r.title,
-		url: wikiPagePath(r.slug, r.projectId),
+		url: wikiPagePath(r.slug),
 		snippet: extractSnippet(r.content, r.targetTitle),
 	}));
 }

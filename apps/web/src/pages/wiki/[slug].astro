@@ -1,0 +1,26 @@
+---
+import Base from '../../layouts/Base.astro';
+import WikiPage from '../../islands/WikiPage';
+
+export async function getStaticPaths() {
+  // Wiki slugs aren't known at build time; the island resolves the page client-side
+  // via the slug prop (GET /api/wiki/:slug). Production traffic for /wiki/:slug is
+  // served by wiki/view.astro through the Worker's pretty-URL fallback (see
+  // apps/api/src/index.ts) — this file exists so `astro dev` can resolve the path
+  // directly (same pattern as projects/[projectSlug]/issues/[issueNumber]/[titleSlug]).
+  return [];
+}
+
+const { slug } = Astro.params as { slug: string };
+// PROJ-487: the release artifact never bakes PUBLIC_WORKSPACE_SLUG (it's one binary
+// deployed to potentially several hostnames/workspaces). Unlike Groups/Tokens
+// (/api/workspaces/:slug/...), WikiPage's API calls (/api/wiki/...) don't embed the
+// workspace slug in the URL — an undefined prop here just omits the X-Workspace-Slug
+// header, and the Worker's workspaceMiddleware resolves the tenant from the Host
+// header instead (WORKSPACE_SUBDOMAIN_ROUTING), same as every other non-slug-scoped
+// page (issues, projects). No client-side hostname resolution needed for this route.
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Wiki — Projektor">
+  <WikiPage client:load workspaceSlug={workspaceSlug} slug={slug} />
+</Base>

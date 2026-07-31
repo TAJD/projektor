@@ -63,6 +63,13 @@ function slugify(title: string): string {
 		.replace(/^-|-$/g, "");
 }
 
+// PROJ-487: "view" is the shell path segment the Worker's pretty-URL fallback serves
+// static assets from (/wiki/view/index.html) — a page slugged "view" would collide
+// with it and never resolve. "index" collides the same way: Static Assets' default
+// html_handling maps /wiki/index -> /wiki/index.html, so it never reaches the Worker
+// either. Both reserved outright rather than special-cased in routing.
+const RESERVED_WIKI_SLUGS = new Set(["view", "index"]);
+
 // PROJ-483: wiki_pages(workspace_id, slug) is unique — surface a structured
 // ConflictError instead of letting the constraint throw a raw D1 error.
 async function assertSlugAvailable(
@@ -71,6 +78,12 @@ async function assertSlugAvailable(
 	slug: string,
 	excludePageId?: string
 ): Promise<void> {
+	if (RESERVED_WIKI_SLUGS.has(slug)) {
+		throw new ValidationError({
+			formErrors: [`Slug '${slug}' is reserved and cannot be used`],
+			fieldErrors: {},
+		});
+	}
 	const existing = await orm
 		.select({ id: schema.wikiPages.id })
 		.from(schema.wikiPages)
@@ -271,7 +284,7 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 		.where(and(...conditions))
 		.orderBy(asc(schema.wikiPages.title));
 
-	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug, r.project_id) }));
+	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug) }));
 }
 
 // PROJ-486: FTS5 MATCH treats bare input as query syntax (AND/OR/NOT, column filters,
@@ -409,7 +422,7 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 	const page = direct ?? (await resolveWikiPageByRedirect(orm, ctx.workspaceId, slugOrId));
 	if (!page) throw new NotFoundError("Wiki page not found");
 	await assertWikiPageVisible(ctx, page.project_id);
-	return { ...page, url: wikiPagePath(page.slug, page.project_id) };
+	return { ...page, url: wikiPagePath(page.slug) };
 }
 
 // PROJ-485: "what links here" — pages that link to `slugOrId` via a resolved wiki_links
@@ -487,7 +500,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	// PROJ-485: parse [[Target]]/URL links out of the new page's content into wiki_links.
 	await reindexWikiLinks(ctx, orm, id, content ?? "");
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
-	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug, projectId ?? null) };
+	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug) };
 }
 
 // PROJ-484: id of the most recently created revision for a page, or null if the page
@@ -816,7 +829,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		diff: buildWikiPageUpdateDiff({ title, content }),
 	});
 
-	return { ok: true, url: wikiPagePath(slug ?? page.slug, page.projectId) };
+	return { ok: true, url: wikiPagePath(slug ?? page.slug) };
 }
 
 // PROJ-238: breadth-first walk of parent_id children, chunked to stay under D1's
@@ -990,7 +1003,7 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 			id: p.id,
 			slug: p.slug,
 			title: p.title,
-			url: wikiPagePath(p.slug, p.projectId),
+			url: wikiPagePath(p.slug),
 			children: [],
 		});
 	}
