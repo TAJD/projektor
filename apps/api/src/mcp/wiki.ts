@@ -3,6 +3,7 @@ import { WIKI_WELL_KNOWN_TYPES } from "../schemas/wiki";
 import { ValidationError } from "../services/errors";
 import type { ServiceCtx } from "../services/types";
 import * as wikiService from "../services/wiki";
+import * as wikiWatchersService from "../services/wiki-watchers";
 
 // PROJ-513: `type` is freeform — these are advertised as hints, never as an
 // inputSchema `enum` (which clients treat as the only legal values).
@@ -468,6 +469,129 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			return wikiService.listWikiTemplates(ctx, input);
+		},
+	},
+	{
+		name: "watch_wiki_page",
+		description:
+			"Watch a wiki page by id or slug — its changes (create is n/a here since the page " +
+			"already exists, update/patch/verify/restore/delete) will generate a per-user " +
+			"notification (list_wiki_notifications). Pass subtree=true to also watch every " +
+			"page currently OR LATER nested under this one (resolved dynamically by walking " +
+			"the page hierarchy at notify time, not a one-time snapshot). Calling this again " +
+			"for the same page updates the subtree flag rather than creating a duplicate watch. " +
+			"Template pages (frontmatter template: true) never generate notifications even if " +
+			"watched directly or via a subtree.",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: {
+				slug: { type: "string", description: "Page ID or slug" },
+				subtree: {
+					type: "boolean",
+					default: false,
+					description: "Also watch this page's current and future descendant pages",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			const { slug, ...rest } = input as { slug: string; subtree?: boolean };
+			return wikiWatchersService.watchWikiPage(ctx as ServiceCtx, slug, rest);
+		},
+	},
+	{
+		name: "unwatch_wiki_page",
+		description: "Stop watching a wiki page by id or slug (a no-op if not currently watched).",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: { slug: { type: "string", description: "Page ID or slug" } },
+		},
+		async handler(input, ctx) {
+			const { slug } = input as { slug: string };
+			return wikiWatchersService.unwatchWikiPage(ctx as ServiceCtx, slug);
+		},
+	},
+	{
+		name: "list_wiki_watches",
+		description: "List the pages the calling user is currently watching.",
+		inputSchema: { type: "object", properties: {} },
+		async handler(_input, ctx) {
+			return wikiWatchersService.listWikiWatches(ctx as ServiceCtx);
+		},
+	},
+	{
+		name: "list_wiki_notifications",
+		description:
+			"List the calling user's wiki watch notifications (newest first). Each entry " +
+			"records the page (denormalized slug/title, so a notification about a page " +
+			"that's since been deleted still shows what it was about), the action " +
+			"(created|updated|deleted), the actor, and whether it's been read.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				unreadOnly: { type: "boolean", default: false },
+				limit: { type: "number", default: 50 },
+				offset: { type: "number", default: 0 },
+			},
+		},
+		async handler(input, ctx) {
+			return wikiWatchersService.listWikiNotifications(ctx, input);
+		},
+	},
+	{
+		name: "mark_wiki_notifications_read",
+		description: "Mark wiki notifications as read, by id, or all: true for every unread one.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				ids: {
+					type: "array",
+					items: { type: "string" },
+					description: "Notification IDs to mark read",
+				},
+				all: {
+					type: "boolean",
+					default: false,
+					description: "Mark all of the caller's notifications read",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			return wikiWatchersService.markWikiNotificationsRead(ctx, input);
+		},
+	},
+	{
+		name: "list_wiki_changes",
+		description:
+			"Cheap delta feed of wiki page changes since a unix-seconds timestamp — for agents " +
+			"polling 'what changed' instead of re-fetching/re-searching the whole wiki. Backed " +
+			"by the existing activity log (no extra write-path cost). `since` is EXCLUSIVE; " +
+			"poll again using the response's `nextSince`, not a locally-computed timestamp, so " +
+			"changes landing on the same second as the cutoff are never missed or double-" +
+			"delivered. Defaults to every wiki page the caller can see (same visibility as " +
+			"list_wiki_pages/search_wiki) — pass watchedOnly=true to narrow to pages the caller " +
+			"is watching (directly or via a subtree watch). A `deleted` entry's slug/title/" +
+			"projectId reflect the page as it was just before deletion (the row itself is gone).",
+		inputSchema: {
+			type: "object",
+			required: ["since"],
+			properties: {
+				since: {
+					type: "number",
+					description: "Unix seconds; only changes strictly after this are returned",
+				},
+				limit: { type: "number", default: 100 },
+				projectId: { type: "string", description: "Restrict to changes on pages in this project" },
+				watchedOnly: {
+					type: "boolean",
+					default: false,
+					description: "Restrict to pages the caller is watching (directly or via subtree)",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			return wikiWatchersService.listWikiChanges(ctx, input);
 		},
 	},
 ];

@@ -132,3 +132,62 @@ export const wikiLinks = sqliteTable(
 		workspaceTargetIdx: index("wiki_links_workspace_target_idx").on(t.workspaceId, t.targetPageId),
 	})
 );
+
+// PROJ-493 (R11): a user watching either a single page (subtree=false) or a page and its
+// whole current+future subtree (subtree=true). "Is user watching page P" is resolved by
+// walking P's parent_id chain at notify time (services/wiki-watchers.ts), not by
+// materializing per-descendant rows — a page added later under a watched subtree is
+// covered automatically.
+export const wikiWatchers = sqliteTable(
+	"wiki_watchers",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		pageId: text("page_id")
+			.notNull()
+			.references(() => wikiPages.id, { onDelete: "cascade" }),
+		subtree: integer("subtree", { mode: "boolean" }).notNull().default(false),
+		createdAt: integer("created_at").notNull(),
+	},
+	(t) => ({
+		userPageUniqueIdx: uniqueIndex("wiki_watchers_user_page_idx").on(
+			t.workspaceId,
+			t.userId,
+			t.pageId
+		),
+		pageIdx: index("wiki_watchers_page_idx").on(t.workspaceId, t.pageId),
+	})
+);
+
+// PROJ-493 (R11): per-user notification list. `pageId` is NOT a foreign key (and has no
+// ON DELETE behavior) — a page that's since been hard-deleted must still leave its
+// deletion notification readable, so pageSlug/pageTitle are denormalized at write time
+// rather than joined from wiki_pages.
+export const wikiNotifications = sqliteTable(
+	"wiki_notifications",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		pageId: text("page_id").notNull(),
+		pageSlug: text("page_slug").notNull(),
+		pageTitle: text("page_title").notNull(),
+		action: text("action", { enum: ["created", "updated", "deleted"] }).notNull(),
+		actorId: text("actor_id").references(() => users.id, { onDelete: "set null" }),
+		summary: text("summary").notNull(),
+		createdAt: integer("created_at").notNull(),
+		readAt: integer("read_at"),
+	},
+	(t) => ({
+		userIdx: index("wiki_notifications_user_idx").on(t.workspaceId, t.userId, t.createdAt),
+	})
+);
