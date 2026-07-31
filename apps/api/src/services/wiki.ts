@@ -98,7 +98,14 @@ async function resolvePageByIdOrSlug(
 	db: D1Database,
 	idOrSlug: string,
 	workspaceId: string
-): Promise<{ id: string; slug: string; title: string; content: string; projectId: string | null }> {
+): Promise<{
+	id: string;
+	slug: string;
+	title: string;
+	content: string;
+	projectId: string | null;
+	parentId: string | null;
+}> {
 	const orm = drizzle(db, { schema });
 	const direct = await orm
 		.select({
@@ -107,6 +114,7 @@ async function resolvePageByIdOrSlug(
 			title: schema.wikiPages.title,
 			content: schema.wikiPages.content,
 			projectId: schema.wikiPages.projectId,
+			parentId: schema.wikiPages.parentId,
 		})
 		.from(schema.wikiPages)
 		.where(
@@ -128,6 +136,8 @@ async function resolvePageByIdOrSlug(
 			content: redirected.content,
 			// eslint-disable-next-line camelcase
 			projectId: redirected.project_id,
+			// eslint-disable-next-line camelcase
+			parentId: redirected.parent_id,
 		};
 	}
 	throw new NotFoundError("Wiki page not found");
@@ -898,8 +908,12 @@ async function deleteWikiPageAttachments(
 	await orm.delete(schema.attachments).where(inArray(schema.attachments.linkedWikiPageId, pageIds));
 }
 
-export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: unknown) {
-	const idCheck = IdSchema.safeParse(slug);
+// PROJ-509: resolved via resolvePageByIdOrSlug (id-or-slug + redirect fallback), same
+// as getWikiPage/updateWikiPage/getWikiBacklinks/listWikiRevisions/getWikiRevision —
+// a delete-by-old-slug-after-rename request resolves to the same page rather than
+// 404ing, for consistency across every other page-reference entry point.
+export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?: unknown) {
+	const idCheck = IdSchema.safeParse(idOrSlug);
 	if (!idCheck.success)
 		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
 	const parsedOptions = DeleteWikiPageOptionsSchema.safeParse(options ?? {});
@@ -907,16 +921,8 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 	const { cascade } = parsedOptions.data;
 
 	const orm = drizzle(ctx.db, { schema });
-	const page = await orm
-		.select({
-			id: schema.wikiPages.id,
-			projectId: schema.wikiPages.projectId,
-			parentId: schema.wikiPages.parentId,
-		})
-		.from(schema.wikiPages)
-		.where(and(eq(schema.wikiPages.slug, slug), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
-		.get();
-	if (!page) throw new NotFoundError("Wiki page not found");
+	const resolved = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
+	const page = { id: resolved.id, projectId: resolved.projectId, parentId: resolved.parentId };
 
 	// PROJ-311: workspace-level pages need a workspace admin/owner; a project-scoped
 	// page can also be deleted by someone with a project-admin grant.
@@ -1022,15 +1028,14 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 	return roots;
 }
 
-export async function listWikiRevisions(ctx: ServiceCtx, slug: string) {
-	const orm = drizzle(ctx.db, { schema });
-	const page = await orm
-		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
-		.from(schema.wikiPages)
-		.where(and(eq(schema.wikiPages.slug, slug), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
-		.get();
-	if (!page) throw new NotFoundError("Wiki page not found");
+// PROJ-509: resolves via resolvePageByIdOrSlug (id-or-slug + redirect fallback) so a
+// renamed page's old slug still resolves here, matching getWikiPage/updateWikiPage/
+// getWikiBacklinks instead of 404ing on the exact reference PROJ-484's optimistic-
+// locking workflow tells agents to fetch.
+export async function listWikiRevisions(ctx: ServiceCtx, idOrSlug: string) {
+	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
 	await assertWikiPageVisible(ctx, page.projectId);
+	const orm = drizzle(ctx.db, { schema });
 
 	return (
 		orm
@@ -1055,15 +1060,11 @@ export async function listWikiRevisions(ctx: ServiceCtx, slug: string) {
 	);
 }
 
-export async function getWikiRevision(ctx: ServiceCtx, slug: string, revisionId: string) {
-	const orm = drizzle(ctx.db, { schema });
-	const page = await orm
-		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
-		.from(schema.wikiPages)
-		.where(and(eq(schema.wikiPages.slug, slug), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
-		.get();
-	if (!page) throw new NotFoundError("Wiki page not found");
+// PROJ-509: same id-or-slug + redirect resolution as listWikiRevisions above.
+export async function getWikiRevision(ctx: ServiceCtx, idOrSlug: string, revisionId: string) {
+	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
 	await assertWikiPageVisible(ctx, page.projectId);
+	const orm = drizzle(ctx.db, { schema });
 
 	const revision = await orm
 		.select({
