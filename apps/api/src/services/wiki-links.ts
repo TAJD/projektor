@@ -38,10 +38,18 @@ function extractWikiSlugFromUrl(url: string): string | null {
 	// by the app, so this doesn't lose any real link).
 	if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(url)) return null;
 	const pathMatch = url.match(/^\/wiki\/([a-z0-9-/]+)/i);
-	if (pathMatch) return decodeURIComponent(pathMatch[1]);
-	const queryMatch = url.match(/[?&]slug=([^&]+)/);
-	if (queryMatch) return decodeURIComponent(queryMatch[1]);
-	return null;
+	const queryMatch = pathMatch ? null : url.match(/[?&]slug=([^&]+)/);
+	const raw = pathMatch?.[1] ?? queryMatch?.[1];
+	if (!raw) return null;
+	try {
+		// PROJ-510: a malformed percent-escape makes decodeURIComponent throw. This runs
+		// mid-reindex, after the content write and the old wiki_links delete have already
+		// committed, so an uncaught throw leaves the page's links wiped. An undecodable
+		// URL is treated as "not a wiki link" rather than propagating.
+		return decodeURIComponent(raw);
+	} catch {
+		return null;
+	}
 }
 
 export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
@@ -172,6 +180,12 @@ const LINK_INSERT_CHUNK_SIZE = 15;
  * Recompute a page's outgoing wiki_links rows from its current content: delete-then-
  * reinsert, mirroring services/wiki.ts's reindexWikiFts. Call after every content write
  * (create or update) — never partially, since a stale row would misreport backlinks.
+ *
+ *
+ * Not atomic: the delete and the reinsert are separate awaits, and neither shares a
+ * transaction/batch with the content write in services/wiki.ts. A throw in between
+ * commits the content but leaves wiki_links empty until the next save. PROJ-510 closed
+ * the only known trigger (parse errors); the gap itself is PROJ-511.
  */
 export async function reindexWikiLinks(
 	ctx: ServiceCtx,
