@@ -3,6 +3,7 @@ import { WIKI_WELL_KNOWN_TYPES } from "../schemas/wiki";
 import { ValidationError } from "../services/errors";
 import type { ServiceCtx } from "../services/types";
 import * as wikiService from "../services/wiki";
+import * as wikiDraftsService from "../services/wiki-drafts";
 import * as wikiWatchersService from "../services/wiki-watchers";
 
 // PROJ-513: `type` is freeform — these are advertised as hints, never as an
@@ -592,6 +593,70 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			return wikiWatchersService.listWikiChanges(ctx, input);
+		},
+	},
+	{
+		name: "get_wiki_draft",
+		description:
+			"Get the calling user's saved server-side draft for a wiki page by id or slug " +
+			"(PROJ-495/R13 — replaces the old localStorage-only autosave, so a draft survives " +
+			"a device switch). Returns null if there is no draft. `baseRevisionId` is the " +
+			"page's latest revision id as of when the draft was started — pass it straight " +
+			"through to update_wiki_page/patch_wiki_page's own baseRevisionId when publishing, " +
+			"so a stale draft hits the normal conflict response instead of silently clobbering " +
+			"someone else's newer edit.",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: { slug: { type: "string", description: "Page ID or slug" } },
+		},
+		async handler(input, ctx) {
+			const { slug } = input as { slug: string };
+			return wikiDraftsService.getWikiDraft(ctx as ServiceCtx, slug);
+		},
+	},
+	{
+		name: "save_wiki_draft",
+		description:
+			"Save (upsert) the calling user's draft for a wiki page by id or slug. One draft " +
+			"per (page, user) — calling this again overwrites the previous draft rather than " +
+			"creating a new one. Not a revision and not visible to other users. Callers should " +
+			"debounce their own call frequency (e.g. ~1s after the last edit) — this tool does " +
+			"no server-side throttling.",
+		inputSchema: {
+			type: "object",
+			required: ["slug", "title", "content"],
+			properties: {
+				slug: { type: "string", description: "Page ID or slug" },
+				title: { type: "string" },
+				content: { type: "string" },
+				baseRevisionId: {
+					type: "string",
+					description:
+						"The page's latest revision id when this draft was started; null if the " +
+						"page had no revisions yet",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			const { slug, ...rest } = input as { slug: string; title: string; content: string };
+			return wikiDraftsService.saveWikiDraft(ctx as ServiceCtx, slug, rest);
+		},
+	},
+	{
+		name: "discard_wiki_draft",
+		description:
+			"Delete the calling user's draft for a wiki page by id or slug (a no-op if there " +
+			"is none). Call this after a successful publish, or whenever the user explicitly " +
+			"discards unsaved changes.",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: { slug: { type: "string", description: "Page ID or slug" } },
+		},
+		async handler(input, ctx) {
+			const { slug } = input as { slug: string };
+			return wikiDraftsService.discardWikiDraft(ctx as ServiceCtx, slug);
 		},
 	},
 ];

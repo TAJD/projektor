@@ -298,108 +298,161 @@ describe("WikiPage — project scope control (PROJ-352)", () => {
 	});
 });
 
+interface ServerDraft {
+	title: string;
+	content: string;
+	baseRevisionId: string | null;
+	updatedAt: number;
+}
+
+// PROJ-495: mock fetch backing a fake server-side wiki_drafts row — GET/PUT/DELETE
+// .../wiki/:slug/draft, plus the usual tree/revisions/page fixtures. `draftCalls`
+// records every draft PUT body for assertions.
+function mockFetchWikiWithDraft(initialDraft: ServerDraft | null = null) {
+	let draft = initialDraft;
+	const draftPutCalls: ServerDraft[] = [];
+	const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+		const u = String(url);
+		if (u.includes("/draft")) {
+			if (init?.method === "PUT") {
+				const body = JSON.parse(init.body as string) as {
+					title: string;
+					content: string;
+					baseRevisionId: string | null;
+				};
+				draft = { ...body, updatedAt: 2_000_000 };
+				draftPutCalls.push(draft);
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+			}
+			if (init?.method === "DELETE") {
+				draft = null;
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(draft) });
+		}
+		if (u.includes("/revisions")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+		}
+		if (u.includes("/tree")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+		}
+		if (init?.method === "PUT") {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+		}
+		return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+	});
+	vi.stubGlobal("fetch", fetchMock);
+	return { fetchMock, draftPutCalls };
+}
+
 async function startEditingWithTitleInput(): Promise<HTMLInputElement> {
-	mockFetchWiki(PAGE);
+	mockFetchWikiWithDraft();
 	render(<WikiPage slug="my-page" />);
 	await screen.findByText("My Page");
 	fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+	await vi.advanceTimersByTimeAsync(0);
 	return screen.getByLabelText("Page title") as HTMLInputElement;
 }
 
-async function renderWithDraftAndOpenEdit(draft: {
-	title: string;
-	content: string;
-	savedAt: number;
-}) {
-	localStorage.setItem("wiki-draft:w1", JSON.stringify(draft));
-	mockFetchWiki(PAGE);
+async function renderWithDraftAndOpenEdit(draft: ServerDraft) {
+	mockFetchWikiWithDraft(draft);
 	render(<WikiPage slug="my-page" />);
 	await screen.findByText("My Page");
 	fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+	await vi.advanceTimersByTimeAsync(0);
 }
 
-describe("draft autosave (PROJ-227)", () => {
+describe("server-side draft autosave (PROJ-495)", () => {
 	beforeEach(() => {
-		localStorage.clear();
 		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
-		localStorage.clear();
 	});
 
-	it("writes a draft to localStorage after debounce while editing", async () => {
+	it("PUTs a draft to the server after debounce while editing", async () => {
 		const titleInput = await startEditingWithTitleInput();
 		fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
 
-		expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
-
 		await vi.advanceTimersByTimeAsync(1000);
 
-		const raw = localStorage.getItem("wiki-draft:w1");
-		expect(raw).toBeTruthy();
-		const draft = JSON.parse(raw as string);
-		expect(draft.title).toBe("My Page Edited");
-		expect(draft.content).toBe(PAGE.content);
+		const fetchMock = vi.mocked(fetch);
+		const putCall = fetchMock.mock.calls.find(
+			([url, init]) => String(url).includes("/draft") && (init as RequestInit)?.method === "PUT"
+		);
+		expect(putCall).toBeTruthy();
+		const body = JSON.parse((putCall?.[1] as RequestInit).body as string);
+		expect(body.title).toBe("My Page Edited");
+		expect(body.content).toBe(PAGE.content);
 	});
 
-	it("clears the draft from localStorage after a successful save", async () => {
+	it("clears the server draft after a successful save", async () => {
 		const titleInput = await startEditingWithTitleInput();
 		fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
 		await vi.advanceTimersByTimeAsync(1000);
-		expect(localStorage.getItem("wiki-draft:w1")).toBeTruthy();
 
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 		await vi.advanceTimersByTimeAsync(0);
+
+		const fetchMock = vi.mocked(fetch);
 		await waitFor(() => {
-			expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
+			const deleteCall = fetchMock.mock.calls.find(
+				([url, init]) =>
+					String(url).includes("/draft") && (init as RequestInit)?.method === "DELETE"
+			);
+			expect(deleteCall).toBeTruthy();
 		});
 	});
 
-	it("keeps the draft in localStorage when editing is cancelled", async () => {
+	it("does not discard the draft when editing is cancelled", async () => {
 		const titleInput = await startEditingWithTitleInput();
 		fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
 		await vi.advanceTimersByTimeAsync(1000);
-		expect(localStorage.getItem("wiki-draft:w1")).toBeTruthy();
 
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		await vi.advanceTimersByTimeAsync(0);
 
-		const raw = localStorage.getItem("wiki-draft:w1");
-		expect(raw).toBeTruthy();
-		expect(JSON.parse(raw as string).title).toBe("My Page Edited");
+		const fetchMock = vi.mocked(fetch);
+		const deleteCall = fetchMock.mock.calls.find(
+			([url, init]) => String(url).includes("/draft") && (init as RequestInit)?.method === "DELETE"
+		);
+		expect(deleteCall).toBeFalsy();
 	});
 
-	it("flushes unflushed edits to the draft when leaving edit mode via navigation", async () => {
+	it("flushes unflushed edits to the server draft when leaving edit mode via navigation", async () => {
 		const titleInput = await startEditingWithTitleInput();
 		fireEvent.input(titleInput, { target: { value: "Typed just before navigating away" } });
 
 		// Navigate away (e.g. clicking a sidebar link) before the 1s debounce fires.
-		expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
 		fireEvent.click(screen.getByRole("button", { name: "+ New page" }));
+		await vi.advanceTimersByTimeAsync(0);
 
-		const raw = localStorage.getItem("wiki-draft:w1");
-		expect(raw).toBeTruthy();
-		expect(JSON.parse(raw as string).title).toBe("Typed just before navigating away");
+		const fetchMock = vi.mocked(fetch);
+		const putCall = fetchMock.mock.calls.find(
+			([url, init]) => String(url).includes("/draft") && (init as RequestInit)?.method === "PUT"
+		);
+		expect(putCall).toBeTruthy();
+		const body = JSON.parse((putCall?.[1] as RequestInit).body as string);
+		expect(body.title).toBe("Typed just before navigating away");
 	});
 });
 
-describe("draft autosave (PROJ-227) — restore banner", () => {
+describe("server-side draft autosave (PROJ-495) — restore banner", () => {
 	beforeEach(() => {
-		localStorage.clear();
 		vi.useFakeTimers();
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
-		localStorage.clear();
 	});
 
 	it("shows a restore banner when a newer draft exists on startEdit", async () => {
 		await renderWithDraftAndOpenEdit({
 			title: "Draft Title",
 			content: "Draft content",
-			savedAt: 2_000_000,
+			baseRevisionId: null,
+			updatedAt: 2_000_000,
 		});
 		expect(await screen.findByText(/Restore unsaved draft from/i)).toBeTruthy();
 	});
@@ -408,7 +461,8 @@ describe("draft autosave (PROJ-227) — restore banner", () => {
 		await renderWithDraftAndOpenEdit({
 			title: "Draft Title",
 			content: "Draft content",
-			savedAt: 2_000_000,
+			baseRevisionId: null,
+			updatedAt: 2_000_000,
 		});
 		await screen.findByText(/Restore unsaved draft from/i);
 		fireEvent.click(screen.getByRole("button", { name: "Restore" }));
@@ -418,18 +472,35 @@ describe("draft autosave (PROJ-227) — restore banner", () => {
 		expect(screen.queryByText(/Restore unsaved draft from/i)).toBeNull();
 	});
 
-	it("discard removes the draft and falls through to loading from the page", async () => {
+	it("discard clears the server draft and falls through to loading from the page", async () => {
 		await renderWithDraftAndOpenEdit({
 			title: "Draft Title",
 			content: "Draft content",
-			savedAt: 2_000_000,
+			baseRevisionId: null,
+			updatedAt: 2_000_000,
 		});
 		await screen.findByText(/Restore unsaved draft from/i);
 		fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+		await vi.advanceTimersByTimeAsync(0);
 
 		const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
 		expect(titleInput.value).toBe(PAGE.title);
-		expect(localStorage.getItem("wiki-draft:w1")).toBeNull();
+		const fetchMock = vi.mocked(fetch);
+		const deleteCall = fetchMock.mock.calls.find(
+			([url, init]) => String(url).includes("/draft") && (init as RequestInit)?.method === "DELETE"
+		);
+		expect(deleteCall).toBeTruthy();
+	});
+
+	it("does not offer a draft older than the page's current published content", async () => {
+		await renderWithDraftAndOpenEdit({
+			title: "Stale Draft Title",
+			content: "Stale draft content",
+			baseRevisionId: null,
+			updatedAt: PAGE.updated_at - 1,
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByText(/Restore unsaved draft from/i)).toBeNull();
 	});
 });
 

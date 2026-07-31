@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { ctxFromHono } from "../services/types";
 import * as wikiService from "../services/wiki";
+import * as wikiDraftsService from "../services/wiki-drafts";
 import * as wikiWatchersService from "../services/wiki-watchers";
 
 const router = new Hono<HonoEnv>();
@@ -250,6 +251,34 @@ router.delete("/:slug/watch", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(await wikiWatchersService.unwatchWikiPage(ctx, c.req.param("slug")));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.get("/:slug/draft", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiDraftsService.getWikiDraft(ctx, c.req.param("slug")));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.put("/:slug/draft", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const body = await c.req.json();
+		return c.json(await wikiDraftsService.saveWikiDraft(ctx, c.req.param("slug"), body));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.delete("/:slug/draft", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiDraftsService.discardWikiDraft(ctx, c.req.param("slug")));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
