@@ -546,7 +546,11 @@ describe("MCP endpoint", () => {
 			{ name: "delete_wiki_page", arguments: { slug: parent.slug, cascade: true } },
 			ownerHeaders
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
-		expect(JSON.parse(delRes.result.content[0].text)).toEqual({ ok: true, deletedCount: 2 });
+		expect(JSON.parse(delRes.result.content[0].text)).toEqual({
+			ok: true,
+			deletedCount: 2,
+			linkedByCount: 0,
+		});
 
 		const childRes2 = await SELF.fetch(`http://localhost/api/wiki/${child.slug}`, {
 			headers: ownerHeaders,

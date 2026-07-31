@@ -44,6 +44,7 @@ import m0040 from "../../../../packages/db/migrations/0040_provisioning_removals
 import m0041 from "../../../../packages/db/migrations/0041_wiki_slug_unique.sql?raw";
 import m0042 from "../../../../packages/db/migrations/0042_wiki_revision_title_summary.sql?raw";
 import m0043 from "../../../../packages/db/migrations/0043_wiki_fts.sql?raw";
+import m0044 from "../../../../packages/db/migrations/0044_wiki_links.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -90,4 +91,5 @@ export const MIGRATIONS = [
 	m0041,
 	m0042,
 	m0043,
+	m0044,
 ];

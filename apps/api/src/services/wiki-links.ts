@@ -1,0 +1,370 @@
+// PROJ-485: server-side wiki link graph. Parses [[Target]] / [[Target|label]] wikilinks
+// and same-workspace wiki URLs out of a page's content on every write, resolves each to
+// a page id (or leaves it unresolved for broken-link reporting), and stores the result in
+// `wiki_links` — id-backed so renames never break a link (target_title is kept purely for
+// display/re-resolution, target_page_id is the source of truth).
+//
+// No dependency on services/wiki.ts (avoids a circular import) — page resolution/
+// visibility for a *specific* page stays in wiki.ts, which calls into this file's
+// `backlinksForResolvedPage` after resolving. listBrokenWikiLinks/backfillWikiLinks
+// don't need a single resolved page so they're self-contained here.
+import { drizzle, schema } from "@projektor/db";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { wikiPagePath } from "../lib/urls";
+import { ListBrokenWikiLinksInputSchema } from "../schemas/wiki";
+import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
+import { ForbiddenError, ValidationError } from "./errors";
+import type { ServiceCtx } from "./types";
+
+type Orm = ReturnType<typeof drizzle<typeof schema>>;
+
+// Mirrors apps/web/src/utils/markdown.ts's resolveWikilinks regex — same link syntax
+// rules, server-side.
+const WIKILINK_RE = /\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g;
+// Markdown link syntax `[label](url)` — used to catch same-workspace wiki URLs
+// (`/wiki/:slug`, `/wiki?slug=...`, or the relative `?slug=...` form markdown.ts emits
+// for already-resolved wikilinks).
+const MD_LINK_RE = /\[[^\]]*\]\(([^)\s]+)\)/g;
+
+type ParsedLinkTarget = { kind: "title"; title: string } | { kind: "slug"; slug: string };
+
+function extractWikiSlugFromUrl(url: string): string | null {
+	// Only relative or same-origin-rooted URLs are treated as same-workspace links —
+	// an absolute cross-origin URL is never a link to a page in this workspace.
+	const pathAndQuery = url.replace(/^https?:\/\/[^/]+/, "");
+	const pathMatch = pathAndQuery.match(/^\/wiki\/([a-z0-9-/]+)/i);
+	if (pathMatch) return decodeURIComponent(pathMatch[1]);
+	const queryMatch = pathAndQuery.match(/[?&]slug=([^&]+)/);
+	if (queryMatch) return decodeURIComponent(queryMatch[1]);
+	return null;
+}
+
+export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
+	const targets: ParsedLinkTarget[] = [];
+	for (const m of content.matchAll(WIKILINK_RE)) {
+		const title = m[1].trim();
+		if (title) targets.push({ kind: "title", title });
+	}
+	for (const m of content.matchAll(MD_LINK_RE)) {
+		const slug = extractWikiSlugFromUrl(m[1].trim());
+		if (slug) targets.push({ kind: "slug", slug });
+	}
+	return targets;
+}
+
+async function resolveTitleTarget(
+	orm: Orm,
+	workspaceId: string,
+	title: string
+): Promise<string | null> {
+	const row = await orm
+		.select({ id: schema.wikiPages.id })
+		.from(schema.wikiPages)
+		.where(
+			and(
+				eq(schema.wikiPages.workspaceId, workspaceId),
+				sql`lower(${schema.wikiPages.title}) = lower(${title})`
+			)
+		)
+		.get();
+	return row?.id ?? null;
+}
+
+async function resolveSlugTarget(
+	orm: Orm,
+	workspaceId: string,
+	slug: string
+): Promise<{ id: string; title: string } | null> {
+	const direct = await orm
+		.select({ id: schema.wikiPages.id, title: schema.wikiPages.title })
+		.from(schema.wikiPages)
+		.where(and(eq(schema.wikiPages.workspaceId, workspaceId), eq(schema.wikiPages.slug, slug)))
+		.get();
+	if (direct) return direct;
+	// PROJ-483 redirects: an old slug still resolves to its page.
+	const redirect = await orm
+		.select({ pageId: schema.wikiRedirects.pageId })
+		.from(schema.wikiRedirects)
+		.where(
+			and(eq(schema.wikiRedirects.workspaceId, workspaceId), eq(schema.wikiRedirects.oldSlug, slug))
+		)
+		.get();
+	if (!redirect) return null;
+	const page = await orm
+		.select({ id: schema.wikiPages.id, title: schema.wikiPages.title })
+		.from(schema.wikiPages)
+		.where(
+			and(eq(schema.wikiPages.id, redirect.pageId), eq(schema.wikiPages.workspaceId, workspaceId))
+		)
+		.get();
+	return page ?? null;
+}
+
+type ResolvedLink = { targetPageId: string | null; targetTitle: string };
+
+async function resolveLinkTargets(
+	orm: Orm,
+	workspaceId: string,
+	targets: ParsedLinkTarget[]
+): Promise<ResolvedLink[]> {
+	// Dedupe by resolved page id (or the raw unresolved key) so a page linking to the
+	// same target multiple times only gets one wiki_links row.
+	const resolved = new Map<string, ResolvedLink>();
+	for (const t of targets) {
+		if (t.kind === "title") {
+			const targetPageId = await resolveTitleTarget(orm, workspaceId, t.title);
+			const key = targetPageId ?? `title:${t.title.toLowerCase()}`;
+			if (!resolved.has(key)) resolved.set(key, { targetPageId, targetTitle: t.title });
+		} else {
+			const found = await resolveSlugTarget(orm, workspaceId, t.slug);
+			const key = found?.id ?? `slug:${t.slug.toLowerCase()}`;
+			if (!resolved.has(key)) {
+				resolved.set(key, { targetPageId: found?.id ?? null, targetTitle: found?.title ?? t.slug });
+			}
+		}
+	}
+	return [...resolved.values()];
+}
+
+// D1 caps bound params at 100; each row binds 6 params (id, workspaceId, sourcePageId,
+// targetPageId, targetTitle, createdAt) — 15 rows/insert stays comfortably under that
+// with headroom, unlike services/sql.ts#inChunks (calibrated for single-param-per-item
+// IN-list queries, not multi-column inserts).
+const LINK_INSERT_CHUNK_SIZE = 15;
+
+/**
+ * Recompute a page's outgoing wiki_links rows from its current content: delete-then-
+ * reinsert, mirroring services/wiki.ts's reindexWikiFts. Call after every content write
+ * (create or update) — never partially, since a stale row would misreport backlinks.
+ */
+export async function reindexWikiLinks(
+	ctx: ServiceCtx,
+	orm: Orm,
+	sourcePageId: string,
+	content: string
+): Promise<void> {
+	await ctx.db
+		.prepare("DELETE FROM wiki_links WHERE source_page_id = ? AND workspace_id = ?")
+		.bind(sourcePageId, ctx.workspaceId)
+		.run();
+
+	const targets = parseWikiLinkTargets(content);
+	if (targets.length === 0) return;
+
+	const resolved = await resolveLinkTargets(orm, ctx.workspaceId, targets);
+	const now = Math.floor(Date.now() / 1000);
+	const rows = resolved.map((r) => ({
+		id: crypto.randomUUID(),
+		workspaceId: ctx.workspaceId,
+		sourcePageId,
+		targetPageId: r.targetPageId,
+		targetTitle: r.targetTitle,
+		createdAt: now,
+	}));
+
+	for (let i = 0; i < rows.length; i += LINK_INSERT_CHUNK_SIZE) {
+		await orm.insert(schema.wikiLinks).values(rows.slice(i, i + LINK_INSERT_CHUNK_SIZE));
+	}
+}
+
+/**
+ * One-time backfill: recompute wiki_links for every existing page in the workspace.
+ * D1 migrations are pure SQL and can't run this parsing logic, so it's exposed as an
+ * idempotent (delete-then-reinsert per page, safe to re-run) owner/admin-gated action
+ * instead — see mcp/wiki.ts's backfill_wiki_links tool / routes/wiki.ts's REST
+ * equivalent, and the PR description for why this shape was chosen over a standalone
+ * script.
+ */
+export async function backfillWikiLinks(ctx: ServiceCtx): Promise<{ pagesProcessed: number }> {
+	if (!isWorkspaceAdmin(ctx.role)) throw new ForbiddenError("Insufficient permissions");
+
+	const orm = drizzle(ctx.db, { schema });
+	const pages = await orm
+		.select({ id: schema.wikiPages.id, content: schema.wikiPages.content })
+		.from(schema.wikiPages)
+		.where(eq(schema.wikiPages.workspaceId, ctx.workspaceId));
+
+	for (const page of pages) {
+		await reindexWikiLinks(ctx, orm, page.id, page.content);
+	}
+	return { pagesProcessed: pages.length };
+}
+
+// Called from services/wiki.ts's deleteWikiPage so a deleted page's outgoing link rows
+// don't linger (ON DELETE CASCADE on source_page_id already guarantees this at the DB
+// level for D1 connections that enforce FKs, but PROJ-407 established that isn't
+// guaranteed for every connection — mirrors deleteWikiPageAttachments's rationale).
+export async function deleteWikiLinksForPages(ctx: ServiceCtx, pageIds: string[]): Promise<void> {
+	const CHUNK = 90;
+	for (let i = 0; i < pageIds.length; i += CHUNK) {
+		const chunk = pageIds.slice(i, i + CHUNK);
+		const placeholders = chunk.map(() => "?").join(",");
+		await ctx.db
+			.prepare(
+				`DELETE FROM wiki_links WHERE source_page_id IN (${placeholders}) AND workspace_id = ?`
+			)
+			.bind(...chunk, ctx.workspaceId)
+			.run();
+	}
+}
+
+// PROJ-485: count of distinct pages that link to any page in `pageIds`, for delete
+// warnings ("N pages link here"). Must be read BEFORE the delete runs — target_page_id
+// is ON DELETE SET NULL, so the count would read as 0 afterwards.
+export async function countBacklinkSources(ctx: ServiceCtx, pageIds: string[]): Promise<number> {
+	if (pageIds.length === 0) return 0;
+	const orm = drizzle(ctx.db, { schema });
+	const rows = await orm
+		.select({ sourcePageId: schema.wikiLinks.sourcePageId })
+		.from(schema.wikiLinks)
+		.where(
+			and(
+				eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
+				inArray(schema.wikiLinks.targetPageId, pageIds)
+			)
+		)
+		.groupBy(schema.wikiLinks.sourcePageId);
+	// Exclude self-links (a page linking to itself isn't "another page" linking here).
+	return rows.filter((r) => !pageIds.includes(r.sourcePageId)).length;
+}
+
+// PROJ-485: best-effort citing context for a backlink — the raw text surrounding the
+// first occurrence of the link syntax in the source page's current content. Returns
+// null rather than guessing if the exact text can't be located (e.g. content changed
+// since the link was indexed).
+function extractSnippet(content: string, targetTitle: string): string | null {
+	const marker = `[[${targetTitle.toLowerCase()}`;
+	const idx = content.toLowerCase().indexOf(marker);
+	if (idx === -1) return null;
+	const SNIPPET_RADIUS = 60;
+	const start = Math.max(0, idx - SNIPPET_RADIUS);
+	const end = Math.min(content.length, idx + marker.length + SNIPPET_RADIUS);
+	const text = content.slice(start, end).replace(/\s+/g, " ").trim();
+	return `${start > 0 ? "…" : ""}${text}${end < content.length ? "…" : ""}`;
+}
+
+export interface WikiBacklink {
+	linkId: string;
+	pageId: string;
+	slug: string;
+	title: string;
+	url: string;
+	snippet: string | null;
+}
+
+/**
+ * Pages that link to an already-resolved+visibility-checked page, via target_page_id
+ * (id-backed — a rename of the target never breaks this). Called by
+ * services/wiki.ts#getWikiBacklinks after it resolves idOrSlug and checks the caller
+ * can see the target page itself.
+ */
+export async function backlinksForResolvedPage(
+	ctx: ServiceCtx,
+	page: { id: string }
+): Promise<WikiBacklink[]> {
+	const orm = drizzle(ctx.db, { schema });
+	const rows = await orm
+		.select({
+			linkId: schema.wikiLinks.id,
+			targetTitle: schema.wikiLinks.targetTitle,
+			pageId: schema.wikiPages.id,
+			slug: schema.wikiPages.slug,
+			title: schema.wikiPages.title,
+			content: schema.wikiPages.content,
+			projectId: schema.wikiPages.projectId,
+		})
+		.from(schema.wikiLinks)
+		.innerJoin(schema.wikiPages, eq(schema.wikiPages.id, schema.wikiLinks.sourcePageId))
+		.where(
+			and(
+				eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
+				eq(schema.wikiLinks.targetPageId, page.id)
+			)
+		);
+
+	// PROJ-311: a backlink from a project-scoped page the caller can't see shouldn't
+	// leak that page's existence.
+	const visibleSourceIds = new Set(
+		isWorkspaceAdmin(ctx.role)
+			? rows.map((r) => r.pageId)
+			: await visibleSourcePageIds(
+					ctx,
+					rows.filter((r) => r.projectId !== null)
+				)
+	);
+	const visible = rows.filter((r) => r.projectId === null || visibleSourceIds.has(r.pageId));
+
+	return visible.map((r) => ({
+		linkId: r.linkId,
+		pageId: r.pageId,
+		slug: r.slug,
+		title: r.title,
+		url: wikiPagePath(r.slug, r.projectId),
+		snippet: extractSnippet(r.content, r.targetTitle),
+	}));
+}
+
+// Resolves which of `rows` (all project-scoped) the caller has an effective grant on.
+async function visibleSourcePageIds(
+	ctx: ServiceCtx,
+	rows: Array<{ pageId: string; projectId: string | null }>
+): Promise<string[]> {
+	if (rows.length === 0) return [];
+	const uniqueProjectIds = [
+		...new Set(rows.map((r) => r.projectId).filter((p): p is string => p !== null)),
+	];
+	const grantedProjectIds = new Set<string>();
+	for (const projectId of uniqueProjectIds) {
+		if ((await effectiveProjectRole(ctx, projectId)) !== null) grantedProjectIds.add(projectId);
+	}
+	return rows
+		.filter((r) => r.projectId !== null && grantedProjectIds.has(r.projectId))
+		.map((r) => r.pageId);
+}
+
+export interface BrokenWikiLink {
+	linkId: string;
+	sourcePageId: string;
+	sourceSlug: string;
+	sourceTitle: string;
+	targetTitle: string;
+}
+
+/** All unresolved (target_page_id null) wiki_links in the workspace, optionally scoped to a project. */
+export async function listBrokenWikiLinks(
+	ctx: ServiceCtx,
+	input: unknown
+): Promise<BrokenWikiLink[]> {
+	const parsed = ListBrokenWikiLinksInputSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId } = parsed.data;
+
+	const orm = drizzle(ctx.db, { schema });
+	const conditions = [
+		eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
+		isNull(schema.wikiLinks.targetPageId),
+	];
+	if (projectId) conditions.push(eq(schema.wikiPages.projectId, projectId));
+
+	// PROJ-311: same visibility filter as listWikiPages — hide project-scoped source
+	// pages the caller isn't granted, workspace-level pages stay visible to everyone.
+	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
+	if (visible) {
+		const cond = or(isNull(schema.wikiPages.projectId), visible);
+		if (cond) conditions.push(cond);
+	}
+
+	const rows = await orm
+		.select({
+			linkId: schema.wikiLinks.id,
+			sourcePageId: schema.wikiPages.id,
+			sourceSlug: schema.wikiPages.slug,
+			sourceTitle: schema.wikiPages.title,
+			targetTitle: schema.wikiLinks.targetTitle,
+		})
+		.from(schema.wikiLinks)
+		.innerJoin(schema.wikiPages, eq(schema.wikiPages.id, schema.wikiLinks.sourcePageId))
+		.where(and(...conditions));
+
+	return rows;
+}

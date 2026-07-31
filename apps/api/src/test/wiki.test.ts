@@ -798,7 +798,7 @@ describe("Wiki API", () => {
 			headers: ownerHeaders,
 		});
 		expect(delRes.status).toBe(200);
-		expect(await delRes.json()).toEqual({ ok: true, deletedCount: 1 });
+		expect(await delRes.json()).toEqual({ ok: true, deletedCount: 1, linkedByCount: 0 });
 
 		const childPageRes = await SELF.fetch(`http://localhost/api/wiki/${child.slug}`, {
 			headers: ownerHeaders,
@@ -837,7 +837,7 @@ describe("Wiki API", () => {
 			headers: ownerHeaders,
 		});
 		expect(delRes.status).toBe(200);
-		expect(await delRes.json()).toEqual({ ok: true, deletedCount: 3 });
+		expect(await delRes.json()).toEqual({ ok: true, deletedCount: 3, linkedByCount: 0 });
 
 		await env.DB.prepare("DELETE FROM rate_limit").run();
 		for (const s of [parent.slug, child.slug, grandchild.slug]) {
@@ -1570,5 +1570,310 @@ describe("wiki slug dedup algorithm (0041_wiki_slug_unique.sql)", () => {
 			expect(results.find((r) => r.id === "p1")?.slug).toBe("operations");
 			expect(results.find((r) => r.id === "p3")?.slug).toBe("operations-2");
 		});
+	});
+});
+
+describe("Wiki link graph and backlinks (PROJ-485)", () => {
+	let token: string;
+	let slug: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+	});
+
+	async function createPage(title: string, content: string) {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title, content }),
+		});
+		return (await res.json()) as { id: string; slug: string };
+	}
+
+	it("[[Target]] and [[Target|label]] both resolve a backlink to the target page", async () => {
+		const target = await createPage("Runbook", "how to page");
+		await createPage("Alpha", "see [[Runbook]] for details");
+		await createPage("Beta", "see [[Runbook|the runbook]] for details");
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${target.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const backlinks = (await res.json()) as Array<{ slug: string; title: string }>;
+		expect(backlinks.map((b) => b.slug).sort()).toEqual(["alpha", "beta"]);
+	});
+
+	it("a same-workspace wiki URL link resolves a backlink", async () => {
+		const target = await createPage("Handbook", "contents");
+		await createPage("Gamma", `[link](/wiki/${target.slug})`);
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${target.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		const backlinks = (await res.json()) as Array<{ slug: string }>;
+		expect(backlinks.map((b) => b.slug)).toEqual(["gamma"]);
+	});
+
+	it("an unresolved [[Target]] is stored as a broken link, not a backlink", async () => {
+		await createPage("Delta", "see [[Nonexistent Page]] for details");
+
+		const brokenRes = await SELF.fetch("http://localhost/api/wiki/broken-links", {
+			headers: authHeaders(token, slug),
+		});
+		const broken = (await brokenRes.json()) as Array<{ sourceSlug: string; targetTitle: string }>;
+		expect(broken).toContainEqual(
+			expect.objectContaining({ sourceSlug: "delta", targetTitle: "Nonexistent Page" })
+		);
+	});
+
+	it("get_backlinks (MCP) returns the same result as REST", async () => {
+		const fixture = await seedFixture();
+		const target = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+			body: JSON.stringify({ title: "MCP Target", content: "x" }),
+		}).then((r) => r.json() as Promise<{ slug: string }>);
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+			body: JSON.stringify({ title: "MCP Source", content: "[[MCP Target]]" }),
+		});
+
+		const result = await mcpCall<{ content: Array<{ text: string }> }>(
+			fixture.workspace.id,
+			"get_backlinks",
+			{ slug: target.slug },
+			authHeaders(fixture.token, fixture.workspace.slug)
+		);
+		const backlinks = mcpData<Array<{ slug: string }>>(result);
+		expect(backlinks).toEqual([expect.objectContaining({ slug: "mcp-source" })]);
+	});
+
+	it("list_broken_wiki_links (MCP) matches REST", async () => {
+		const fixture = await seedFixture();
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+			body: JSON.stringify({ title: "Epsilon", content: "[[Missing Target]]" }),
+		});
+
+		const result = await mcpCall<{ content: Array<{ text: string }> }>(
+			fixture.workspace.id,
+			"list_broken_wiki_links",
+			{},
+			authHeaders(fixture.token, fixture.workspace.slug)
+		);
+		const broken = mcpData<Array<{ targetTitle: string }>>(result);
+		expect(broken).toContainEqual(expect.objectContaining({ targetTitle: "Missing Target" }));
+	});
+
+	it("renaming the target page's slug doesn't break an existing backlink (id-backed)", async () => {
+		const target = await createPage("Original Name", "content");
+		await createPage("Linker", "see [[Original Name]]");
+
+		await SELF.fetch(`http://localhost/api/wiki/${target.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "renamed-slug" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/renamed-slug/backlinks", {
+			headers: authHeaders(token, slug),
+		});
+		const backlinks = (await res.json()) as Array<{ slug: string }>;
+		expect(backlinks.map((b) => b.slug)).toEqual(["linker"]);
+	});
+
+	it("editing content to remove a link removes the backlink; a new link adds one", async () => {
+		const target = await createPage("Stable Target", "x");
+		const linker = await createPage("Changing Source", "see [[Stable Target]]");
+
+		let res = await SELF.fetch(`http://localhost/api/wiki/${target.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await res.json()) as unknown[]).length).toBe(1);
+
+		await SELF.fetch(`http://localhost/api/wiki/${linker.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "no more links here" }),
+		});
+
+		res = await SELF.fetch(`http://localhost/api/wiki/${target.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(await res.json()).toEqual([]);
+	});
+
+	it("a title-only update (no content change) leaves the link graph untouched", async () => {
+		const target = await createPage("Untouched Target", "x");
+		const linker = await createPage("Title Change Source", "see [[Untouched Target]]");
+
+		await SELF.fetch(`http://localhost/api/wiki/${linker.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Renamed Title Only" }),
+		});
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${target.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		const backlinks = (await res.json()) as Array<{ slug: string }>;
+		expect(backlinks.map((b) => b.slug)).toEqual(["title-change-source"]);
+	});
+
+	it("DELETE surfaces linkedByCount as a non-blocking warning and still deletes the page", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const target = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+			body: JSON.stringify({ title: "Linked Target", content: "x" }),
+		}).then((r) => r.json() as Promise<{ slug: string }>);
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+			body: JSON.stringify({ title: "Linker One", content: "[[Linked Target]]" }),
+		});
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${target.slug}`, {
+			method: "DELETE",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { ok: boolean; linkedByCount: number };
+		expect(body.linkedByCount).toBe(1);
+
+		const getRes = await SELF.fetch(`http://localhost/api/wiki/${target.slug}`, {
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+		expect(getRes.status).toBe(404);
+
+		// The now-deleted target turns the surviving linker's outgoing link into a broken
+		// link (target_page_id set null) rather than silently vanishing.
+		const brokenRes = await SELF.fetch("http://localhost/api/wiki/broken-links", {
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+		const broken = (await brokenRes.json()) as Array<{ targetTitle: string }>;
+		expect(broken).toContainEqual(expect.objectContaining({ targetTitle: "Linked Target" }));
+	});
+
+	it("cascade-deleting a subtree cleans up outgoing links for every deleted page", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const parentRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+			body: JSON.stringify({ title: "Cascade Parent", content: "[[Nonexistent A]]" }),
+		});
+		const parent = (await parentRes.json()) as { id: string; slug: string };
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+			body: JSON.stringify({
+				title: "Cascade Child",
+				content: "[[Nonexistent B]]",
+				parentId: parent.id,
+			}),
+		});
+
+		await SELF.fetch(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+
+		const brokenRes = await SELF.fetch("http://localhost/api/wiki/broken-links", {
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+		const broken = (await brokenRes.json()) as Array<{ targetTitle: string }>;
+		expect(broken.some((b) => b.targetTitle === "Nonexistent A")).toBe(false);
+		expect(broken.some((b) => b.targetTitle === "Nonexistent B")).toBe(false);
+	});
+
+	it("backlinks and broken links never cross workspace boundaries", async () => {
+		const workspaceA = await seedFixture();
+		const workspaceB = await seedFixture();
+
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(workspaceA.token, workspaceA.workspace.slug),
+			body: JSON.stringify({ title: "Shared Title", content: "x" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(workspaceB.token, workspaceB.workspace.slug),
+			body: JSON.stringify({ title: "B Source", content: "see [[Shared Title]]" }),
+		});
+
+		// workspace B's link can only resolve against workspace B's own pages, so it's
+		// unresolved there (no "Shared Title" page exists in B) — never leaking a match
+		// against workspace A's page of the same title.
+		const brokenB = await SELF.fetch("http://localhost/api/wiki/broken-links", {
+			headers: authHeaders(workspaceB.token, workspaceB.workspace.slug),
+		});
+		expect(
+			((await brokenB.json()) as Array<{ targetTitle: string }>).some(
+				(b) => b.targetTitle === "Shared Title"
+			)
+		).toBe(true);
+
+		const sharedA = await SELF.fetch("http://localhost/api/wiki/shared-title", {
+			headers: authHeaders(workspaceA.token, workspaceA.workspace.slug),
+		});
+		const target = (await sharedA.json()) as { id: string };
+		const backlinksA = await SELF.fetch(`http://localhost/api/wiki/${target.id}/backlinks`, {
+			headers: authHeaders(workspaceA.token, workspaceA.workspace.slug),
+		});
+		expect(await backlinksA.json()).toEqual([]);
+	});
+
+	it("backfill_wiki_links (MCP, owner-only) recomputes links for pre-existing content", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		// Seed pages directly at the DB layer, bypassing reindexWikiLinks, to simulate
+		// pre-PROJ-485 content that predates the link graph.
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			"INSERT INTO wiki_pages (id, workspace_id, slug, title, content, created_by_id, updated_by_id, created_at, updated_at) " +
+				"VALUES ('legacy-target', ?, 'legacy-target', 'Legacy Target', 'x', ?, ?, ?, ?)"
+		)
+			.bind(owner.workspace.id, owner.user.id, owner.user.id, now, now)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO wiki_pages (id, workspace_id, slug, title, content, created_by_id, updated_by_id, created_at, updated_at) " +
+				"VALUES ('legacy-source', ?, 'legacy-source', 'Legacy Source', '[[Legacy Target]]', ?, ?, ?, ?)"
+		)
+			.bind(owner.workspace.id, owner.user.id, owner.user.id, now, now)
+			.run();
+
+		const preBacklinks = await SELF.fetch("http://localhost/api/wiki/legacy-target/backlinks", {
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+		expect(await preBacklinks.json()).toEqual([]);
+
+		const result = await mcpCall<{ content: Array<{ text: string }> }>(
+			owner.workspace.id,
+			"backfill_wiki_links",
+			{},
+			authHeaders(owner.token, owner.workspace.slug)
+		);
+		const backfillResult = mcpData<{ pagesProcessed: number }>(result);
+		expect(backfillResult.pagesProcessed).toBeGreaterThanOrEqual(2);
+
+		const postBacklinks = await SELF.fetch("http://localhost/api/wiki/legacy-target/backlinks", {
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+		const backlinks = (await postBacklinks.json()) as Array<{ slug: string }>;
+		expect(backlinks.map((b) => b.slug)).toEqual(["legacy-source"]);
+	});
+
+	it("backfill_wiki_links is rejected for a non-admin member", async () => {
+		const member = await seedFixture({ role: "member" });
+		const result = await mcpCall(
+			member.workspace.id,
+			"backfill_wiki_links",
+			{},
+			authHeaders(member.token, member.workspace.slug)
+		);
+		expect(isMcpError(result)).toBe(true);
 	});
 });
