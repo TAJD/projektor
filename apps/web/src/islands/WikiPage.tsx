@@ -1199,13 +1199,27 @@ function RevisionsHistory({
 	);
 }
 
+// PROJ-494: whether an attachment's id appears anywhere in the page's current markdown
+// (e.g. as part of an inline `![alt](/api/files/:id...)` ref). A plain substring check —
+// good enough to tell "referenced" from "orphaned" without parsing markdown image syntax,
+// and it also catches an id pasted into a manual link or wiki_ref-style reference.
+function isReferenced(attachmentId: string, content: string): boolean {
+	return content.includes(attachmentId);
+}
+
+const REFERENCED_BADGE_CLASS =
+	"inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold " +
+	"uppercase tracking-wide shrink-0";
+
 function AttachmentEntry({
 	attachment,
 	workspaceSlug,
+	referenced,
 	onDelete,
 }: {
 	attachment: Attachment;
 	workspaceSlug?: string;
+	referenced: boolean;
 	onDelete: (attachmentId: string) => void;
 }) {
 	const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
@@ -1219,6 +1233,16 @@ function AttachmentEntry({
 			>
 				{attachment.filename}
 			</a>
+			<span
+				class={REFERENCED_BADGE_CLASS}
+				style={
+					referenced
+						? { background: "rgba(22, 163, 74, 0.12)", color: "var(--status-done)" }
+						: { background: "var(--priority-low-bg)", color: "var(--priority-low-text)" }
+				}
+			>
+				{referenced ? "In page" : "Unreferenced"}
+			</span>
 			<span class="text-xs text-text-muted shrink-0">{formatBytes(attachment.size)}</span>
 			<button
 				type="button"
@@ -1280,6 +1304,7 @@ function AttachmentUploadForm({
 function AttachmentsPanel({
 	attachments,
 	workspaceSlug,
+	content,
 	uploadFormOpen,
 	uploadFile,
 	uploading,
@@ -1292,6 +1317,7 @@ function AttachmentsPanel({
 }: {
 	attachments: Attachment[];
 	workspaceSlug?: string;
+	content: string;
 	uploadFormOpen: boolean;
 	uploadFile: File | null;
 	uploading: boolean;
@@ -1315,6 +1341,7 @@ function AttachmentsPanel({
 							key={a.id}
 							attachment={a}
 							workspaceSlug={workspaceSlug}
+							referenced={isReferenced(a.id, content)}
 							onDelete={onDeleteAttachment}
 						/>
 					))}
@@ -1398,6 +1425,7 @@ interface PageArticleProps {
 	onUpload: () => void;
 	onCancelUpload: () => void;
 	onDeleteAttachment: (attachmentId: string) => void;
+	onUploadInlineImage: (file: File) => Promise<string | null>;
 }
 
 function PageArticleMeta(
@@ -1526,6 +1554,7 @@ function PageArticle(props: PageArticleProps) {
 							value={props.editContent}
 							onChange={props.onEditContentChange}
 							minHeight="320px"
+							onImageFile={props.onUploadInlineImage}
 						/>
 					</div>
 				) : (
@@ -1551,6 +1580,7 @@ function PageArticle(props: PageArticleProps) {
 				<AttachmentsPanel
 					attachments={props.attachments}
 					workspaceSlug={props.workspaceSlug}
+					content={props.editing ? props.editContent : page.content}
 					uploadFormOpen={props.uploadFormOpen}
 					uploadFile={props.uploadFile}
 					uploading={props.uploading}
@@ -2067,6 +2097,31 @@ function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageDat
 		}
 	}
 
+	// PROJ-494: paste/drag-drop image upload, passed to MarkdownEditor as onImageFile.
+	// Reuses the same upload endpoint as the "Attach file" form above — an inline image is
+	// just an attachment that also gets a markdown ref auto-inserted. Returns a URL carrying
+	// `?workspace=` so the <img> tag rendering it (a plain browser subresource load, no
+	// custom headers) can still resolve the workspace — see middleware/workspace.ts.
+	async function uploadInlineImage(file: File): Promise<string | null> {
+		if (!page) return null;
+		try {
+			const form = new FormData();
+			form.append("file", file);
+			form.append("entityType", "wiki_page");
+			form.append("entityId", page.id);
+			const result = await apiFetch<{ id: string }>("/api/files", {
+				workspaceSlug,
+				method: "POST",
+				body: form,
+			});
+			await fetchAttachments(page.id);
+			const qs = workspaceSlug ? `?workspace=${encodeURIComponent(workspaceSlug)}` : "";
+			return `/api/files/${result.id}${qs}`;
+		} catch {
+			return null;
+		}
+	}
+
 	return {
 		attachments,
 		uploadFormOpen,
@@ -2078,6 +2133,7 @@ function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageDat
 		uploadAttachment,
 		cancelUpload,
 		deleteAttachment,
+		uploadInlineImage,
 	};
 }
 
@@ -2846,6 +2902,7 @@ function buildArticleProps(article: {
 		onUpload: article.attach.uploadAttachment,
 		onCancelUpload: article.attach.cancelUpload,
 		onDeleteAttachment: article.attach.deleteAttachment,
+		onUploadInlineImage: article.attach.uploadInlineImage,
 		moving: article.move.moving,
 		moveOptions: article.moveOptions,
 		moveTargetId: article.move.moveTargetId,

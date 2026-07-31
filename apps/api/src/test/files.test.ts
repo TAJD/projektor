@@ -190,6 +190,46 @@ describe("Files API", () => {
 		expect(getRes.status).toBe(404);
 	});
 
+	// PROJ-494: an inline <img> tag rendering an attachment in wiki content can't set a
+	// custom X-Workspace-Slug header, so GET falls back to a `?workspace=` query param.
+	it("GET /api/files/:id resolves the workspace from a ?workspace= query param when no header is sent", async () => {
+		const uploadRes = await makeUploadRequest(token, slug, "query-param content", "q.txt");
+		const { id } = (await uploadRes.json()) as { id: string };
+
+		const getRes = await SELF.fetch(`http://localhost/api/files/${id}?workspace=${slug}`, {
+			headers: { Authorization: `Bearer ${token}` },
+		});
+		expect(getRes.status).toBe(200);
+		expect(await getRes.text()).toBe("query-param content");
+	});
+
+	it("GET /api/files/:id via ?workspace= still 404s for a file in a different workspace", async () => {
+		const uploadRes = await makeUploadRequest(token, slug, "content", "q2.txt");
+		const { id } = (await uploadRes.json()) as { id: string };
+
+		const other = await seedFixture();
+		const getRes = await SELF.fetch(
+			`http://localhost/api/files/${id}?workspace=${other.workspace.slug}`,
+			{
+				headers: { Authorization: `Bearer ${other.token}` },
+			}
+		);
+		expect(getRes.status).toBe(404);
+	});
+
+	it("POST /api/files does not honor ?workspace= — the header is still required", async () => {
+		const form = new FormData();
+		form.append("file", new File(["data"], "f.txt", { type: "text/plain" }));
+		form.append("entityType", "issue");
+		form.append("entityId", ENTITY_ID);
+		const res = await SELF.fetch(`http://localhost/api/files?workspace=${slug}`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}` },
+			body: form,
+		});
+		expect(res.status).toBe(400);
+	});
+
 	it("GET /api/files/:id returns 404 for a different workspace", async () => {
 		const uploadRes = await makeUploadRequest(token, slug);
 		const { id } = (await uploadRes.json()) as { id: string };

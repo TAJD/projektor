@@ -79,6 +79,19 @@ describe("workspace subdomain routing (WORKSPACE_SUBDOMAIN_ROUTING)", () => {
 		expect(res.status).toBe(200);
 	});
 
+	// PROJ-494: the `?workspace=` query-param fallback is opt-in per route (only GET
+	// /api/files*, see index.ts) — everything else must keep requiring the header.
+	it("a ?workspace= query param is ignored on routes that didn't opt in", async () => {
+		const fixture = await seedFixture();
+		const res = await SELF.fetch(
+			`http://localhost/api/task-types?workspace=${fixture.workspace.slug}`,
+			{
+				headers: { Authorization: `Bearer ${fixture.token}` },
+			}
+		);
+		expect(res.status).toBe(400);
+	});
+
 	it("flag off + no header + a resolvable subdomain warns before the 400", async () => {
 		const fixture = await seedFixture();
 		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});

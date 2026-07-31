@@ -9,6 +9,57 @@ interface Props {
 	value: string;
 	onChange: (value: string) => void;
 	minHeight?: string;
+	// PROJ-494: paste/drag-drop an image into the editor. Returning the URL to embed
+	// inserts `![filename](url)` at the cursor/drop position; returning null (upload
+	// failed, or the caller has no entity to attach to yet, e.g. the create-page form)
+	// leaves the editor untouched. Undefined disables image interception entirely —
+	// paste/drop of non-image content is never affected either way.
+	onImageFile?: (file: File) => Promise<string | null>;
+}
+
+// Mirrors services/files.ts's INLINE_TYPES on the API side — the set of image types the
+// API will actually serve inline (SVG is excluded there for script-execution risk, so
+// pasting one falls through to a manual "Attach file" upload instead of auto-embedding).
+export const PASTE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+function imageFilesFromClipboard(data: DataTransfer | null): File[] {
+	if (!data) return [];
+	const files: File[] = [];
+	for (const item of Array.from(data.items)) {
+		if (item.kind === "file" && PASTE_IMAGE_TYPES.has(item.type)) {
+			const file = item.getAsFile();
+			if (file) files.push(file);
+		}
+	}
+	return files;
+}
+
+function imageFilesFromDrop(data: DataTransfer | null): File[] {
+	if (!data) return [];
+	return Array.from(data.files).filter((f) => PASTE_IMAGE_TYPES.has(f.type));
+}
+
+// Uploads sequentially and inserts each `![name](url)` right after the previous one, so a
+// multi-file paste/drop lands as consecutive image refs instead of racing to overlapping
+// positions. A file whose upload fails (onImageFile resolves null) is silently skipped.
+async function insertUploadedImages(
+	view: EditorView,
+	files: File[],
+	pos: number,
+	onImageFile: (file: File) => Promise<string | null>
+): Promise<void> {
+	let insertAt = pos;
+	for (const file of files) {
+		const url = await onImageFile(file);
+		if (!url) continue;
+		const insert = `![${file.name}](${url})\n`;
+		view.dispatch({
+			changes: { from: insertAt, insert },
+			selection: EditorSelection.cursor(insertAt + insert.length),
+		});
+		insertAt += insert.length;
+	}
+	view.focus();
 }
 
 // Sub-640px gets a 44px-square touch target (the toolbar was ~24px tall, well under
@@ -179,10 +230,16 @@ function PreviewPane({ preview, mobilePreview }: { preview: string; mobilePrevie
 function useMarkdownEditorView(
 	value: string,
 	onChange: (value: string) => void,
-	minHeight: string
+	minHeight: string,
+	onImageFile: ((file: File) => Promise<string | null>) | undefined
 ) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const viewRef = useRef<EditorView | null>(null);
+	// The domEventHandlers extension below is installed once, in the mount effect — read
+	// through a ref (updated every render, not just on mount) so it always calls whichever
+	// onImageFile the latest render passed, rather than closing over the first one forever.
+	const onImageFileRef = useRef(onImageFile);
+	onImageFileRef.current = onImageFile;
 	// The last doc content WE emitted via onChange. The "sync externally-driven value"
 	// effect below compares the incoming `value` prop against this — not against the
 	// live doc — so a same-tick echo of our own change (however delayed by Preact's
@@ -239,6 +296,27 @@ function useMarkdownEditorView(
 					".cm-cursor": { borderLeftColor: "var(--text)" },
 				}),
 				EditorView.lineWrapping,
+				EditorView.domEventHandlers({
+					paste(event, view) {
+						const handler = onImageFileRef.current;
+						const files = imageFilesFromClipboard(event.clipboardData);
+						if (!handler || files.length === 0) return false;
+						event.preventDefault();
+						insertUploadedImages(view, files, view.state.selection.main.from, handler);
+						return true;
+					},
+					drop(event, view) {
+						const handler = onImageFileRef.current;
+						const files = imageFilesFromDrop(event.dataTransfer);
+						if (!handler || files.length === 0) return false;
+						event.preventDefault();
+						const pos =
+							view.posAtCoords({ x: event.clientX, y: event.clientY }) ??
+							view.state.selection.main.from;
+						insertUploadedImages(view, files, pos, handler);
+						return true;
+					},
+				}),
 			],
 		});
 
@@ -315,7 +393,12 @@ function useMarkdownCommands(viewRef: { current: EditorView | null }) {
 	return { bold, italic, heading, link, codeBlock, bulletList, numberedList };
 }
 
-export default function MarkdownEditor({ value, onChange, minHeight = "240px" }: Props) {
+export default function MarkdownEditor({
+	value,
+	onChange,
+	minHeight = "240px",
+	onImageFile,
+}: Props) {
 	const [mobilePreview, setMobilePreview] = useState(false);
 	const [preview, setPreview] = useState("");
 
@@ -326,7 +409,7 @@ export default function MarkdownEditor({ value, onChange, minHeight = "240px" }:
 		return () => clearTimeout(timer);
 	}, [value]);
 
-	const { containerRef, viewRef } = useMarkdownEditorView(value, onChange, minHeight);
+	const { containerRef, viewRef } = useMarkdownEditorView(value, onChange, minHeight, onImageFile);
 	const { bold, italic, heading, link, codeBlock, bulletList, numberedList } =
 		useMarkdownCommands(viewRef);
 
