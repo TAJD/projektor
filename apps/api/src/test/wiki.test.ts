@@ -1315,6 +1315,169 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 	});
 });
 
+// PROJ-509: list_wiki_revisions/get_wiki_revision/delete_wiki_page resolve via
+// id-or-slug + redirect fallback, matching get_wiki_page/update_wiki_page/
+// get_wiki_backlinks — a renamed page's old slug must keep working for every entry
+// point, not just get_wiki_page (PROJ-484's optimistic-locking workflow fetches
+// baseRevisionId via list_wiki_revisions using whatever reference the caller holds).
+describe("Wiki revisions/delete resolve by old slug after rename (PROJ-509)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	it("REST: GET /:slug/revisions resolves via an old (pre-rename) slug", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Runbook", content: "v1" }),
+		});
+		expect(createRes.status).toBe(201);
+
+		const editRes = await SELF.fetch("http://localhost/api/wiki/runbook", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		expect(editRes.status).toBe(200);
+
+		const renameRes = await SELF.fetch("http://localhost/api/wiki/runbook", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "operations-runbook" }),
+		});
+		expect(renameRes.status).toBe(200);
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+
+		// "runbook" is now only a redirect — the old slug must still resolve here, same
+		// as GET /:slug (getWikiPage).
+		const revRes = await SELF.fetch("http://localhost/api/wiki/runbook/revisions", {
+			headers: authHeaders(token, slug),
+		});
+		expect(revRes.status).toBe(200);
+		const revisions = (await revRes.json()) as Array<{ id: string; title: string }>;
+		expect(revisions).toHaveLength(1);
+		expect(revisions[0].title).toBe("Runbook");
+	});
+
+	it("REST: GET /:slug/revisions/:revisionId resolves via an old (pre-rename) slug", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Playbook", content: "v1" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki/playbook", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		const revRes = await SELF.fetch("http://localhost/api/wiki/playbook/revisions", {
+			headers: authHeaders(token, slug),
+		});
+		const [revision] = (await revRes.json()) as Array<{ id: string }>;
+
+		await SELF.fetch("http://localhost/api/wiki/playbook", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "team-playbook" }),
+		});
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+
+		const detailRes = await SELF.fetch(
+			`http://localhost/api/wiki/playbook/revisions/${revision.id}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(detailRes.status).toBe(200);
+		const detail = (await detailRes.json()) as { id: string; content: string };
+		expect(detail.id).toBe(revision.id);
+		expect(detail.content).toBe("v1");
+	});
+
+	it("MCP: list_wiki_revisions and get_wiki_revision resolve via an old (pre-rename) slug", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "Charter", content: "v1" },
+				authHeaders(token, slug)
+			)
+		);
+		await mcpCall(
+			workspaceId,
+			"update_wiki_page",
+			{ slug: created.slug, content: "v2" },
+			authHeaders(token, slug)
+		);
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await mcpCall(
+			workspaceId,
+			"update_wiki_page",
+			{ slug: created.slug, newSlug: "team-charter" },
+			authHeaders(token, slug)
+		);
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+
+		const revisions = mcpData<Array<{ id: string; title: string }>>(
+			await mcpCall(
+				workspaceId,
+				"list_wiki_revisions",
+				{ slug: created.slug },
+				authHeaders(token, slug)
+			)
+		);
+		expect(revisions).toHaveLength(1);
+		expect(revisions[0].title).toBe("Charter");
+
+		const revision = mcpData<{ id: string; content: string }>(
+			await mcpCall(
+				workspaceId,
+				"get_wiki_revision",
+				{ slug: created.slug, revisionId: revisions[0].id },
+				authHeaders(token, slug)
+			)
+		);
+		expect(revision.content).toBe("v1");
+	});
+
+	it("REST: DELETE /:slug resolves via an old (pre-rename) slug", async () => {
+		// Deleting a workspace-level page requires admin/owner (services/wiki.ts).
+		const owner = await seedFixture({ role: "owner" });
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+			body: JSON.stringify({ title: "Draft Notes", content: "v1" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki/draft-notes", {
+			method: "PUT",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+			body: JSON.stringify({ slug: "archived-notes" }),
+		});
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+
+		// "draft-notes" is now only a redirect — deleting by the old slug should resolve
+		// to the same (renamed) page rather than 404ing.
+		const deleteRes = await SELF.fetch("http://localhost/api/wiki/draft-notes", {
+			method: "DELETE",
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+		expect(deleteRes.status).toBe(200);
+		const body = (await deleteRes.json()) as { ok: boolean; deletedCount: number };
+		expect(body.ok).toBe(true);
+		expect(body.deletedCount).toBe(1);
+
+		const getRes = await SELF.fetch("http://localhost/api/wiki/archived-notes", {
+			headers: authHeaders(owner.token, owner.workspace.slug),
+		});
+		expect(getRes.status).toBe(404);
+	});
+});
+
 // PROJ-484: optimistic locking (baseRevisionId + conflict diff) on wiki writes
 describe("Wiki optimistic locking (PROJ-484)", () => {
 	let token: string;
