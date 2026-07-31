@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
-import { renderMdWithWikilinks, renderMermaidDiagrams } from "../utils/markdown";
+import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
 import AccessPending from "./AccessPending";
 import MarkdownEditor from "./LazyMarkdownEditor";
 import Select, { type SelectOption } from "./Select";
@@ -98,7 +98,7 @@ const WIKI_TAG_CHIP_CLASS =
 	"bg-bg border border-border text-text-base";
 
 function TagChips({ tags }: { tags: string[] | undefined | null }) {
-	if (!tags || tags.length === 0) return null;
+	if (!Array.isArray(tags) || tags.length === 0) return null;
 	return (
 		<span class="inline-flex flex-wrap align-middle">
 			{tags.map((t) => (
@@ -300,7 +300,7 @@ function SearchResultsList({
 				<li key={r.id}>
 					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
 						<span class="font-medium">{r.title}</span>
-						{(r.type || r.status || r.tags.length > 0) && (
+						{(r.type || r.status || (r.tags?.length ?? 0) > 0) && (
 							<span class="block mt-[0.15rem]">
 								{r.status && <WikiStatusPill status={r.status} />}
 								<TagChips tags={r.tags} />
@@ -340,7 +340,7 @@ function FilteredPagesList({
 				<li key={r.id}>
 					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
 						<span class="font-medium">{r.title}</span>
-						{(r.type || r.status || r.tags.length > 0) && (
+						{(r.type || r.status || (r.tags?.length ?? 0) > 0) && (
 							<span class="block mt-[0.15rem]">
 								{r.status && <WikiStatusPill status={r.status} />}
 								<TagChips tags={r.tags} />
@@ -1215,7 +1215,7 @@ function PageArticle(props: PageArticleProps) {
 						ref={props.contentRef}
 						class="prose prose-sm max-w-none"
 						dangerouslySetInnerHTML={{
-							__html: renderMdWithWikilinks(page.content, props.wikiPages),
+							__html: renderMdWithWikilinks(stripFrontmatter(page.content), props.wikiPages),
 						}}
 					/>
 				)}
@@ -1560,7 +1560,8 @@ function setMetaTag(attr: "name" | "property", key: string, content: string) {
 }
 
 function excerptOf(content: string, maxLength = 200): string {
-	const plain = content
+	// PROJ-488: never let a page's frontmatter YAML become its og:description.
+	const plain = stripFrontmatter(content)
 		.replace(/```[\s\S]*?```/g, " ")
 		.replace(/[#*_>`[\]()!-]/g, " ")
 		.replace(/\s+/g, " ")

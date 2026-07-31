@@ -48,6 +48,17 @@ export async function renderMermaidDiagrams(container: Element): Promise<void> {
 	await mermaid.run({ nodes });
 }
 
+// PROJ-488 (R6): a leading `---\n<yaml>\n---` block is metadata, not prose — the API
+// parses it into the columns the metadata card renders from. Left in `content` (it's
+// canonical markdown, edited as raw text and diffed in revisions), so the *rendered*
+// view has to drop it; marked would otherwise turn the YAML into a setext <h2> that
+// lands in the body and the table of contents. Mirrors the API's FRONTMATTER_RE.
+const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
+
+export function stripFrontmatter(markdown: string): string {
+	return markdown.replace(FRONTMATTER_RE, "");
+}
+
 function resolveWikilinks(
 	markdown: string,
 	pages: ReadonlyArray<{ title: string; slug: string }>

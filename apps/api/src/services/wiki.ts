@@ -366,6 +366,18 @@ function sanitizeWikiFtsQuery(q: string): string {
 // two are UNINDEXED so their weight is irrelevant, left at 0 for clarity.
 const WIKI_FTS_BM25_WEIGHTS = "0, 0, 10.0, 1.0, 5.0";
 
+// PROJ-488: a JSON-array column read through a raw D1 query (no drizzle json decoding).
+function decodeJsonArrayColumn(value: unknown): string[] {
+	if (Array.isArray(value)) return value as string[];
+	if (typeof value !== "string") return [];
+	try {
+		const parsed = JSON.parse(value);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
 export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	const parsed = SearchWikiInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -435,7 +447,16 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 		.all();
 	// PROJ-489 (R7, not landed): no freshness model exists yet, so freshness is
 	// omitted-as-null rather than fabricated.
-	return (results as Array<Record<string, unknown>>).map((r) => ({ ...r, freshness: null }));
+	return (results as Array<Record<string, unknown>>).map((r) => ({
+		...r,
+		// PROJ-488: this is a raw D1 query, so the JSON-array columns come back as the
+		// stored TEXT rather than as arrays the way drizzle's `{ mode: "json" }` decodes
+		// them for listWikiPages/getWikiPage. Decode here so every wiki surface returns
+		// tags/owners with the same shape.
+		tags: decodeJsonArrayColumn(r.tags),
+		owners: decodeJsonArrayColumn(r.owners),
+		freshness: null,
+	}));
 }
 
 const wikiPageDetailColumns = {
@@ -809,7 +830,7 @@ async function reindexWikiFts(
 		.prepare(
 			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
 		)
-		// PROJ-488: current.tags is already reflects this write — reindexWikiFts runs
+		// PROJ-488: current.tags already reflects this write — reindexWikiFts runs
 		// after the wikiPages UPDATE below applies (see call site in updateWikiPage).
 		.bind(id, ctx.workspaceId, current.title, current.content, (current.tags ?? []).join(" "))
 		.run();

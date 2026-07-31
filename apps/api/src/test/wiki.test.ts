@@ -1478,6 +1478,56 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 		expect(res.status).toBe(400);
 	});
 
+	it("rejects a frontmatter block that isn't a YAML mapping", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "List Frontmatter",
+				content: "---\n- one\n- two\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects a verified_at that isn't a parseable date", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Bad Verified At",
+				content: "---\nverified_at: last tuesday\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects a verified_at that is neither a date nor a number", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Boolean Verified At",
+				content: "---\nverified_at: true\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("accepts a verified_at given as unix seconds", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Unix Verified At",
+				content: "---\nverified_at: 1700000000\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(201);
+		const created = (await res.json()) as { verifiedAt: number };
+		expect(created.verifiedAt).toBe(1_700_000_000);
+	});
+
 	it("update_wiki_page reparses frontmatter when content changes", async () => {
 		const created = mcpData<{ slug: string }>(
 			await mcpCall(
@@ -1647,6 +1697,28 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 		expect(res.status).toBe(200);
 		const results = (await res.json()) as Array<{ title: string }>;
 		expect(results.map((r) => r.title)).toEqual(["Deploy Runbook"]);
+	});
+
+	it("search results return tags/owners as arrays, same shape as list and get", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Shape Runbook", content: RUNBOOK_CONTENT }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=Runbook", {
+			headers: authHeaders(token, slug),
+		});
+		const [hit] = (await res.json()) as Array<{ tags: string[]; owners: string[] }>;
+		expect(hit.tags).toEqual(["ops", "oncall"]);
+		expect(hit.owners).toEqual(["alice", "bob"]);
+
+		const listRes = await SELF.fetch("http://localhost/api/wiki?type=runbook", {
+			headers: authHeaders(token, slug),
+		});
+		const [listed] = (await listRes.json()) as Array<{ tags: string[]; owners: string[] }>;
+		expect(hit.tags).toEqual(listed.tags);
+		expect(hit.owners).toEqual(listed.owners);
 	});
 
 	it("MCP search_wiki filters by type, parity with REST", async () => {

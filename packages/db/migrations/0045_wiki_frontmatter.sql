@@ -16,7 +16,7 @@ ALTER TABLE wiki_pages ADD COLUMN owners TEXT NOT NULL DEFAULT '[]';
 ALTER TABLE wiki_pages ADD COLUMN verify_interval INTEGER;
 
 -- Filtering by type/status is the common R6 access pattern (listWikiPages/searchWiki);
--- tags is JSON so it can't be indexed directly (filtered via a LIKE scan, same tradeoff
--- FTS accepts elsewhere in this schema) but type/status are scalar and worth an index.
+-- tags is JSON so it can't be indexed directly (filtered via a json_each() scan, see
+-- services/wiki.ts#tagsFilterCondition) but type/status are scalar and worth an index.
 CREATE INDEX `wiki_pages_workspace_type_idx` ON `wiki_pages` (`workspace_id`, `type`);
 CREATE INDEX `wiki_pages_workspace_status_idx` ON `wiki_pages` (`workspace_id`, `status`);

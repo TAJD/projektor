@@ -1,6 +1,28 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
-import { renderMd } from "./markdown";
+import { renderMd, stripFrontmatter } from "./markdown";
+
+// PROJ-488 (R6): frontmatter is metadata, not prose — the rendered view drops it.
+describe("stripFrontmatter", () => {
+	it("removes a leading YAML frontmatter block", () => {
+		const md = "---\ntype: runbook\ntags: [ops]\n---\n# Heading\n\nBody.";
+		expect(stripFrontmatter(md)).toBe("# Heading\n\nBody.");
+	});
+
+	it("is CRLF-tolerant", () => {
+		expect(stripFrontmatter("---\r\ntype: adr\r\n---\r\nBody.")).toBe("Body.");
+	});
+
+	it("leaves content without a leading frontmatter block untouched", () => {
+		const md = "# Heading\n\nBody.\n\n---\n";
+		expect(stripFrontmatter(md)).toBe(md);
+	});
+
+	it("does not strip a block that isn't at the very start", () => {
+		const md = "Intro.\n\n---\ntype: runbook\n---\n";
+		expect(stripFrontmatter(md)).toBe(md);
+	});
+});
 
 describe("renderMd — XSS sanitization", () => {
 	it("strips <script> tags", () => {

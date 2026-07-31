@@ -646,6 +646,30 @@ describe("WikiPage frontmatter metadata (PROJ-488)", () => {
 		expect(screen.getByText(/Verified/)).toBeTruthy();
 	});
 
+	it("does not render the raw frontmatter block in the page body", async () => {
+		mockFetchWiki({
+			...PAGE_WITH_META,
+			content: [
+				"---",
+				"type: runbook",
+				"tags: [ops, oncall]",
+				"status: current",
+				"---",
+				"# Real heading",
+				"",
+				"Body text.",
+			].join("\n"),
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(await screen.findByText("Body text.")).toBeTruthy();
+		expect(screen.getByRole("heading", { name: "Real heading" })).toBeTruthy();
+		// The YAML would otherwise render as a setext <h2> at the top of the body.
+		expect(screen.queryByText(/type: runbook/)).toBeNull();
+		expect(screen.queryByText(/status: current/)).toBeNull();
+	});
+
 	it("renders no metadata card for a page without frontmatter", async () => {
 		mockFetchWiki(PAGE);
 		render(<WikiPage slug="my-page" />);
