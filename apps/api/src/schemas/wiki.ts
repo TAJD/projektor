@@ -6,13 +6,24 @@ const SlugSchema = z
 	.max(200)
 	.regex(/^[a-z0-9-/]+$/);
 
-export const CreatePageSchema = z.object({
-	title: z.string().min(1).max(300),
-	content: z.string().max(500000).optional(),
-	parentId: z.string().uuid().optional(),
-	projectId: z.string().uuid().optional(),
-	slug: SlugSchema.optional(),
-});
+export const CreatePageSchema = z
+	.object({
+		title: z.string().min(1).max(300),
+		content: z.string().max(500000).optional(),
+		parentId: z.string().uuid().optional(),
+		projectId: z.string().uuid().optional(),
+		slug: SlugSchema.optional(),
+		// PROJ-491 (R9): seeds this page's initial content from an existing template page
+		// (services/wiki.ts#createWikiPage) — must resolve to a page carrying frontmatter
+		// `template: true`, or the write is rejected rather than silently falling back to
+		// blank content. Mutually exclusive with `content`: which one should win is
+		// ambiguous, so both together is a validation error, not a silent precedence rule.
+		templateSlug: z.string().min(1).max(200).optional(),
+	})
+	.refine((d) => d.content === undefined || d.templateSlug === undefined, {
+		message: "content and templateSlug cannot both be provided",
+		path: ["templateSlug"],
+	});
 
 export const UpdatePageSchema = z
 	.object({
@@ -68,6 +79,11 @@ export const WikiFrontmatterSchema = z
 		// Days between required re-verifications (R7/PROJ-489 consumes this; R6 only
 		// stores it). Capped at 10 years to catch an obviously-wrong unit (e.g. seconds).
 		verify_interval: z.number().int().positive().max(3650).optional(),
+		// PROJ-491 (R9): marks this page as a reusable template, conventionally living
+		// under a workspace "Templates" page. Denormalized into wiki_pages.is_template
+		// (services/wiki.ts) so search/staleness queries can filter it out without
+		// parsing content, and create_wiki_page's templateSlug can validate the target.
+		template: z.boolean().optional(),
 	})
 	.strict();
 
@@ -168,3 +184,11 @@ export const PatchWikiPageInputSchema = z.discriminatedUnion("op", [
 ]);
 
 export type PatchWikiPageInput = z.infer<typeof PatchWikiPageInputSchema>;
+
+// PROJ-491 (R9): the template picker (services/wiki.ts#listWikiTemplates). Templates are
+// primarily workspace-global by convention, but a project-scoped template is allowed
+// (same project-visibility rule as any other project-scoped page) — projectId narrows to
+// one project's templates rather than restricting the picker to workspace-only pages.
+export const ListWikiTemplatesInputSchema = z.object({
+	projectId: z.string().uuid().optional(),
+});

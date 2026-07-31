@@ -103,10 +103,14 @@ export const wikiTools: MCPTool[] = [
 			"Create a new wiki page. `content` may start with an optional YAML frontmatter block " +
 			"(`---\\ntype: runbook\\ntags: [foo]\\nstatus: draft\\n---\\n...`) — type (freeform; " +
 			`well-known values ${WELL_KNOWN_TYPES}), tags[], status (draft|current|stale|` +
-			"deprecated), verified_at, verified_by, owners[], verify_interval (days) are parsed " +
-			"and denormalized for filtering. Invalid frontmatter (bad status/enum value, wrong " +
-			"field type, unrecognized key) is rejected with a structured validation error, not " +
-			"silently ignored.",
+			"deprecated), verified_at, verified_by, owners[], verify_interval (days), template " +
+			"(boolean) are parsed and denormalized for filtering. Invalid frontmatter (bad " +
+			"status/enum value, wrong field type, unrecognized key) is rejected with a structured " +
+			"validation error, not silently ignored. Alternatively, pass `templateSlug` (from " +
+			"list_wiki_templates) to seed this page's content from an existing template page — " +
+			"its `template: true` flag is stripped from the seeded content (the new page is not " +
+			"itself a template). `templateSlug` and `content` are mutually exclusive; a " +
+			"`templateSlug` that doesn't resolve to a page flagged template:true is rejected.",
 		inputSchema: {
 			type: "object",
 			required: ["title"],
@@ -118,7 +122,15 @@ export const wikiTools: MCPTool[] = [
 				},
 				content: {
 					type: "string",
-					description: "Markdown content, optionally starting with a YAML frontmatter block",
+					description:
+						"Markdown content, optionally starting with a YAML frontmatter block. " +
+						"Mutually exclusive with templateSlug.",
+				},
+				templateSlug: {
+					type: "string",
+					description:
+						"Seed this page's content from the template page at this slug/id (see " +
+						"list_wiki_templates). Mutually exclusive with content.",
 				},
 				parentId: { type: "string", description: "Parent page ID for nested pages" },
 				projectId: { type: "string", description: "Project ID to scope this page to" },
@@ -406,6 +418,27 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			return wikiService.listStaleWikiPages(ctx, input);
+		},
+	},
+	{
+		name: "list_wiki_templates",
+		description:
+			"List pages flagged as templates (frontmatter `template: true`) — the picker " +
+			"create_wiki_page's `templateSlug` draws from. Templates are conventionally " +
+			"workspace-global (living under a workspace 'Templates' page) but a project-scoped " +
+			"template is allowed and follows the same project-visibility rule as any other " +
+			"project-scoped page.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: {
+					type: "string",
+					description: "Restrict to templates belonging to this project ID",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			return wikiService.listWikiTemplates(ctx, input);
 		},
 	},
 ];

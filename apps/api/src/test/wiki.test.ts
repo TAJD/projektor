@@ -6,6 +6,7 @@ import {
 	seedFixture,
 	seedGroupGrant,
 	seedProject,
+	seedToken,
 	seedWorkspaceRoles,
 } from "./helpers";
 
@@ -3474,5 +3475,255 @@ describe("Wiki freshness model (PROJ-489)", () => {
 		);
 		expect(result.map((r) => r.title)).toContain("MCP Overdue Page");
 		expect(result.map((r) => r.title)).not.toContain("MCP Fresh Page");
+	});
+});
+
+// PROJ-491 (R9): workspace-level page templates — `template: true` frontmatter,
+// create_wiki_page's templateSlug, and the list_wiki_templates picker. REST/MCP parity
+// throughout, same as the other frontmatter-driven features above.
+describe("Wiki page templates (PROJ-491)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	const TEMPLATE_CONTENT = [
+		"---",
+		"type: runbook",
+		"status: draft",
+		"template: true",
+		"---",
+		"# Runbook: [Title]",
+		"",
+		"## Steps",
+	].join("\n");
+
+	async function createTemplate() {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Runbook Template", content: TEMPLATE_CONTENT }),
+		});
+		expect(res.status).toBe(201);
+		return (await res.json()) as { id: string; slug: string; isTemplate: boolean };
+	}
+
+	it("REST: frontmatter template:true denormalizes into isTemplate on create", async () => {
+		const created = await createTemplate();
+		expect(created.isTemplate).toBe(true);
+
+		const getRes = await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const page = (await getRes.json()) as { is_template: boolean };
+		expect(page.is_template).toBe(true);
+	});
+
+	it("REST: create_wiki_page with templateSlug seeds content and strips template:true", async () => {
+		await createTemplate();
+
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Deploy Runbook", templateSlug: "runbook-template" }),
+		});
+		expect(res.status).toBe(201);
+		const created = (await res.json()) as { slug: string; isTemplate: boolean; type: string };
+		// The seeded page keeps the template's other frontmatter (type) but is not itself
+		// a template — only the `template` key is stripped.
+		expect(created.isTemplate).toBe(false);
+		expect(created.type).toBe("runbook");
+
+		const getRes = await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const page = (await getRes.json()) as { content: string; is_template: boolean };
+		expect(page.content).toContain("## Steps");
+		expect(page.content).not.toContain("template: true");
+		expect(page.is_template).toBe(false);
+	});
+
+	it("MCP: create_wiki_page with templateSlug has parity with REST", async () => {
+		await createTemplate();
+
+		const result = mcpData<{ isTemplate: boolean; type: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "MCP Deploy Runbook", templateSlug: "runbook-template" },
+				authHeaders(token, slug)
+			)
+		);
+		expect(result.isTemplate).toBe(false);
+		expect(result.type).toBe("runbook");
+	});
+
+	it("rejects templateSlug that does not resolve to any page (not a silent blank fallback)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Orphan Page", templateSlug: "does-not-exist" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects templateSlug pointing at a page that isn't flagged template:true", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Ordinary Page", content: "# Just a page" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Bad Seed", templateSlug: "ordinary-page" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects content and templateSlug provided together", async () => {
+		await createTemplate();
+
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Ambiguous Page",
+				content: "some content",
+				templateSlug: "runbook-template",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("search_wiki excludes template pages by default", async () => {
+		await createTemplate();
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Runbook For Deploys", content: "# Runbook body content" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=Runbook", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toContain("Runbook For Deploys");
+		expect(results.map((r) => r.title)).not.toContain("Runbook Template");
+	});
+
+	it("list_stale_pages excludes template pages even with an overdue verify_interval", async () => {
+		const overdueTemplateContent = [
+			"---",
+			"template: true",
+			"verify_interval: 30",
+			"verified_at: 2020-01-01",
+			"---",
+			"# Stale-looking template",
+		].join("\n");
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Overdue Template", content: overdueTemplateContent }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/stale-pages", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).not.toContain("Overdue Template");
+	});
+
+	it("REST GET /api/wiki/templates lists only template-flagged pages", async () => {
+		await createTemplate();
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Regular Page", content: "# Not a template" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/templates", {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toEqual(["Runbook Template"]);
+	});
+
+	it("rejects a page slugged 'templates' — it would be shadowed by GET /api/wiki/templates", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Templates", slug: "templates", content: "" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("MCP list_wiki_templates has parity with REST", async () => {
+		await createTemplate();
+
+		const result = mcpData<Array<{ title: string }>>(
+			await mcpCall(workspaceId, "list_wiki_templates", {}, authHeaders(token, slug))
+		);
+		expect(result.map((r) => r.title)).toEqual(["Runbook Template"]);
+	});
+});
+
+// PROJ-491 (R9): createWorkspace seeds the three built-in templates under a "Templates"
+// parent page — exercised against the real service (not the seedWorkspace test helper,
+// which bypasses createWorkspace entirely) so this only runs where it matters.
+describe("Wiki built-in template seeding on workspace creation (PROJ-491)", () => {
+	it("seeds a Templates parent page plus runbook/adr/spec templates", async () => {
+		const fixture = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(fixture.token, fixture.workspace.slug);
+		const newSlug = `seed-test-${crypto.randomUUID().slice(0, 8)}`;
+
+		const created = mcpData<{ id: string; slug: string }>(
+			await mcpCall(
+				fixture.workspace.id,
+				"create_workspace",
+				{ slug: newSlug, name: "Seed Test" },
+				ownerHeaders
+			)
+		);
+
+		const newToken = await seedToken(created.id, fixture.user.id);
+		const newHeaders = authHeaders(newToken, created.slug);
+
+		const listRes = await SELF.fetch("http://localhost/api/wiki/templates", {
+			headers: newHeaders,
+		});
+		expect(listRes.status).toBe(200);
+		const templates = (await listRes.json()) as Array<{ title: string; type: string | null }>;
+		expect(templates.map((t) => t.title).sort()).toEqual([
+			"ADR Template",
+			"Runbook Template",
+			"Spec Template",
+		]);
+
+		const treeRes = await SELF.fetch("http://localhost/api/wiki/tree", { headers: newHeaders });
+		const tree = (await treeRes.json()) as Array<{
+			title: string;
+			slug: string;
+			children: unknown[];
+		}>;
+		const templatesNode = tree.find((n) => n.title === "Templates");
+		expect(templatesNode?.children.length).toBe(3);
+
+		// The seeded parent must stay reachable by slug: GET /api/wiki/templates is the
+		// template-list endpoint, so a parent slugged "templates" would be shadowed by it
+		// and the page would never render.
+		const parentRes = await SELF.fetch(`http://localhost/api/wiki/${templatesNode?.slug}`, {
+			headers: newHeaders,
+		});
+		expect(parentRes.status).toBe(200);
+		expect(((await parentRes.json()) as { title: string }).title).toBe("Templates");
 	});
 });

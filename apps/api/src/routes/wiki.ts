@@ -84,6 +84,18 @@ router.get("/stale-pages", async (c) => {
 	}
 });
 
+// PROJ-491 (R9): must be registered before the /:slug catch-all below, same as
+// /tree, /search, /broken-links, /stale-pages above.
+router.get("/templates", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const projectId = c.req.query("projectId");
+		return c.json(await wikiService.listWikiTemplates(ctx, { projectId }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
 router.post("/backfill-links", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {

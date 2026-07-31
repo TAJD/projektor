@@ -866,3 +866,89 @@ describe("WikiPage freshness model (PROJ-489)", () => {
 		expect(screen.getByText("Stale")).toBeTruthy();
 	});
 });
+
+// PROJ-491 (R9): the create-form's template picker, sourced from GET /api/wiki/templates.
+describe("WikiPage — create page template picker (PROJ-491)", () => {
+	const TEMPLATES = [
+		{
+			id: "t1",
+			slug: "runbook-template",
+			title: "Runbook Template",
+			url: "/wiki/runbook-template",
+		},
+	];
+
+	function mockFetchWithTemplates(postSpy?: (url: string, body: unknown) => void) {
+		return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/templates")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(TEMPLATES) });
+			}
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (init?.method === "POST" && postSpy) {
+				postSpy(u, init.body ? JSON.parse(String(init.body)) : undefined);
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ id: "new1", slug: "new-page" }),
+				});
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+		});
+	}
+
+	it("shows a template picker populated from list_wiki_templates", async () => {
+		vi.stubGlobal("fetch", mockFetchWithTemplates());
+		render(<WikiPage />);
+		fireEvent.click(await screen.findByRole("button", { name: "+ New page" }));
+
+		fireEvent.click(await screen.findByRole("combobox", { name: /Seed content from template/i }));
+		expect(await screen.findByRole("option", { name: "Runbook Template" })).toBeTruthy();
+	});
+
+	it("selecting a template hides the content editor and sends templateSlug instead of content", async () => {
+		const postSpy = vi.fn();
+		vi.stubGlobal("fetch", mockFetchWithTemplates(postSpy));
+		render(<WikiPage />);
+		fireEvent.click(await screen.findByRole("button", { name: "+ New page" }));
+
+		fireEvent.click(await screen.findByRole("combobox", { name: /Seed content from template/i }));
+		fireEvent.click(await screen.findByRole("option", { name: "Runbook Template" }));
+
+		expect(await screen.findByText(/seeded from the "Runbook Template" template/i)).toBeTruthy();
+
+		fireEvent.input(screen.getByRole("textbox", { name: /title/i }), {
+			target: { value: "Deploy Runbook" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Create page" }));
+
+		await waitFor(() => {
+			expect(postSpy).toHaveBeenCalled();
+		});
+		const [, body] = postSpy.mock.calls[0] as [string, Record<string, unknown>];
+		expect(body.templateSlug).toBe("runbook-template");
+		expect(body.content).toBeUndefined();
+	});
+
+	it("no template picker is rendered when there are no templates", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/templates")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			})
+		);
+		render(<WikiPage />);
+		fireEvent.click(await screen.findByRole("button", { name: "+ New page" }));
+
+		await screen.findByRole("textbox", { name: /title/i });
+		expect(screen.queryByRole("combobox", { name: /Seed content from template/i })).toBeNull();
+	});
+});

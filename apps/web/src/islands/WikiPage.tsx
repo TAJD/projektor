@@ -14,6 +14,13 @@ interface ProjectOption {
 	name: string;
 }
 
+// PROJ-491 (R9): the create-form's template picker draws from list_wiki_templates.
+interface TemplateOption {
+	id: string;
+	slug: string;
+	title: string;
+}
+
 // PROJ-489 (R7): computed/derived at read time, never stored — null when the page has
 // no verify_interval/status frontmatter signal at all.
 interface WikiFreshness {
@@ -513,6 +520,19 @@ function useProjects(workspaceSlug: string | undefined) {
 	return projects;
 }
 
+// PROJ-491 (R9): fetched once for the create-form's template picker.
+function useWikiTemplates(workspaceSlug: string | undefined) {
+	const [templates, setTemplates] = useState<TemplateOption[]>([]);
+
+	useEffect(() => {
+		apiFetch<TemplateOption[]>("/api/wiki/templates", { workspaceSlug })
+			.then((list) => setTemplates(Array.isArray(list) ? list : []))
+			.catch(() => {});
+	}, [workspaceSlug]);
+
+	return templates;
+}
+
 function ScopeControl({
 	workspaceSlug,
 	projectId,
@@ -707,9 +727,12 @@ function CreatePageForm({
 	content,
 	error,
 	saving,
+	templates,
+	templateSlug,
 	onTitleChange,
 	onSlugChange,
 	onContentChange,
+	onTemplateChange,
 	onSubmit,
 	onCancel,
 }: {
@@ -719,12 +742,21 @@ function CreatePageForm({
 	content: string;
 	error: string | null;
 	saving: boolean;
+	templates: TemplateOption[];
+	templateSlug: string;
 	onTitleChange: (value: string) => void;
 	onSlugChange: (value: string) => void;
 	onContentChange: (value: string) => void;
+	onTemplateChange: (value: string) => void;
 	onSubmit: () => void;
 	onCancel: () => void;
 }) {
+	const templateOptions: SelectOption[] = [
+		{ value: "", label: "No template (blank page)" },
+		...templates.map((t) => ({ value: t.slug, label: t.title })),
+	];
+	const selectedTemplate = templates.find((t) => t.slug === templateSlug) ?? null;
+
 	return (
 		<div>
 			<h2 class="mb-6 text-2xl font-bold text-text-base">
@@ -761,10 +793,29 @@ function CreatePageForm({
 					class="w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base box-border font-mono"
 				/>
 			</div>
+			{templates.length > 0 && (
+				<div class="mb-4">
+					<p class="m-0 mb-1 font-medium text-sm text-text-base">Template</p>
+					<Select
+						value={templateSlug}
+						options={templateOptions}
+						ariaLabel="Seed content from template"
+						onChange={onTemplateChange}
+					/>
+				</div>
+			)}
 			<div class="mb-5">
-				{/* biome-ignore lint/a11y/noLabelWithoutControl: caption for MarkdownEditor, which has no associable control */}
-				<label class="block font-medium text-sm text-text-base mb-1">Content (Markdown)</label>
-				<MarkdownEditor value={content} onChange={onContentChange} minHeight="280px" />
+				{selectedTemplate ? (
+					<p class="text-sm text-text-muted">
+						Content will be seeded from the "{selectedTemplate.title}" template on create.
+					</p>
+				) : (
+					<>
+						{/* biome-ignore lint/a11y/noLabelWithoutControl: caption for MarkdownEditor, which has no associable control */}
+						<label class="block font-medium text-sm text-text-base mb-1">Content (Markdown)</label>
+						<MarkdownEditor value={content} onChange={onContentChange} minHeight="280px" />
+					</>
+				)}
 			</div>
 			<div class="flex gap-2">
 				<button type="button" onClick={onSubmit} disabled={saving} class="btn btn-primary">
@@ -1422,9 +1473,12 @@ interface CreateFormProps {
 	content: string;
 	error: string | null;
 	saving: boolean;
+	templates: TemplateOption[];
+	templateSlug: string;
 	onTitleChange: (value: string) => void;
 	onSlugChange: (value: string) => void;
 	onContentChange: (value: string) => void;
+	onTemplateChange: (value: string) => void;
 	onSubmit: () => void;
 	onCancel: () => void;
 }
@@ -2204,6 +2258,10 @@ function useCreatePageForm(
 	const [createError, setCreateError] = useState<string | null>(null);
 	const [createSaving, setCreateSaving] = useState(false);
 	const [slugManuallyEdited, setSlugManuallyEdited] = useState(false);
+	// PROJ-491 (R9): "" means no template selected — content is edited freely. Selecting a
+	// template seeds content from create_wiki_page's templateSlug (server-side, mutually
+	// exclusive with content) rather than duplicating the strip-template-flag logic here.
+	const [createTemplateSlug, setCreateTemplateSlug] = useState("");
 
 	useEffect(() => {
 		const prefilledTitle = new URLSearchParams(window.location.search).get("createTitle");
@@ -2222,6 +2280,7 @@ function useCreatePageForm(
 		setCreateParentId(parentId);
 		setCreateError(null);
 		setSlugManuallyEdited(false);
+		setCreateTemplateSlug("");
 	}
 
 	function cancelCreate() {
@@ -2237,6 +2296,11 @@ function useCreatePageForm(
 	function onCreateSlugChange(v: string) {
 		setCreateSlug(v);
 		setSlugManuallyEdited(true);
+	}
+
+	function onCreateTemplateChange(v: string) {
+		setCreateTemplateSlug(v);
+		if (v) setCreateContent("");
 	}
 
 	async function submitCreate(): Promise<string | undefined> {
@@ -2258,7 +2322,9 @@ function useCreatePageForm(
 				body: {
 					title: createTitle.trim(),
 					slug: finalSlug,
-					content: createContent,
+					...(createTemplateSlug
+						? { templateSlug: createTemplateSlug }
+						: { content: createContent }),
 					...(projectId ? { projectId } : {}),
 					...(createParentId ? { parentId: createParentId } : {}),
 				},
@@ -2283,10 +2349,12 @@ function useCreatePageForm(
 		createParentId,
 		createError,
 		createSaving,
+		createTemplateSlug,
 		startCreate,
 		cancelCreate,
 		onCreateTitleChange,
 		onCreateSlugChange,
+		onCreateTemplateChange,
 		submitCreate,
 	};
 }
@@ -2494,9 +2562,12 @@ function buildCreateFormProps(create: {
 	createContent: string;
 	createError: string | null;
 	createSaving: boolean;
+	templates: TemplateOption[];
+	createTemplateSlug: string;
 	onCreateTitleChange: (v: string) => void;
 	onCreateSlugChange: (v: string) => void;
 	setCreateContent: (v: string) => void;
+	onCreateTemplateChange: (v: string) => void;
 	submitCreate: () => void;
 	cancelCreate: () => void;
 }): CreateFormProps {
@@ -2508,9 +2579,12 @@ function buildCreateFormProps(create: {
 		content: create.createContent,
 		error: create.createError,
 		saving: create.createSaving,
+		templates: create.templates,
+		templateSlug: create.createTemplateSlug,
 		onTitleChange: create.onCreateTitleChange,
 		onSlugChange: create.onCreateSlugChange,
 		onContentChange: create.setCreateContent,
+		onTemplateChange: create.onCreateTemplateChange,
 		onSubmit: create.submitCreate,
 		onCancel: create.cancelCreate,
 	};
@@ -2637,6 +2711,7 @@ export default function WikiPage({
 		pageData.revisionsLoaded ? (pageData.revisions[0]?.id ?? null) : undefined
 	);
 	const createForm = useCreatePageForm(workspaceSlug, projectId, fetchTree);
+	const wikiTemplates = useWikiTemplates(workspaceSlug);
 	const move = useMovePage(workspaceSlug, pageData.page, pageData.fetchPage, fetchTree);
 	const verify = useWikiVerify(workspaceSlug, pageData.page, pageData.fetchPage);
 
@@ -2670,9 +2745,12 @@ export default function WikiPage({
 		createContent: createForm.createContent,
 		createError: createForm.createError,
 		createSaving: createForm.createSaving,
+		templates: wikiTemplates,
+		createTemplateSlug: createForm.createTemplateSlug,
 		onCreateTitleChange: createForm.onCreateTitleChange,
 		onCreateSlugChange: createForm.onCreateSlugChange,
 		setCreateContent: createForm.setCreateContent,
+		onCreateTemplateChange: createForm.onCreateTemplateChange,
 		submitCreate,
 		cancelCreate: createForm.cancelCreate,
 	});

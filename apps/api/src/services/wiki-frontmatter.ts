@@ -15,6 +15,7 @@ export type WikiFrontmatterMeta = {
 	verifiedBy: string | null;
 	owners: string[];
 	verifyInterval: number | null;
+	isTemplate: boolean;
 };
 
 export const EMPTY_WIKI_FRONTMATTER: WikiFrontmatterMeta = {
@@ -25,6 +26,7 @@ export const EMPTY_WIKI_FRONTMATTER: WikiFrontmatterMeta = {
 	verifiedBy: null,
 	owners: [],
 	verifyInterval: null,
+	isTemplate: false,
 };
 
 // YAML 1.1 (what the `yaml` package parses by default) auto-converts an unquoted
@@ -101,7 +103,29 @@ export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
 		verifiedBy: d.verified_by ?? null,
 		owners: d.owners ?? [],
 		verifyInterval: d.verify_interval ?? null,
+		isTemplate: d.template ?? false,
 	};
+}
+
+// PROJ-491 (R9): strips the `template: true` frontmatter key when seeding a new page's
+// content from a template page — a page created FROM a template is not itself a template
+// unless the author explicitly adds the flag back. Every other frontmatter key (type,
+// tags, status, ...) carries over untouched. If stripping leaves no frontmatter keys at
+// all, the block is dropped entirely rather than left as an empty `---\n---\n` shell.
+export function stripTemplateFlag(content: string): string {
+	const match = FRONTMATTER_RE.exec(content);
+	if (!match) return content;
+	const rest = content.slice(match[0].length);
+
+	const raw = parseYaml(match[1]);
+	if (raw === null || raw === undefined || typeof raw !== "object" || Array.isArray(raw)) {
+		return content;
+	}
+	const { template: _template, ...remaining } = raw as Record<string, unknown>;
+	if (Object.keys(remaining).length === 0) return rest;
+
+	const yamlText = stringifyYaml(remaining).trimEnd();
+	return `---\n${yamlText}\n---\n${rest}`;
 }
 
 // PROJ-489 (R7): markdown + frontmatter is the canonical source (PRD principle 1) — the
