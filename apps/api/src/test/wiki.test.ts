@@ -4625,6 +4625,31 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 	it("a stale baseRevisionId on publish still hits the normal 409 conflict — no separate draft conflict mechanism", async () => {
 		const page = await createPage("draft-conflict", "Draft Conflict", "v0");
 
+		// Establish a first revision, and capture its id the way startEdit() would —
+		// this is the baseRevisionId the draft freezes and later resubmits on publish.
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v1" }),
+		});
+		const revRes = await req(`http://localhost/api/wiki/${page.slug}/revisions`, {
+			headers: authHeaders(token, slug),
+		});
+		const revisions = (await revRes.json()) as Array<{ id: string }>;
+		const draftBaseRevisionId = revisions[0]?.id;
+		expect(draftBaseRevisionId).toBeTruthy();
+
+		// Save a draft frozen at that revision, exactly as the client's autosave would.
+		await req(`http://localhost/api/wiki/${page.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Draft Conflict",
+				content: "in-progress draft edit",
+				baseRevisionId: draftBaseRevisionId,
+			}),
+		});
+
 		// Someone else's edit advances the page's latest revision past what the draft
 		// was based on.
 		await req(`http://localhost/api/wiki/${page.slug}`, {
@@ -4633,10 +4658,13 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 			body: JSON.stringify({ content: "someone else's edit" }),
 		});
 
+		// Publish resubmits the DRAFT's own (now-stale) baseRevisionId — exactly what
+		// useWikiEditing's save() sends after a restoreDraft() — and must hit the same
+		// 409 conflict path as any other stale edit.
 		const publishRes = await req(`http://localhost/api/wiki/${page.slug}`, {
 			method: "PUT",
 			headers: authHeaders(token, slug),
-			body: JSON.stringify({ content: "stale draft content", baseRevisionId: null }),
+			body: JSON.stringify({ content: "stale draft content", baseRevisionId: draftBaseRevisionId }),
 		});
 		expect(publishRes.status).toBe(409);
 	});

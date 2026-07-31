@@ -237,10 +237,13 @@ export const ListWikiChangesInputSchema = z.object({
 
 // PROJ-495 (R13): server-side per-user draft, replacing the PROJ-227 localStorage
 // autosave. title/content are both required (a draft is always a full snapshot of the
-// editor state, not a partial patch) — baseRevisionId is optional/nullable with the
-// same convention as UpdatePageSchema: omitted keeps the caller's prior baseRevisionId
-// unset (unusual — the client always sends it), `null` means "the page had no
-// revisions yet when the draft was started".
+// editor state, not a partial patch). baseRevisionId is optional/nullable, but unlike
+// UpdatePageSchema's "omitted preserves last-write-wins" convention, a draft's
+// baseRevisionId column has no tri-state to preserve — saveWikiDraft (services/
+// wiki-drafts.ts) coerces an omitted value to `null` on every save (insert or upsert),
+// same as an explicit `null`, meaning "the page had no revisions yet when the draft was
+// started". Callers that want to keep the draft's existing baseRevisionId must resend it
+// explicitly (the WikiPage.tsx client always does).
 export const SaveWikiDraftInputSchema = z.object({
 	title: z.string().min(1).max(300),
 	content: z.string().max(500000),
