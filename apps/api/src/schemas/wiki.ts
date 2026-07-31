@@ -131,3 +131,40 @@ export const ListStaleWikiPagesInputSchema = z.object({
 	limit: z.coerce.number().int().min(1).max(200).optional().default(50),
 	offset: z.coerce.number().int().min(0).optional().default(0),
 });
+
+// PROJ-490 (R8): section-addressed patch operations. `baseRevisionId` is required
+// (not optional, unlike UpdatePageSchema) — patch_wiki_page is a new tool with no
+// last-write-wins transition period to preserve; every patch declares what it read.
+// `null` means "the page has never been revised" (same convention as UpdatePageSchema).
+const PatchBaseFields = {
+	baseRevisionId: z.string().nullable(),
+	summary: z.string().max(2000).optional(),
+};
+
+export const PatchWikiPageInputSchema = z.discriminatedUnion("op", [
+	z.object({
+		op: z.literal("append_to_section"),
+		heading: z.string().min(1).max(500),
+		text: z.string().min(1).max(500000),
+		...PatchBaseFields,
+	}),
+	z.object({
+		op: z.literal("replace_section"),
+		heading: z.string().min(1).max(500),
+		text: z.string().max(500000),
+		...PatchBaseFields,
+	}),
+	z.object({
+		op: z.literal("insert_after_heading"),
+		heading: z.string().min(1).max(500),
+		text: z.string().min(1).max(500000),
+		...PatchBaseFields,
+	}),
+	z.object({
+		op: z.literal("append_to_page"),
+		text: z.string().min(1).max(500000),
+		...PatchBaseFields,
+	}),
+]);
+
+export type PatchWikiPageInput = z.infer<typeof PatchWikiPageInputSchema>;

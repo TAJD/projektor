@@ -7,6 +7,8 @@ import {
 	DeleteWikiPageOptionsSchema,
 	ListPagesInputSchema,
 	ListStaleWikiPagesInputSchema,
+	type PatchWikiPageInput,
+	PatchWikiPageInputSchema,
 	SearchWikiInputSchema,
 	UpdatePageSchema,
 } from "../schemas/wiki";
@@ -1133,6 +1135,209 @@ export async function listStaleWikiPages(ctx: ServiceCtx, input: unknown) {
 			now,
 		}),
 	}));
+}
+
+// PROJ-490 (R8): a "section" is a markdown ATX heading (`#`..`######`) plus every
+// line up to the next heading of ANY level (or end of document). Headings are
+// addressed by their exact trimmed text; nested subheadings become their own
+// separate sections rather than being folded into their parent's — flat and
+// predictable, and it's what makes findSection a simple linear lookup.
+const ATX_HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
+
+type HeadingSection = { heading: string; level: number; startLine: number; endLine: number };
+
+function parseHeadingSections(content: string): HeadingSection[] {
+	const lines = content.split("\n");
+	const headings: Array<{ level: number; heading: string; startLine: number }> = [];
+	lines.forEach((line, idx) => {
+		const m = ATX_HEADING_RE.exec(line);
+		if (m) headings.push({ level: m[1].length, heading: m[2].trim(), startLine: idx });
+	});
+	return headings.map((h, i) => ({
+		heading: h.heading,
+		level: h.level,
+		startLine: h.startLine,
+		endLine: i + 1 < headings.length ? headings[i + 1].startLine : lines.length,
+	}));
+}
+
+function findSection(sections: HeadingSection[], heading: string): HeadingSection | undefined {
+	const target = heading.trim();
+	return sections.find((s) => s.heading === target);
+}
+
+function extractSectionText(content: string, section: HeadingSection): string {
+	return content.split("\n").slice(section.startLine, section.endLine).join("\n");
+}
+
+function trimTrailingBlankLines(lines: string[]): string[] {
+	const out = [...lines];
+	while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
+	return out;
+}
+
+function trimLeadingBlankLines(lines: string[]): string[] {
+	const out = [...lines];
+	while (out.length > 0 && out[0].trim() === "") out.shift();
+	return out;
+}
+
+// PROJ-490: appends at the absolute end of the document, with a single blank-line
+// separator. Never section-scoped, so it has no target section to conflict-check —
+// see patchWikiPage's comment on why append_to_page skips the section-lock entirely.
+function appendToPageEnd(content: string, text: string): string {
+	const trimmed = content.replace(/\s+$/, "");
+	if (trimmed === "") return `${text.trimEnd()}\n`;
+	return `${trimmed}\n\n${text.trimEnd()}\n`;
+}
+
+// PROJ-490: applies one of the three heading-addressed ops to `content`, given the
+// section it resolved to (already confirmed to exist in the CURRENT content by the
+// caller). The heading line itself is always preserved — only the body under it
+// (append_to_section/replace_section) or the position right after it
+// (insert_after_heading) changes.
+function applySectionOp(
+	content: string,
+	section: HeadingSection,
+	op: Extract<
+		PatchWikiPageInput,
+		{ op: "append_to_section" | "replace_section" | "insert_after_heading" }
+	>
+): string {
+	const lines = content.split("\n");
+	const before = lines.slice(0, section.startLine);
+	const headingLine = lines[section.startLine];
+	const bodyLines = lines.slice(section.startLine + 1, section.endLine);
+	const afterLines = lines.slice(section.endLine);
+
+	let newBodyLines: string[];
+	if (op.op === "append_to_section") {
+		const trimmedBody = trimTrailingBlankLines(bodyLines);
+		newBodyLines =
+			trimmedBody.length > 0 ? [...trimmedBody, "", ...op.text.split("\n")] : op.text.split("\n");
+	} else if (op.op === "replace_section") {
+		newBodyLines = op.text.trim() === "" ? [] : op.text.split("\n");
+	} else {
+		const trimmedBody = trimLeadingBlankLines(bodyLines);
+		newBodyLines =
+			trimmedBody.length > 0 ? [...op.text.split("\n"), "", ...trimmedBody] : op.text.split("\n");
+	}
+
+	const newSectionLines = [headingLine, ...newBodyLines];
+	const separator = afterLines.length > 0 ? [""] : [];
+	return [...before, ...newSectionLines, ...separator, ...afterLines].join("\n");
+}
+
+// PROJ-490 (R8): patch_wiki_page — section-addressed patch ops so multiple agents can
+// co-edit disjoint parts of the same page without conflicting.
+//
+// Conflict detection is deliberately SECTION-scoped, not whole-page: reusing
+// updateWikiPage's baseRevisionId-vs-latest-revision check verbatim would make two
+// agents patching two different sections of the same page conflict with each other
+// just because the page's overall revision advanced — which defeats the entire point
+// of section patch ops (PRD R8: "disjoint-section writes never conflict"). Instead:
+//   1. Resolve the target section in the page's CURRENT content. Missing there ->
+//      NotFoundError with the current heading list (covers both "never existed" and
+//      "existed at base but was deleted/renamed since" — same response shape for both,
+//      since from the caller's perspective they're indistinguishable: the heading they
+//      asked for isn't there to patch).
+//   2. If baseRevisionId doesn't match the page's current latest revision, resolve
+//      the SAME section's text as of baseRevisionId (via the same resolveBaseContent
+//      helper update_wiki_page uses for its whole-page diff) and compare only that
+//      section's text, base vs current. Only reject if that comparison differs —
+//      edits to other sections in between never trip this check.
+// Tradeoff accepted: this compares base-section-text directly against current-section-
+// text, skipping over any intermediate revisions. A section that was edited and then
+// edited BACK to its original text between base and now is (correctly) treated as no
+// conflict — but a section edited by someone else and then re-edited to a different
+// value that happens to text-match some intermediate state is not distinguished from
+// "unchanged since base". This is the same class of approximation update_wiki_page
+// already accepts for its whole-page check (see getLatestRevisionId's TOCTOU note
+// above) — full section-level history tracking is out of scope for R8.
+//
+// append_to_page is exempt from the section-lock entirely: appending at the document's
+// tail is commutative with any edit elsewhere in the page (it can never clobber
+// content another writer touched), so there is no section to compare and no way for
+// it to conflict. baseRevisionId is still required on the input for API consistency
+// and because a revision snapshot is still created either way.
+export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
+	const parsed = PatchWikiPageInputSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const data = parsed.data;
+
+	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
+	await requireWikiWrite(ctx, page.projectId);
+	const currentContent = page.content;
+
+	let newContent: string;
+	if (data.op === "append_to_page") {
+		newContent = appendToPageEnd(currentContent, data.text);
+	} else {
+		const currentSections = parseHeadingSections(currentContent);
+		const currentSection = findSection(currentSections, data.heading);
+		if (!currentSection) {
+			throw new NotFoundError(`Heading '${data.heading}' not found`, {
+				currentHeadings: currentSections.map((s) => s.heading),
+			});
+		}
+
+		const currentRevisionId = await getLatestRevisionId(ctx.db, page.id);
+		if (currentRevisionId !== data.baseRevisionId) {
+			const baseContent = await resolveBaseContent(
+				ctx.db,
+				page.id,
+				data.baseRevisionId,
+				currentContent
+			);
+			const baseSection = findSection(parseHeadingSections(baseContent), data.heading);
+			const baseSectionText = baseSection ? extractSectionText(baseContent, baseSection) : "";
+			const currentSectionText = extractSectionText(currentContent, currentSection);
+			if (baseSectionText !== currentSectionText) {
+				throw new ConflictError(
+					`Section '${data.heading}' has been modified since baseRevisionId; rebase and retry`,
+					{ currentRevisionId, diff: buildUnifiedDiff(baseSectionText, currentSectionText) }
+				);
+			}
+		}
+
+		newContent = applySectionOp(currentContent, currentSection, data);
+	}
+
+	const now = Math.floor(Date.now() / 1000);
+	const orm = drizzle(ctx.db, { schema });
+	// PROJ-490: parse+validate frontmatter up front, same as updateWikiPage, so
+	// invalid frontmatter (which a patch op cannot introduce on its own since it only
+	// edits section bodies, but a malformed source page could already carry) throws
+	// before the revision insert below — never a partial write.
+	const meta = parseWikiFrontmatter(newContent);
+
+	await orm.insert(schema.wikiRevisions).values({
+		id: crypto.randomUUID(),
+		pageId: page.id,
+		content: page.content,
+		title: page.title,
+		summary: data.summary ?? null,
+		authorId: ctx.userId,
+		createdAt: now,
+	});
+
+	const setData = buildWikiPageUpdateSet(now, ctx.userId, { content: newContent, meta });
+	await orm
+		.update(schema.wikiPages)
+		// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
+		.set(setData as any)
+		.where(eq(schema.wikiPages.id, page.id));
+
+	await reindexWikiFts(ctx, orm, page.id, { content: newContent });
+	await reindexWikiLinks(ctx, orm, page.id, newContent);
+	await recordActivity(ctx, {
+		entityType: "wiki_page",
+		entityId: page.id,
+		action: "updated",
+		diff: buildWikiPageUpdateDiff({ content: newContent }),
+	});
+
+	return { ok: true, url: wikiPagePath(page.slug) };
 }
 
 // PROJ-238: breadth-first walk of parent_id children, chunked to stay under D1's

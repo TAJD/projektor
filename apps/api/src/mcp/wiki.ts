@@ -196,6 +196,64 @@ export const wikiTools: MCPTool[] = [
 		},
 	},
 	{
+		name: "patch_wiki_page",
+		description:
+			"Section-addressed patch operations on a wiki page's markdown, by id or slug. " +
+			"Sections are addressed by exact heading text (a `#`..`######` line and everything " +
+			"up to the next heading). Ops: append_to_section (add text at the end of the " +
+			"section's body), replace_section (replace the section's body, heading kept), " +
+			"insert_after_heading (insert text directly under the heading, before the " +
+			"existing body), append_to_page (append at the very end of the document, no " +
+			"heading needed). baseRevisionId is required (the current revision id from " +
+			"list_wiki_revisions/get_wiki_revision, or null if the page has never been " +
+			"revised) — conflict detection is SECTION-scoped, not whole-page: two agents " +
+			"patching two different sections never conflict with each other even if the " +
+			"page's overall revision advanced between their reads, only if the SAME section " +
+			"changed underneath the caller. On a heading miss (never existed, or was " +
+			"deleted/renamed since baseRevisionId) the error lists the page's current " +
+			"headings so a caller can retry against reality. Creates a revision, same as " +
+			"update_wiki_page; does not touch the page's existing frontmatter metadata beyond " +
+			"reparsing it (never stamps verified_at).",
+		inputSchema: {
+			type: "object",
+			required: ["op", "baseRevisionId"],
+			properties: {
+				id: { type: "string", description: "Page ID" },
+				slug: { type: "string", description: "Page slug (alternative to id)" },
+				op: {
+					type: "string",
+					enum: ["append_to_section", "replace_section", "insert_after_heading", "append_to_page"],
+				},
+				heading: {
+					type: "string",
+					description:
+						"Target section's heading text (required for every op except append_to_page)",
+				},
+				text: { type: "string", description: "Text to add/replace" },
+				baseRevisionId: {
+					type: ["string", "null"],
+					description:
+						"The revision id this patch is based on — null if the page has never been revised.",
+				},
+				summary: {
+					type: "string",
+					description: "Optional edit message/changelog note, recorded on the created revision",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			const { id, slug, ...rest } = input as { id?: string; slug?: string };
+			const idOrSlug = id ?? slug;
+			if (!idOrSlug) {
+				throw new ValidationError({
+					formErrors: ["Either id or slug must be provided"],
+					fieldErrors: {},
+				});
+			}
+			return wikiService.patchWikiPage(ctx as ServiceCtx, idOrSlug, rest);
+		},
+	},
+	{
 		name: "delete_wiki_page",
 		description:
 			"Delete a wiki page by slug (not allowed for viewers). By default any child pages are " +
