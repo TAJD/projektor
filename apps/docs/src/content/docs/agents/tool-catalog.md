@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**96 tools across 21 domains.**
+**97 tools across 21 domains.**
 
 ## Coordination
 
