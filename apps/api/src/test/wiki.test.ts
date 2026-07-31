@@ -222,7 +222,7 @@ describe("Wiki API", () => {
 
 	// PROJ-486: type/tags/status are accepted for R6/R7 forward compatibility but not
 	// yet implemented — passing them must not error or change results.
-	it("GET /api/wiki/search ignores unsupported type/status filters instead of erroring", async () => {
+	it("GET /api/wiki/search rejects a type/status value outside the well-known enum (PROJ-488)", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
@@ -232,9 +232,7 @@ describe("Wiki API", () => {
 			"http://localhost/api/wiki/search?q=wrangler&type=guide&status=fresh",
 			{ headers: authHeaders(token, slug) }
 		);
-		expect(res.status).toBe(200);
-		const results = (await res.json()) as Array<{ title: string }>;
-		expect(results.map((r) => r.title)).toContain("Noop Filter Page");
+		expect(res.status).toBe(400);
 	});
 
 	it("accepts a custom slug", async () => {
@@ -1312,6 +1310,440 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		);
 		expect(isMcpError(res)).toBe(true);
 		if (isMcpError(res)) expect(res.error.code).toBe(-32000);
+	});
+});
+
+// PROJ-488 (R6): YAML frontmatter parsed and denormalized into wiki_pages columns on
+// write, plus type/tags/status filtering on listWikiPages/searchWiki. REST/MCP parity
+// throughout — each behavior is exercised via both surfaces.
+describe("Wiki frontmatter metadata (PROJ-488)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	const RUNBOOK_CONTENT = [
+		"---",
+		"type: runbook",
+		"tags: [ops, oncall]",
+		"status: current",
+		"verified_at: 2026-01-01",
+		"verified_by: alice@example.com",
+		"owners: [alice, bob]",
+		"verify_interval: 90",
+		"---",
+		"# Runbook body",
+	].join("\n");
+
+	it("REST POST /api/wiki parses valid frontmatter into denormalized fields", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Incident Runbook", content: RUNBOOK_CONTENT }),
+		});
+		expect(res.status).toBe(201);
+		const created = (await res.json()) as {
+			type: string;
+			tags: string[];
+			status: string;
+			verifiedBy: string;
+			owners: string[];
+			verifyInterval: number;
+		};
+		expect(created.type).toBe("runbook");
+		expect(created.tags).toEqual(["ops", "oncall"]);
+		expect(created.status).toBe("current");
+		expect(created.verifiedBy).toBe("alice@example.com");
+		expect(created.owners).toEqual(["alice", "bob"]);
+		expect(created.verifyInterval).toBe(90);
+
+		const getRes = await SELF.fetch("http://localhost/api/wiki/incident-runbook", {
+			headers: authHeaders(token, slug),
+		});
+		const page = (await getRes.json()) as {
+			type: string;
+			tags: string[] | string;
+			status: string;
+		};
+		expect(page.type).toBe("runbook");
+		expect(page.status).toBe("current");
+		// tags column comes back through drizzle's JSON mode as a real array on GET.
+		expect(page.tags).toEqual(["ops", "oncall"]);
+	});
+
+	it("MCP create_wiki_page parses valid frontmatter into denormalized fields (parity with REST)", async () => {
+		const result = mcpData<{ type: string; tags: string[]; status: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "Oncall Runbook", content: RUNBOOK_CONTENT },
+				authHeaders(token, slug)
+			)
+		);
+		expect(result.type).toBe("runbook");
+		expect(result.tags).toEqual(["ops", "oncall"]);
+		expect(result.status).toBe("current");
+	});
+
+	it("a page with no frontmatter gets empty/null metadata", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Plain Page", content: "just markdown, no frontmatter" }),
+		});
+		const created = (await res.json()) as {
+			type: string | null;
+			tags: string[];
+			status: string | null;
+		};
+		expect(created.type).toBeNull();
+		expect(created.tags).toEqual([]);
+		expect(created.status).toBeNull();
+	});
+
+	it("REST POST /api/wiki rejects an unrecognized `type` enum value with 400", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Bad Type",
+				content: "---\ntype: whitepaper\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("MCP create_wiki_page rejects an unrecognized `type` enum value (-32602), parity with REST", async () => {
+		const res = await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "Bad Type Mcp", content: "---\ntype: whitepaper\n---\nbody" },
+			authHeaders(token, slug)
+		);
+		expect(isMcpError(res)).toBe(true);
+		if (isMcpError(res)) expect(res.error.code).toBe(-32602);
+	});
+
+	it("rejects an invalid `status` enum value with a structured error", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Bad Status",
+				content: "---\nstatus: archived\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects malformed YAML in the frontmatter block with a structured error, not a silent drop", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Bad Yaml",
+				content: "---\ntags: [unterminated\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects an unrecognized frontmatter key rather than silently ignoring it", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Typo Key",
+				content: "---\nstauts: current\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects tags with the wrong type (a string instead of an array)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Bad Tags",
+				content: "---\ntags: ops\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects a frontmatter block that isn't a YAML mapping", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "List Frontmatter",
+				content: "---\n- one\n- two\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects a verified_at that isn't a parseable date", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Bad Verified At",
+				content: "---\nverified_at: last tuesday\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("rejects a verified_at that is neither a date nor a number", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Boolean Verified At",
+				content: "---\nverified_at: true\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("accepts a verified_at given as unix seconds", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Unix Verified At",
+				content: "---\nverified_at: 1700000000\n---\nbody",
+			}),
+		});
+		expect(res.status).toBe(201);
+		const created = (await res.json()) as { verifiedAt: number };
+		expect(created.verifiedAt).toBe(1_700_000_000);
+	});
+
+	it("update_wiki_page reparses frontmatter when content changes", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "Evolving Doc", content: RUNBOOK_CONTENT },
+				authHeaders(token, slug)
+			)
+		);
+
+		await mcpCall(
+			workspaceId,
+			"update_wiki_page",
+			{ slug: created.slug, content: "---\ntype: adr\nstatus: deprecated\n---\nnew body" },
+			authHeaders(token, slug)
+		);
+
+		const page = mcpData<{ type: string; status: string; tags: string[] }>(
+			await mcpCall(workspaceId, "get_wiki_page", { slug: created.slug }, authHeaders(token, slug))
+		);
+		expect(page.type).toBe("adr");
+		expect(page.status).toBe("deprecated");
+		expect(page.tags).toEqual([]);
+	});
+
+	it("update_wiki_page leaves existing frontmatter metadata unchanged when content is omitted", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "Stable Doc", content: RUNBOOK_CONTENT },
+				authHeaders(token, slug)
+			)
+		);
+
+		await mcpCall(
+			workspaceId,
+			"update_wiki_page",
+			{ slug: created.slug, title: "Stable Doc (renamed title)" },
+			authHeaders(token, slug)
+		);
+
+		const page = mcpData<{ type: string; status: string; tags: string[] }>(
+			await mcpCall(workspaceId, "get_wiki_page", { slug: created.slug }, authHeaders(token, slug))
+		);
+		expect(page.type).toBe("runbook");
+		expect(page.status).toBe("current");
+		expect(page.tags).toEqual(["ops", "oncall"]);
+	});
+
+	it("update_wiki_page rejects invalid frontmatter on a content edit", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "Will Fail Update", content: RUNBOOK_CONTENT },
+				authHeaders(token, slug)
+			)
+		);
+		const res = await mcpCall(
+			workspaceId,
+			"update_wiki_page",
+			{ slug: created.slug, content: "---\ntype: not-a-real-type\n---\nbody" },
+			authHeaders(token, slug)
+		);
+		expect(isMcpError(res)).toBe(true);
+		if (isMcpError(res)) expect(res.error.code).toBe(-32602);
+	});
+
+	it("REST GET /api/wiki filters by type and status", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Filter Runbook", content: RUNBOOK_CONTENT }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Filter Adr",
+				content: "---\ntype: adr\nstatus: draft\n---\nbody",
+			}),
+		});
+
+		const byType = await SELF.fetch("http://localhost/api/wiki?type=adr", {
+			headers: authHeaders(token, slug),
+		});
+		const byTypeResults = (await byType.json()) as Array<{ title: string }>;
+		expect(byTypeResults.map((r) => r.title)).toEqual(["Filter Adr"]);
+
+		const byStatus = await SELF.fetch("http://localhost/api/wiki?status=current", {
+			headers: authHeaders(token, slug),
+		});
+		const byStatusResults = (await byStatus.json()) as Array<{ title: string }>;
+		expect(byStatusResults.map((r) => r.title)).toEqual(["Filter Runbook"]);
+	});
+
+	it("REST GET /api/wiki?tags= filters by any-of tag match", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Tagged Ops", content: "---\ntags: [ops]\n---\nbody" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Tagged Frontend",
+				content: "---\ntags: [frontend]\n---\nbody",
+			}),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Untagged", content: "no frontmatter here" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki?tags=ops,frontend", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title).sort()).toEqual(["Tagged Frontend", "Tagged Ops"]);
+	});
+
+	it("MCP list_wiki_pages filters by tags (any-of), parity with REST", async () => {
+		await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "Mcp Tagged Ops", content: "---\ntags: [ops]\n---\nbody" },
+			authHeaders(token, slug)
+		);
+		await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "Mcp Untagged", content: "no frontmatter" },
+			authHeaders(token, slug)
+		);
+
+		const result = mcpData<Array<{ title: string }>>(
+			await mcpCall(workspaceId, "list_wiki_pages", { tags: ["ops"] }, authHeaders(token, slug))
+		);
+		expect(result.map((r) => r.title)).toEqual(["Mcp Tagged Ops"]);
+	});
+
+	it("REST GET /api/wiki/search filters by type/status/tags on top of the FTS match", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Deploy Runbook",
+				content: "---\ntype: runbook\nstatus: current\ntags: [deploy]\n---\ndeploy steps",
+			}),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Deploy Adr",
+				content: "---\ntype: adr\nstatus: draft\ntags: [deploy]\n---\ndeploy decision",
+			}),
+		});
+
+		const res = await SELF.fetch(
+			"http://localhost/api/wiki/search?q=deploy&type=runbook&status=current&tags=deploy",
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toEqual(["Deploy Runbook"]);
+	});
+
+	it("search results return tags/owners as arrays, same shape as list and get", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Shape Runbook", content: RUNBOOK_CONTENT }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=Runbook", {
+			headers: authHeaders(token, slug),
+		});
+		const [hit] = (await res.json()) as Array<{ tags: string[]; owners: string[] }>;
+		expect(hit.tags).toEqual(["ops", "oncall"]);
+		expect(hit.owners).toEqual(["alice", "bob"]);
+
+		const listRes = await SELF.fetch("http://localhost/api/wiki?type=runbook", {
+			headers: authHeaders(token, slug),
+		});
+		const [listed] = (await listRes.json()) as Array<{ tags: string[]; owners: string[] }>;
+		expect(hit.tags).toEqual(listed.tags);
+		expect(hit.owners).toEqual(listed.owners);
+	});
+
+	it("MCP search_wiki filters by type, parity with REST", async () => {
+		await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "Widget Runbook", content: "---\ntype: runbook\n---\nwidget steps" },
+			authHeaders(token, slug)
+		);
+		await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "Widget Spec", content: "---\ntype: spec\n---\nwidget spec" },
+			authHeaders(token, slug)
+		);
+
+		const result = mcpData<Array<{ title: string }>>(
+			await mcpCall(
+				workspaceId,
+				"search_wiki",
+				{ query: "widget", type: "spec" },
+				authHeaders(token, slug)
+			)
+		);
+		expect(result.map((r) => r.title)).toEqual(["Widget Spec"]);
 	});
 });
 

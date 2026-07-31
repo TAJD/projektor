@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
-import { renderMdWithWikilinks, renderMermaidDiagrams } from "../utils/markdown";
+import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
 import AccessPending from "./AccessPending";
 import MarkdownEditor from "./LazyMarkdownEditor";
 import Select, { type SelectOption } from "./Select";
@@ -20,6 +20,10 @@ interface SearchResult {
 	title: string;
 	project_id: string | null;
 	excerpt: string | null;
+	// PROJ-488 (R6): denormalized frontmatter metadata, surfaced as chips in search results.
+	type: string | null;
+	status: string | null;
+	tags: string[];
 }
 
 interface WikiPageData {
@@ -29,6 +33,113 @@ interface WikiPageData {
 	content: string;
 	parent_id: string | null;
 	updated_at: number;
+	// PROJ-488 (R6): optional YAML frontmatter, denormalized on the API side.
+	type: string | null;
+	tags: string[];
+	status: string | null;
+	verified_at: number | null;
+	verified_by: string | null;
+	owners: string[];
+	verify_interval: number | null;
+}
+
+// PROJ-488: shape returned by GET /api/wiki (listWikiPages) — used for the sidebar's
+// type/status/tags filtered browse view (WikiSidebar's flat list, distinct from the
+// hierarchical tree shown when no filter is active).
+interface WikiListItem {
+	id: string;
+	slug: string;
+	title: string;
+	type: string | null;
+	status: string | null;
+	tags: string[];
+}
+
+const WIKI_TYPE_FILTER_OPTIONS: SelectOption[] = [
+	{ value: "", label: "All types" },
+	{ value: "runbook", label: "Runbook" },
+	{ value: "adr", label: "ADR" },
+	{ value: "spec", label: "Spec" },
+	{ value: "note", label: "Note" },
+];
+
+const WIKI_STATUS_FILTER_OPTIONS: SelectOption[] = [
+	{ value: "", label: "All statuses" },
+	{ value: "draft", label: "Draft" },
+	{ value: "current", label: "Current" },
+	{ value: "stale", label: "Stale" },
+	{ value: "deprecated", label: "Deprecated" },
+];
+
+const WIKI_STATUS_PILL_STYLE: Record<string, { bg: string; color: string }> = {
+	draft: { bg: "var(--priority-low-bg)", color: "var(--priority-low-text)" },
+	current: { bg: "rgba(22, 163, 74, 0.12)", color: "var(--status-done)" },
+	stale: { bg: "var(--priority-high-bg)", color: "var(--priority-high-text)" },
+	deprecated: { bg: "var(--danger-bg)", color: "var(--danger-text)" },
+};
+
+function WikiStatusPill({ status }: { status: string }) {
+	const style = WIKI_STATUS_PILL_STYLE[status] ?? {
+		bg: "var(--priority-low-bg)",
+		color: "var(--priority-low-text)",
+	};
+	return (
+		<span
+			class="inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold uppercase tracking-wide"
+			style={{ background: style.bg, color: style.color }}
+		>
+			{status}
+		</span>
+	);
+}
+
+const WIKI_TAG_CHIP_CLASS =
+	"inline-flex items-center px-2 py-[0.1rem] mr-1 mb-1 rounded-full text-[0.72rem] " +
+	"bg-bg border border-border text-text-base";
+
+function TagChips({ tags }: { tags: string[] | undefined | null }) {
+	if (!Array.isArray(tags) || tags.length === 0) return null;
+	return (
+		<span class="inline-flex flex-wrap align-middle">
+			{tags.map((t) => (
+				<span key={t} class={WIKI_TAG_CHIP_CLASS}>
+					{t}
+				</span>
+			))}
+		</span>
+	);
+}
+
+// PROJ-488: header card summarizing a page's frontmatter metadata (type/status/tags/
+// owners/verification). Omitted entirely for a page with no frontmatter at all, so
+// pages predating this feature (or that simply don't use it) render exactly as before.
+function WikiMetadataCard({ page }: { page: WikiPageData }) {
+	const hasMetadata =
+		Boolean(page.type) ||
+		Boolean(page.status) ||
+		page.tags.length > 0 ||
+		page.owners.length > 0 ||
+		Boolean(page.verified_at);
+	if (!hasMetadata) return null;
+
+	return (
+		<div class="flex flex-wrap items-center gap-2 mb-4 p-3 border border-border rounded-lg bg-surface text-[0.8rem] text-text-muted">
+			{page.type && (
+				<span class="inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold uppercase tracking-wide bg-bg border border-border text-text-muted">
+					{page.type}
+				</span>
+			)}
+			{page.status && <WikiStatusPill status={page.status} />}
+			<TagChips tags={page.tags} />
+			{page.owners.length > 0 && <span>Owners: {page.owners.join(", ")}</span>}
+			{page.verified_at && (
+				<span>
+					Verified {new Date(page.verified_at * 1000).toLocaleDateString()}
+					{page.verified_by ? ` by ${page.verified_by}` : ""}
+				</span>
+			)}
+		</div>
+	);
 }
 
 interface TreeNode {
@@ -189,9 +300,50 @@ function SearchResultsList({
 				<li key={r.id}>
 					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
 						<span class="font-medium">{r.title}</span>
+						{(r.type || r.status || (r.tags?.length ?? 0) > 0) && (
+							<span class="block mt-[0.15rem]">
+								{r.status && <WikiStatusPill status={r.status} />}
+								<TagChips tags={r.tags} />
+							</span>
+						)}
 						{r.excerpt && (
 							<span class="block text-[0.75rem] text-text-muted truncate">
 								{renderHighlightedExcerpt(r.excerpt)}
+							</span>
+						)}
+					</button>
+				</li>
+			))}
+		</ul>
+	);
+}
+
+// PROJ-488: flat, non-hierarchical list shown in the sidebar when a type/status/tag
+// filter is active — filtering the page *tree* (does any descendant match?) is out of
+// scope for this ticket, so an active filter temporarily replaces the tree view instead
+// of pruning it.
+function FilteredPagesList({
+	loading,
+	results,
+	onSelect,
+}: {
+	loading: boolean;
+	results: WikiListItem[];
+	onSelect: (slug: string) => void;
+}) {
+	if (loading) return <p class="text-[0.8rem] text-text-muted m-0">Loading…</p>;
+	if (results.length === 0)
+		return <p class="text-[0.8rem] text-text-muted m-0">No matching pages</p>;
+	return (
+		<ul class="list-none m-0 p-0">
+			{results.map((r) => (
+				<li key={r.id}>
+					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
+						<span class="font-medium">{r.title}</span>
+						{(r.type || r.status || (r.tags?.length ?? 0) > 0) && (
+							<span class="block mt-[0.15rem]">
+								{r.status && <WikiStatusPill status={r.status} />}
+								<TagChips tags={r.tags} />
 							</span>
 						)}
 					</button>
@@ -272,6 +424,49 @@ function ScopeControl({
 	);
 }
 
+// PROJ-488: type/status dropdowns + a comma-separated tags text filter, shared between
+// the sidebar's filtered browse view and (via useWikiSearch) text search.
+function WikiFilterBar({
+	filterType,
+	onFilterTypeChange,
+	filterStatus,
+	onFilterStatusChange,
+	filterTags,
+	onFilterTagsChange,
+}: {
+	filterType: string;
+	onFilterTypeChange: (v: string) => void;
+	filterStatus: string;
+	onFilterStatusChange: (v: string) => void;
+	filterTags: string;
+	onFilterTagsChange: (v: string) => void;
+}) {
+	return (
+		<div class="mb-3 flex flex-col gap-1.5">
+			<Select
+				value={filterType}
+				options={WIKI_TYPE_FILTER_OPTIONS}
+				ariaLabel="Filter wiki pages by type"
+				onChange={onFilterTypeChange}
+			/>
+			<Select
+				value={filterStatus}
+				options={WIKI_STATUS_FILTER_OPTIONS}
+				ariaLabel="Filter wiki pages by status"
+				onChange={onFilterStatusChange}
+			/>
+			<input
+				type="text"
+				value={filterTags}
+				onInput={(e) => onFilterTagsChange((e.target as HTMLInputElement).value)}
+				placeholder="Filter by tags (comma-separated)…"
+				class="w-full px-3 py-[0.375rem] border border-border rounded text-sm bg-bg text-text-base box-border"
+				aria-label="Filter wiki pages by tags"
+			/>
+		</div>
+	);
+}
+
 function WikiSidebar({
 	workspaceSlug,
 	projectId,
@@ -284,6 +479,15 @@ function WikiSidebar({
 	slug,
 	onNavigate,
 	onCreate,
+	filterType,
+	onFilterTypeChange,
+	filterStatus,
+	onFilterStatusChange,
+	filterTags,
+	onFilterTagsChange,
+	hasActiveFilters,
+	filteredResults,
+	filteredLoading,
 }: {
 	workspaceSlug: string | undefined;
 	projectId: string;
@@ -296,6 +500,15 @@ function WikiSidebar({
 	slug: string;
 	onNavigate: (slug: string) => void;
 	onCreate: () => void;
+	filterType: string;
+	onFilterTypeChange: (v: string) => void;
+	filterStatus: string;
+	onFilterStatusChange: (v: string) => void;
+	filterTags: string;
+	onFilterTagsChange: (v: string) => void;
+	hasActiveFilters: boolean;
+	filteredResults: WikiListItem[];
+	filteredLoading: boolean;
 }) {
 	const asideClass = [
 		"w-[240px] shrink-0 bg-surface border-r border-border p-4 overflow-y-auto",
@@ -319,6 +532,14 @@ function WikiSidebar({
 				class="w-full px-3 py-[0.375rem] mb-3 border border-border rounded text-sm bg-bg text-text-base box-border"
 				aria-label="Search wiki pages"
 			/>
+			<WikiFilterBar
+				filterType={filterType}
+				onFilterTypeChange={onFilterTypeChange}
+				filterStatus={filterStatus}
+				onFilterStatusChange={onFilterStatusChange}
+				filterTags={filterTags}
+				onFilterTagsChange={onFilterTagsChange}
+			/>
 			{searchQuery.trim() ? (
 				<SearchResultsList
 					loading={searchLoading}
@@ -327,6 +548,12 @@ function WikiSidebar({
 						onSearchQueryChange("");
 						onNavigate(s);
 					}}
+				/>
+			) : hasActiveFilters ? (
+				<FilteredPagesList
+					loading={filteredLoading}
+					results={filteredResults}
+					onSelect={onNavigate}
 				/>
 			) : (
 				<PageTreeList loading={treeLoading} tree={pageTree} slug={slug} onNavigate={onNavigate} />
@@ -929,6 +1156,8 @@ function PageArticleMeta(
 				onDelete={props.onDelete}
 			/>
 
+			{!props.editing && <WikiMetadataCard page={props.page} />}
+
 			{props.moving && (
 				<MovePageForm
 					options={props.moveOptions}
@@ -986,7 +1215,7 @@ function PageArticle(props: PageArticleProps) {
 						ref={props.contentRef}
 						class="prose prose-sm max-w-none"
 						dangerouslySetInnerHTML={{
-							__html: renderMdWithWikilinks(page.content, props.wikiPages),
+							__html: renderMdWithWikilinks(stripFrontmatter(page.content), props.wikiPages),
 						}}
 					/>
 				)}
@@ -1156,10 +1385,64 @@ function useWikiTree(workspaceSlug: string | undefined, projectId: string) {
 	return { pageTree, pageMap, treeLoading, fetchTree };
 }
 
-function useWikiSearch(workspaceSlug: string | undefined, projectId: string) {
+// PROJ-488: type/status/tags filters shared between the sidebar's filtered browse view
+// (no search query — a flat list from listWikiPages) and text search below (combined
+// with the FTS query via search_wiki's own type/status/tags params).
+function useWikiFilters(workspaceSlug: string | undefined, projectId: string) {
+	const [filterType, setFilterType] = useState("");
+	const [filterStatus, setFilterStatus] = useState("");
+	const [filterTags, setFilterTags] = useState("");
+	const [filteredResults, setFilteredResults] = useState<WikiListItem[]>([]);
+	const [filteredLoading, setFilteredLoading] = useState(false);
+
+	const hasActiveFilters = Boolean(filterType || filterStatus || filterTags.trim());
+
+	useEffect(() => {
+		if (!hasActiveFilters) {
+			setFilteredResults([]);
+			return;
+		}
+		setFilteredLoading(true);
+		const timer = setTimeout(async () => {
+			try {
+				const qs = new URLSearchParams();
+				if (projectId) qs.set("projectId", projectId);
+				if (filterType) qs.set("type", filterType);
+				if (filterStatus) qs.set("status", filterStatus);
+				if (filterTags.trim()) qs.set("tags", filterTags);
+				const data = await apiFetch<WikiListItem[]>(`/api/wiki?${qs}`, { workspaceSlug });
+				setFilteredResults(Array.isArray(data) ? data : []);
+			} catch {
+				// non-fatal
+			} finally {
+				setFilteredLoading(false);
+			}
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [filterType, filterStatus, filterTags, workspaceSlug, projectId, hasActiveFilters]);
+
+	return {
+		filterType,
+		setFilterType,
+		filterStatus,
+		setFilterStatus,
+		filterTags,
+		setFilterTags,
+		filteredResults,
+		filteredLoading,
+		hasActiveFilters,
+	};
+}
+
+function useWikiSearch(
+	workspaceSlug: string | undefined,
+	projectId: string,
+	filters: { filterType: string; filterStatus: string; filterTags: string }
+) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
 	const [searchLoading, setSearchLoading] = useState(false);
+	const { filterType, filterStatus, filterTags } = filters;
 
 	useEffect(() => {
 		if (!searchQuery.trim()) {
@@ -1171,6 +1454,9 @@ function useWikiSearch(workspaceSlug: string | undefined, projectId: string) {
 			try {
 				const qs = new URLSearchParams({ q: searchQuery });
 				if (projectId) qs.set("projectId", projectId);
+				if (filterType) qs.set("type", filterType);
+				if (filterStatus) qs.set("status", filterStatus);
+				if (filterTags.trim()) qs.set("tags", filterTags);
 				const data = await apiFetch<SearchResult[]>(`/api/wiki/search?${qs}`, { workspaceSlug });
 				setSearchResults(Array.isArray(data) ? data : []);
 			} catch {
@@ -1180,7 +1466,7 @@ function useWikiSearch(workspaceSlug: string | undefined, projectId: string) {
 			}
 		}, 300);
 		return () => clearTimeout(timer);
-	}, [searchQuery, workspaceSlug, projectId]);
+	}, [searchQuery, workspaceSlug, projectId, filterType, filterStatus, filterTags]);
 
 	return { searchQuery, setSearchQuery, searchResults, searchLoading };
 }
@@ -1274,7 +1560,8 @@ function setMetaTag(attr: "name" | "property", key: string, content: string) {
 }
 
 function excerptOf(content: string, maxLength = 200): string {
-	const plain = content
+	// PROJ-488: never let a page's frontmatter YAML become its og:description.
+	const plain = stripFrontmatter(content)
 		.replace(/```[\s\S]*?```/g, " ")
 		.replace(/[#*_>`[\]()!-]/g, " ")
 		.replace(/\s+/g, " ")
@@ -1911,6 +2198,7 @@ function WikiPageShell(props: {
 	slug: string;
 	onNavigate: (slug: string) => void;
 	onCreate: () => void;
+	filters: ReturnType<typeof useWikiFilters>;
 	mainContentProps: {
 		creating: boolean;
 		createProps: CreateFormProps;
@@ -1936,6 +2224,15 @@ function WikiPageShell(props: {
 				slug={props.slug}
 				onNavigate={props.onNavigate}
 				onCreate={props.onCreate}
+				filterType={props.filters.filterType}
+				onFilterTypeChange={props.filters.setFilterType}
+				filterStatus={props.filters.filterStatus}
+				onFilterStatusChange={props.filters.setFilterStatus}
+				filterTags={props.filters.filterTags}
+				onFilterTagsChange={props.filters.setFilterTags}
+				hasActiveFilters={props.filters.hasActiveFilters}
+				filteredResults={props.filters.filteredResults}
+				filteredLoading={props.filters.filteredLoading}
 			/>
 
 			<main class="flex-1 p-8 min-w-0">
@@ -2088,9 +2385,15 @@ export default function WikiPage({
 	const gate = useAccessGate(workspaceSlug);
 	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp, slugProp);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
+	const filters = useWikiFilters(workspaceSlug, projectId);
 	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(
 		workspaceSlug,
-		projectId
+		projectId,
+		{
+			filterType: filters.filterType,
+			filterStatus: filters.filterStatus,
+			filterTags: filters.filterTags,
+		}
 	);
 
 	const pageData = useWikiPageData(workspaceSlug, slug);
@@ -2193,6 +2496,7 @@ export default function WikiPage({
 			slug={slug}
 			onNavigate={navigateTo}
 			onCreate={() => startCreate(null)}
+			filters={filters}
 			mainContentProps={{
 				creating: createForm.creating,
 				createProps,

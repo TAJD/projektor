@@ -17,6 +17,13 @@ interface WikiPageData {
 	content: string;
 	parent_id: string | null;
 	updated_at: number;
+	type: string | null;
+	tags: string[];
+	status: string | null;
+	verified_at: number | null;
+	verified_by: string | null;
+	owners: string[];
+	verify_interval: number | null;
 }
 
 const PAGE: WikiPageData = {
@@ -26,6 +33,13 @@ const PAGE: WikiPageData = {
 	content: "Hello world content.",
 	parent_id: null,
 	updated_at: 1000,
+	type: null,
+	tags: [],
+	status: null,
+	verified_at: null,
+	verified_by: null,
+	owners: [],
+	verify_interval: null,
 };
 
 function mockFetchWiki(page: WikiPageData | null, ok = true, status = 404) {
@@ -602,5 +616,108 @@ describe("optimistic locking (PROJ-507)", () => {
 		});
 		// Let the post-save refetches settle so they don't render after teardown.
 		await screen.findByRole("button", { name: "Edit" });
+	});
+});
+
+// PROJ-488 (R6): frontmatter metadata header card, tag chips, and sidebar tag/type/
+// status filters.
+describe("WikiPage frontmatter metadata (PROJ-488)", () => {
+	const PAGE_WITH_META: WikiPageData = {
+		...PAGE,
+		type: "runbook",
+		tags: ["ops", "oncall"],
+		status: "current",
+		verified_at: 1_700_000_000,
+		verified_by: "alice@example.com",
+		owners: ["alice", "bob"],
+		verify_interval: 90,
+	};
+
+	it("renders a metadata card with type, status, tags, and owners", async () => {
+		mockFetchWiki(PAGE_WITH_META);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(screen.getByText("runbook")).toBeTruthy();
+		expect(screen.getByText("current")).toBeTruthy();
+		expect(screen.getByText("ops")).toBeTruthy();
+		expect(screen.getByText("oncall")).toBeTruthy();
+		expect(screen.getByText(/Owners: alice, bob/)).toBeTruthy();
+		expect(screen.getByText(/Verified/)).toBeTruthy();
+	});
+
+	it("does not render the raw frontmatter block in the page body", async () => {
+		mockFetchWiki({
+			...PAGE_WITH_META,
+			content: [
+				"---",
+				"type: runbook",
+				"tags: [ops, oncall]",
+				"status: current",
+				"---",
+				"# Real heading",
+				"",
+				"Body text.",
+			].join("\n"),
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(await screen.findByText("Body text.")).toBeTruthy();
+		expect(screen.getByRole("heading", { name: "Real heading" })).toBeTruthy();
+		// The YAML would otherwise render as a setext <h2> at the top of the body.
+		expect(screen.queryByText(/type: runbook/)).toBeNull();
+		expect(screen.queryByText(/status: current/)).toBeNull();
+	});
+
+	it("renders no metadata card for a page without frontmatter", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(screen.queryByText(/Owners:/)).toBeNull();
+		expect(screen.queryByText(/Verified/)).toBeNull();
+	});
+
+	it("filtering by tags in the sidebar fetches and lists matching pages", async () => {
+		const FILTERED_RESULT = [
+			{
+				id: "w9",
+				slug: "ops-runbook",
+				title: "Ops Runbook",
+				type: "runbook",
+				status: "current",
+				tags: ["ops"],
+			},
+		];
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/api/wiki?") && u.includes("tags=")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(FILTERED_RESULT) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.input(screen.getByLabelText(/Filter wiki pages by tags/i), {
+			target: { value: "ops" },
+		});
+
+		expect(await screen.findByText("Ops Runbook")).toBeTruthy();
+		await waitFor(() => {
+			expect(
+				fetchMock.mock.calls.some(
+					([u]) => String(u).includes("/api/wiki?") && String(u).includes("tags=ops")
+				)
+			).toBe(true);
+		});
 	});
 });

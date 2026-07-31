@@ -21,6 +21,7 @@ import { recordActivity } from "./activity";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
+import { parseWikiFrontmatter, type WikiFrontmatterMeta } from "./wiki-frontmatter";
 import {
 	backlinksForResolvedPage,
 	clearIncomingLinkTargets,
@@ -238,13 +239,30 @@ async function validateUpdatedPageParent(
 function buildWikiPageUpdateSet(
 	now: number,
 	updatedById: string,
-	fields: { title?: string; content?: string; parentId?: string | null; slug?: string }
+	fields: {
+		title?: string;
+		content?: string;
+		parentId?: string | null;
+		slug?: string;
+		meta?: WikiFrontmatterMeta;
+	}
 ): Record<string, unknown> {
 	const setData: Record<string, unknown> = { updatedAt: now, updatedById };
 	if (fields.title !== undefined) setData.title = fields.title;
 	if (fields.content !== undefined) setData.content = fields.content;
 	if (fields.parentId !== undefined) setData.parentId = fields.parentId;
 	if (fields.slug !== undefined) setData.slug = fields.slug;
+	// PROJ-488: only reparsed (and only overwritten) when content changes — a
+	// title/parent/slug-only update leaves the page's existing frontmatter metadata as-is.
+	if (fields.meta !== undefined) {
+		setData.type = fields.meta.type;
+		setData.tags = fields.meta.tags;
+		setData.status = fields.meta.status;
+		setData.verifiedAt = fields.meta.verifiedAt;
+		setData.verifiedBy = fields.meta.verifiedBy;
+		setData.owners = fields.meta.owners;
+		setData.verifyInterval = fields.meta.verifyInterval;
+	}
 	return setData;
 }
 
@@ -256,6 +274,19 @@ function buildWikiPageUpdateDiff(fields: {
 	if (fields.title !== undefined) diff.title = fields.title;
 	if (fields.content !== undefined) diff.content = fields.content;
 	return diff;
+}
+
+// PROJ-488: any-of tag match — a page matches if `wiki_pages.tags` (a JSON array
+// column) contains at least one of the given tags. json_each is the standard SQLite
+// way to query into a JSON array column without denormalizing it into its own table;
+// `tags` has no direct index (see 0045_wiki_frontmatter.sql), so this is a per-row
+// scan, acceptable at current wiki sizes — revisit with a join table if it becomes hot.
+function tagsFilterCondition(tags: string[]) {
+	if (tags.length === 0) return undefined;
+	return sql`EXISTS (SELECT 1 FROM json_each(${schema.wikiPages.tags}) WHERE value IN (${sql.join(
+		tags.map((t) => sql`${t}`),
+		sql`, `
+	)}))`;
 }
 
 export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
@@ -270,6 +301,14 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 	if (parsed.data.projectId) {
 		conditions.push(eq(schema.wikiPages.projectId, parsed.data.projectId));
 	}
+	if (parsed.data.type) {
+		conditions.push(eq(schema.wikiPages.type, parsed.data.type));
+	}
+	if (parsed.data.status) {
+		conditions.push(eq(schema.wikiPages.status, parsed.data.status));
+	}
+	const tagsCond = tagsFilterCondition(parsed.data.tags ?? []);
+	if (tagsCond) conditions.push(tagsCond);
 	// PROJ-311: hide project-scoped pages whose project the user isn't granted
 	// (workspace-level pages, projectId null, stay visible to everyone).
 	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
@@ -289,6 +328,17 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 			project_id: schema.wikiPages.projectId,
 			// eslint-disable-next-line camelcase
 			updated_at: schema.wikiPages.updatedAt,
+			// PROJ-488 (R6): denormalized frontmatter metadata.
+			type: schema.wikiPages.type,
+			tags: schema.wikiPages.tags,
+			status: schema.wikiPages.status,
+			// eslint-disable-next-line camelcase
+			verified_at: schema.wikiPages.verifiedAt,
+			// eslint-disable-next-line camelcase
+			verified_by: schema.wikiPages.verifiedBy,
+			owners: schema.wikiPages.owners,
+			// eslint-disable-next-line camelcase
+			verify_interval: schema.wikiPages.verifyInterval,
 		})
 		.from(schema.wikiPages)
 		.where(and(...conditions))
@@ -316,12 +366,22 @@ function sanitizeWikiFtsQuery(q: string): string {
 // two are UNINDEXED so their weight is irrelevant, left at 0 for clarity.
 const WIKI_FTS_BM25_WEIGHTS = "0, 0, 10.0, 1.0, 5.0";
 
+// PROJ-488: a JSON-array column read through a raw D1 query (no drizzle json decoding).
+function decodeJsonArrayColumn(value: unknown): string[] {
+	if (Array.isArray(value)) return value as string[];
+	if (typeof value !== "string") return [];
+	try {
+		const parsed = JSON.parse(value);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
 export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	const parsed = SearchWikiInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { query, limit, offset, projectId, updatedSince } = parsed.data;
-	// PROJ-486: `type`/`tags`/`status` are accepted by the schema for forward
-	// compatibility with R6/R7 but intentionally unused here — see schemas/wiki.ts.
+	const { query, limit, offset, projectId, updatedSince, type, status, tags } = parsed.data;
 
 	const ftsQuery = sanitizeWikiFtsQuery(query);
 	if (!ftsQuery) return [];
@@ -334,6 +394,7 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	}
 
 	let q = `SELECT p.id, p.slug, p.title, p.project_id,
+              p.type, p.tags, p.status, p.verified_at, p.verified_by, p.owners, p.verify_interval,
               snippet(wiki_fts, -1, '**', '**', '…', 24) as excerpt,
               bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}) as rank
             FROM wiki_fts
@@ -358,6 +419,22 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 		params.push(updatedSince);
 	}
 
+	// PROJ-488 (R6): type/status/tags filters over the denormalized frontmatter
+	// columns — combined (AND) with the FTS match, same as updatedSince/projectId above.
+	if (type) {
+		q += " AND p.type = ?";
+		params.push(type);
+	}
+	if (status) {
+		q += " AND p.status = ?";
+		params.push(status);
+	}
+	if (tags && tags.length > 0) {
+		// Any-of match, same semantics as listWikiPages's tagsFilterCondition.
+		q += ` AND EXISTS (SELECT 1 FROM json_each(p.tags) WHERE value IN (${tags.map(() => "?").join(",")}))`;
+		params.push(...tags);
+	}
+
 	// PROJ-486: bm25() alone ties on equal-rank rows, which makes LIMIT/OFFSET
 	// paging non-deterministic (duplicate/skip results across pages) — break
 	// ties by page id for a stable order.
@@ -370,7 +447,16 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 		.all();
 	// PROJ-489 (R7, not landed): no freshness model exists yet, so freshness is
 	// omitted-as-null rather than fabricated.
-	return (results as Array<Record<string, unknown>>).map((r) => ({ ...r, freshness: null }));
+	return (results as Array<Record<string, unknown>>).map((r) => ({
+		...r,
+		// PROJ-488: this is a raw D1 query, so the JSON-array columns come back as the
+		// stored TEXT rather than as arrays the way drizzle's `{ mode: "json" }` decodes
+		// them for listWikiPages/getWikiPage. Decode here so every wiki surface returns
+		// tags/owners with the same shape.
+		tags: decodeJsonArrayColumn(r.tags),
+		owners: decodeJsonArrayColumn(r.owners),
+		freshness: null,
+	}));
 }
 
 const wikiPageDetailColumns = {
@@ -384,6 +470,17 @@ const wikiPageDetailColumns = {
 	project_id: schema.wikiPages.projectId,
 	// eslint-disable-next-line camelcase
 	updated_at: schema.wikiPages.updatedAt,
+	// PROJ-488 (R6): denormalized frontmatter metadata.
+	type: schema.wikiPages.type,
+	tags: schema.wikiPages.tags,
+	status: schema.wikiPages.status,
+	// eslint-disable-next-line camelcase
+	verified_at: schema.wikiPages.verifiedAt,
+	// eslint-disable-next-line camelcase
+	verified_by: schema.wikiPages.verifiedBy,
+	owners: schema.wikiPages.owners,
+	// eslint-disable-next-line camelcase
+	verify_interval: schema.wikiPages.verifyInterval,
 };
 
 // PROJ-483: a slug with no live page may still be a former slug of one — recorded in
@@ -476,6 +573,9 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	await assertSlugAvailable(orm, ctx.workspaceId, slug);
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
+	// PROJ-488 (R6): parse+validate the optional frontmatter block up front, so an
+	// invalid frontmatter throws before any row is written (never a partial create).
+	const meta = parseWikiFrontmatter(content ?? "");
 
 	try {
 		await orm.insert(schema.wikiPages).values({
@@ -490,6 +590,13 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 			updatedById: ctx.userId,
 			createdAt: now,
 			updatedAt: now,
+			type: meta.type,
+			tags: meta.tags,
+			status: meta.status,
+			verifiedAt: meta.verifiedAt,
+			verifiedBy: meta.verifiedBy,
+			owners: meta.owners,
+			verifyInterval: meta.verifyInterval,
 		});
 	} catch (e) {
 		// PROJ-483: assertSlugAvailable-then-insert isn't atomic — a concurrent create
@@ -500,17 +607,19 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		}
 		throw e;
 	}
-	// PROJ-486: tags is left empty until R6 (PROJ-488) populates it from frontmatter.
+	// PROJ-488: tags is now populated from frontmatter (space-joined — wiki_fts's default
+	// unicode61 tokenizer splits on non-alphanumeric, so a comma join would tokenize
+	// identically, but space matches how title/content are naturally tokenized).
 	await ctx.db
 		.prepare(
 			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
 		)
-		.bind(id, ctx.workspaceId, title, content ?? "", "")
+		.bind(id, ctx.workspaceId, title, content ?? "", meta.tags.join(" "))
 		.run();
 	// PROJ-485: parse [[Target]]/URL links out of the new page's content into wiki_links.
 	await reindexWikiLinks(ctx, orm, id, content ?? "");
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
-	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug) };
+	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug), ...meta };
 }
 
 // PROJ-484: id of the most recently created revision for a page, or null if the page
@@ -703,7 +812,11 @@ async function reindexWikiFts(
 	if (data.title === undefined && data.content === undefined) return;
 
 	const current = await orm
-		.select({ title: schema.wikiPages.title, content: schema.wikiPages.content })
+		.select({
+			title: schema.wikiPages.title,
+			content: schema.wikiPages.content,
+			tags: schema.wikiPages.tags,
+		})
 		.from(schema.wikiPages)
 		.where(and(eq(schema.wikiPages.id, id), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
 		.get();
@@ -717,7 +830,9 @@ async function reindexWikiFts(
 		.prepare(
 			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
 		)
-		.bind(id, ctx.workspaceId, current.title, current.content, "")
+		// PROJ-488: current.tags already reflects this write — reindexWikiFts runs
+		// after the wikiPages UPDATE below applies (see call site in updateWikiPage).
+		.bind(id, ctx.workspaceId, current.title, current.content, (current.tags ?? []).join(" "))
 		.run();
 }
 
@@ -764,6 +879,12 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		await validateUpdatedPageParent(ctx.db, parentId, ctx.workspaceId, page);
 	}
 
+	// PROJ-488 (R6): parse+validate frontmatter up front (before any write) when content
+	// changes, so invalid frontmatter throws before the revision insert below — never a
+	// partial update. `undefined` (not reparsed) means the update doesn't touch content,
+	// so buildWikiPageUpdateSet leaves the page's existing metadata columns untouched.
+	const meta = content !== undefined ? parseWikiFrontmatter(content) : undefined;
+
 	// PROJ-483: renaming the slug — check the new slug isn't already live, then leave a
 	// redirect from the old slug to this page so existing links keep resolving.
 	const isRename = slug !== undefined && slug !== page.slug;
@@ -790,7 +911,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		});
 	}
 
-	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug });
+	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug, meta });
 	try {
 		await orm
 			.update(schema.wikiPages)

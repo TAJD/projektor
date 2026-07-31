@@ -6,12 +6,29 @@ import * as wikiService from "../services/wiki";
 export const wikiTools: MCPTool[] = [
 	{
 		name: "list_wiki_pages",
-		description: "List wiki pages in the workspace, optionally filtered by parent or project",
+		description:
+			"List wiki pages in the workspace, optionally filtered by parent, project, " +
+			"frontmatter type/status, or tags (any-of match)",
 		inputSchema: {
 			type: "object",
 			properties: {
 				parentId: { type: "string", description: "Filter to children of this page ID" },
 				projectId: { type: "string", description: "Filter to pages belonging to this project ID" },
+				type: {
+					type: "string",
+					enum: ["runbook", "adr", "spec", "note"],
+					description: "Filter to pages whose frontmatter `type` matches",
+				},
+				status: {
+					type: "string",
+					enum: ["draft", "current", "stale", "deprecated"],
+					description: "Filter to pages whose frontmatter `status` matches",
+				},
+				tags: {
+					type: "array",
+					items: { type: "string" },
+					description: "Filter to pages carrying at least one of these frontmatter tags",
+				},
 			},
 		},
 		async handler(input, ctx) {
@@ -22,9 +39,9 @@ export const wikiTools: MCPTool[] = [
 		name: "search_wiki",
 		description:
 			"Full-text search over wiki pages (FTS5, BM25-ranked, title weighted above body). " +
-			"Returns match-anchored snippets highlighted with ** markers. type/tags/status are " +
-			"accepted for forward compatibility with the frontmatter (R6) and freshness (R7) " +
-			"work but are not yet implemented and are ignored if passed.",
+			"Returns match-anchored snippets highlighted with ** markers. type/status/tags filter " +
+			"on the denormalized frontmatter columns (R6); status here is unrelated to the " +
+			"freshness/staleness ranking work (R7, PROJ-489), which hasn't landed yet.",
 		inputSchema: {
 			type: "object",
 			required: ["query"],
@@ -37,13 +54,21 @@ export const wikiTools: MCPTool[] = [
 					type: "number",
 					description: "Unix seconds — only return pages updated at or after this time",
 				},
-				type: { type: "string", description: "Not yet supported (R6, PROJ-488); ignored" },
+				type: {
+					type: "string",
+					enum: ["runbook", "adr", "spec", "note"],
+					description: "Filter to pages whose frontmatter `type` matches",
+				},
 				tags: {
 					type: "array",
 					items: { type: "string" },
-					description: "Not yet supported (R6, PROJ-488); ignored",
+					description: "Filter to pages carrying at least one of these frontmatter tags",
 				},
-				status: { type: "string", description: "Not yet supported (R7, PROJ-489); ignored" },
+				status: {
+					type: "string",
+					enum: ["draft", "current", "stale", "deprecated"],
+					description: "Filter to pages whose frontmatter `status` matches",
+				},
 			},
 		},
 		async handler(input, ctx) {
@@ -65,7 +90,13 @@ export const wikiTools: MCPTool[] = [
 	},
 	{
 		name: "create_wiki_page",
-		description: "Create a new wiki page",
+		description:
+			"Create a new wiki page. `content` may start with an optional YAML frontmatter block " +
+			"(`---\\ntype: runbook\\ntags: [foo]\\nstatus: draft\\n---\\n...`) — type (runbook|adr|" +
+			"spec|note), tags[], status (draft|current|stale|deprecated), verified_at, verified_by, " +
+			"owners[], verify_interval (days) are parsed and denormalized for filtering. Invalid " +
+			"frontmatter (bad enum value, wrong field type, unrecognized key) is rejected with a " +
+			"structured validation error, not silently ignored.",
 		inputSchema: {
 			type: "object",
 			required: ["title"],
@@ -75,7 +106,10 @@ export const wikiTools: MCPTool[] = [
 					type: "string",
 					description: "URL-safe identifier; auto-generated from title if omitted",
 				},
-				content: { type: "string", description: "Markdown content" },
+				content: {
+					type: "string",
+					description: "Markdown content, optionally starting with a YAML frontmatter block",
+				},
 				parentId: { type: "string", description: "Parent page ID for nested pages" },
 				projectId: { type: "string", description: "Project ID to scope this page to" },
 			},
@@ -93,14 +127,20 @@ export const wikiTools: MCPTool[] = [
 			"advanced since baseRevisionId, the write is rejected with a structured conflict " +
 			"(currentRevisionId + a unified diff) instead of silently overwriting. Omitting " +
 			"baseRevisionId is DEPRECATED — it keeps today's last-write-wins behavior during the " +
-			"transition and will be rejected in a future version.",
+			"transition and will be rejected in a future version. `content` may include a YAML " +
+			"frontmatter block (see create_wiki_page); it's re-parsed on every content edit, " +
+			"replacing the page's previously-stored metadata. Omitting `content` leaves the " +
+			"page's existing frontmatter metadata unchanged.",
 		inputSchema: {
 			type: "object",
 			properties: {
 				id: { type: "string", description: "Page ID" },
 				slug: { type: "string", description: "Page slug (alternative to id)" },
 				title: { type: "string" },
-				content: { type: "string" },
+				content: {
+					type: "string",
+					description: "Markdown content, optionally starting with a YAML frontmatter block",
+				},
 				parentId: {
 					type: "string",
 					nullable: true,

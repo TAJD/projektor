@@ -20,6 +20,7 @@
     "@projektor/types": "workspace:*",
     "drizzle-orm": "^0.33.0",
     "hono": "^4.6.0",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
