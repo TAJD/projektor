@@ -2786,6 +2786,35 @@ describe("Wiki freshness model (PROJ-489)", () => {
 		expect(afterRevisions.length).toBe(beforeRevisions.length + 1);
 	});
 
+	// PROJ-489: verifying rewrites the whole content (frontmatter stamp + body), so it must
+	// stamp the CURRENT content — a stale read would silently revert the edit before it.
+	it("POST /api/wiki/:slug/verify stamps on top of the latest content, never a stale snapshot", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Edited Then Verified", content: overdueContent() }),
+		});
+		const created = (await createRes.json()) as { slug: string };
+
+		await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: `${overdueContent()}\n\nBrand new paragraph.` }),
+		});
+
+		await SELF.fetch(`http://localhost/api/wiki/${created.slug}/verify`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+
+		const pageRes = await SELF.fetch(`http://localhost/api/wiki/${created.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const page = (await pageRes.json()) as { content: string; verified_by: string };
+		expect(page.content).toContain("Brand new paragraph.");
+		expect(page.verified_by).toBe(userEmail);
+	});
+
 	it("POST /api/wiki/:slug/verify is rejected for a viewer", async () => {
 		const roles = await seedWorkspaceRoles();
 		const createRes = await SELF.fetch("http://localhost/api/wiki", {

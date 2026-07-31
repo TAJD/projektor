@@ -311,7 +311,8 @@ export const wikiTools: MCPTool[] = [
 			"Stamp a wiki page as freshly verified — sets its frontmatter verified_at to now and " +
 			"verified_by to the CALLING user's email (never caller-supplied). Rewrites the page's " +
 			"frontmatter block (creating one if it had none) and records a revision, same as any " +
-			"other content edit. Not allowed for viewers.",
+			"other content edit — including its conflict check, so a concurrent edit racing the " +
+			"stamp is rejected rather than reverted. Not allowed for viewers.",
 		inputSchema: {
 			type: "object",
 			required: ["slug"],

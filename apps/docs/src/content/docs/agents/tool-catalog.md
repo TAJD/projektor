@@ -144,7 +144,7 @@ running server.
 | `backfill_wiki_links` | One-time (idempotent, safe to re-run) recompute of the wiki_links graph for every existing page in the workspace. Owner/admin only. |
 | `list_wiki_revisions` | List revision history for a wiki page |
 | `get_wiki_revision` | Get the content of a specific wiki revision by its ID |
-| `verify_wiki_page` | Stamp a wiki page as freshly verified — sets its frontmatter verified_at to now and verified_by to the CALLING user's email (never caller-supplied). Rewrites the page's frontmatter block (creating one if it had none) and records a revision, same as any other content edit. Not allowed for viewers. |
+| `verify_wiki_page` | Stamp a wiki page as freshly verified — sets its frontmatter verified_at to now and verified_by to the CALLING user's email (never caller-supplied). Rewrites the page's frontmatter block (creating one if it had none) and records a revision, same as any other content edit — including its conflict check, so a concurrent edit racing the stamp is rejected rather than reverted. Not allowed for viewers. |
 | `list_stale_pages` | Maintenance queue of wiki pages that need re-verification: computed-stale (verify_interval elapsed since verified_at), unverified (verify_interval declared but never verified), or explicitly status: stale\|deprecated. Same rule search_wiki uses to demote results (R7). |
 
 ### Attachments

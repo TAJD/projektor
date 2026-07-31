@@ -1036,9 +1036,18 @@ export async function verifyWikiPage(ctx: ServiceCtx, idOrSlug: string) {
 		.get();
 	if (!user) throw new NotFoundError("Calling user not found");
 
+	// PROJ-489: stamping the frontmatter is a read-modify-write of the WHOLE content, so
+	// without a base revision a content edit landing between the read and the write would
+	// be silently reverted by a verification click — exactly the loss PROJ-484 added
+	// optimistic locking for. Read the base revision id BEFORE the content it describes:
+	// a writer racing us either lands before both reads (we stamp on top of their edit) or
+	// bumps the latest revision past our base (updateWikiPage rejects with a conflict).
+	const baseRevisionId = await getLatestRevisionId(ctx.db, page.id);
+	const current = await resolvePageByIdOrSlug(ctx.db, page.id, ctx.workspaceId);
+
 	const now = Math.floor(Date.now() / 1000);
-	const newContent = stampWikiFrontmatterVerification(page.content, now, user.email);
-	await updateWikiPage(ctx, page.id, { content: newContent, summary: "Verified" });
+	const newContent = stampWikiFrontmatterVerification(current.content, now, user.email);
+	await updateWikiPage(ctx, page.id, { content: newContent, summary: "Verified", baseRevisionId });
 
 	// Re-derive from the same frontmatter just written, so the response matches exactly
 	// what a subsequent read would parse back out (rather than re-fetching the page).
