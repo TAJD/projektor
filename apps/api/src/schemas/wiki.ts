@@ -50,7 +50,8 @@ export const UpdatePageSchema = z
 // set below rather than opening it up to arbitrary keys).
 //
 // PROJ-513: `type` is freeform text per the PRD ("well-known" values are suggestions,
-// not a closed set — WIKI_WELL_KNOWN_TYPES below is what the UI/MCP hint as options).
+// not a closed set — WIKI_WELL_KNOWN_TYPES below is what the MCP tool descriptions hint
+// as options, and what the web sidebar's filter dropdown mirrors).
 // `status` stays a closed enum: the PRD gives it as an exhaustive lifecycle, not examples.
 export const WIKI_WELL_KNOWN_TYPES = ["runbook", "adr", "spec", "note"] as const;
 

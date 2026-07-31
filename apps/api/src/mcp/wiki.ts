@@ -1,7 +1,15 @@
 import type { MCPTool } from "@projektor/types";
+import { WIKI_WELL_KNOWN_TYPES } from "../schemas/wiki";
 import { ValidationError } from "../services/errors";
 import type { ServiceCtx } from "../services/types";
 import * as wikiService from "../services/wiki";
+
+// PROJ-513: `type` is freeform — these are advertised as hints, never as an
+// inputSchema `enum` (which clients treat as the only legal values).
+const WELL_KNOWN_TYPES = WIKI_WELL_KNOWN_TYPES.join("|");
+const TYPE_FILTER_DESCRIPTION =
+	"Filter to pages whose frontmatter `type` matches (freeform; well-known " +
+	`values are ${WELL_KNOWN_TYPES})`;
 
 export const wikiTools: MCPTool[] = [
 	{
@@ -16,9 +24,7 @@ export const wikiTools: MCPTool[] = [
 				projectId: { type: "string", description: "Filter to pages belonging to this project ID" },
 				type: {
 					type: "string",
-					description:
-						"Filter to pages whose frontmatter `type` matches (freeform; well-known " +
-						"values are runbook|adr|spec|note)",
+					description: TYPE_FILTER_DESCRIPTION,
 				},
 				status: {
 					type: "string",
@@ -57,9 +63,7 @@ export const wikiTools: MCPTool[] = [
 				},
 				type: {
 					type: "string",
-					description:
-						"Filter to pages whose frontmatter `type` matches (freeform; well-known " +
-						"values are runbook|adr|spec|note)",
+					description: TYPE_FILTER_DESCRIPTION,
 				},
 				tags: {
 					type: "array",
@@ -95,7 +99,7 @@ export const wikiTools: MCPTool[] = [
 		description:
 			"Create a new wiki page. `content` may start with an optional YAML frontmatter block " +
 			"(`---\\ntype: runbook\\ntags: [foo]\\nstatus: draft\\n---\\n...`) — type (freeform; " +
-			"well-known values runbook|adr|spec|note), tags[], status (draft|current|stale|" +
+			`well-known values ${WELL_KNOWN_TYPES}), tags[], status (draft|current|stale|` +
 			"deprecated), verified_at, verified_by, owners[], verify_interval (days) are parsed " +
 			"and denormalized for filtering. Invalid frontmatter (bad status/enum value, wrong " +
 			"field type, unrecognized key) is rejected with a structured validation error, not " +

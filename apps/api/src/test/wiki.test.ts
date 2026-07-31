@@ -1440,6 +1440,50 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 		expect(created.type).toBe("whitepaper");
 	});
 
+	// PROJ-513: the freeform value has to survive the whole round trip — stored on create,
+	// then usable as a filter on both list and search, exactly like a well-known one.
+	it("filters list/search by a `type` value outside the well-known set (PROJ-513)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Freeform Filter Whitepaper",
+				content: "---\ntype: whitepaper\n---\nlatency budget",
+			}),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Freeform Filter Adr",
+				content: "---\ntype: adr\n---\nlatency budget",
+			}),
+		});
+
+		const listRes = await SELF.fetch("http://localhost/api/wiki?type=whitepaper", {
+			headers: authHeaders(token, slug),
+		});
+		const listed = (await listRes.json()) as Array<{ title: string }>;
+		expect(listed.map((r) => r.title)).toEqual(["Freeform Filter Whitepaper"]);
+
+		const searchRes = await SELF.fetch(
+			"http://localhost/api/wiki/search?q=latency&type=whitepaper",
+			{ headers: authHeaders(token, slug) }
+		);
+		const found = (await searchRes.json()) as Array<{ title: string }>;
+		expect(found.map((r) => r.title)).toEqual(["Freeform Filter Whitepaper"]);
+
+		const mcpListed = mcpData<Array<{ title: string }>>(
+			await mcpCall(
+				workspaceId,
+				"list_wiki_pages",
+				{ type: "whitepaper" },
+				authHeaders(token, slug)
+			)
+		);
+		expect(mcpListed.map((r) => r.title)).toEqual(["Freeform Filter Whitepaper"]);
+	});
+
 	it("rejects an invalid `status` enum value with a structured error", async () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
