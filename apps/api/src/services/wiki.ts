@@ -41,7 +41,11 @@ import {
 	reindexWikiLinks,
 	type WikiBacklink,
 } from "./wiki-links";
-import { notifyWikiWatchers } from "./wiki-watchers";
+import {
+	deleteWikiWatchersForPages,
+	notifyCascadeDescendantWatchers,
+	notifyWikiWatchers,
+} from "./wiki-watchers";
 
 type TreeNode = { id: string; slug: string; title: string; url: string; children: TreeNode[] };
 
@@ -1779,6 +1783,28 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 				action: "deleted",
 			});
 		}
+		// PROJ-493: subtree watchers rooted at/above the cascade root got the single
+		// notification above, but someone watching one of the DESCENDANTS directly would
+		// otherwise hear nothing at all before their watch row disappeared with the page.
+		if (descendantIds.length > 0) {
+			const descendants = await inChunks(descendantIds, (chunk) =>
+				orm
+					.select({
+						id: schema.wikiPages.id,
+						slug: schema.wikiPages.slug,
+						title: schema.wikiPages.title,
+						isTemplate: schema.wikiPages.isTemplate,
+					})
+					.from(schema.wikiPages)
+					.where(
+						and(
+							inArray(schema.wikiPages.id, chunk),
+							eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+						)
+					)
+			);
+			await notifyCascadeDescendantWatchers(ctx, descendants);
+		}
 		await inChunks(allIds, async (chunk) => {
 			await deleteWikiPageAttachments(ctx, orm, chunk);
 			return [];
@@ -1792,6 +1818,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		// the app level too, since D1 doesn't guarantee FK enforcement on every connection.
 		await deleteWikiLinksForPages(ctx, allIds);
 		await clearIncomingLinkTargets(ctx, allIds);
+		await deleteWikiWatchersForPages(ctx, allIds);
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
@@ -1826,6 +1853,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 	await deleteWikiFtsEntries(ctx, [page.id]);
 	await deleteWikiLinksForPages(ctx, [page.id]);
 	await clearIncomingLinkTargets(ctx, [page.id]);
+	await deleteWikiWatchersForPages(ctx, [page.id]);
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
 		entityId: page.id,

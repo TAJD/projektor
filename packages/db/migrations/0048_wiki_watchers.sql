@@ -5,7 +5,10 @@
 -- P's parent_id chain at read/write time rather than materializing descendant rows, so a
 -- page added under a watched subtree later is automatically covered with no backfill
 -- (services/wiki-watchers.ts#notifyWikiWatchers). page_id cascades on delete — watching a
--- page that's later hard-deleted just drops the watch, nothing to preserve there.
+-- page that's later hard-deleted just drops the watch, nothing to preserve there. The FK
+-- is belt-and-braces only: deleteWikiPage also removes the rows explicitly
+-- (wiki-watchers.ts#deleteWikiWatchersForPages), since D1 doesn't guarantee FK enforcement
+-- on every connection — the same PROJ-407 precedent as wiki attachments/links.
 CREATE TABLE `wiki_watchers` (
 	`id` text PRIMARY KEY NOT NULL,
 	`workspace_id` text NOT NULL REFERENCES `workspaces`(`id`) ON DELETE CASCADE,

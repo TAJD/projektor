@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BooleanQueryParam } from "./common";
 
 const SlugSchema = z
 	.string()
@@ -205,7 +206,7 @@ export const WatchWikiPageInputSchema = z.object({
 });
 
 export const ListWikiNotificationsInputSchema = z.object({
-	unreadOnly: z.coerce.boolean().optional().default(false),
+	unreadOnly: BooleanQueryParam.optional().default(false),
 	limit: z.coerce.number().int().min(1).max(200).optional().default(50),
 	offset: z.coerce.number().int().min(0).optional().default(0),
 });
@@ -231,5 +232,5 @@ export const ListWikiChangesInputSchema = z.object({
 	since: z.coerce.number().int().nonnegative(),
 	limit: z.coerce.number().int().min(1).max(500).optional().default(100),
 	projectId: z.string().uuid().optional(),
-	watchedOnly: z.coerce.boolean().optional().default(false),
+	watchedOnly: BooleanQueryParam.optional().default(false),
 });

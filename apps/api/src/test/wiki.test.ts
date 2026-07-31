@@ -4253,6 +4253,71 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		expect(deleteNotifs[0]).toMatchObject({ pageId: parent.id, slug: "cascade-parent" });
 	});
 
+	it("a cascade delete notifies someone watching a DESCENDANT directly, and clears their watch row", async () => {
+		const parent = await createPage("cascade-root", "Cascade Root", "content");
+		const child = await createChildPage("cascade-kid", "Cascade Kid", "child", parent.id);
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${child.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+
+		const delRes = await req(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(delRes.status).toBe(200);
+
+		const deleteNotifs = (await notifications(watcher.token)).filter((n) => n.action === "deleted");
+		expect(deleteNotifs.length).toBe(1);
+		expect(deleteNotifs[0]).toMatchObject({ pageId: child.id, slug: "cascade-kid" });
+
+		// No dangling watch row left pointing at a page that no longer exists.
+		const watchesRes = await req("http://localhost/api/wiki/watches", {
+			headers: authHeaders(watcher.token, slug),
+		});
+		expect(await watchesRes.json()).toEqual([]);
+		const orphaned = await env.DB.prepare(
+			"SELECT COUNT(*) AS c FROM wiki_watchers WHERE page_id = ?"
+		)
+			.bind(child.id)
+			.first<{ c: number }>();
+		expect(orphaned?.c).toBe(0);
+	});
+
+	it("unreadOnly=false / watchedOnly=false are honored as false, not coerced true", async () => {
+		const page = await createPage("bool-param", "Bool Param", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		await req("http://localhost/api/wiki/notifications/read", {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ all: true }),
+		});
+
+		expect((await notifications(watcher.token, "?unreadOnly=true")).length).toBe(0);
+		expect((await notifications(watcher.token, "?unreadOnly=false")).length).toBe(1);
+
+		// The watcher watches nothing but `page`; watchedOnly=false must not narrow.
+		await createPage("bool-unwatched", "Bool Unwatched", "other");
+		const res = await req(`http://localhost/api/wiki/changes?since=${t0}&watchedOnly=false`, {
+			headers: authHeaders(watcher.token, slug),
+		});
+		const body = (await res.json()) as { changes: Array<{ slug: string | null }> };
+		expect(body.changes.map((c) => c.slug)).toContain("bool-unwatched");
+	});
+
 	it("mark_wiki_notifications_read: by explicit ids, then all:true", async () => {
 		const page = await createPage("read-flag", "Read Flag", "content");
 		const watcher = await seedWatcher();

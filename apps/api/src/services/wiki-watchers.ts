@@ -16,6 +16,7 @@ import {
 } from "../schemas/wiki";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 type Orm = ReturnType<typeof drizzle<typeof schema>>;
@@ -230,18 +231,42 @@ export async function notifyWikiWatchers(
 	const userIds = [...new Set(rows.map((r) => r.userId))].filter((id) => id !== ctx.userId);
 	if (userIds.length === 0) return;
 
+	await insertNotifications(
+		ctx,
+		orm,
+		userIds.map((userId) => ({
+			userId,
+			pageId: opts.pageId,
+			slug: opts.slug,
+			title: opts.title,
+			action: opts.action,
+		}))
+	);
+}
+
+async function insertNotifications(
+	ctx: ServiceCtx,
+	orm: Orm,
+	entries: {
+		userId: string;
+		pageId: string;
+		slug: string;
+		title: string;
+		action: "created" | "updated" | "deleted";
+	}[]
+): Promise<void> {
+	if (entries.length === 0) return;
 	const now = Math.floor(Date.now() / 1000);
-	const summary = `${ACTION_LABEL[opts.action]}: ${opts.title}`;
-	const values = userIds.map((userId) => ({
+	const values = entries.map((e) => ({
 		id: crypto.randomUUID(),
 		workspaceId: ctx.workspaceId,
-		userId,
-		pageId: opts.pageId,
-		pageSlug: opts.slug,
-		pageTitle: opts.title,
-		action: opts.action,
+		userId: e.userId,
+		pageId: e.pageId,
+		pageSlug: e.slug,
+		pageTitle: e.title,
+		action: e.action,
 		actorId: ctx.userId,
-		summary,
+		summary: `${ACTION_LABEL[e.action]}: ${e.title}`,
 		createdAt: now,
 		readAt: null,
 	}));
@@ -255,6 +280,75 @@ export async function notifyWikiWatchers(
 			.insert(schema.wikiNotifications)
 			.values(values.slice(i, i + NOTIFICATION_INSERT_CHUNK_SIZE));
 	}
+}
+
+// PROJ-493: a cascade delete also removes every descendant page. Watchers rooted at (or
+// above) the cascade root already got the single root-level notification, but a watcher
+// whose watch row points AT one of the descendants matches only that descendant — without
+// this they'd be told nothing at all and then have their watch row removed underneath
+// them. One notification per (watcher, deleted descendant they watched).
+export async function notifyCascadeDescendantWatchers(
+	ctx: ServiceCtx,
+	descendants: { id: string; slug: string; title: string; isTemplate: boolean }[]
+): Promise<void> {
+	const pages = descendants.filter((p) => !p.isTemplate);
+	if (pages.length === 0) return;
+
+	const orm = drizzle(ctx.db, { schema });
+	const rows = await inChunks(
+		pages.map((p) => p.id),
+		(chunk) =>
+			orm
+				.select({ userId: schema.wikiWatchers.userId, pageId: schema.wikiWatchers.pageId })
+				.from(schema.wikiWatchers)
+				.where(
+					and(
+						eq(schema.wikiWatchers.workspaceId, ctx.workspaceId),
+						inArray(schema.wikiWatchers.pageId, chunk)
+					)
+				)
+	);
+
+	const byId = new Map(pages.map((p) => [p.id, p]));
+	const entries = rows
+		.filter((r) => r.userId !== ctx.userId)
+		.map((r) => {
+			const page = byId.get(r.pageId);
+			if (!page) return null;
+			return {
+				userId: r.userId,
+				pageId: page.id,
+				slug: page.slug,
+				title: page.title,
+				action: "deleted" as const,
+			};
+		})
+		.filter((e): e is NonNullable<typeof e> => e !== null);
+
+	await insertNotifications(ctx, orm, entries);
+}
+
+// PROJ-493: mirror wiki_watchers.page_id's ON DELETE CASCADE at the app level, same
+// PROJ-407 precedent as deleteWikiPageAttachments/deleteWikiLinksForPages — D1 does not
+// guarantee FK enforcement on every connection, so leaning on the FK alone would leave
+// watch rows pointing at pages that no longer exist.
+export async function deleteWikiWatchersForPages(
+	ctx: ServiceCtx,
+	pageIds: string[]
+): Promise<void> {
+	if (pageIds.length === 0) return;
+	const orm = drizzle(ctx.db, { schema });
+	await inChunks(pageIds, async (chunk) => {
+		await orm
+			.delete(schema.wikiWatchers)
+			.where(
+				and(
+					eq(schema.wikiWatchers.workspaceId, ctx.workspaceId),
+					inArray(schema.wikiWatchers.pageId, chunk)
+				)
+			);
+		return [];
+	});
 }
 
 export async function listWikiNotifications(ctx: ServiceCtx, input: unknown) {
@@ -367,16 +461,44 @@ async function watchedPageIds(
 	const subtreeRootIds = new Set(watches.filter((w) => w.subtree).map((w) => w.pageId));
 
 	const matched = new Set<string>();
+	// candidate page -> the ancestor its chain walk has currently reached.
+	const pending = new Map<string, string>();
 	for (const pageId of new Set(candidatePageIds)) {
 		if (directWatchIds.has(pageId)) {
 			matched.add(pageId);
 			continue;
 		}
-		if (subtreeRootIds.size === 0) continue;
-		const ancestors = await resolveAncestorChain(ctx.db, pageId, pageId, ctx.workspaceId);
-		// resolveAncestorChain(pageId, pageId, ...) re-fetches pageId's own row as the
-		// first hop, which is redundant but harmless — ancestors[0] === pageId either way.
-		if (ancestors.some((id) => subtreeRootIds.has(id))) matched.add(pageId);
+		if (subtreeRootIds.size > 0) pending.set(pageId, pageId);
+	}
+
+	// Walk every remaining candidate's parent chain in lock-step — one batched query per
+	// tree level (nesting is capped at depth 5) rather than a per-candidate chain walk,
+	// which would be O(candidates x depth) round-trips for a `limit` of up to 500.
+	for (let depth = 0; depth < 6 && pending.size > 0; depth++) {
+		const frontier = [...new Set(pending.values())];
+		const rows = await inChunks(frontier, (chunk) =>
+			orm
+				.select({ id: schema.wikiPages.id, parentId: schema.wikiPages.parentId })
+				.from(schema.wikiPages)
+				.where(
+					and(
+						inArray(schema.wikiPages.id, chunk),
+						eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+					)
+				)
+		);
+		const parentOf = new Map(rows.map((r) => [r.id, r.parentId]));
+		for (const [candidate, cur] of [...pending]) {
+			const parent = parentOf.get(cur) ?? null;
+			if (parent === null) {
+				pending.delete(candidate);
+			} else if (subtreeRootIds.has(parent)) {
+				matched.add(candidate);
+				pending.delete(candidate);
+			} else {
+				pending.set(candidate, parent);
+			}
+		}
 	}
 	return matched;
 }
@@ -434,9 +556,32 @@ export async function listWikiChanges(
 		.orderBy(schema.activity.createdAt)
 		.limit(limit);
 
+	// `since` is second-granular and exclusive, so a batch cut off mid-second by `limit`
+	// would strand the rest of that second: the caller polls with nextSince = that second
+	// and `gt` skips them forever. Drop the trailing partial second instead, so the next
+	// poll picks it up whole. (If the WHOLE batch is one second there's nothing to trim —
+	// that needs `limit` changes inside a single second, and the alternative is a poll
+	// that can never advance.)
+	let batch = rows;
+	if (rows.length === limit && rows.length > 0) {
+		const maxTs = rows[rows.length - 1].createdAt;
+		if (rows[0].createdAt !== maxTs) batch = rows.filter((r) => r.createdAt < maxTs);
+	}
+
+	// One role lookup per distinct project in the batch, not per event.
+	const roleCache = new Map<string, boolean>();
+	const canSeeProject = async (id: string): Promise<boolean> => {
+		if (isWorkspaceAdmin(ctx.role)) return true;
+		const cached = roleCache.get(id);
+		if (cached !== undefined) return cached;
+		const visible = (await effectiveProjectRole(ctx, id)) !== null;
+		roleCache.set(id, visible);
+		return visible;
+	};
+
 	let nextSince = since;
 	const events: WikiChangeEvent[] = [];
-	for (const r of rows) {
+	for (const r of batch) {
 		if (r.createdAt > nextSince) nextSince = r.createdAt;
 		const action = r.action as "created" | "updated" | "deleted";
 		const deleted = action === "deleted" ? extractDeletedPageInfo(r.diff) : null;
@@ -445,13 +590,8 @@ export async function listWikiChanges(
 		const eventProjectId = deleted ? deleted.projectId : r.pageProjectId;
 
 		if (projectId && eventProjectId !== projectId) continue;
-		if (!projectId && eventProjectId !== null) {
-			if (
-				!isWorkspaceAdmin(ctx.role) &&
-				(await effectiveProjectRole(ctx, eventProjectId)) === null
-			) {
-				continue;
-			}
+		if (!projectId && eventProjectId !== null && !(await canSeeProject(eventProjectId))) {
+			continue;
 		}
 
 		events.push({
