@@ -71,3 +71,8 @@ export const DeleteWikiPageOptionsSchema = z.object({
 	// deleted page's entire subtree is removed too.
 	cascade: z.boolean().optional().default(false),
 });
+
+// PROJ-485: broken-link reporting, optionally scoped to a project.
+export const ListBrokenWikiLinksInputSchema = z.object({
+	projectId: z.string().uuid().optional(),
+});

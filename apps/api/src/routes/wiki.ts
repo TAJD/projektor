@@ -43,6 +43,34 @@ router.get("/search", async (c) => {
 	}
 });
 
+router.get("/broken-links", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const projectId = c.req.query("projectId");
+		return c.json(await wikiService.listBrokenWikiLinks(ctx, { projectId }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.post("/backfill-links", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiService.backfillWikiLinks(ctx));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.get("/:slug/backlinks", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiService.getWikiBacklinks(ctx, c.req.param("slug")));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
 router.get("/:slug/revisions/:revisionId", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {

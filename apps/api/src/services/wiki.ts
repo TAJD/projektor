@@ -21,6 +21,14 @@ import { recordActivity } from "./activity";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
+import {
+	backlinksForResolvedPage,
+	clearIncomingLinkTargets,
+	countBacklinkSources,
+	deleteWikiLinksForPages,
+	reindexWikiLinks,
+	type WikiBacklink,
+} from "./wiki-links";
 
 type TreeNode = { id: string; slug: string; title: string; url: string; children: TreeNode[] };
 
@@ -404,6 +412,31 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 	return { ...page, url: wikiPagePath(page.slug, page.project_id) };
 }
 
+// PROJ-485: "what links here" — pages that link to `slugOrId` via a resolved wiki_links
+// row. Resolves the target the same way getWikiPage does (live slug/id, then redirect
+// fallback) and enforces the same visibility check before exposing anything.
+export async function getWikiBacklinks(ctx: ServiceCtx, slugOrId: string): Promise<WikiBacklink[]> {
+	const orm = drizzle(ctx.db, { schema });
+	const direct = await orm
+		.select({ id: schema.wikiPages.id, project_id: schema.wikiPages.projectId })
+		.from(schema.wikiPages)
+		.where(
+			and(
+				or(eq(schema.wikiPages.id, slugOrId), eq(schema.wikiPages.slug, slugOrId)),
+				eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+			)
+		)
+		.get();
+	const page = direct ?? (await resolveWikiPageByRedirect(orm, ctx.workspaceId, slugOrId));
+	if (!page) throw new NotFoundError("Wiki page not found");
+	await assertWikiPageVisible(ctx, page.project_id);
+	return backlinksForResolvedPage(ctx, { id: page.id });
+}
+
+// PROJ-485: re-exported so routes/wiki.ts and mcp/wiki.ts only need to import from this
+// module, matching every other domain function's entry point.
+export { backfillWikiLinks, listBrokenWikiLinks } from "./wiki-links";
+
 export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	const parsed = CreatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -451,6 +484,8 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		)
 		.bind(id, ctx.workspaceId, title, content ?? "", "")
 		.run();
+	// PROJ-485: parse [[Target]]/URL links out of the new page's content into wiki_links.
+	await reindexWikiLinks(ctx, orm, id, content ?? "");
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
 	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug, projectId ?? null) };
 }
@@ -750,6 +785,11 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	}
 
 	await reindexWikiFts(ctx, orm, page.id, { title, content });
+	// PROJ-485: outgoing links are derived purely from content — a title/slug/parent-only
+	// update leaves them unchanged, so only reindex when content actually changed.
+	if (content !== undefined) {
+		await reindexWikiLinks(ctx, orm, page.id, content);
+	}
 
 	if (isRename) {
 		// Upsert: the old slug may already carry a stale redirect from an earlier rename
@@ -878,6 +918,10 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 	if (cascade) {
 		const descendantIds = await collectDescendantIds(ctx.db, page.id, ctx.workspaceId);
 		const allIds = [page.id, ...descendantIds];
+		// PROJ-485: read before the delete — target_page_id is ON DELETE SET NULL, so the
+		// count would read as 0 once the pages are gone. Non-blocking: surfaced as info on
+		// the response, matching the PRD's "delete warnings" (not a hard block).
+		const linkedByCount = await countBacklinkSources(ctx, allIds);
 		await inChunks(allIds, async (chunk) => {
 			await deleteWikiPageAttachments(ctx, orm, chunk);
 			return [];
@@ -887,13 +931,17 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 			return [];
 		});
 		await deleteWikiFtsEntries(ctx, allIds);
+		// PROJ-407-style defensive cleanup: mirror the FK's ON DELETE CASCADE/SET NULL at
+		// the app level too, since D1 doesn't guarantee FK enforcement on every connection.
+		await deleteWikiLinksForPages(ctx, allIds);
+		await clearIncomingLinkTargets(ctx, allIds);
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
 			action: "deleted",
 			diff: { cascade: true, deletedCount: allIds.length },
 		});
-		return { ok: true, deletedCount: allIds.length };
+		return { ok: true, deletedCount: allIds.length, linkedByCount };
 	}
 
 	// PROJ-238: no FK constraint on parent_id, so a plain delete would otherwise leave
@@ -904,11 +952,14 @@ export async function deleteWikiPage(ctx: ServiceCtx, slug: string, options?: un
 		.set({ parentId: page.parentId })
 		.where(eq(schema.wikiPages.parentId, page.id));
 
+	const linkedByCount = await countBacklinkSources(ctx, [page.id]);
 	await deleteWikiPageAttachments(ctx, orm, [page.id]);
 	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
 	await deleteWikiFtsEntries(ctx, [page.id]);
+	await deleteWikiLinksForPages(ctx, [page.id]);
+	await clearIncomingLinkTargets(ctx, [page.id]);
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: page.id, action: "deleted" });
-	return { ok: true, deletedCount: 1 };
+	return { ok: true, deletedCount: 1, linkedByCount };
 }
 
 export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<TreeNode[]> {

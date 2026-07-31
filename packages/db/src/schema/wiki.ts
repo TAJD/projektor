@@ -78,3 +78,28 @@ export const wikiRedirects = sqliteTable(
 		pageIdIdx: index("wiki_redirects_page_id_idx").on(t.pageId),
 	})
 );
+
+// PROJ-485: server-side wiki link graph. Recomputed (delete-then-reinsert) on every
+// content write by services/wiki-links.ts#reindexWikiLinks. targetPageId is nullable —
+// null means the parsed [[Target]]/URL link didn't resolve to a page in this workspace
+// at write time (a broken link); targetTitle always holds the raw parsed text so it
+// survives later renames and stays available for broken-link reporting/re-resolution.
+export const wikiLinks = sqliteTable(
+	"wiki_links",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		sourcePageId: text("source_page_id")
+			.notNull()
+			.references(() => wikiPages.id, { onDelete: "cascade" }),
+		targetPageId: text("target_page_id").references(() => wikiPages.id, { onDelete: "set null" }),
+		targetTitle: text("target_title").notNull(),
+		createdAt: integer("created_at").notNull(),
+	},
+	(t) => ({
+		sourcePageIdx: index("wiki_links_source_page_idx").on(t.sourcePageId),
+		workspaceTargetIdx: index("wiki_links_workspace_target_idx").on(t.workspaceId, t.targetPageId),
+	})
+);

@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**90 tools across 21 domains.**
+**93 tools across 21 domains.**
 
 ## Coordination
 
@@ -139,6 +139,9 @@ running server.
 | `update_wiki_page` | Update a wiki page by id or slug (saves a revision when content changes). Pass baseRevisionId (the current revision id from list_wiki_revisions/get_wiki_revision, or null if the page has never been revised) for conflict-safe writes: if the page advanced since baseRevisionId, the write is rejected with a structured conflict (currentRevisionId + a unified diff) instead of silently overwriting. Omitting baseRevisionId is DEPRECATED — it keeps today's last-write-wins behavior during the transition and will be rejected in a future version. |
 | `delete_wiki_page` | Delete a wiki page by slug (not allowed for viewers). By default any child pages are promoted to the deleted page's parent; pass cascade=true to delete the whole subtree instead. |
 | `wiki_tree` | Get the wiki page hierarchy as a nested tree, optionally filtered by project |
+| `get_backlinks` | List pages that link to the given page via a resolved [[wikilink]] or same-workspace URL (id-backed, so renames never break a backlink). Each result includes a snippet of the citing text when it can still be located in the source page's current content. |
+| `list_broken_wiki_links` | List unresolved wiki links in the workspace — [[Target]]/URL links whose target title or slug didn't match any page at write time. Useful as a maintenance queue. Note: a broken link does not auto-re-resolve if the missing page is created later — only backfill_wiki_links (or re-saving the linking page) re-resolves it. |
+| `backfill_wiki_links` | One-time (idempotent, safe to re-run) recompute of the wiki_links graph for every existing page in the workspace. Owner/admin only. |
 | `list_wiki_revisions` | List revision history for a wiki page |
 | `get_wiki_revision` | Get the content of a specific wiki revision by its ID |
 

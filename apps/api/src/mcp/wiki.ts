@@ -182,6 +182,51 @@ export const wikiTools: MCPTool[] = [
 		},
 	},
 	{
+		name: "get_backlinks",
+		description:
+			"List pages that link to the given page via a resolved [[wikilink]] or same-workspace " +
+			"URL (id-backed, so renames never break a backlink). Each result includes a snippet of " +
+			"the citing text when it can still be located in the source page's current content.",
+		inputSchema: {
+			type: "object",
+			required: ["slug"],
+			properties: {
+				slug: { type: "string", description: "Page ID or slug to find backlinks for" },
+			},
+		},
+		async handler(input, ctx) {
+			const { slug } = input as { slug: string };
+			return wikiService.getWikiBacklinks(ctx as ServiceCtx, slug);
+		},
+	},
+	{
+		name: "list_broken_wiki_links",
+		description:
+			"List unresolved wiki links in the workspace — [[Target]]/URL links whose target " +
+			"title or slug didn't match any page at write time. Useful as a maintenance queue. " +
+			"Note: a broken link does not auto-re-resolve if the missing page is created later — " +
+			"only backfill_wiki_links (or re-saving the linking page) re-resolves it.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: { type: "string", description: "Restrict to links from pages in this project" },
+			},
+		},
+		async handler(input, ctx) {
+			return wikiService.listBrokenWikiLinks(ctx, input);
+		},
+	},
+	{
+		name: "backfill_wiki_links",
+		description:
+			"One-time (idempotent, safe to re-run) recompute of the wiki_links graph for every " +
+			"existing page in the workspace. Owner/admin only.",
+		inputSchema: { type: "object", properties: {} },
+		async handler(_input, ctx) {
+			return wikiService.backfillWikiLinks(ctx as ServiceCtx);
+		},
+	},
+	{
 		name: "list_wiki_revisions",
 		description: "List revision history for a wiki page",
 		inputSchema: {
