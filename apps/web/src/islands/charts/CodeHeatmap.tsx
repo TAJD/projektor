@@ -66,6 +66,7 @@ function useCodeHeatmap(
 			.finally(() => setLoading(false));
 	}, [workspaceSlug, projectId, since, until, prefix, mode]);
 
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
 	return { mode, setMode, prefix, setPrefix, data, loading, error };
 }
 
@@ -233,6 +234,61 @@ function ContentionEmptyState() {
 	);
 }
 
+function CodeHeatmapPanel({
+	loading,
+	error,
+	data,
+	mode,
+	prefix,
+	onNavigate,
+	countField,
+	maxCount,
+}: {
+	loading: boolean;
+	error: string | null;
+	data: CodeHeatmapResponse | null;
+	mode: HeatmapMode;
+	prefix: string;
+	onNavigate: (prefix: string) => void;
+	countField: "distinctRejectedIssueCount" | "distinctIssueCount";
+	maxCount: number;
+}) {
+	return (
+		<>
+			{loading && <p aria-live="polite">Loading…</p>}
+			{!loading && error && (
+				<p role="alert" class="text-[var(--danger-text)]">
+					{error}
+				</p>
+			)}
+			{!loading && !error && data && (
+				<>
+					<Breadcrumb prefix={prefix} onNavigate={onNavigate} />
+					{data.entries.length === 0 ? (
+						mode === "contention" ? (
+							<ContentionEmptyState />
+						) : (
+							<CodeHeatmapEmptyState />
+						)
+					) : (
+						<div class="flex flex-col gap-0.5">
+							{data.entries.map((entry) => (
+								<HeatmapRow
+									key={entry.path}
+									entry={entry}
+									mode={mode}
+									ratio={(entry[countField] ?? 0) / maxCount}
+									onDrillDown={onNavigate}
+								/>
+							))}
+						</div>
+					)}
+				</>
+			)}
+		</>
+	);
+}
+
 // PROJ-332: "Where work lands" — a hand-rolled proportional bar list rather than a
 // treemap (per the ticket's fallback: keep the dependency footprint small). Bars carry
 // the sequential heat encoding; sizing (bar length) and shading (fill intensity) are
@@ -260,36 +316,16 @@ export default function CodeHeatmap({ workspaceSlug, projectId, since, until }: 
 			/>
 			<div class="p-4 bg-surface border border-border rounded-lg">
 				<ModeToggle mode={mode} onChange={setMode} />
-				{loading && <p aria-live="polite">Loading…</p>}
-				{!loading && error && (
-					<p role="alert" class="text-[var(--danger-text)]">
-						{error}
-					</p>
-				)}
-				{!loading && !error && data && (
-					<>
-						<Breadcrumb prefix={prefix} onNavigate={setPrefix} />
-						{data.entries.length === 0 ? (
-							mode === "contention" ? (
-								<ContentionEmptyState />
-							) : (
-								<CodeHeatmapEmptyState />
-							)
-						) : (
-							<div class="flex flex-col gap-0.5">
-								{data.entries.map((entry) => (
-									<HeatmapRow
-										key={entry.path}
-										entry={entry}
-										mode={mode}
-										ratio={(entry[countField] ?? 0) / maxCount}
-										onDrillDown={setPrefix}
-									/>
-								))}
-							</div>
-						)}
-					</>
-				)}
+				<CodeHeatmapPanel
+					loading={loading}
+					error={error}
+					data={data}
+					mode={mode}
+					prefix={prefix}
+					onNavigate={setPrefix}
+					countField={countField}
+					maxCount={maxCount}
+				/>
 			</div>
 		</div>
 	);

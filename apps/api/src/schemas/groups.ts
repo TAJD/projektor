@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 // PROJ-311: grant roles are the per-project subset of workspace roles (no owner).
+// cofferdam-ignore: Design.OrphanExport: exported for schema-module consistency, used only within this file today
 export const GrantRoleEnum = z.enum(["viewer", "member", "admin"]);
 
 export const CreateGroupSchema = z.object({

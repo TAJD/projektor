@@ -302,15 +302,25 @@ function useProjectSelection(workspaceSlug: string | undefined) {
 	return { projectId, projectIdReady, epicTypeId, projects };
 }
 
-function useEpicsData(
-	projectId: string | null,
-	projectIdReady: boolean,
-	epicTypeId: string | null,
-	workspaceSlug: string | undefined,
-	filterDateField: DateField,
-	filterDateFrom: string,
-	filterDateTo: string
-) {
+interface UseEpicsDataOptions {
+	projectId: string | null;
+	projectIdReady: boolean;
+	epicTypeId: string | null;
+	workspaceSlug: string | undefined;
+	filterDateField: DateField;
+	filterDateFrom: string;
+	filterDateTo: string;
+}
+
+function useEpicsData({
+	projectId,
+	projectIdReady,
+	epicTypeId,
+	workspaceSlug,
+	filterDateField,
+	filterDateFrom,
+	filterDateTo,
+}: UseEpicsDataOptions) {
 	const [epics, setEpics] = useState<EpicItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -346,6 +356,7 @@ function useEpicsData(
 		if (projectIdReady) fetchEpics();
 	}, [fetchEpics, projectIdReady]);
 
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
 	return { epics, loading, error, fetchEpics };
 }
 
@@ -431,15 +442,15 @@ export default function EpicList({ workspaceSlug }: Props) {
 	const [sortBy, setSortBy] = useState<SortKey>("created_at");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-	const { epics, loading, error, fetchEpics } = useEpicsData(
+	const { epics, loading, error, fetchEpics } = useEpicsData({
 		projectId,
 		projectIdReady,
 		epicTypeId,
 		workspaceSlug,
 		filterDateField,
 		filterDateFrom,
-		filterDateTo
-	);
+		filterDateTo,
+	});
 
 	const {
 		showCreate,

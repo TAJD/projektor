@@ -7,6 +7,7 @@
 import { afterEach } from "vitest";
 
 export const MOBILE_WIDTH = 375;
+// cofferdam-ignore: Design.OrphanExport: exported alongside MOBILE_WIDTH for symmetry; used internally for the afterEach reset today
 export const DESKTOP_WIDTH = 1024;
 
 export function setViewportWidth(width: number): void {

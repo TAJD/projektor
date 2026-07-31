@@ -22,6 +22,7 @@ export function readThemeColor(token: string, fallback: string): string {
 	return value || fallback;
 }
 
+// cofferdam-ignore: Design.OrphanExport: color helper kept exported for module API consistency
 export function hexToRgba(hex: string, alpha: number): string {
 	const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
 	if (!match) return hex;
@@ -68,6 +69,7 @@ function tickIndices(width: number, labels: string[]): number[] {
 	const maxTicks = Math.max(2, Math.floor(width / 70));
 	const stride = Math.max(1, Math.ceil(n / maxTicks));
 	const idxs: number[] = [];
+	// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map over a fixed-length source
 	for (let i = 0; i < n; i += stride) idxs.push(i);
 	if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
 	return idxs;

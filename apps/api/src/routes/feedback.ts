@@ -1,4 +1,5 @@
 import type { HonoEnv } from "@projektor/types";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
 import { serviceErrToResponse } from "../http/error-adapter";
@@ -37,12 +38,10 @@ publicRouter.options("/submit", (c) => {
 	return c.body(null, 204, headers);
 });
 
-publicRouter.post("/submit", async (c) => {
-	const auth = c.req.header("Authorization");
-	if (!auth?.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
-	const token = auth.slice(7);
-	const origin = c.req.header("Origin") ?? null;
-
+async function checkFeedbackRateLimit(
+	c: Context<HonoEnv>,
+	token: string
+): Promise<Response | null> {
 	// Dual-keyed rate limit (token hash + IP) — reject if either trips its bucket.
 	// Dedicated PROJ-378 env vars, not RATE_LIMIT_API_MAX/RATE_LIMIT_AUTH_MAX: this
 	// route runs outside the global rateLimitMiddleware chain (mounted before it),
@@ -57,26 +56,44 @@ publicRouter.post("/submit", async (c) => {
 	if (tokenCount > tokenLimit || ipCount > ipLimit) {
 		return c.json({ error: "Too Many Requests" }, 429);
 	}
+	return null;
+}
 
-	let rawBody: unknown;
+async function parseFeedbackBody(c: Context<HonoEnv>): Promise<unknown> {
 	try {
-		rawBody = await c.req.json();
+		return await c.req.json();
 	} catch {
-		rawBody = {};
+		return {};
 	}
+}
+
+function submitFeedbackErrorResponse(c: Context<HonoEnv>, e: unknown): Response {
+	// Endpoint-specific mapping: an unknown/revoked source is an invalid
+	// credential (401), an inactive source is a paused resource (403), a bad
+	// body is 400. (NotFound → 401 here, unlike every other endpoint.)
+	if (e instanceof ValidationError) return c.json({ error: e.issues }, 400);
+	if (e instanceof ForbiddenError) return c.json({ error: e.message }, 403);
+	if (e instanceof NotFoundError) return c.json({ error: e.message }, 401);
+	throw e;
+}
+
+publicRouter.post("/submit", async (c) => {
+	const auth = c.req.header("Authorization");
+	if (!auth?.startsWith("Bearer ")) return c.json({ error: "Unauthorized" }, 401);
+	const token = auth.slice(7);
+	const origin = c.req.header("Origin") ?? null;
+
+	const rateLimited = await checkFeedbackRateLimit(c, token);
+	if (rateLimited) return rateLimited;
+
+	const rawBody = await parseFeedbackBody(c);
 
 	try {
 		const { id, corsAllowOrigin } = await submitFeedback(c.env.DB, token, rawBody, origin);
 		if (corsAllowOrigin) c.header("Access-Control-Allow-Origin", corsAllowOrigin);
 		return c.json({ id }, 201);
 	} catch (e) {
-		// Endpoint-specific mapping: an unknown/revoked source is an invalid
-		// credential (401), an inactive source is a paused resource (403), a bad
-		// body is 400. (NotFound → 401 here, unlike every other endpoint.)
-		if (e instanceof ValidationError) return c.json({ error: e.issues }, 400);
-		if (e instanceof ForbiddenError) return c.json({ error: e.message }, 403);
-		if (e instanceof NotFoundError) return c.json({ error: e.message }, 401);
-		throw e;
+		return submitFeedbackErrorResponse(c, e);
 	}
 });
 

@@ -518,32 +518,84 @@ async function assertIssueProjectVisible(ctx: ServiceCtx, projectId: string): Pr
 	}
 }
 
+// The cache is keyed by issue id, not user — re-check visibility so a member can't
+// read an entry warmed by an admin.
+async function getVisibleCachedIssue(
+	ctx: ServiceCtx,
+	issueId: string
+): Promise<Record<string, unknown> | null> {
+	const cached = await cache.get<Record<string, unknown>>(
+		ctx.kv,
+		`issue:${ctx.workspaceId}:${issueId}`
+	);
+	if (!cached) return null;
+	await assertIssueProjectVisible(ctx, cached.project_id as string);
+	return cached;
+}
+
+async function fetchIssueByIdOrRef(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	id: string | undefined,
+	ref: string | undefined
+) {
+	if (id) return fetchIssueById(orm, ctx, id);
+	if (ref) return fetchIssueByRef(orm, ctx, ref);
+	return null;
+}
+
+function buildIssueUrl(issueRecord: Record<string, unknown>): string | null {
+	return issueRecord.project_key
+		? issuePath(
+				issueRecord.project_key as string,
+				issueRecord.number as number,
+				issueRecord.title as string
+			)
+		: null;
+}
+
+async function assembleFullIssue(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	issueId: string,
+	issueRecord: Record<string, unknown>
+) {
+	type ChildCount = { status: string; count: number };
+	const childRows = (await orm.all(
+		sql`SELECT status, COUNT(*) as count FROM issues
+			WHERE parent_id = ${issueId} AND workspace_id = ${ctx.workspaceId}
+			GROUP BY status`
+	)) as ChildCount[];
+
+	const rollup = computeChildRollup(childRows);
+
+	const links = await listLinksForIssue(ctx, { issueId });
+
+	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, [issueId]);
+	const customFields = customFieldsByIssue[issueId] ?? [];
+
+	return {
+		...issueRecord,
+		rollup,
+		links,
+		customFields,
+		url: buildIssueUrl(issueRecord),
+	};
+}
+
 export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = GetIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { id, ref } = result.data;
 
 	if (id) {
-		const cached = await cache.get<Record<string, unknown>>(
-			ctx.kv,
-			`issue:${ctx.workspaceId}:${id}`
-		);
-		// The cache is keyed by issue id, not user — re-check visibility so a member
-		// can't read an entry warmed by an admin.
-		if (cached) {
-			await assertIssueProjectVisible(ctx, cached.project_id as string);
-			return cached;
-		}
+		const cached = await getVisibleCachedIssue(ctx, id);
+		if (cached) return cached;
 	}
 
 	const orm = drizzle(ctx.db, { schema });
 
-	const issue = id
-		? await fetchIssueById(orm, ctx, id)
-		: ref
-			? await fetchIssueByRef(orm, ctx, ref)
-			: null;
-
+	const issue = await fetchIssueByIdOrRef(orm, ctx, id, ref);
 	if (!issue) throw new NotFoundError("Issue not found");
 
 	await assertIssueProjectVisible(ctx, (issue as Record<string, unknown>).project_id as string);
@@ -563,34 +615,7 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 		if (cached) return cached;
 	}
 
-	type ChildCount = { status: string; count: number };
-	const childRows = (await orm.all(
-		sql`SELECT status, COUNT(*) as count FROM issues
-			WHERE parent_id = ${issueId} AND workspace_id = ${ctx.workspaceId}
-			GROUP BY status`
-	)) as ChildCount[];
-
-	const rollup = computeChildRollup(childRows);
-
-	const links = await listLinksForIssue(ctx, { issueId });
-
-	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, [issueId]);
-	const customFields = customFieldsByIssue[issueId] ?? [];
-
-	const issueRecord = issue as Record<string, unknown>;
-	const fullIssue = {
-		...issueRecord,
-		rollup,
-		links,
-		customFields,
-		url: issueRecord.project_key
-			? issuePath(
-					issueRecord.project_key as string,
-					issueRecord.number as number,
-					issueRecord.title as string
-				)
-			: null,
-	};
+	const fullIssue = await assembleFullIssue(ctx, orm, issueId, issue as Record<string, unknown>);
 
 	await cache.set(ctx.kv, `issue:${ctx.workspaceId}:${issueId}`, fullIssue, ISSUE_TTL);
 
@@ -897,11 +922,14 @@ function applyFlowTimestampTransitions(
 function applyReviewTransitions(
 	setValues: SetValues,
 	existing: ExistingIssue,
-	resolvedStatusKey: string,
-	newStatusCategory: string | undefined,
-	enteringInReview: boolean,
-	enteringDone: boolean
+	transition: {
+		resolvedStatusKey: string;
+		newStatusCategory: string | undefined;
+		enteringInReview: boolean;
+		enteringDone: boolean;
+	}
 ): boolean {
+	const { resolvedStatusKey, newStatusCategory, enteringInReview, enteringDone } = transition;
 	if (enteringInReview && existing.inReviewAt == null) setValues.inReviewAt = now();
 
 	const wasInReview = isReviewStatusKey(existing.status);
@@ -1030,14 +1058,12 @@ async function applyStatusFields(
 
 	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
 	applyFlowTimestampTransitions(setValues, existing, resolvedStatusKey, newStatusCategory);
-	const isGateRejection = applyReviewTransitions(
-		setValues,
-		existing,
+	const isGateRejection = applyReviewTransitions(setValues, existing, {
 		resolvedStatusKey,
 		newStatusCategory,
-		transition.enteringInReview,
-		transition.enteringDone
-	);
+		enteringInReview: transition.enteringInReview,
+		enteringDone: transition.enteringDone,
+	});
 	// PROJ-334: recorded as its own event (not batched into the setValues UPDATE below)
 	// so it carries its own occurred_at, the same reasoning file-claims.ts insertClaims
 	// uses for D1's lack of interactive transactions — a stray extra row on a later

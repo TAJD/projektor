@@ -92,6 +92,8 @@ const tabBtnClass = (active: boolean) =>
 
 type TabId = "members" | "groups";
 
+const TAB_LABELS: Record<TabId, string> = { members: "Members", groups: "Groups" };
+
 function isForbidden(e: unknown): boolean {
 	return String(e).includes(": 403");
 }
@@ -127,6 +129,106 @@ async function loadAll(slug: string): Promise<Loaded> {
 			})
 		: [];
 	return { groups, members: ws.members ?? [], memberGroups, projects, role, isAdmin };
+}
+
+// ---------------------------------------------------------------------------
+// Root data + actions + tab-navigation hooks
+// ---------------------------------------------------------------------------
+
+function useGroupManagerData(slug: string) {
+	const [data, setData] = useState<Loaded | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
+	const [forbidden, setForbidden] = useState(false);
+
+	const refetch = useCallback(async () => {
+		if (!slug) return;
+		setLoading(true);
+		setError(null);
+		setForbidden(false);
+		try {
+			setData(await loadAll(slug));
+		} catch (e) {
+			if (isForbidden(e)) setForbidden(true);
+			else setError(String(e));
+		} finally {
+			setLoading(false);
+		}
+	}, [slug]);
+
+	useEffect(() => {
+		void refetch();
+	}, [refetch]);
+
+	return { data, loading, error, setError, forbidden, refetch };
+}
+
+function useGroupActions(
+	slug: string,
+	refetch: () => Promise<void>,
+	setError: (e: string | null) => void,
+	onDeleted: (id: string) => void
+) {
+	const [newName, setNewName] = useState("");
+	const [createErr, setCreateErr] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+
+	async function createGroup() {
+		const name = newName.trim();
+		if (!name) return;
+		setBusy(true);
+		setCreateErr(null);
+		try {
+			await apiFetch(`/api/workspaces/${slug}/groups`, {
+				method: "POST",
+				workspaceSlug: slug,
+				body: { name },
+			});
+			setNewName("");
+			await refetch();
+		} catch (e) {
+			setCreateErr(isForbidden(e) ? "Only admins can create groups." : String(e));
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	async function deleteGroup(id: string) {
+		setBusy(true);
+		try {
+			await apiFetch(`/api/workspaces/${slug}/groups/${id}`, {
+				method: "DELETE",
+				workspaceSlug: slug,
+			});
+			onDeleted(id);
+			await refetch();
+		} catch (e) {
+			setError(String(e));
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	return { newName, setNewName, createErr, busy, createGroup, deleteGroup };
+}
+
+// WAI-ARIA tabs pattern: arrow keys move focus AND activate (automatic
+// activation), Home/End jump to the first/last tab.
+function nextTabId(tabs: TabId[], activeTab: TabId, key: string): TabId | null {
+	const idx = tabs.indexOf(activeTab);
+	if (key === "ArrowRight") return tabs[(idx + 1) % tabs.length];
+	if (key === "ArrowLeft") return tabs[(idx - 1 + tabs.length) % tabs.length];
+	if (key === "Home") return tabs[0];
+	if (key === "End") return tabs[tabs.length - 1];
+	return null;
+}
+
+function useTabRefs() {
+	const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({});
+	const focusTab = useCallback((id: TabId) => {
+		tabRefs.current[id]?.focus();
+	}, []);
+	return { tabRefs, focusTab };
 }
 
 // ---------------------------------------------------------------------------
@@ -487,113 +589,122 @@ function GroupDetailEditor(props: DetailProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Root
+// Groups tab — list + create form + detail editor
 // ---------------------------------------------------------------------------
 
-// cofferdam-ignore: Readability.MaxFunctionLength: single-island admin screen, normal preact style
-export default function GroupManager({ workspaceSlug }: Props) {
-	const slug = resolveWorkspaceSlug(workspaceSlug);
-	const [data, setData] = useState<Loaded | null>(null);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-	const [forbidden, setForbidden] = useState(false);
-	const [selected, setSelected] = useState<string | null>(null);
-	const [newName, setNewName] = useState("");
-	const [createErr, setCreateErr] = useState<string | null>(null);
-	const [busy, setBusy] = useState(false);
-	// Default admins to the Groups tab so the existing create/rename/grant flows
-	// (and their tests) stay reachable without an extra click; non-admins always
-	// land on Groups anyway since they have no Members tab.
-	const [tab, setTab] = useState<TabId>("groups");
-	const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({});
+interface GroupsTableProps {
+	groups: GroupSummary[];
+	isAdmin: boolean;
+	busy: boolean;
+	onSelect: (id: string) => void;
+	onDelete: (id: string) => void;
+}
 
-	const refetch = useCallback(async () => {
-		if (!slug) return;
-		setLoading(true);
-		setError(null);
-		setForbidden(false);
-		try {
-			setData(await loadAll(slug));
-		} catch (e) {
-			if (isForbidden(e)) setForbidden(true);
-			else setError(String(e));
-		} finally {
-			setLoading(false);
-		}
-	}, [slug]);
+function GroupsTable({ groups, isAdmin, busy, onSelect, onDelete }: GroupsTableProps) {
+	return (
+		<div class="overflow-x-auto max-sm:hidden">
+			<table class="w-full border-collapse">
+				<thead>
+					<tr>
+						<th class={TH}>Name</th>
+						<th class={TH}>Members</th>
+						<th class={TH}>Projects</th>
+						{isAdmin && <th class={TH} />}
+					</tr>
+				</thead>
+				<tbody>
+					{groups.map((g) => (
+						<tr key={g.id}>
+							<td class={TD}>
+								{isAdmin ? (
+									<button
+										type="button"
+										class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
+										onClick={() => onSelect(g.id)}
+									>
+										{g.name}
+									</button>
+								) : (
+									<span class="font-medium text-text-base">{g.name}</span>
+								)}
+							</td>
+							<td class={TD}>{g.memberCount}</td>
+							<td class={TD}>{g.grantCount}</td>
+							{isAdmin && (
+								<td class={TD}>
+									<button
+										type="button"
+										class={BTN_DANGER}
+										disabled={busy}
+										onClick={() => onDelete(g.id)}
+									>
+										Delete
+									</button>
+								</td>
+							)}
+						</tr>
+					))}
+				</tbody>
+			</table>
+		</div>
+	);
+}
 
-	useEffect(() => {
-		void refetch();
-	}, [refetch]);
+function GroupsMobileCards({ groups, isAdmin, busy, onSelect, onDelete }: GroupsTableProps) {
+	return (
+		<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
+			{groups.map((g) => (
+				<div key={g.id} class="py-3 px-4 border border-border rounded-md bg-surface">
+					<div class="flex justify-between items-center gap-2 mb-1">
+						{isAdmin ? (
+							<button
+								type="button"
+								class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
+								onClick={() => onSelect(g.id)}
+							>
+								{g.name}
+							</button>
+						) : (
+							<span class="font-medium text-text-base">{g.name}</span>
+						)}
+						{isAdmin && (
+							<button
+								type="button"
+								class={BTN_DANGER}
+								disabled={busy}
+								onClick={() => onDelete(g.id)}
+							>
+								Delete
+							</button>
+						)}
+					</div>
+					<div class="text-[0.75rem] text-text-muted">
+						{g.memberCount} members · {g.grantCount} projects
+					</div>
+				</div>
+			))}
+		</div>
+	);
+}
 
-	if (!slug) return <div class={CARD}>No workspace configured.</div>;
-	if (loading) return <div class={CARD}>Loading…</div>;
-	if (forbidden) return <div class={CARD}>Only workspace owners and admins can manage groups.</div>;
-	if (error) return <div class={CARD}>Error: {error}</div>;
-	if (!data) return null;
+interface GroupsSectionProps {
+	slug: string;
+	isAdmin: boolean;
+	data: Loaded;
+	newName: string;
+	setNewName: (v: string) => void;
+	createErr: string | null;
+	busy: boolean;
+	createGroup: () => void;
+	deleteGroup: (id: string) => void;
+	selected: string | null;
+	setSelected: (id: string | null) => void;
+	refetch: () => Promise<void>;
+}
 
-	async function createGroup() {
-		const name = newName.trim();
-		if (!name) return;
-		setBusy(true);
-		setCreateErr(null);
-		try {
-			await apiFetch(`/api/workspaces/${slug}/groups`, {
-				method: "POST",
-				workspaceSlug: slug,
-				body: { name },
-			});
-			setNewName("");
-			await refetch();
-		} catch (e) {
-			setCreateErr(isForbidden(e) ? "Only admins can create groups." : String(e));
-		} finally {
-			setBusy(false);
-		}
-	}
-
-	async function deleteGroup(id: string) {
-		setBusy(true);
-		try {
-			await apiFetch(`/api/workspaces/${slug}/groups/${id}`, {
-				method: "DELETE",
-				workspaceSlug: slug,
-			});
-			if (selected === id) setSelected(null);
-			await refetch();
-		} catch (e) {
-			setError(String(e));
-		} finally {
-			setBusy(false);
-		}
-	}
-
-	const { isAdmin } = data;
-	const tabs: TabId[] = isAdmin ? ["members", "groups"] : ["groups"];
-	const activeTab: TabId = isAdmin ? tab : "groups";
-
-	function focusTab(id: TabId) {
-		tabRefs.current[id]?.focus();
-	}
-
-	// WAI-ARIA tabs pattern: arrow keys move focus AND activate (automatic
-	// activation), Home/End jump to the first/last tab.
-	function onTabKeyDown(e: KeyboardEvent) {
-		const idx = tabs.indexOf(activeTab);
-		let nextId: TabId | null = null;
-		if (e.key === "ArrowRight") nextId = tabs[(idx + 1) % tabs.length];
-		else if (e.key === "ArrowLeft") nextId = tabs[(idx - 1 + tabs.length) % tabs.length];
-		else if (e.key === "Home") nextId = tabs[0];
-		else if (e.key === "End") nextId = tabs[tabs.length - 1];
-		if (!nextId) return;
-		e.preventDefault();
-		setTab(nextId);
-		focusTab(nextId);
-	}
-
-	const TAB_LABELS: Record<TabId, string> = { members: "Members", groups: "Groups" };
-
-	const groupsSection = (
+function GroupsSection(props: GroupsSectionProps) {
+	const { isAdmin, data } = props;
+	return (
 		<>
 			<section class={CARD}>
 				<h2 class={H2}>{isAdmin ? "Groups" : "Your groups"}</h2>
@@ -602,23 +713,25 @@ export default function GroupManager({ workspaceSlug }: Props) {
 						<input
 							class={INPUT}
 							placeholder="New group name"
-							value={newName}
-							onInput={(e) => setNewName((e.target as HTMLInputElement).value)}
+							value={props.newName}
+							onInput={(e) => props.setNewName((e.target as HTMLInputElement).value)}
 							onKeyDown={(e) => {
-								if (e.key === "Enter") void createGroup();
+								if (e.key === "Enter") void props.createGroup();
 							}}
 						/>
 						<button
 							type="button"
 							class={BTN_PRIMARY}
-							disabled={busy || !newName.trim()}
-							onClick={createGroup}
+							disabled={props.busy || !props.newName.trim()}
+							onClick={props.createGroup}
 						>
 							Create group
 						</button>
 					</div>
 				)}
-				{createErr && <div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{createErr}</div>}
+				{props.createErr && (
+					<div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{props.createErr}</div>
+				)}
 
 				{data.groups.length === 0 ? (
 					<div class="text-[0.85rem] text-text-muted">
@@ -628,98 +741,140 @@ export default function GroupManager({ workspaceSlug }: Props) {
 					</div>
 				) : (
 					<>
-						<div class="overflow-x-auto max-sm:hidden">
-							<table class="w-full border-collapse">
-								<thead>
-									<tr>
-										<th class={TH}>Name</th>
-										<th class={TH}>Members</th>
-										<th class={TH}>Projects</th>
-										{isAdmin && <th class={TH} />}
-									</tr>
-								</thead>
-								<tbody>
-									{data.groups.map((g) => (
-										<tr key={g.id}>
-											<td class={TD}>
-												{isAdmin ? (
-													<button
-														type="button"
-														class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
-														onClick={() => setSelected(g.id)}
-													>
-														{g.name}
-													</button>
-												) : (
-													<span class="font-medium text-text-base">{g.name}</span>
-												)}
-											</td>
-											<td class={TD}>{g.memberCount}</td>
-											<td class={TD}>{g.grantCount}</td>
-											{isAdmin && (
-												<td class={TD}>
-													<button
-														type="button"
-														class={BTN_DANGER}
-														disabled={busy}
-														onClick={() => deleteGroup(g.id)}
-													>
-														Delete
-													</button>
-												</td>
-											)}
-										</tr>
-									))}
-								</tbody>
-							</table>
-						</div>
-						<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
-							{data.groups.map((g) => (
-								<div key={g.id} class="py-3 px-4 border border-border rounded-md bg-surface">
-									<div class="flex justify-between items-center gap-2 mb-1">
-										{isAdmin ? (
-											<button
-												type="button"
-												class="text-accent font-medium bg-transparent border-0 cursor-pointer p-0"
-												onClick={() => setSelected(g.id)}
-											>
-												{g.name}
-											</button>
-										) : (
-											<span class="font-medium text-text-base">{g.name}</span>
-										)}
-										{isAdmin && (
-											<button
-												type="button"
-												class={BTN_DANGER}
-												disabled={busy}
-												onClick={() => deleteGroup(g.id)}
-											>
-												Delete
-											</button>
-										)}
-									</div>
-									<div class="text-[0.75rem] text-text-muted">
-										{g.memberCount} members · {g.grantCount} projects
-									</div>
-								</div>
-							))}
-						</div>
+						<GroupsTable
+							groups={data.groups}
+							isAdmin={isAdmin}
+							busy={props.busy}
+							onSelect={props.setSelected}
+							onDelete={props.deleteGroup}
+						/>
+						<GroupsMobileCards
+							groups={data.groups}
+							isAdmin={isAdmin}
+							busy={props.busy}
+							onSelect={props.setSelected}
+							onDelete={props.deleteGroup}
+						/>
 					</>
 				)}
 			</section>
 
-			{isAdmin && selected && (
+			{isAdmin && props.selected && (
 				<GroupDetailEditor
-					slug={slug}
-					groupId={selected}
+					slug={props.slug}
+					groupId={props.selected}
 					members={data.members}
 					projects={data.projects}
-					onChanged={refetch}
-					onClose={() => setSelected(null)}
+					onChanged={props.refetch}
+					onClose={() => props.setSelected(null)}
 				/>
 			)}
 		</>
+	);
+}
+
+interface GroupTabsProps {
+	tabs: TabId[];
+	activeTab: TabId;
+	tabRefs: { current: Partial<Record<TabId, HTMLButtonElement | null>> };
+	onTabKeyDown: (e: KeyboardEvent) => void;
+	onSelect: (id: TabId) => void;
+}
+
+function GroupTabs(props: GroupTabsProps) {
+	return (
+		<div role="tablist" aria-label="Groups" class={TAB_LIST} onKeyDown={props.onTabKeyDown}>
+			{props.tabs.map((id) => (
+				<button
+					key={id}
+					ref={(el) => {
+						props.tabRefs.current[id] = el;
+					}}
+					type="button"
+					role="tab"
+					id={`group-tab-${id}`}
+					aria-selected={props.activeTab === id}
+					aria-controls={`group-tabpanel-${id}`}
+					tabIndex={props.activeTab === id ? 0 : -1}
+					class={tabBtnClass(props.activeTab === id)}
+					onClick={() => props.onSelect(id)}
+				>
+					{TAB_LABELS[id]}
+				</button>
+			))}
+		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Guard — resolves the loading/forbidden/error/no-workspace states so the
+// body below only ever renders once `data` is present.
+// ---------------------------------------------------------------------------
+
+interface GuardProps {
+	slug: string;
+	loading: boolean;
+	forbidden: boolean;
+	error: string | null;
+	data: Loaded | null;
+	children: (data: Loaded) => preact.JSX.Element;
+}
+
+function GroupManagerGuard({ slug, loading, forbidden, error, data, children }: GuardProps) {
+	if (!slug) return <div class={CARD}>No workspace configured.</div>;
+	if (loading) return <div class={CARD}>Loading…</div>;
+	if (forbidden) return <div class={CARD}>Only workspace owners and admins can manage groups.</div>;
+	if (error) return <div class={CARD}>Error: {error}</div>;
+	if (!data) return null;
+	return children(data);
+}
+
+// ---------------------------------------------------------------------------
+// Body — tab layout once `data` has loaded.
+// ---------------------------------------------------------------------------
+
+interface BodyProps {
+	slug: string;
+	data: Loaded;
+	tab: TabId;
+	setTab: (id: TabId) => void;
+	tabRefs: { current: Partial<Record<TabId, HTMLButtonElement | null>> };
+	focusTab: (id: TabId) => void;
+	selected: string | null;
+	setSelected: (id: string | null) => void;
+	actions: ReturnType<typeof useGroupActions>;
+	refetch: () => Promise<void>;
+}
+
+function GroupManagerBody(props: BodyProps) {
+	const { data, setTab, focusTab } = props;
+	const { isAdmin } = data;
+	const tabs: TabId[] = isAdmin ? ["members", "groups"] : ["groups"];
+	const activeTab: TabId = isAdmin ? props.tab : "groups";
+
+	function onTabKeyDown(e: KeyboardEvent) {
+		const nextId = nextTabId(tabs, activeTab, e.key);
+		if (!nextId) return;
+		e.preventDefault();
+		setTab(nextId);
+		focusTab(nextId);
+	}
+
+	const groupsSection = (
+		<GroupsSection
+			slug={props.slug}
+			isAdmin={isAdmin}
+			data={data}
+			newName={props.actions.newName}
+			setNewName={props.actions.setNewName}
+			createErr={props.actions.createErr}
+			busy={props.actions.busy}
+			createGroup={props.actions.createGroup}
+			deleteGroup={props.actions.deleteGroup}
+			selected={props.selected}
+			setSelected={props.setSelected}
+			refetch={props.refetch}
+		/>
 	);
 
 	return (
@@ -727,26 +882,13 @@ export default function GroupManager({ workspaceSlug }: Props) {
 			<RoleBanner role={data.role} isAdmin={isAdmin} />
 
 			{tabs.length > 1 && (
-				<div role="tablist" aria-label="Groups" class={TAB_LIST} onKeyDown={onTabKeyDown}>
-					{tabs.map((id) => (
-						<button
-							key={id}
-							ref={(el) => {
-								tabRefs.current[id] = el;
-							}}
-							type="button"
-							role="tab"
-							id={`group-tab-${id}`}
-							aria-selected={activeTab === id}
-							aria-controls={`group-tabpanel-${id}`}
-							tabIndex={activeTab === id ? 0 : -1}
-							class={tabBtnClass(activeTab === id)}
-							onClick={() => setTab(id)}
-						>
-							{TAB_LABELS[id]}
-						</button>
-					))}
-				</div>
+				<GroupTabs
+					tabs={tabs}
+					activeTab={activeTab}
+					tabRefs={props.tabRefs}
+					onTabKeyDown={onTabKeyDown}
+					onSelect={setTab}
+				/>
 			)}
 
 			{isAdmin && activeTab === "members" && (
@@ -764,5 +906,48 @@ export default function GroupManager({ workspaceSlug }: Props) {
 					groupsSection
 				))}
 		</div>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Root
+// ---------------------------------------------------------------------------
+
+export default function GroupManager({ workspaceSlug }: Props) {
+	const slug = resolveWorkspaceSlug(workspaceSlug);
+	const { data, loading, error, setError, forbidden, refetch } = useGroupManagerData(slug);
+	const [selected, setSelected] = useState<string | null>(null);
+	// Default admins to the Groups tab so the existing create/rename/grant flows
+	// (and their tests) stay reachable without an extra click; non-admins always
+	// land on Groups anyway since they have no Members tab.
+	const [tab, setTab] = useState<TabId>("groups");
+	const { tabRefs, focusTab } = useTabRefs();
+	const actions = useGroupActions(slug, refetch, setError, (id) => {
+		if (selected === id) setSelected(null);
+	});
+
+	return (
+		<GroupManagerGuard
+			slug={slug}
+			loading={loading}
+			forbidden={forbidden}
+			error={error}
+			data={data}
+		>
+			{(loadedData) => (
+				<GroupManagerBody
+					slug={slug}
+					data={loadedData}
+					tab={tab}
+					setTab={setTab}
+					tabRefs={tabRefs}
+					focusTab={focusTab}
+					selected={selected}
+					setSelected={setSelected}
+					actions={actions}
+					refetch={refetch}
+				/>
+			)}
+		</GroupManagerGuard>
 	);
 }

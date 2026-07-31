@@ -27,13 +27,7 @@ interface SubmitSourceRow {
 	revoked_at: number | null;
 }
 
-export async function submitFeedback(
-	db: D1Database,
-	token: string,
-	rawBody: unknown,
-	requestOrigin: string | null
-): Promise<{ id: string; corsAllowOrigin: string | null }> {
-	const tokenHash = await hashFeedbackToken(token);
+async function resolveFeedbackSource(db: D1Database, tokenHash: string): Promise<SubmitSourceRow> {
 	const source = await db
 		.prepare(
 			`SELECT id, workspace_id, project_id, is_active, allowed_origins, revoked_at
@@ -47,10 +41,20 @@ export async function submitFeedback(
 	// Inactive → the credential is real but the source is paused (kill switch) → 403.
 	if (source.is_active !== 1) throw new ForbiddenError("Feedback source is inactive");
 
+	return source;
+}
+
+function parseSubmitFeedbackBody(rawBody: unknown) {
 	const parsed = SubmitFeedbackSchema.safeParse(rawBody);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const d = parsed.data;
+	return parsed.data;
+}
 
+async function insertFeedbackRow(
+	db: D1Database,
+	source: SubmitSourceRow,
+	d: ReturnType<typeof parseSubmitFeedbackBody>
+): Promise<string> {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
 	await db
@@ -73,11 +77,28 @@ export async function submitFeedback(
 			now
 		)
 		.run();
+	return id;
+}
 
+function resolveCorsAllowOrigin(
+	source: SubmitSourceRow,
+	requestOrigin: string | null
+): string | null {
 	const allowed = source.allowed_origins ? (JSON.parse(source.allowed_origins) as string[]) : null;
-	const corsAllowOrigin =
-		allowed && requestOrigin && allowed.includes(requestOrigin) ? requestOrigin : null;
+	return allowed && requestOrigin && allowed.includes(requestOrigin) ? requestOrigin : null;
+}
 
+export async function submitFeedback(
+	db: D1Database,
+	token: string,
+	rawBody: unknown,
+	requestOrigin: string | null
+): Promise<{ id: string; corsAllowOrigin: string | null }> {
+	const tokenHash = await hashFeedbackToken(token);
+	const source = await resolveFeedbackSource(db, tokenHash);
+	const d = parseSubmitFeedbackBody(rawBody);
+	const id = await insertFeedbackRow(db, source, d);
+	const corsAllowOrigin = resolveCorsAllowOrigin(source, requestOrigin);
 	return { id, corsAllowOrigin };
 }
 

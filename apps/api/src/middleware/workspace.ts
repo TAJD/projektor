@@ -48,28 +48,56 @@ function mcpWorkspaceIdFromPath(path: string): string | undefined {
 	return /^\/mcp\/([^/]+)$/.exec(path)?.[1];
 }
 
+// PROJ-16: when auth came from a workspace-scoped token, enforce confinement.
+// null = user-scoped token (allowed in any workspace the user is a member of).
+// undefined = CF Access / dev-bypass (no token — the membership check below is the gate).
+// Checked before membership so a token pointed at the wrong workspace gets the same 403
+// it always did, rather than leaking whether the caller happens to be a member there.
+function tokenConfinedToOtherWorkspace(
+	row: { id: string },
+	tokenWorkspaceId: string | null | undefined
+): boolean {
+	return tokenWorkspaceId != null && row.id !== tokenWorkspaceId;
+}
+
+async function missingWorkspaceResponse(
+	c: Context<HonoEnv>,
+	headerSlug: string | undefined,
+	routingEnabled: boolean
+): Promise<Response> {
+	await warnIfIgnoredSubdomain(c, headerSlug, routingEnabled);
+	return c.json(
+		{
+			error: routingEnabled
+				? "Workspace not specified"
+				: "Workspace not specified: missing X-Workspace-Slug header",
+		},
+		400
+	);
+}
+
+// Workspace resolved from the X-Workspace-Slug header, or (opt-in) the Host header's
+// subdomain. See WORKSPACE_SUBDOMAIN_ROUTING in packages/types/src/env.ts. (PROJ-267)
+// PROJ-348: falls back to the MCP path's workspace UUID when no slug was resolved.
+// The token-workspace-scope check in workspaceMiddleware is unchanged and remains
+// the security boundary — a token minted for another workspace is still rejected there.
+function resolveWorkspaceTarget(
+	c: Context<HonoEnv>,
+	headerSlug: string | undefined,
+	routingEnabled: boolean
+): { slug: string | undefined; mcpWorkspaceId: string | undefined } {
+	const slug = headerSlug ?? (routingEnabled ? c.req.header("host")?.split(".")[0] : undefined);
+	const mcpWorkspaceId = slug ? undefined : mcpWorkspaceIdFromPath(c.req.path);
+	return { slug, mcpWorkspaceId };
+}
+
 export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
-	// Workspace resolved from the X-Workspace-Slug header, or (opt-in) the Host header's
-	// subdomain. See WORKSPACE_SUBDOMAIN_ROUTING in packages/types/src/env.ts. (PROJ-267)
 	const headerSlug = c.req.header("X-Workspace-Slug");
 	const routingEnabled = subdomainRoutingEnabled(c.env.WORKSPACE_SUBDOMAIN_ROUTING);
-	const slug = headerSlug ?? (routingEnabled ? c.req.header("host")?.split(".")[0] : undefined);
-
-	// PROJ-348: fall back to the MCP path's workspace UUID when no slug was resolved.
-	// The token-workspace-scope check below is unchanged and remains the security
-	// boundary — a token minted for another workspace is still rejected here.
-	const mcpWorkspaceId = slug ? undefined : mcpWorkspaceIdFromPath(c.req.path);
+	const { slug, mcpWorkspaceId } = resolveWorkspaceTarget(c, headerSlug, routingEnabled);
 
 	if (!slug && !mcpWorkspaceId) {
-		await warnIfIgnoredSubdomain(c, headerSlug, routingEnabled);
-		return c.json(
-			{
-				error: routingEnabled
-					? "Workspace not specified"
-					: "Workspace not specified: missing X-Workspace-Slug header",
-			},
-			400
-		);
+		return missingWorkspaceResponse(c, headerSlug, routingEnabled);
 	}
 
 	// PROJ-432: the workspace and this user's membership of it in one round trip. They were
@@ -88,16 +116,9 @@ export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
 
 	if (!row) return c.json({ error: "Workspace not found" }, 404);
 
-	// PROJ-16: when auth came from a workspace-scoped token, enforce confinement.
-	// null = user-scoped token (allowed in any workspace the user is a member of).
-	// undefined = CF Access / dev-bypass (no token — the membership check below is the gate).
-	// Checked before membership so a token pointed at the wrong workspace gets the same 403
-	// it always did, rather than leaking whether the caller happens to be a member there.
-	const tokenWorkspaceId = c.get("tokenWorkspaceId");
-	if (tokenWorkspaceId != null && row.id !== tokenWorkspaceId) {
+	if (tokenConfinedToOtherWorkspace(row, c.get("tokenWorkspaceId"))) {
 		return c.json({ error: "Forbidden" }, 403);
 	}
-
 	if (!row.role) return c.json({ error: "Forbidden" }, 403);
 
 	c.set("workspace", { id: row.id, name: row.name, slug: row.slug });

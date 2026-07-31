@@ -377,7 +377,6 @@ describe("list_project_activity MCP tool", () => {
 	});
 });
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("GET /api/projects/:id/activity (PROJ-245)", () => {
 	let token: string;
 	let slug: string;

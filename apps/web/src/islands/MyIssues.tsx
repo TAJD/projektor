@@ -166,7 +166,6 @@ function ProjectIssuesSection({ name, issues }: { name: string; issues: Issue[] 
 	);
 }
 
-// cofferdam-ignore: Design.OrphanExport: imported by pages/my-issues.astro — cofferdam doesn't parse .astro imports
 export default function MyIssues({ workspaceSlug }: Props) {
 	const [issues, setIssues] = useState<Issue[]>([]);
 	const [loading, setLoading] = useState(true);

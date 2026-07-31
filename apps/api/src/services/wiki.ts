@@ -1029,6 +1029,18 @@ async function deleteWikiPageAttachments(
 	await orm.delete(schema.attachments).where(inArray(schema.attachments.linkedWikiPageId, pageIds));
 }
 
+// PROJ-311: workspace-level pages need a workspace admin/owner; a project-scoped
+// page can also be deleted by someone with a project-admin grant.
+async function requireWikiDelete(ctx: ServiceCtx, projectId: string | null): Promise<void> {
+	if (projectId === null) {
+		if (ctx.role !== "admin" && ctx.role !== "owner")
+			throw new ForbiddenError("Insufficient permissions");
+	} else if (!isWorkspaceAdmin(ctx.role)) {
+		if ((await effectiveProjectRole(ctx, projectId)) !== "admin")
+			throw new ForbiddenError("Insufficient permissions");
+	}
+}
+
 // PROJ-509: resolved via resolvePageByIdOrSlug (id-or-slug + redirect fallback), same
 // as getWikiPage/updateWikiPage/getWikiBacklinks/listWikiRevisions/getWikiRevision —
 // a delete-by-old-slug-after-rename request resolves to the same page rather than
@@ -1045,15 +1057,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 	const resolved = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
 	const page = { id: resolved.id, projectId: resolved.projectId, parentId: resolved.parentId };
 
-	// PROJ-311: workspace-level pages need a workspace admin/owner; a project-scoped
-	// page can also be deleted by someone with a project-admin grant.
-	if (page.projectId === null) {
-		if (ctx.role !== "admin" && ctx.role !== "owner")
-			throw new ForbiddenError("Insufficient permissions");
-	} else if (!isWorkspaceAdmin(ctx.role)) {
-		if ((await effectiveProjectRole(ctx, page.projectId)) !== "admin")
-			throw new ForbiddenError("Insufficient permissions");
-	}
+	await requireWikiDelete(ctx, page.projectId);
 
 	if (cascade) {
 		const descendantIds = await collectDescendantIds(ctx.db, page.id, ctx.workspaceId);
