@@ -42,11 +42,10 @@ function extractWikiSlugFromUrl(url: string): string | null {
 	const raw = pathMatch?.[1] ?? queryMatch?.[1];
 	if (!raw) return null;
 	try {
-		// PROJ-510: a malformed percent-escape (e.g. a bare `%` not followed by two hex
-		// digits) makes decodeURIComponent throw. This runs mid-reindex, after the page's
-		// content/old wiki_links rows have already been committed — an uncaught throw here
-		// would 500 the request with wiki_links left deleted and never repopulated. Treat
-		// an undecodable URL as "not a wiki link" instead of propagating the exception.
+		// PROJ-510: a malformed percent-escape makes decodeURIComponent throw. This runs
+		// mid-reindex, after the content write and the old wiki_links delete have already
+		// committed, so an uncaught throw leaves the page's links wiped. An undecodable
+		// URL is treated as "not a wiki link" rather than propagating.
 		return decodeURIComponent(raw);
 	} catch {
 		return null;
@@ -182,15 +181,11 @@ const LINK_INSERT_CHUNK_SIZE = 15;
  * reinsert, mirroring services/wiki.ts's reindexWikiFts. Call after every content write
  * (create or update) — never partially, since a stale row would misreport backlinks.
  *
- * PROJ-510: this delete-then-reinsert is NOT in the same D1 transaction/batch as the
- * page content write in services/wiki.ts (there is no db.batch(...) wrapping either) —
- * callers await each statement sequentially. If something throws between the delete and
- * the reinsert, the page's content is already committed but wiki_links is left empty
- * until the next successful save. extractWikiSlugFromUrl's parse errors are now handled
- * defensively (never throw), which closes the only known trigger, but the underlying gap
- * is unaddressed — wrapping content write + link reindex in one transaction would touch
- * createWikiPage/updateWikiPage's other sequential writes (revisions, FTS, redirects) and
- * was judged out of scope here; tracked as a follow-up.
+ *
+ * Not atomic: the delete and the reinsert are separate awaits, and neither shares a
+ * transaction/batch with the content write in services/wiki.ts. A throw in between
+ * commits the content but leaves wiki_links empty until the next save. PROJ-510 closed
+ * the only known trigger (parse errors); the gap itself is PROJ-511.
  */
 export async function reindexWikiLinks(
 	ctx: ServiceCtx,
