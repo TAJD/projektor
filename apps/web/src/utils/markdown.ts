@@ -60,7 +60,7 @@ function resolveWikilinks(
 			const displayText = rawLabel?.trim() ?? title;
 			const slug = titleMap.get(title.toLowerCase());
 			if (slug) {
-				return `[${displayText}](?slug=${encodeURIComponent(slug)})`;
+				return `[${displayText}](/wiki/${encodeURIComponent(slug)})`;
 			}
 			const href = `?createTitle=${encodeURIComponent(title)}`;
 			return `<span class="wiki-link-broken">${escapeHtml(displayText)} <a href="${href}">+</a></span>`;

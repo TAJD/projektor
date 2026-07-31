@@ -87,7 +87,7 @@ function toDto(r: AttachmentRow): AttachmentDto {
 				? {
 						id: r.wiki_page_id,
 						title: r.wiki_page_title,
-						url: wikiPagePath(r.wiki_page_slug ?? "", r.wiki_page_project_id),
+						url: wikiPagePath(r.wiki_page_slug ?? ""),
 					}
 				: null,
 	};

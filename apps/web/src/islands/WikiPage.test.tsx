@@ -1,7 +1,9 @@
 // WikiPage island — mock-fetch tests.
 //
-// WikiPage reads ?slug= from the URL, fetches the tree + page + revisions via
-// apiFetch (which calls global fetch). The pattern: set the URL with
+// WikiPage resolves its slug from (in order) the `slug` prop — how the /wiki/:slug
+// astro routes render it (PROJ-487) — a `?slug=` query param (legacy), or the
+// pathname (production's wiki/view.astro shell). It fetches the tree + page +
+// revisions via apiFetch (which calls global fetch). The pattern: set the URL with
 // history.replaceState, override the default stub from setup.ts with
 // vi.stubGlobal, then await findBy* for the async state update.
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
@@ -26,7 +28,7 @@ const PAGE: WikiPageData = {
 	updated_at: 1000,
 };
 
-function mockFetchWiki(page: WikiPageData | null, ok = true) {
+function mockFetchWiki(page: WikiPageData | null, ok = true, status = 404) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {
@@ -38,7 +40,7 @@ function mockFetchWiki(page: WikiPageData | null, ok = true) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 			}
 			if (!ok) {
-				return Promise.resolve({ ok: false, status: 404 });
+				return Promise.resolve({ ok: false, status });
 			}
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(page) });
 		})
@@ -51,6 +53,8 @@ beforeEach(() => {
 
 afterEach(() => {
 	history.replaceState(null, "", "/");
+	document.title = "";
+	for (const el of document.head.querySelectorAll('meta[property^="og:"]')) el.remove();
 });
 
 describe("WikiPage", () => {
@@ -66,9 +70,8 @@ describe("WikiPage", () => {
 	});
 
 	it("shows loading state while fetching the page", async () => {
-		history.replaceState(null, "", "?slug=my-page");
 		vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
-		render(<WikiPage />);
+		render(<WikiPage slug="my-page" />);
 		// Both the sidebar tree and the main content show "Loading…" while pending.
 		// findAllByText waits for at least one match.
 		const loadingEls = await screen.findAllByText("Loading…");
@@ -76,37 +79,38 @@ describe("WikiPage", () => {
 	});
 
 	it("renders page title and content after fetch resolves", async () => {
-		history.replaceState(null, "", "?slug=my-page");
 		mockFetchWiki(PAGE);
-		render(<WikiPage />);
+		render(<WikiPage slug="my-page" />);
 		expect(await screen.findByText("My Page")).toBeTruthy();
 	});
 
 	it("shows Edit button once the page is loaded", async () => {
-		history.replaceState(null, "", "?slug=my-page");
 		mockFetchWiki(PAGE);
-		render(<WikiPage />);
+		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
 		expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
 	});
 
-	it("shows an error message when the page fetch fails", async () => {
-		history.replaceState(null, "", "?slug=my-page");
-		mockFetchWiki(null, false);
-		render(<WikiPage />);
+	it("shows an error message when the page fetch fails (non-404)", async () => {
+		mockFetchWiki(null, false, 500);
+		render(<WikiPage slug="my-page" />);
 		expect(await screen.findByText(/Failed to load page/i)).toBeTruthy();
 	});
 
+	it("shows a 404 message when the slug resolves to nothing (PROJ-487)", async () => {
+		mockFetchWiki(null, false, 404);
+		render(<WikiPage slug="does-not-exist" />);
+		expect(await screen.findByText(/No wiki page found at "does-not-exist"/i)).toBeTruthy();
+	});
+
 	it("shows Move button once the page is loaded", async () => {
-		history.replaceState(null, "", "?slug=my-page");
 		mockFetchWiki(PAGE);
-		render(<WikiPage />);
+		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
 		expect(screen.getByRole("button", { name: "Move" })).toBeTruthy();
 	});
 
 	it("moves a page to a new parent via PUT and refetches tree/page", async () => {
-		history.replaceState(null, "", "?slug=my-page");
 		const OTHER_PAGE_NODE = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
 		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
 			const u = String(url);
@@ -122,7 +126,7 @@ describe("WikiPage", () => {
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
 		});
 		vi.stubGlobal("fetch", fetchMock);
-		render(<WikiPage />);
+		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
 
 		fireEvent.click(screen.getByRole("button", { name: "Move" }));
@@ -137,6 +141,94 @@ describe("WikiPage", () => {
 			expect(putCall?.[0]).toContain("/api/wiki/my-page");
 			expect(JSON.parse(putCall?.[1].body)).toEqual({ parentId: "w2" });
 		});
+	});
+});
+
+// PROJ-487: path-based /wiki/:slug routing + client-set SSR-shell metadata (static
+// output has no per-request server render, see AGENTS.md — this is the closest
+// equivalent) + legacy ?slug= redirect.
+describe("WikiPage — path-based routing (PROJ-487)", () => {
+	const realLocation = window.location;
+
+	afterEach(() => {
+		Object.defineProperty(window, "location", { configurable: true, value: realLocation });
+	});
+
+	// jsdom's Location.prototype.replace is a non-configurable, non-writable own data
+	// property, so neither vi.spyOn nor a direct assignment (nor a Proxy — it trips the
+	// "must return the target's actual value" invariant for such properties) can shadow
+	// it. Swap `window.location` for an unrelated plain object instead (only the fields
+	// the code under test reads), restored in afterEach above.
+	function stubLocationReplace() {
+		const replace = vi.fn();
+		Object.defineProperty(window, "location", {
+			configurable: true,
+			value: {
+				pathname: realLocation.pathname,
+				search: realLocation.search,
+				origin: realLocation.origin,
+				hostname: realLocation.hostname,
+				host: realLocation.host,
+				replace,
+			},
+		});
+		return replace;
+	}
+
+	it("resolves the slug from the URL path when no slug prop is given (production wiki/view.astro shell)", async () => {
+		history.replaceState(null, "", "/wiki/my-page");
+		mockFetchWiki(PAGE);
+		render(<WikiPage />);
+		expect(await screen.findByText("My Page")).toBeTruthy();
+	});
+
+	it("sets document title and OG meta tags from the fetched page", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => {
+			expect(document.title).toBe("My Page — Projektor Wiki");
+		});
+		expect(document.head.querySelector('meta[property="og:title"]')?.getAttribute("content")).toBe(
+			"My Page"
+		);
+		expect(
+			document.head.querySelector('meta[property="og:description"]')?.getAttribute("content")
+		).toContain("Hello world content");
+		expect(
+			document.head.querySelector('meta[property="og:url"]')?.getAttribute("content")
+		).toContain("/wiki/my-page");
+	});
+
+	it("redirects a legacy ?slug= query URL to the canonical /wiki/:slug path", async () => {
+		history.replaceState(null, "", "/wiki?slug=my-page");
+		const replace = stubLocationReplace();
+		mockFetchWiki(PAGE);
+		render(<WikiPage />);
+		await waitFor(() => {
+			expect(replace).toHaveBeenCalledWith("/wiki/my-page");
+		});
+	});
+
+	it("redirects straight to the current canonical slug, not the requested one (avoids a redirect chain, PROJ-483)", async () => {
+		// The old/renamed slug was requested (e.g. via a stale bookmark that hit the
+		// Worker's pretty-URL fallback), but the API's live-then-redirect lookup
+		// resolved it to the page's current slug.
+		const replace = stubLocationReplace();
+		mockFetchWiki({ ...PAGE, slug: "new-slug" });
+		render(<WikiPage slug="old-slug" />);
+		await waitFor(() => {
+			expect(replace).toHaveBeenCalledWith("/wiki/new-slug");
+		});
+	});
+
+	it("does not redirect once already on the canonical path", async () => {
+		history.replaceState(null, "", "/wiki/my-page");
+		const replace = stubLocationReplace();
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		expect(replace).not.toHaveBeenCalled();
 	});
 });
 
@@ -164,9 +256,8 @@ describe("WikiPage — project scope control (PROJ-352)", () => {
 	}
 
 	it("defaults to 'Workspace (all projects)' scope when no projectId is set", async () => {
-		history.replaceState(null, "", "?slug=my-page");
 		mockFetchWikiWithProjects(PAGE);
-		render(<WikiPage />);
+		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
 		expect(screen.getByRole("combobox", { name: "Wiki project scope" }).textContent).toMatch(
 			/Workspace \(all projects\)/i
@@ -174,9 +265,9 @@ describe("WikiPage — project scope control (PROJ-352)", () => {
 	});
 
 	it("shows the project's scope when projectId is set via the URL", async () => {
-		history.replaceState(null, "", "?slug=my-page&projectId=p1");
+		history.replaceState(null, "", "?projectId=p1");
 		mockFetchWikiWithProjects(PAGE);
-		render(<WikiPage />);
+		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
 		await waitFor(() => {
 			expect(screen.getByRole("combobox", { name: "Wiki project scope" }).textContent).toMatch(
@@ -187,9 +278,8 @@ describe("WikiPage — project scope control (PROJ-352)", () => {
 });
 
 async function startEditingWithTitleInput(): Promise<HTMLInputElement> {
-	history.replaceState(null, "", "?slug=my-page");
 	mockFetchWiki(PAGE);
-	render(<WikiPage />);
+	render(<WikiPage slug="my-page" />);
 	await screen.findByText("My Page");
 	fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 	return screen.getByLabelText("Page title") as HTMLInputElement;
@@ -200,10 +290,9 @@ async function renderWithDraftAndOpenEdit(draft: {
 	content: string;
 	savedAt: number;
 }) {
-	history.replaceState(null, "", "?slug=my-page");
 	localStorage.setItem("wiki-draft:w1", JSON.stringify(draft));
 	mockFetchWiki(PAGE);
-	render(<WikiPage />);
+	render(<WikiPage slug="my-page" />);
 	await screen.findByText("My Page");
 	fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 }

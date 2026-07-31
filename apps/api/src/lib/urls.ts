@@ -14,9 +14,10 @@ export function issuePath(projectKey: string, number: number, title: string): st
 	return `/projects/${projectKey}/issues/${number}/${slugifyForUrl(title)}`;
 }
 
-/** Canonical web UI path for a wiki page (PROJ-307). */
-export function wikiPagePath(slug: string, projectId: string | null): string {
-	const qs = new URLSearchParams({ slug });
-	if (projectId) qs.set("projectId", projectId);
-	return `/wiki?${qs.toString()}`;
+/**
+ * Canonical web UI path for a wiki page (PROJ-307; path-routed since PROJ-487).
+ * Slugs are unique per workspace (PROJ-483), so no project disambiguator is needed.
+ */
+export function wikiPagePath(slug: string): string {
+	return `/wiki/${encodeURIComponent(slug)}`;
 }

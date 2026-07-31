@@ -135,7 +135,7 @@ describe("ProjectLanding", () => {
 		mockFetchProject([ISSUE], [WIKI_PAGE]);
 		render(<ProjectLanding />);
 		const link = (await screen.findByText("Getting Started")).closest("a");
-		expect(link?.getAttribute("href")).toBe("/wiki?slug=getting-started&projectId=p1");
+		expect(link?.getAttribute("href")).toBe("/wiki/getting-started");
 	});
 
 	// PROJ-376: pretty project URLs (/projects/view/<slug>) resolve via the path,

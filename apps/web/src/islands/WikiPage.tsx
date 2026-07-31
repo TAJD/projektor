@@ -69,6 +69,7 @@ interface Attachment {
 interface Props {
 	workspaceSlug?: string;
 	projectId?: string;
+	slug?: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -1062,6 +1063,15 @@ function WikiMainContent(props: {
 	}
 	if (props.loading) return <p aria-live="polite">Loading…</p>;
 	if (props.error) {
+		// PROJ-487: a slug that resolves to nothing (not even via a PROJ-483 redirect)
+		// gets a dedicated 404 message rather than the generic failure text.
+		if (props.error.includes("404")) {
+			return (
+				<p role="alert" class="text-text-muted">
+					No wiki page found at "{props.slug}".
+				</p>
+			);
+		}
 		return (
 			<p role="alert" class="text-[var(--danger-text)]">
 				Failed to load page: {props.error}
@@ -1072,17 +1082,51 @@ function WikiMainContent(props: {
 	return <PageArticle {...props.articleProps} page={props.page} />;
 }
 
-function useWikiUrlState(projectIdProp: string | undefined) {
-	const [slug, setSlug] = useState("");
+// PROJ-487: /wiki/:slug is now the canonical path. `slugProp` covers the astro
+// dynamic route (dev server); `view.astro` (the production pretty-URL shell served
+// via the Worker fallback, see apps/api/src/index.ts) has no such param, so this
+// also falls back to parsing the slug straight out of the path, matching the
+// convention IssueDetail already uses for /projects/:key/issues/:n/*.
+function slugFromPathname(pathname: string): string {
+	const match = /^\/wiki\/([^/]+)\/?$/.exec(pathname);
+	return match ? decodeURIComponent(match[1]) : "";
+}
+
+function useWikiUrlState(projectIdProp: string | undefined, slugProp: string | undefined) {
+	const [slug, setSlug] = useState(slugProp ?? "");
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 
 	useEffect(() => {
-		const params = new URLSearchParams(window.location.search);
-		setSlug(params.get("slug") ?? "");
-		if (!projectIdProp) setProjectId(params.get("projectId") ?? "");
-	}, [projectIdProp]);
+		if (!slugProp) {
+			const params = new URLSearchParams(window.location.search);
+			// ?slug= is the legacy PROJ-307 query form. Kept as a fallback (not just for
+			// the redirect below) so an old bookmark/link still resolves even if the
+			// redirect effect hasn't run yet.
+			setSlug(params.get("slug") || slugFromPathname(window.location.pathname));
+		}
+		if (!projectIdProp)
+			setProjectId(new URLSearchParams(window.location.search).get("projectId") ?? "");
+	}, [projectIdProp, slugProp]);
 
 	return { slug, setSlug, projectId };
+}
+
+// PROJ-487: /wiki?slug=X (and stale slugs that PROJ-483 redirects) get sent to the
+// canonical /wiki/:slug path client-side — this build is static output (no per-request
+// server rendering, see AGENTS.md's release-artifact constraint), so a real HTTP 301
+// isn't available here; this is the closest equivalent. `fetchedSlug` is the page's
+// *current* slug from the API response, so a rename redirects straight to the new
+// canonical path instead of chaining through the old one.
+function useLegacyQuerySlugRedirect(fetchedSlug: string | undefined, requestedSlug: string) {
+	useEffect(() => {
+		if (!fetchedSlug) return;
+		const params = new URLSearchParams(window.location.search);
+		const hasLegacyQuery = params.has("slug");
+		const onCanonicalPath = window.location.pathname === `/wiki/${encodeURIComponent(fetchedSlug)}`;
+		if ((hasLegacyQuery || fetchedSlug !== requestedSlug) && !onCanonicalPath) {
+			window.location.replace(`/wiki/${encodeURIComponent(fetchedSlug)}`);
+		}
+	}, [fetchedSlug, requestedSlug]);
 }
 
 function useWikiTree(workspaceSlug: string | undefined, projectId: string) {
@@ -1206,6 +1250,42 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 		contentRef,
 		fetchPage,
 	};
+}
+
+function setMetaTag(attr: "name" | "property", key: string, content: string) {
+	let el = document.head.querySelector<HTMLMetaElement>(`meta[${attr}="${key}"]`);
+	if (!el) {
+		el = document.createElement("meta");
+		el.setAttribute(attr, key);
+		document.head.appendChild(el);
+	}
+	el.setAttribute("content", content);
+}
+
+function excerptOf(content: string, maxLength = 200): string {
+	const plain = content
+		.replace(/```[\s\S]*?```/g, " ")
+		.replace(/[#*_>`[\]()!-]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+	return plain.length > maxLength ? `${plain.slice(0, maxLength).trimEnd()}…` : plain;
+}
+
+// PROJ-487: the static build (see AGENTS.md) can't render per-page <title>/OG tags
+// on the server — there's no per-request render step to do it in — so this updates
+// them client-side once the page has loaded, the closest approximation available.
+function useWikiPageMeta(page: WikiPageData | null) {
+	useEffect(() => {
+		if (!page) return;
+		document.title = `${page.title} — Projektor Wiki`;
+		setMetaTag("property", "og:title", page.title);
+		setMetaTag("property", "og:description", excerptOf(page.content));
+		setMetaTag(
+			"property",
+			"og:url",
+			`${window.location.origin}/wiki/${encodeURIComponent(page.slug)}`
+		);
+	}, [page]);
 }
 
 function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTMLDivElement>) {
@@ -1710,7 +1790,7 @@ function createWikiActions(args: {
 		setToc([]);
 		setSlug(s);
 		cancelMove();
-		history.pushState(null, "", `?slug=${encodeURIComponent(s)}`);
+		history.pushState(null, "", s ? `/wiki/${encodeURIComponent(s)}` : "/wiki");
 	}
 
 	function startCreate(parentId: string | null = null) {
@@ -1734,7 +1814,7 @@ function createWikiActions(args: {
 			});
 			setPage(null);
 			setSlug("");
-			history.pushState(null, "", window.location.pathname);
+			history.pushState(null, "", "/wiki");
 			await fetchTree();
 		} catch (e) {
 			alert(`Delete failed: ${String(e)}`);
@@ -1966,9 +2046,13 @@ function buildArticleProps(article: {
 	};
 }
 
-export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Props) {
+export default function WikiPage({
+	workspaceSlug,
+	projectId: projectIdProp,
+	slug: slugProp,
+}: Props) {
 	const gate = useAccessGate(workspaceSlug);
-	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp);
+	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp, slugProp);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
 	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(
 		workspaceSlug,
@@ -1976,6 +2060,8 @@ export default function WikiPage({ workspaceSlug, projectId: projectIdProp }: Pr
 	);
 
 	const pageData = useWikiPageData(workspaceSlug, slug);
+	useLegacyQuerySlugRedirect(pageData.page?.slug, slug);
+	useWikiPageMeta(pageData.page);
 	const { toc, setToc, activeHeadingId } = useTableOfContents(pageData.page, pageData.contentRef);
 	const attach = useWikiAttachments(workspaceSlug, pageData.page);
 	const editState = useWikiEditing(

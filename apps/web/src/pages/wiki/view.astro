@@ -1,0 +1,12 @@
+---
+import Base from '../../layouts/Base.astro';
+import WikiPage from '../../islands/WikiPage';
+
+// Slug is read from the URL path at runtime by the island (static output cannot use
+// dynamic routes) — this is the shell the Worker's pretty-URL fallback serves for
+// /wiki/:slug (see apps/api/src/index.ts), mirroring issues/view.astro.
+const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
+---
+<Base title="Wiki — Projektor">
+  <WikiPage client:load workspaceSlug={workspaceSlug} />
+</Base>
