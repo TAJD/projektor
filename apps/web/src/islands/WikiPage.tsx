@@ -1720,7 +1720,8 @@ function WikiMainContent(props: {
 function slugFromPathname(pathname: string): string {
 	const match = /^\/wiki\/([^/]+)\/?$/.exec(pathname);
 	if (!match) return "";
-	return safeDecodeURIComponent(match[1]);
+	const decoded = safeDecodeURIComponent(match[1]);
+	return decoded ?? "";
 }
 
 function useWikiUrlState(projectIdProp: string | undefined, slugProp: string | undefined) {
