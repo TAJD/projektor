@@ -1679,7 +1679,14 @@ function WikiMainContent(props: {
 // convention IssueDetail already uses for /projects/:key/issues/:n/*.
 function slugFromPathname(pathname: string): string {
 	const match = /^\/wiki\/([^/]+)\/?$/.exec(pathname);
-	return match ? decodeURIComponent(match[1]) : "";
+	if (!match) return "";
+	// PROJ-512: a malformed percent-escape (e.g. `/wiki/100%`) makes decodeURIComponent
+	// throw — treat that as "no slug" rather than crashing the island.
+	try {
+		return decodeURIComponent(match[1]);
+	} catch {
+		return "";
+	}
 }
 
 function useWikiUrlState(projectIdProp: string | undefined, slugProp: string | undefined) {

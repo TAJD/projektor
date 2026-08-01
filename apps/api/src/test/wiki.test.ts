@@ -1094,6 +1094,30 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(res.status).toBe(400);
 	});
 
+	it("POST /api/wiki rejects a slug containing '/' (PROJ-517, 400)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Nested", content: "v1", slug: "a/b" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("PUT /api/wiki/:slug rejects renaming to a slug containing '/' (PROJ-517, 400)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Delta", content: "d" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/delta", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "a/b" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
 	it("POST /api/wiki rejects the reserved slug 'index' (PROJ-487, 400)", async () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",

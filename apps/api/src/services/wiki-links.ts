@@ -10,7 +10,7 @@
 // don't need a single resolved page so they're self-contained here.
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { wikiPagePath } from "../lib/urls";
+import { safeDecodeURIComponent, wikiPagePath } from "../lib/urls";
 import { ListBrokenWikiLinksInputSchema } from "../schemas/wiki";
 import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
 import { ForbiddenError, ValidationError } from "./errors";
@@ -41,15 +41,11 @@ function extractWikiSlugFromUrl(url: string): string | null {
 	const queryMatch = pathMatch ? null : url.match(/[?&]slug=([^&]+)/);
 	const raw = pathMatch?.[1] ?? queryMatch?.[1];
 	if (!raw) return null;
-	try {
-		// PROJ-510: a malformed percent-escape makes decodeURIComponent throw. This runs
-		// mid-reindex, after the content write and the old wiki_links delete have already
-		// committed, so an uncaught throw leaves the page's links wiped. An undecodable
-		// URL is treated as "not a wiki link" rather than propagating.
-		return decodeURIComponent(raw);
-	} catch {
-		return null;
-	}
+	// PROJ-510: a malformed percent-escape makes decodeURIComponent throw. This runs
+	// mid-reindex, after the content write and the old wiki_links delete have already
+	// committed, so an uncaught throw leaves the page's links wiped. An undecodable
+	// URL is treated as "not a wiki link" rather than propagating.
+	return safeDecodeURIComponent(raw);
 }
 
 export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
