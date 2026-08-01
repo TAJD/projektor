@@ -688,9 +688,13 @@ export const wikiTools: MCPTool[] = [
 			"Restore a trashed wiki page by ID (not slug — a slug is only unique among live " +
 			"pages, so more than one trashed page can share the same now-recycled slug; use " +
 			"list_wiki_trash to find the ID). Requires the same permission as delete_wiki_page. " +
-			"Rejected with a structured conflict if another live page has since taken the " +
-			"page's slug — rename that page first. The restored page's parent may itself still " +
-			"be trashed; if so the page appears as a root until the parent is also restored.",
+			"If this page was cascade-trashed together with descendants, the whole subtree is " +
+			"restored as one batch — the response's restoredCount reports how many pages came " +
+			"back. Rejected with a structured conflict (no partial restore) if the ID's own " +
+			"slug OR any descendant's slug has since been taken by another live page — the " +
+			"conflict names the colliding slug; rename that page first, then retry. The " +
+			"restored page's parent may itself still be trashed; if so the page appears as a " +
+			"root until the parent is also restored.",
 		inputSchema: {
 			type: "object",
 			required: ["id"],

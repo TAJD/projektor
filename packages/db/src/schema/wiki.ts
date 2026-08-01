@@ -49,6 +49,12 @@ export const wikiPages = sqliteTable(
 		// wiki_watchers, wiki_drafts, wiki_fts) now waits until purgeExpiredWikiPages
 		// actually removes the row, 30+ days later (services/wiki.ts).
 		deletedAt: integer("deleted_at"),
+		// PROJ-496 follow-up: identifies which deleteWikiPage call trashed this page —
+		// every page in one cascade-trash batch shares the same value, a lone non-cascade
+		// trash gets its own unique value. Disambiguates cascade-restore batch membership
+		// without relying on deletedAt timestamp equality, which collides when two
+		// independent trashes land in the same wall-clock second.
+		trashBatchId: text("trash_batch_id"),
 	},
 	(t) => ({
 		wsSlugIdx: index("wiki_pages_workspace_slug_idx").on(t.workspaceId, t.slug),
@@ -74,6 +80,8 @@ export const wikiPages = sqliteTable(
 			t.workspaceId,
 			t.deletedAt
 		),
+		// PROJ-496 follow-up: collectCascadeTrashedDescendantIds walks this per batch id.
+		trashBatchIdIdx: index("wiki_pages_trash_batch_id_idx").on(t.workspaceId, t.trashBatchId),
 	})
 );
 

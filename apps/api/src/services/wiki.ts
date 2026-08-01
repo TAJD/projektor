@@ -1758,19 +1758,21 @@ async function collectDescendantIds(
 	return descendants;
 }
 
-// PROJ-496: mirror of collectDescendantIds for the undelete path — walks parent_id
-// children that are IN THE TRASH and share the exact same deleted_at stamp as the
-// root being restored (deleteWikiPage's cascade branch stamps the whole subtree with
-// one `now` value in a single batch). Restricting to the same timestamp is what keeps
-// this from also restoring a descendant that was independently trashed at some other
-// time — that page stays in the trash, same as collectDescendantIds leaves it out of
-// a subsequent cascade delete.
+// PROJ-496 follow-up: mirror of collectDescendantIds for the undelete path — walks
+// parent_id children that are IN THE TRASH and share the exact same trash_batch_id as
+// the root being restored (deleteWikiPage's cascade branch stamps the whole subtree
+// with one batch id in a single call). Batch id — not deleted_at — is what identifies
+// "trashed together": two independent single-page trashes can land in the same
+// wall-clock second and would otherwise be mistaken for one cascade batch. A
+// descendant trashed independently (different batch id) is left out, same as
+// collectDescendantIds leaves it out of a subsequent cascade delete.
 async function collectCascadeTrashedDescendantIds(
 	db: D1Database,
 	rootId: string,
 	workspaceId: string,
-	deletedAt: number
+	trashBatchId: string | null
 ): Promise<string[]> {
+	if (trashBatchId === null) return [];
 	const orm = drizzle(db, { schema });
 	const descendants: string[] = [];
 	let frontier = [rootId];
@@ -1783,7 +1785,7 @@ async function collectCascadeTrashedDescendantIds(
 					and(
 						inArray(schema.wikiPages.parentId, chunk),
 						eq(schema.wikiPages.workspaceId, workspaceId),
-						eq(schema.wikiPages.deletedAt, deletedAt)
+						eq(schema.wikiPages.trashBatchId, trashBatchId)
 					)
 				)
 		);
@@ -1884,11 +1886,13 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 
 	if (cascade) {
 		// PROJ-496: moves the WHOLE subtree to trash as a single unit — every id here gets
-		// the same deleted_at stamp, so undeleting the root later doesn't leave descendants
-		// behind (undeleting a descendant independently is still possible, see
-		// undeleteWikiPage's "orphan-in-trash" note).
+		// the same deleted_at AND trash_batch_id stamp, so undeleting the root later doesn't
+		// leave descendants behind (undeleting a descendant independently is still possible,
+		// see undeleteWikiPage's "orphan-in-trash" note). trash_batch_id (not deleted_at) is
+		// what identifies batch membership — see collectCascadeTrashedDescendantIds.
 		const descendantIds = await collectDescendantIds(ctx.db, page.id, ctx.workspaceId);
 		const allIds = [page.id, ...descendantIds];
+		const trashBatchId = crypto.randomUUID();
 		// PROJ-485: read before the trash stamp — not that it would change (soft delete
 		// doesn't touch wiki_links), but kept for parity with the pre-R14 read-before-write
 		// ordering and because a future purge racing this call shouldn't matter either way.
@@ -1927,7 +1931,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		await inChunks(allIds, async (chunk) => {
 			await orm
 				.update(schema.wikiPages)
-				.set({ deletedAt: now })
+				.set({ deletedAt: now, trashBatchId })
 				.where(inArray(schema.wikiPages.id, chunk));
 			return [];
 		});
@@ -1963,7 +1967,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 	}
 	await orm
 		.update(schema.wikiPages)
-		.set({ deletedAt: now })
+		.set({ deletedAt: now, trashBatchId: crypto.randomUUID() })
 		.where(eq(schema.wikiPages.id, page.id));
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
@@ -1986,11 +1990,13 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 //     root in list/tree views until its parent is also undeleted — the same "orphan"
 //     rendering getWikiTree already does for any page whose parent isn't in the current
 //     result set (map.has() check), so this needs no special-casing there.
-//   - Slug reuse: the page's slug is re-checked against LIVE pages only (assertSlugAvailable,
-//     which now filters deleted_at IS NULL) and rejected with a structured ConflictError
-//     if a new page has since taken it — the caller must rename the new page (or the
-//     page being undeleted, via update_wiki_page, which isn't possible until it's live
-//     again) to resolve the collision.
+//   - Slug reuse: every page in the restore batch (root AND every descendant) has its
+//     slug re-checked against LIVE pages only (assertSlugAvailable, which now filters
+//     deleted_at IS NULL) and rejected with a structured ConflictError naming the
+//     colliding slug if a new page has since taken it — the caller must rename the new
+//     page (or the page being undeleted, via update_wiki_page, which isn't possible
+//     until it's live again) to resolve the collision. No partial restore happens: the
+//     whole batch is checked before any row is updated.
 export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 	const idCheck = IdSchema.safeParse(id);
 	if (!idCheck.success)
@@ -2006,6 +2012,7 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 			parentId: schema.wikiPages.parentId,
 			isTemplate: schema.wikiPages.isTemplate,
 			deletedAt: schema.wikiPages.deletedAt,
+			trashBatchId: schema.wikiPages.trashBatchId,
 		})
 		.from(schema.wikiPages)
 		.where(and(eq(schema.wikiPages.id, id), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
@@ -2016,26 +2023,56 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 	}
 
 	await requireWikiDelete(ctx, page.projectId);
-	await assertSlugAvailable(orm, ctx.workspaceId, page.slug, page.id);
 
-	// PROJ-496: restore the whole cascade-trashed subtree, not just the root — a page
-	// trashed via deleteWikiPage's cascade branch stamps every descendant with the same
-	// deleted_at, so walking descendants that share that exact stamp recovers exactly
-	// the batch that was trashed together (see collectCascadeTrashedDescendantIds).
-	// Independently-trashed descendants (a different deleted_at) are left alone.
+	// PROJ-496 follow-up: restore the whole cascade-trashed subtree, not just the root —
+	// a page trashed via deleteWikiPage's cascade branch stamps every descendant with the
+	// same trash_batch_id, so walking descendants that share that exact id recovers
+	// exactly the batch that was trashed together (see collectCascadeTrashedDescendantIds).
+	// Independently-trashed descendants (a different batch id) are left alone.
 	const descendantIds = await collectCascadeTrashedDescendantIds(
 		ctx.db,
 		page.id,
 		ctx.workspaceId,
-		page.deletedAt
+		page.trashBatchId
 	);
 	const allIds = [page.id, ...descendantIds];
+
+	const descendantRows =
+		descendantIds.length > 0
+			? await inChunks(descendantIds, (chunk) =>
+					orm
+						.select({
+							id: schema.wikiPages.id,
+							slug: schema.wikiPages.slug,
+							title: schema.wikiPages.title,
+							isTemplate: schema.wikiPages.isTemplate,
+						})
+						.from(schema.wikiPages)
+						.where(
+							and(
+								inArray(schema.wikiPages.id, chunk),
+								eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+							)
+						)
+				)
+			: [];
+
+	// PROJ-496 follow-up: every id in the cascade batch must clear the slug check, not
+	// just the root — the partial-unique slug index only enforces uniqueness among LIVE
+	// pages, so a descendant's slug can have been taken by an unrelated new page while
+	// the whole subtree sat in the trash. Checking only the root let that case fall
+	// through to a raw SQLite constraint violation on the batch UPDATE below (a 500)
+	// instead of the structured ConflictError the design here promises.
+	await assertSlugAvailable(orm, ctx.workspaceId, page.slug, page.id);
+	for (const descendant of descendantRows) {
+		await assertSlugAvailable(orm, ctx.workspaceId, descendant.slug, descendant.id);
+	}
 
 	const now = Math.floor(Date.now() / 1000);
 	await inChunks(allIds, async (chunk) => {
 		await orm
 			.update(schema.wikiPages)
-			.set({ deletedAt: null, updatedAt: now, updatedById: ctx.userId })
+			.set({ deletedAt: null, trashBatchId: null, updatedAt: now, updatedById: ctx.userId })
 			.where(inArray(schema.wikiPages.id, chunk));
 		return [];
 	});
@@ -2065,6 +2102,12 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 			title: page.title,
 			action: "updated",
 		});
+	}
+	// PROJ-496 follow-up: mirrors deleteWikiPage's cascade branch notifying descendant
+	// watchers on trash — without this, someone watching a descendant directly hears
+	// about the delete but never a matching "restored" event on cascade undelete.
+	if (descendantRows.length > 0) {
+		await notifyCascadeDescendantWatchers(ctx, descendantRows, "updated");
 	}
 
 	return {

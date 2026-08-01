@@ -295,9 +295,14 @@ async function insertNotifications(
 // whose watch row points AT one of the descendants matches only that descendant — without
 // this they'd be told nothing at all and then have their watch row removed underneath
 // them. One notification per (watcher, deleted descendant they watched).
+//
+// PROJ-496 follow-up: also used by undeleteWikiPage's cascade-restore path (action:
+// "updated") so a descendant watcher hears about the restore too, mirroring the delete
+// side — otherwise they'd get a "deleted" event with no matching "restored" one.
 export async function notifyCascadeDescendantWatchers(
 	ctx: ServiceCtx,
-	descendants: { id: string; slug: string; title: string; isTemplate: boolean }[]
+	descendants: { id: string; slug: string; title: string; isTemplate: boolean }[],
+	action: "created" | "updated" | "deleted" = "deleted"
 ): Promise<void> {
 	const pages = descendants.filter((p) => !p.isTemplate);
 	if (pages.length === 0) return;
@@ -328,7 +333,7 @@ export async function notifyCascadeDescendantWatchers(
 				pageId: page.id,
 				slug: page.slug,
 				title: page.title,
-				action: "deleted" as const,
+				action,
 			};
 		})
 		.filter((e): e is NonNullable<typeof e> => e !== null);

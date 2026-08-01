@@ -52,6 +52,7 @@ import m0048 from "../../../../packages/db/migrations/0048_wiki_watchers.sql?raw
 import m0049 from "../../../../packages/db/migrations/0049_wiki_drafts.sql?raw";
 import m0050 from "../../../../packages/db/migrations/0050_wiki_slug_slash_backfill.sql?raw";
 import m0051 from "../../../../packages/db/migrations/0051_wiki_trash.sql?raw";
+import m0052 from "../../../../packages/db/migrations/0052_wiki_trash_batch_id.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -106,4 +107,5 @@ export const MIGRATIONS = [
 	m0049,
 	m0050,
 	m0051,
+	m0052,
 ];

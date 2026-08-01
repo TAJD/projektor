@@ -4438,6 +4438,40 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		expect(stillThere?.c).toBe(1);
 	});
 
+	it("a cascade undelete notifies someone watching a DESCENDANT directly (PROJ-496 follow-up: symmetric with cascade delete)", async () => {
+		const parent = await createPage("cascade-restore-root", "Cascade Restore Root", "content");
+		const child = await createChildPage(
+			"cascade-restore-kid",
+			"Cascade Restore Kid",
+			"child",
+			parent.id
+		);
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${child.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+
+		const delRes = await req(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(delRes.status).toBe(200);
+
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${parent.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(200);
+
+		const restoreNotifs = (await notifications(watcher.token)).filter(
+			(n) => n.action === "updated"
+		);
+		expect(restoreNotifs.length).toBe(1);
+		expect(restoreNotifs[0]).toMatchObject({ pageId: child.id, slug: "cascade-restore-kid" });
+	});
+
 	it("unreadOnly=false / watchedOnly=false are honored as false, not coerced true", async () => {
 		const page = await createPage("bool-param", "Bool Param", "content");
 		const watcher = await seedWatcher();
@@ -5406,19 +5440,49 @@ describe("Wiki trash (PROJ-496)", () => {
 		}
 	});
 
-	it("undeleting a cascade-trashed root does NOT restore a descendant that was independently trashed earlier", async () => {
+	it("undeleting a cascade-trashed root 409s when a descendant's slug was reclaimed while trashed, instead of a raw 500", async () => {
+		const parent = await createPage("Cascade Undelete Conflict Parent", "content");
+		const child = await createPage("Cascade Undelete Conflict Child", "content", {
+			parentId: parent.id,
+		});
+
+		await trashPage(parent.slug, true);
+
+		// A brand-new page claims the now-freed child slug while the subtree is trashed.
+		const reclaimed = await createPage("Cascade Undelete Conflict Reclaimed", "content", {
+			slug: child.slug,
+		});
+		expect(reclaimed.slug).toBe(child.slug);
+
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${parent.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(409);
+		const body = (await undeleteRes.json()) as { error?: string; message?: string };
+		const message = body.error ?? body.message ?? "";
+		expect(message).toContain(child.slug);
+
+		// Nothing in the batch should have been restored — the whole check runs before
+		// any row is updated.
+		const parentRow = await env.DB.prepare("SELECT deleted_at FROM wiki_pages WHERE id = ?")
+			.bind(parent.id)
+			.first<{ deleted_at: number | null }>();
+		expect(parentRow?.deleted_at).not.toBeNull();
+	});
+
+	it("undeleting a cascade-trashed root does NOT restore a descendant that was independently trashed in the same batch-collision window", async () => {
+		// Regression test for the trash_batch_id disambiguation (PROJ-496 follow-up):
+		// trashing the child alone and then cascade-trashing the parent right after, with
+		// no artificial time offset, used to be indistinguishable from "trashed in one
+		// cascade batch" when both landed on the same deleted_at second. trash_batch_id
+		// gives each deleteWikiPage call its own identity regardless of timestamp, so this
+		// now correctly leaves the independently-trashed child alone.
 		const parent = await createPage("Cascade Undelete Mixed Parent", "content");
 		const child = await createPage("Cascade Undelete Mixed Child", "content", {
 			parentId: parent.id,
 		});
 		await trashPage(child.slug);
-		// Force the independent trash timestamp to differ from the batch stamp the cascade
-		// delete below will apply — same-second test execution would otherwise give both
-		// operations an identical `deleted_at` and defeat the point of this test.
-		await env.DB.prepare("UPDATE wiki_pages SET deleted_at = ? WHERE id = ?")
-			.bind(Math.floor(Date.now() / 1000) - 3600, child.id)
-			.run();
-
 		await trashPage(parent.slug, true);
 
 		const undeleteRes = await req(`http://localhost/api/wiki/trash/${parent.id}/undelete`, {
