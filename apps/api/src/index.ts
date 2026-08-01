@@ -378,7 +378,11 @@ async function sha256hex(s: string): Promise<string> {
 // ctx — there's no authenticated user in a cron invocation, so userId is a placeholder
 // (purgeExpiredWikiPages never reads it). A failure purging one workspace is logged and
 // does not stop the sweep over the rest.
-export async function scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+export async function scheduled(
+	_event: ScheduledEvent,
+	env: Env,
+	ctx: ExecutionContext
+): Promise<void> {
 	ctx.waitUntil(purgeAllWorkspacesExpiredWikiPages(env));
 }
 
