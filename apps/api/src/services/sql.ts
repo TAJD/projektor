@@ -9,6 +9,19 @@
 // `inChunks` so each underlying query stays under the cap.
 const D1_BOUND_PARAM_LIMIT = 100;
 
+// PROJ-518: shared by services/issues.ts (issues_fts) and services/wiki.ts (wiki_fts) —
+// FTS5 MATCH treats bare input as query syntax (AND/OR/NOT, column filters, prefix "*",
+// etc). Wrap each whitespace-separated token in double quotes so raw user text is always
+// treated as a literal phrase search, never interpreted as FTS query syntax.
+export function sanitizeFtsQuery(q: string): string {
+	return q
+		.trim()
+		.split(/\s+/)
+		.filter((t) => Boolean(t) && /\w/.test(t))
+		.map((t) => `"${t.replace(/"/g, '""')}"`)
+		.join(" ");
+}
+
 // Conservative chunk size: leaves ~10 parameters of headroom for the other predicates in
 // the same query (a workspaceId filter, status filters, etc.). Every current caller binds
 // fewer than 10 extra params, so 90 is safe; shrink it if a query ever needs more.

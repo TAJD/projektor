@@ -427,6 +427,11 @@ export interface WikiChangeEvent {
 	projectId: string | null;
 	actorId: string | null;
 	createdAt: number;
+	// PROJ-526: for a cascade delete's root event only — ids of descendant pages that were
+	// deleted alongside it (root id itself excluded, it's already `pageId`). null for
+	// every non-cascade event, so a poller building a local mirror can evict these ids
+	// without needing a separate activity row per descendant.
+	deletedPageIds: string[] | null;
 }
 
 // PROJ-493: for created/updated events, current page state (slug/title/projectId) is
@@ -440,12 +445,18 @@ function extractDeletedPageInfo(diff: Record<string, unknown> | null): {
 	slug: string | null;
 	title: string | null;
 	projectId: string | null;
+	deletedPageIds: string[] | null;
 } {
-	if (!diff) return { slug: null, title: null, projectId: null };
+	if (!diff) return { slug: null, title: null, projectId: null, deletedPageIds: null };
 	return {
 		slug: typeof diff.slug === "string" ? diff.slug : null,
 		title: typeof diff.title === "string" ? diff.title : null,
 		projectId: typeof diff.projectId === "string" ? diff.projectId : null,
+		// PROJ-526: only present on a cascade root's diff (services/wiki.ts#deleteWikiPage);
+		// includes the root's own id, which callers building a mirror should already have.
+		deletedPageIds: Array.isArray(diff.deletedPageIds)
+			? diff.deletedPageIds.filter((id): id is string => typeof id === "string")
+			: null,
 	};
 }
 
@@ -623,6 +634,7 @@ export async function listWikiChanges(
 			projectId: eventProjectId,
 			actorId: r.actorId,
 			createdAt: r.createdAt,
+			deletedPageIds: deleted?.deletedPageIds ?? null,
 		});
 	}
 

@@ -26,7 +26,7 @@ import {
 } from "./access";
 import { recordActivity } from "./activity";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
-import { inChunks } from "./sql";
+import { inChunks, sanitizeFtsQuery } from "./sql";
 import type { ServiceCtx } from "./types";
 import { deleteWikiDraftsForPages } from "./wiki-drafts";
 import { computeFreshness } from "./wiki-freshness";
@@ -38,10 +38,10 @@ import {
 } from "./wiki-frontmatter";
 import {
 	backlinksForResolvedPage,
+	buildWikiLinksReindexStatements,
 	clearIncomingLinkTargets,
 	countBacklinkSources,
 	deleteWikiLinksForPages,
-	reindexWikiLinks,
 	type WikiBacklink,
 } from "./wiki-links";
 import {
@@ -356,13 +356,17 @@ function tagsFilterCondition(tags: string[]) {
 	)}))`;
 }
 
-// PROJ-489 (R7): a page is "stale" for maintenance-queue/ranking-demotion purposes when
-// EITHER an explicit `status: stale|deprecated` is set, OR a `verify_interval` was
-// declared and the page is either never-verified or overdue. This is the SQL-side
-// mirror of computeFreshness's stale/unverified branches (services/wiki-freshness.ts) —
-// kept in lockstep by hand since this needs to run inside SQL (ORDER BY / WHERE) rather
-// than per-row in JS. `now` is passed in as a bound parameter (not `strftime('%s','now')`)
-// so ranking and the freshness computed for the same response agree on one instant.
+// PROJ-489 (R7): a page is "stale" for maintenance-queue purposes when EITHER an explicit
+// `status: stale|deprecated` is set, OR a `verify_interval` was declared and the page is
+// either never-verified or overdue. This is the SQL-side mirror of computeFreshness's
+// stale/unverified branches (services/wiki-freshness.ts) — kept in lockstep by hand since
+// this needs to run inside SQL (ORDER BY / WHERE) rather than per-row in JS. `now` is
+// passed in as a bound parameter (not `strftime('%s','now')`) so ranking and the
+// freshness computed for the same response agree on one instant.
+//
+// PROJ-515: only used by listStaleWikiPages now — searchWiki's ranking-demotion tier
+// deliberately diverged from this (see its inline ORDER BY CASE) to stop penalizing
+// never-verified pages in search results while still surfacing them here for maintenance.
 function staleWikiPageCondition(now: number) {
 	return sql`(
 		${schema.wikiPages.status} IN ('stale', 'deprecated')
@@ -400,6 +404,12 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 	}
 	const tagsCond = tagsFilterCondition(parsed.data.tags ?? []);
 	if (tagsCond) conditions.push(tagsCond);
+	// PROJ-525: matches search_wiki/listStaleWikiPages's is_template=0 exclusion — a
+	// template shouldn't leak into ordinary type/status/tags browsing (e.g. filtering by
+	// type=runbook alongside "Runbook Template").
+	if (!parsed.data.includeTemplates) {
+		conditions.push(eq(schema.wikiPages.isTemplate, false));
+	}
 	// PROJ-311: hide project-scoped pages whose project the user isn't granted
 	// (workspace-level pages, projectId null, stay visible to everyone).
 	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
@@ -440,19 +450,6 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug) }));
 }
 
-// PROJ-486: FTS5 MATCH treats bare input as query syntax (AND/OR/NOT, column filters,
-// prefix "*", etc). Wrap each whitespace-separated token in double quotes so raw user
-// text is always treated as a literal phrase search, mirroring services/issues.ts's
-// sanitizeFtsQuery for issues_fts.
-function sanitizeWikiFtsQuery(q: string): string {
-	return q
-		.trim()
-		.split(/\s+/)
-		.filter((t) => Boolean(t) && /\w/.test(t))
-		.map((t) => `"${t.replace(/"/g, '""')}"`)
-		.join(" ");
-}
-
 // PROJ-486: title is weighted well above content and tags so a title match ranks
 // above a match buried deep in body content — bm25() weight args are positional,
 // one per wiki_fts column (page_id, workspace_id, title, content, tags); the first
@@ -476,7 +473,7 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { query, limit, offset, projectId, updatedSince, type, status, tags } = parsed.data;
 
-	const ftsQuery = sanitizeWikiFtsQuery(query);
+	const ftsQuery = sanitizeFtsQuery(query);
 	if (!ftsQuery) return [];
 
 	if (projectId) {
@@ -535,10 +532,19 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 		params.push(...tags);
 	}
 
-	// PROJ-489 (R7): demote computed-stale/unverified/explicitly-stale-or-deprecated pages
-	// below everything else, THEN rank by bm25 within each tier. `now` is bound once and
-	// reused below for the freshness computed on each returned row, so the ordering and
-	// the displayed freshness state always agree.
+	// PROJ-489 (R7) / PROJ-515: demote computed-stale (verified once, now overdue) and
+	// explicitly stale-or-deprecated pages below everything else, THEN rank by bm25
+	// within each tier. `now` is bound once and reused below for the freshness computed
+	// on each returned row, so the ordering and the displayed freshness state always agree.
+	//
+	// PROJ-515: deliberately does NOT demote "unverified" (verify_interval declared,
+	// verified_at still null) — a freshly authored page that opts into verification
+	// tracking shouldn't rank worse than a legacy page carrying no frontmatter at all
+	// just for declaring an interval. This is now intentionally NARROWER than
+	// staleWikiPageCondition (used by listStaleWikiPages, which keeps "unverified" — the
+	// maintenance queue is the right place to nag about it). The two conditions were kept
+	// in lockstep by design until this decision; any future change to one should
+	// re-examine whether the other should follow.
 	const now = Math.floor(Date.now() / 1000);
 	// PROJ-486: bm25() alone ties on equal-rank rows, which makes LIMIT/OFFSET
 	// paging non-deterministic (duplicate/skip results across pages) — break
@@ -547,7 +553,8 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	              p.status IN ('stale', 'deprecated')
 	              OR (
 	                p.verify_interval IS NOT NULL
-	                AND (p.verified_at IS NULL OR (p.verified_at + p.verify_interval * 86400) <= ?)
+	                AND p.verified_at IS NOT NULL
+	                AND (p.verified_at + p.verify_interval * 86400) <= ?
 	              )
 	            ) THEN 1 ELSE 0 END),
 	          bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}), p.id LIMIT ? OFFSET ?`;
@@ -756,28 +763,45 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	// invalid frontmatter throws before any row is written (never a partial create).
 	const meta = parseWikiFrontmatter(content ?? "");
 
+	const insertStatement = toD1Statement(
+		ctx,
+		orm
+			.insert(schema.wikiPages)
+			.values({
+				id,
+				workspaceId: ctx.workspaceId,
+				projectId: projectId ?? null,
+				slug,
+				title,
+				content: content ?? "",
+				parentId: parentId ?? null,
+				createdById: ctx.userId,
+				updatedById: ctx.userId,
+				createdAt: now,
+				updatedAt: now,
+				type: meta.type,
+				tags: meta.tags,
+				status: meta.status,
+				verifiedAt: meta.verifiedAt,
+				verifiedBy: meta.verifiedBy,
+				owners: meta.owners,
+				verifyInterval: meta.verifyInterval,
+				isTemplate: meta.isTemplate,
+			})
+			.toSQL()
+	);
+	// PROJ-485: parse [[Target]]/URL links out of the new page's content into wiki_links.
+	// PROJ-511: resolution (the async reads inside this call) happens before any of these
+	// statements exist, so by the time the batch below runs there's nothing left to throw
+	// mid-write — the content row, its FTS mirror, and its wiki_links all land atomically.
+	const linkStatements = await buildWikiLinksReindexStatements(ctx, orm, id, content ?? "");
+
 	try {
-		await orm.insert(schema.wikiPages).values({
-			id,
-			workspaceId: ctx.workspaceId,
-			projectId: projectId ?? null,
-			slug,
-			title,
-			content: content ?? "",
-			parentId: parentId ?? null,
-			createdById: ctx.userId,
-			updatedById: ctx.userId,
-			createdAt: now,
-			updatedAt: now,
-			type: meta.type,
-			tags: meta.tags,
-			status: meta.status,
-			verifiedAt: meta.verifiedAt,
-			verifiedBy: meta.verifiedBy,
-			owners: meta.owners,
-			verifyInterval: meta.verifyInterval,
-			isTemplate: meta.isTemplate,
-		});
+		await ctx.db.batch([
+			insertStatement,
+			buildFtsInsertStatement(ctx, id, title, content ?? "", meta.tags),
+			...linkStatements,
+		]);
 	} catch (e) {
 		// PROJ-483: assertSlugAvailable-then-insert isn't atomic — a concurrent create
 		// can win the race between the check and this insert. Surface the resulting
@@ -787,17 +811,6 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		}
 		throw e;
 	}
-	// PROJ-488: tags is now populated from frontmatter (space-joined — wiki_fts's default
-	// unicode61 tokenizer splits on non-alphanumeric, so a comma join would tokenize
-	// identically, but space matches how title/content are naturally tokenized).
-	await ctx.db
-		.prepare(
-			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
-		)
-		.bind(id, ctx.workspaceId, title, content ?? "", meta.tags.join(" "))
-		.run();
-	// PROJ-485: parse [[Target]]/URL links out of the new page's content into wiki_links.
-	await reindexWikiLinks(ctx, orm, id, content ?? "");
 	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
 	// PROJ-493 (R11): a subtree watcher on an ancestor is notified of a page newly
 	// created underneath them (there's no possible DIRECT watch on `id` yet — it didn't
@@ -883,6 +896,30 @@ async function resolveBaseContent(
 		.bind(pageId, baseRow.createdAt, baseRow.createdAt, baseRow.rowid)
 		.first<{ content: string }>();
 	return nextRow?.content ?? currentContent;
+}
+
+// PROJ-524: append_to_page skips the section-conflict check entirely (append is
+// commutative — see patchWikiPage's comment on why), but a non-null baseRevisionId
+// still needs to actually belong to this page, same as the section ops' base-content
+// lookup (resolveBaseContent) rejects a foreign/garbage id. Unlike resolveBaseContent,
+// this never needs the base content itself (append never diffs against it), so it's a
+// plain existence check rather than resolving a snapshot.
+async function assertRevisionBelongsToPage(
+	db: D1Database,
+	pageId: string,
+	baseRevisionId: string | null
+): Promise<void> {
+	if (baseRevisionId === null) return;
+	const baseRow = await db
+		.prepare("SELECT id FROM wiki_revisions WHERE id = ? AND page_id = ?")
+		.bind(baseRevisionId, pageId)
+		.first<{ id: string }>();
+	if (!baseRow) {
+		throw new ValidationError({
+			formErrors: ["baseRevisionId does not belong to this page"],
+			fieldErrors: {},
+		});
+	}
 }
 
 // PROJ-484: LCS-based line diff. dp is O(n*m) time/memory, which is fine for typical
@@ -991,41 +1028,73 @@ export function buildUnifiedDiff(baseContent: string, currentContent: string): s
 	return `--- base\n+++ current\n${hunks.join("\n")}`;
 }
 
-// PROJ-486: mirrors issues.ts's reindexIssueFts — delete-then-reinsert the wiki_fts
-// mirror row after a title/content edit. Re-reads the page rather than trusting the
-// caller's partial `data` so a title-only or content-only update still reindexes the
-// unchanged field's current value, not a stale/empty one.
-async function reindexWikiFts(
+// PROJ-511: converts an un-awaited drizzle query builder (insert/update/delete) into a
+// raw D1PreparedStatement, so it can sit in the same ctx.db.batch() array as hand-written
+// SQL (wiki_fts/wiki_links) — batch() is D1's native API and only accepts
+// D1PreparedStatement, not drizzle's own query builders.
+function toD1Statement(
 	ctx: ServiceCtx,
-	orm: ReturnType<typeof drizzle<typeof schema>>,
+	query: { sql: string; params: unknown[] }
+): D1PreparedStatement {
+	return ctx.db.prepare(query.sql).bind(...query.params);
+}
+
+// PROJ-486/PROJ-511: builds (without executing) the INSERT that mirrors a page into
+// wiki_fts. tags is passed in explicitly rather than re-read from the DB — callers
+// already know the post-write title/content/tags before any statement runs, since that's
+// what lets these statements sit alongside the content write in one atomic batch.
+function buildFtsInsertStatement(
+	ctx: ServiceCtx,
 	id: string,
-	data: { title?: string; content?: string }
-): Promise<void> {
-	if (data.title === undefined && data.content === undefined) return;
-
-	const current = await orm
-		.select({
-			title: schema.wikiPages.title,
-			content: schema.wikiPages.content,
-			tags: schema.wikiPages.tags,
-		})
-		.from(schema.wikiPages)
-		.where(and(eq(schema.wikiPages.id, id), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
-		.get();
-	if (!current) return;
-
-	await ctx.db
-		.prepare("DELETE FROM wiki_fts WHERE page_id = ? AND workspace_id = ?")
-		.bind(id, ctx.workspaceId)
-		.run();
-	await ctx.db
+	title: string,
+	content: string,
+	tags: string[]
+): D1PreparedStatement {
+	// PROJ-488: tags is space-joined — wiki_fts's default unicode61 tokenizer splits on
+	// non-alphanumeric, so a comma join would tokenize identically, but space matches how
+	// title/content are naturally tokenized.
+	return ctx.db
 		.prepare(
 			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
 		)
-		// PROJ-488: current.tags already reflects this write — reindexWikiFts runs
-		// after the wikiPages UPDATE below applies (see call site in updateWikiPage).
-		.bind(id, ctx.workspaceId, current.title, current.content, (current.tags ?? []).join(" "))
-		.run();
+		.bind(id, ctx.workspaceId, title, content, tags.join(" "));
+}
+
+// PROJ-486/PROJ-511: mirrors issues.ts's reindexIssueFts — delete-then-reinsert the
+// wiki_fts mirror row after a title/content edit, as a pair of statements meant to run in
+// the same db.batch() as the page's content write (services/wiki.ts#updateWikiPage/
+// createWikiPage/patchWikiPage), not sequentially afterward.
+function buildFtsReindexStatements(
+	ctx: ServiceCtx,
+	id: string,
+	title: string,
+	content: string,
+	tags: string[]
+): D1PreparedStatement[] {
+	return [
+		ctx.db
+			.prepare("DELETE FROM wiki_fts WHERE page_id = ? AND workspace_id = ?")
+			.bind(id, ctx.workspaceId),
+		buildFtsInsertStatement(ctx, id, title, content, tags),
+	];
+}
+
+// PROJ-511: the tags column isn't part of `data` for a title-only update (content
+// undefined, so frontmatter was never reparsed) — read it so the FTS row being rebuilt
+// doesn't lose the page's existing tags. A plain read before any write statement is
+// built, not a read sandwiched between writes, so it carries none of the old
+// read-after-write ordering risk this function used to have.
+async function currentPageTags(
+	orm: ReturnType<typeof drizzle<typeof schema>>,
+	ctx: ServiceCtx,
+	id: string
+): Promise<string[]> {
+	const row = await orm
+		.select({ tags: schema.wikiPages.tags })
+		.from(schema.wikiPages)
+		.where(and(eq(schema.wikiPages.id, id), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
+		.get();
+	return row?.tags ?? [];
 }
 
 // PROJ-486: chunked so a cascade delete of a large subtree stays under D1's 100-bound
@@ -1088,28 +1157,101 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// undefined) has nothing to diff against later, so it doesn't create a revision row
 	// and any `summary` passed alongside a title-only update is silently dropped rather
 	// than stored somewhere with no corresponding snapshot.
+	//
+	// PROJ-520 (deliberate tradeoff, not fixed): since the revision pointer only advances
+	// on a content edit, two concurrent title/parent/slug-only updates that both pass the
+	// same baseRevisionId will both pass the check above and last-write-win — and a
+	// concurrent content writer's conflict check can't see an interleaved metadata-only
+	// change either. Accepted rather than fixed: metadata-only races are rare (today's
+	// only caller is the web UI, which always sends title+content together) and adding a
+	// metadata-revision marker would mean two different "revision" concepts for callers to
+	// reason about. Revisit if an MCP caller that updates title/slug/parent alone in a
+	// concurrent setting turns out to need it.
+	// PROJ-511: every statement below is collected, not awaited, and executed as one
+	// ctx.db.batch() call — the content write, its revision snapshot, its wiki_fts
+	// mirror, and its wiki_links reindex all land atomically. A throw anywhere in the
+	// resolution work above (frontmatter parse, link-target resolution inside
+	// buildWikiLinksReindexStatements) happens before any of these exist, so it can no
+	// longer leave the page updated with a stale/wiped links or FTS row.
+	const statements: D1PreparedStatement[] = [];
+
 	if (content !== undefined) {
 		// PROJ-484: title snapshot is the page's title as of THIS revision (i.e. before
 		// this update applies any new title) — consistent with content, which snapshots
 		// the pre-edit value too. summary is this edit's optional changelog note.
-		await orm.insert(schema.wikiRevisions).values({
-			id: crypto.randomUUID(),
-			pageId: page.id,
-			content: page.content,
-			title: page.title,
-			summary: summary ?? null,
-			authorId: ctx.userId,
-			createdAt: now,
-		});
+		statements.push(
+			toD1Statement(
+				ctx,
+				orm
+					.insert(schema.wikiRevisions)
+					.values({
+						id: crypto.randomUUID(),
+						pageId: page.id,
+						content: page.content,
+						title: page.title,
+						summary: summary ?? null,
+						authorId: ctx.userId,
+						createdAt: now,
+					})
+					.toSQL()
+			)
+		);
 	}
 
 	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug, meta });
+	statements.push(
+		toD1Statement(
+			ctx,
+			orm
+				.update(schema.wikiPages)
+				// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
+				.set(setData as any)
+				.where(eq(schema.wikiPages.id, page.id))
+				.toSQL()
+		)
+	);
+
+	// PROJ-486/PROJ-520: only reindexed when title or content actually changed — a
+	// parentId/slug-only update leaves the FTS mirror row untouched, matching the old
+	// reindexWikiFts's early-return.
+	if (title !== undefined || content !== undefined) {
+		const finalTitle = title ?? page.title;
+		const finalContent = content ?? page.content;
+		const tags = meta !== undefined ? meta.tags : await currentPageTags(orm, ctx, page.id);
+		statements.push(...buildFtsReindexStatements(ctx, page.id, finalTitle, finalContent, tags));
+	}
+	// PROJ-485: outgoing links are derived purely from content — a title/slug/parent-only
+	// update leaves them unchanged, so only reindex when content actually changed.
+	if (content !== undefined) {
+		statements.push(...(await buildWikiLinksReindexStatements(ctx, orm, page.id, content)));
+	}
+
+	if (isRename) {
+		// Upsert: the old slug may already carry a stale redirect from an earlier rename
+		// of some other page — this rename takes ownership of it.
+		statements.push(
+			toD1Statement(
+				ctx,
+				orm
+					.insert(schema.wikiRedirects)
+					.values({
+						id: crypto.randomUUID(),
+						workspaceId: ctx.workspaceId,
+						oldSlug: page.slug,
+						pageId: page.id,
+						createdAt: now,
+					})
+					.onConflictDoUpdate({
+						target: [schema.wikiRedirects.workspaceId, schema.wikiRedirects.oldSlug],
+						set: { pageId: page.id, createdAt: now },
+					})
+					.toSQL()
+			)
+		);
+	}
+
 	try {
-		await orm
-			.update(schema.wikiPages)
-			// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
-			.set(setData as any)
-			.where(eq(schema.wikiPages.id, page.id));
+		await ctx.db.batch(statements);
 	} catch (e) {
 		// PROJ-483: assertSlugAvailable-then-update isn't atomic — a concurrent rename
 		// can win the race between the check and this update. Surface the resulting
@@ -1118,31 +1260,6 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 			throw new ConflictError(`Slug '${slug}' is already in use`);
 		}
 		throw e;
-	}
-
-	await reindexWikiFts(ctx, orm, page.id, { title, content });
-	// PROJ-485: outgoing links are derived purely from content — a title/slug/parent-only
-	// update leaves them unchanged, so only reindex when content actually changed.
-	if (content !== undefined) {
-		await reindexWikiLinks(ctx, orm, page.id, content);
-	}
-
-	if (isRename) {
-		// Upsert: the old slug may already carry a stale redirect from an earlier rename
-		// of some other page — this rename takes ownership of it.
-		await orm
-			.insert(schema.wikiRedirects)
-			.values({
-				id: crypto.randomUUID(),
-				workspaceId: ctx.workspaceId,
-				oldSlug: page.slug,
-				pageId: page.id,
-				createdAt: now,
-			})
-			.onConflictDoUpdate({
-				target: [schema.wikiRedirects.workspaceId, schema.wikiRedirects.oldSlug],
-				set: { pageId: page.id, createdAt: now },
-			});
 	}
 
 	await recordActivity(ctx, {
@@ -1457,6 +1574,7 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 
 	let newContent: string;
 	if (data.op === "append_to_page") {
+		await assertRevisionBelongsToPage(ctx.db, page.id, data.baseRevisionId);
 		newContent = appendToPageEnd(currentContent, data.text);
 	} else {
 		const currentSections = parseHeadingSections(currentContent);
@@ -1520,25 +1638,40 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 	// before the revision insert below — never a partial write.
 	const meta = parseWikiFrontmatter(newContent);
 
-	await orm.insert(schema.wikiRevisions).values({
-		id: crypto.randomUUID(),
-		pageId: page.id,
-		content: page.content,
-		title: page.title,
-		summary: data.summary ?? null,
-		authorId: ctx.userId,
-		createdAt: now,
-	});
+	// PROJ-511: same atomic-batch shape as updateWikiPage — content write, revision
+	// snapshot, FTS mirror, and wiki_links reindex all in one ctx.db.batch() call.
+	const revisionStatement = toD1Statement(
+		ctx,
+		orm
+			.insert(schema.wikiRevisions)
+			.values({
+				id: crypto.randomUUID(),
+				pageId: page.id,
+				content: page.content,
+				title: page.title,
+				summary: data.summary ?? null,
+				authorId: ctx.userId,
+				createdAt: now,
+			})
+			.toSQL()
+	);
 
 	const setData = buildWikiPageUpdateSet(now, ctx.userId, { content: newContent, meta });
-	await orm
-		.update(schema.wikiPages)
-		// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
-		.set(setData as any)
-		.where(eq(schema.wikiPages.id, page.id));
+	const updateStatement = toD1Statement(
+		ctx,
+		orm
+			.update(schema.wikiPages)
+			// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
+			.set(setData as any)
+			.where(eq(schema.wikiPages.id, page.id))
+			.toSQL()
+	);
 
-	await reindexWikiFts(ctx, orm, page.id, { content: newContent });
-	await reindexWikiLinks(ctx, orm, page.id, newContent);
+	const ftsStatements = buildFtsReindexStatements(ctx, page.id, page.title, newContent, meta.tags);
+	const linkStatements = await buildWikiLinksReindexStatements(ctx, orm, page.id, newContent);
+
+	await ctx.db.batch([revisionStatement, updateStatement, ...ftsStatements, ...linkStatements]);
+
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
 		entityId: page.id,
@@ -1638,6 +1771,16 @@ export async function seedDefaultWikiTemplates(
 		createdAt: now,
 		updatedAt: now,
 	});
+	// PROJ-522: unlike the three templates below (search-excluded by is_template=0/1),
+	// this parent page is a real browsable, non-template page — it needs the same
+	// wiki_fts mirror row every other write path maintains (reindexWikiFts), or it's
+	// invisible to search_wiki until someone happens to edit it.
+	await db
+		.prepare(
+			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
+		)
+		.bind(parentId, workspaceId, "Templates", "", "")
+		.run();
 
 	const templates: Array<{ slug: string; title: string; type: string; body: string }> = [
 		{
@@ -1942,7 +2085,15 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 			entityType: "wiki_page",
 			entityId: page.id,
 			action: "deleted",
-			diff: { ...deleteDiffBase, cascade: true, deletedCount: allIds.length },
+			// PROJ-526: descendant ids so a list_wiki_changes poller can evict them from a
+			// local mirror without a per-descendant activity row (which would make project
+			// activity feeds noisier — see the ticket's rationale for this shape).
+			diff: {
+				...deleteDiffBase,
+				cascade: true,
+				deletedCount: allIds.length,
+				deletedPageIds: allIds,
+			},
 		});
 		return { ok: true, deletedCount: allIds.length, linkedByCount };
 	}
