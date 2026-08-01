@@ -49,19 +49,9 @@ function normalizeVerifiedAt(value: unknown): number | null {
 	throw new Error("verified_at must be a date or a unix-seconds number");
 }
 
-// PROJ-488: parses+validates the optional frontmatter block out of a wiki page's raw
-// `content`. `content` itself is left untouched — frontmatter is denormalized into
-// columns purely for filtering; the canonical markdown (frontmatter included) keeps
-// round-tripping through create/update/revisions/diff exactly as before this feature.
-// Invalid YAML or a frontmatter value that fails schema validation throws a
-// ValidationError — this is intentionally never silently ignored or coerced.
-export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
-	const match = FRONTMATTER_RE.exec(content);
-	if (!match) return EMPTY_WIKI_FRONTMATTER;
-
-	let raw: unknown;
+function parseFrontmatterYaml(yamlBlock: string): unknown {
 	try {
-		raw = parseYaml(match[1]);
+		return parseYaml(yamlBlock);
 	} catch {
 		// Never interpolate the third-party YAML parser's own exception message —
 		// it can describe internal parser state, not just the caller's input.
@@ -70,17 +60,9 @@ export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
 			fieldErrors: {},
 		});
 	}
+}
 
-	// An empty `---\n---\n` block parses to null/undefined — treat as "no frontmatter"
-	// rather than an error, since it's an easy no-op state to end up in when editing.
-	if (raw === null || raw === undefined) return EMPTY_WIKI_FRONTMATTER;
-	if (typeof raw !== "object" || Array.isArray(raw)) {
-		throw new ValidationError({
-			formErrors: ["Frontmatter must be a YAML mapping (key: value pairs), not a list or scalar"],
-			fieldErrors: {},
-		});
-	}
-
+function normalizeFrontmatterRecord(raw: object): Record<string, unknown> {
 	const normalized: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
 	if ("verified_at" in normalized) {
 		try {
@@ -92,7 +74,32 @@ export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
 			});
 		}
 	}
+	return normalized;
+}
 
+// PROJ-488: parses+validates the optional frontmatter block out of a wiki page's raw
+// `content`. `content` itself is left untouched — frontmatter is denormalized into
+// columns purely for filtering; the canonical markdown (frontmatter included) keeps
+// round-tripping through create/update/revisions/diff exactly as before this feature.
+// Invalid YAML or a frontmatter value that fails schema validation throws a
+// ValidationError — this is intentionally never silently ignored or coerced.
+export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
+	const match = FRONTMATTER_RE.exec(content);
+	if (!match) return EMPTY_WIKI_FRONTMATTER;
+
+	const raw = parseFrontmatterYaml(match[1]);
+
+	// An empty `---\n---\n` block parses to null/undefined — treat as "no frontmatter"
+	// rather than an error, since it's an easy no-op state to end up in when editing.
+	if (raw === null || raw === undefined) return EMPTY_WIKI_FRONTMATTER;
+	if (typeof raw !== "object" || Array.isArray(raw)) {
+		throw new ValidationError({
+			formErrors: ["Frontmatter must be a YAML mapping (key: value pairs), not a list or scalar"],
+			fieldErrors: {},
+		});
+	}
+
+	const normalized = normalizeFrontmatterRecord(raw);
 	const parsed = WikiFrontmatterSchema.safeParse(normalized);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 

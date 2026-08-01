@@ -737,6 +737,99 @@ async function resolveTemplateContent(ctx: ServiceCtx, templateSlug: string): Pr
 	return stripTemplateFlag(template.content);
 }
 
+// PROJ-517: slugify's charset can't produce "/", but a symbol-only or non-Latin title
+// can still derive an empty or over-length slug — run it through the same SlugSchema
+// the custom-slug path is validated against rather than trusting it. A title that
+// fails this (CJK, emoji-only, etc.) still gets a usable page: fall back to a short
+// opaque slug rather than hard-failing creation, since the title itself (unconstrained
+// by SlugSchema) remains the actual display name.
+function deriveSlugFromTitle(title: string): string {
+	const derivedSlug = SlugSchema.safeParse(slugify(title));
+	return derivedSlug.success ? derivedSlug.data : `page-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function buildCreateWikiPageInsertStatement(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle<typeof schema>>,
+	fields: Readonly<{
+		id: string;
+		projectId: string | null;
+		slug: string;
+		title: string;
+		content: string;
+		parentId: string | null;
+		now: number;
+		meta: ReturnType<typeof parseWikiFrontmatter>;
+	}>
+): D1PreparedStatement {
+	const { id, projectId, slug, title, content, parentId, now, meta } = fields;
+	return toD1Statement(
+		ctx,
+		orm
+			.insert(schema.wikiPages)
+			.values({
+				id,
+				workspaceId: ctx.workspaceId,
+				projectId,
+				slug,
+				title,
+				content,
+				parentId,
+				createdById: ctx.userId,
+				updatedById: ctx.userId,
+				createdAt: now,
+				updatedAt: now,
+				type: meta.type,
+				tags: meta.tags,
+				status: meta.status,
+				verifiedAt: meta.verifiedAt,
+				verifiedBy: meta.verifiedBy,
+				owners: meta.owners,
+				verifyInterval: meta.verifyInterval,
+				isTemplate: meta.isTemplate,
+			})
+			.toSQL()
+	);
+}
+
+// PROJ-483: assertSlugAvailable-then-insert isn't atomic — a concurrent create can win
+// the race between the check and this insert. Surface the resulting unique-index
+// violation as a structured conflict, not a raw 500.
+async function writeCreateWikiPageBatch(
+	ctx: ServiceCtx,
+	statements: readonly D1PreparedStatement[],
+	slug: string
+): Promise<void> {
+	try {
+		await ctx.db.batch(statements as D1PreparedStatement[]);
+	} catch (e) {
+		if (e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
+			throw new ConflictError(`Slug '${slug}' is already in use`);
+		}
+		throw e;
+	}
+}
+
+// PROJ-493 (R11): a subtree watcher on an ancestor is notified of a page newly created
+// underneath them (there's no possible DIRECT watch on `id` yet — it didn't exist until
+// this insert). Template pages never notify (see wiki-watchers.ts).
+async function finalizeWikiPageCreate(
+	ctx: ServiceCtx,
+	fields: Readonly<{
+		id: string;
+		parentId: string | null;
+		slug: string;
+		title: string;
+		meta: ReturnType<typeof parseWikiFrontmatter>;
+	}>
+): Promise<void> {
+	const { id, parentId, slug, title, meta } = fields;
+	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
+	if (!meta.isTemplate) {
+		await notifyWikiWatchers(ctx, { pageId: id, parentId, slug, title, action: "created" });
+	}
+}
+
 export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	const parsed = CreatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -753,17 +846,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		: (parsed.data.content ?? "");
 
 	const orm = drizzle(ctx.db, { schema });
-	let slug = customSlug;
-	if (!slug) {
-		// PROJ-517: slugify's charset can't produce "/", but a symbol-only or non-Latin
-		// title can still derive an empty or over-length slug — run it through the same
-		// SlugSchema the custom-slug path is validated against rather than trusting it.
-		// A title that fails this (CJK, emoji-only, etc.) still gets a usable page: fall
-		// back to a short opaque slug rather than hard-failing creation, since the title
-		// itself (unconstrained by SlugSchema) remains the actual display name.
-		const derivedSlug = SlugSchema.safeParse(slugify(title));
-		slug = derivedSlug.success ? derivedSlug.data : `page-${crypto.randomUUID().slice(0, 8)}`;
-	}
+	const slug = customSlug ?? deriveSlugFromTitle(title);
 	await assertSlugAvailable(orm, ctx.workspaceId, slug);
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -771,67 +854,28 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	// invalid frontmatter throws before any row is written (never a partial create).
 	const meta = parseWikiFrontmatter(content ?? "");
 
-	const insertStatement = toD1Statement(
-		ctx,
-		orm
-			.insert(schema.wikiPages)
-			.values({
-				id,
-				workspaceId: ctx.workspaceId,
-				projectId: projectId ?? null,
-				slug,
-				title,
-				content: content ?? "",
-				parentId: parentId ?? null,
-				createdById: ctx.userId,
-				updatedById: ctx.userId,
-				createdAt: now,
-				updatedAt: now,
-				type: meta.type,
-				tags: meta.tags,
-				status: meta.status,
-				verifiedAt: meta.verifiedAt,
-				verifiedBy: meta.verifiedBy,
-				owners: meta.owners,
-				verifyInterval: meta.verifyInterval,
-				isTemplate: meta.isTemplate,
-			})
-			.toSQL()
-	);
+	const insertStatement = buildCreateWikiPageInsertStatement(ctx, orm, {
+		id,
+		projectId: projectId ?? null,
+		slug,
+		title,
+		content: content ?? "",
+		parentId: parentId ?? null,
+		now,
+		meta,
+	});
 	// PROJ-485: parse [[Target]]/URL links out of the new page's content into wiki_links.
 	// PROJ-511: resolution (the async reads inside this call) happens before any of these
 	// statements exist, so by the time the batch below runs there's nothing left to throw
 	// mid-write — the content row, its FTS mirror, and its wiki_links all land atomically.
 	const linkStatements = await buildWikiLinksReindexStatements(ctx, orm, id, content ?? "");
 
-	try {
-		await ctx.db.batch([
-			insertStatement,
-			buildFtsInsertStatement(ctx, id, title, content ?? "", meta.tags),
-			...linkStatements,
-		]);
-	} catch (e) {
-		// PROJ-483: assertSlugAvailable-then-insert isn't atomic — a concurrent create
-		// can win the race between the check and this insert. Surface the resulting
-		// unique-index violation as a structured conflict, not a raw 500.
-		if (e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
-			throw new ConflictError(`Slug '${slug}' is already in use`);
-		}
-		throw e;
-	}
-	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
-	// PROJ-493 (R11): a subtree watcher on an ancestor is notified of a page newly
-	// created underneath them (there's no possible DIRECT watch on `id` yet — it didn't
-	// exist until this insert). Template pages never notify (see wiki-watchers.ts).
-	if (!meta.isTemplate) {
-		await notifyWikiWatchers(ctx, {
-			pageId: id,
-			parentId: parentId ?? null,
-			slug,
-			title,
-			action: "created",
-		});
-	}
+	await writeCreateWikiPageBatch(
+		ctx,
+		[insertStatement, buildFtsInsertStatement(ctx, id, title, content ?? "", meta.tags), ...linkStatements],
+		slug
+	);
+	await finalizeWikiPageCreate(ctx, { id, parentId: parentId ?? null, slug, title, meta });
 	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug), ...meta };
 }
 
@@ -938,15 +982,9 @@ const MAX_DIFF_CELLS = 1_000_000;
 
 type DiffOp = { type: "equal" | "add" | "remove"; line: string };
 
-function computeLineDiff(oldLines: readonly string[], newLines: readonly string[]): DiffOp[] {
+function buildLcsTable(oldLines: readonly string[], newLines: readonly string[]): number[][] {
 	const n = oldLines.length;
 	const m = newLines.length;
-	if (n * m > MAX_DIFF_CELLS) {
-		return [
-			...oldLines.map((line): DiffOp => ({ type: "remove", line })),
-			...newLines.map((line): DiffOp => ({ type: "add", line })),
-		];
-	}
 	const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
 	for (let i = n - 1; i >= 0; i--) {
 		for (let j = m - 1; j >= 0; j--) {
@@ -954,6 +992,16 @@ function computeLineDiff(oldLines: readonly string[], newLines: readonly string[
 				oldLines[i] === newLines[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
 		}
 	}
+	return dp;
+}
+
+function traceLcsDiffOps(
+	oldLines: readonly string[],
+	newLines: readonly string[],
+	dp: readonly number[][]
+): DiffOp[] {
+	const n = oldLines.length;
+	const m = newLines.length;
 	const ops: DiffOp[] = [];
 	let i = 0;
 	let j = 0;
@@ -979,6 +1027,19 @@ function computeLineDiff(oldLines: readonly string[], newLines: readonly string[
 		j++;
 	}
 	return ops;
+}
+
+function computeLineDiff(oldLines: readonly string[], newLines: readonly string[]): DiffOp[] {
+	const n = oldLines.length;
+	const m = newLines.length;
+	if (n * m > MAX_DIFF_CELLS) {
+		return [
+			...oldLines.map((line): DiffOp => ({ type: "remove", line })),
+			...newLines.map((line): DiffOp => ({ type: "add", line })),
+		];
+	}
+	const dp = buildLcsTable(oldLines, newLines);
+	return traceLcsDiffOps(oldLines, newLines, dp);
 }
 
 // PROJ-484: renders a standard unified diff (`--- base` / `+++ current`, `@@ -a,b +c,d @@`
@@ -1128,9 +1189,11 @@ function buildUpdateWikiPageStatements(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
 	page: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>,
-	now: number,
-	isRename: boolean,
-	meta: ReturnType<typeof parseWikiFrontmatter> | undefined,
+	opts: Readonly<{
+		now: number;
+		isRename: boolean;
+		meta: ReturnType<typeof parseWikiFrontmatter> | undefined;
+	}>,
 	fields: Readonly<{
 		title?: string;
 		content?: string;
@@ -1139,6 +1202,7 @@ function buildUpdateWikiPageStatements(
 		summary?: string;
 	}>
 ): D1PreparedStatement[] {
+	const { now, isRename, meta } = opts;
 	const { title, content, parentId, slug, summary } = fields;
 	const statements: D1PreparedStatement[] = [];
 
@@ -1209,6 +1273,109 @@ function buildUpdateWikiPageStatements(
 	return statements;
 }
 
+// PROJ-484: optimistic locking. Omitting baseRevisionId keeps today's last-write-wins
+// behavior during the transition (deprecated — see mcp/wiki.ts docs). When supplied, it
+// must match the page's current latest revision id, or the write is rejected with a
+// structured conflict (current revision id + a unified diff) so the caller can rebase
+// and retry.
+async function assertNoUpdateConflict(
+	db: D1Database,
+	page: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>,
+	baseRevisionId: string | null | undefined
+): Promise<void> {
+	if (baseRevisionId === undefined) return;
+	const currentRevisionId = await getLatestRevisionId(db, page.id);
+	if (currentRevisionId !== baseRevisionId) {
+		const baseContent = await resolveBaseContent(db, page.id, baseRevisionId, page.content);
+		const diff = buildUnifiedDiff(baseContent, page.content);
+		throw new ConflictError("Wiki page has been modified since baseRevisionId; rebase and retry", {
+			currentRevisionId,
+			diff,
+		});
+	}
+}
+
+// PROJ-486/PROJ-520: FTS is only reindexed when title or content actually changed — a
+// parentId/slug-only update leaves the FTS mirror row untouched, matching the old
+// reindexWikiFts's early-return. PROJ-485: outgoing links are derived purely from
+// content, so they're only reindexed when content actually changed.
+async function buildUpdateWikiPageReindexStatements(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle<typeof schema>>,
+	page: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>,
+	fields: Readonly<{
+		title: string | undefined;
+		content: string | undefined;
+		meta: ReturnType<typeof parseWikiFrontmatter> | undefined;
+	}>
+): Promise<D1PreparedStatement[]> {
+	const { title, content, meta } = fields;
+	const statements: D1PreparedStatement[] = [];
+	if (title !== undefined || content !== undefined) {
+		const finalTitle = title ?? page.title;
+		const finalContent = content ?? page.content;
+		const tags = meta !== undefined ? meta.tags : await currentPageTags(orm, ctx, page.id);
+		statements.push(...buildFtsReindexStatements(ctx, page.id, finalTitle, finalContent, tags));
+	}
+	if (content !== undefined) {
+		statements.push(...(await buildWikiLinksReindexStatements(ctx, orm, page.id, content)));
+	}
+	return statements;
+}
+
+// PROJ-483: assertSlugAvailable-then-update isn't atomic — a concurrent rename can win
+// the race between the check and this update. Surface the resulting unique-index
+// violation as a structured conflict, not a raw 500.
+async function writeUpdateWikiPageBatch(
+	ctx: ServiceCtx,
+	statements: readonly D1PreparedStatement[],
+	isRename: boolean,
+	slug: string | undefined
+): Promise<void> {
+	try {
+		await ctx.db.batch(statements as D1PreparedStatement[]);
+	} catch (e) {
+		if (isRename && e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
+			throw new ConflictError(`Slug '${slug}' is already in use`);
+		}
+		throw e;
+	}
+}
+
+// PROJ-493 (R11): covers plain edits, verify_wiki_page, and restore (all routed through
+// this function). meta is only recomputed when content changed — otherwise fall back to
+// the page's existing isTemplate, which this write left untouched.
+async function finalizeWikiPageUpdate(
+	ctx: ServiceCtx,
+	page: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>,
+	fields: Readonly<{
+		title: string | undefined;
+		content: string | undefined;
+		parentId: string | null | undefined;
+		slug: string | undefined;
+		meta: ReturnType<typeof parseWikiFrontmatter> | undefined;
+	}>
+): Promise<void> {
+	const { title, content, parentId, slug, meta } = fields;
+	await recordActivity(ctx, {
+		entityType: "wiki_page",
+		entityId: page.id,
+		action: "updated",
+		diff: buildWikiPageUpdateDiff({ title, content }),
+	});
+
+	const isTemplate = meta?.isTemplate ?? page.isTemplate;
+	if (!isTemplate) {
+		await notifyWikiWatchers(ctx, {
+			pageId: page.id,
+			parentId: parentId !== undefined ? parentId : page.parentId,
+			slug: slug ?? page.slug,
+			title: title ?? page.title,
+			action: "updated",
+		});
+	}
+}
+
 export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
 	const parsed = UpdatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -1218,22 +1385,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	const now = Math.floor(Date.now() / 1000);
 	const orm = drizzle(ctx.db, { schema });
 
-	// PROJ-484: optimistic locking. Omitting baseRevisionId keeps today's last-write-wins
-	// behavior during the transition (deprecated — see mcp/wiki.ts docs). When supplied,
-	// it must match the page's current latest revision id, or the write is rejected with
-	// a structured conflict (current revision id + a unified diff) so the caller can
-	// rebase and retry.
-	if (baseRevisionId !== undefined) {
-		const currentRevisionId = await getLatestRevisionId(ctx.db, page.id);
-		if (currentRevisionId !== baseRevisionId) {
-			const baseContent = await resolveBaseContent(ctx.db, page.id, baseRevisionId, page.content);
-			const diff = buildUnifiedDiff(baseContent, page.content);
-			throw new ConflictError(
-				"Wiki page has been modified since baseRevisionId; rebase and retry",
-				{ currentRevisionId, diff }
-			);
-		}
-	}
+	await assertNoUpdateConflict(ctx.db, page, baseRevisionId);
 
 	if (parentId !== undefined && parentId !== null) {
 		await validateUpdatedPageParent(ctx.db, parentId, ctx.workspaceId, page);
@@ -1272,61 +1424,19 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// resolution work above (frontmatter parse, link-target resolution inside
 	// buildWikiLinksReindexStatements) happens before any of these exist, so it can no
 	// longer leave the page updated with a stale/wiped links or FTS row.
-	const statements = buildUpdateWikiPageStatements(ctx, orm, page, now, isRename, meta, {
-		title,
-		content,
-		parentId,
-		slug,
-		summary,
-	});
+	const statements = buildUpdateWikiPageStatements(
+		ctx,
+		orm,
+		page,
+		{ now, isRename, meta },
+		{ title, content, parentId, slug, summary }
+	);
+	statements.push(
+		...(await buildUpdateWikiPageReindexStatements(ctx, orm, page, { title, content, meta }))
+	);
 
-	// PROJ-486/PROJ-520: only reindexed when title or content actually changed — a
-	// parentId/slug-only update leaves the FTS mirror row untouched, matching the old
-	// reindexWikiFts's early-return.
-	if (title !== undefined || content !== undefined) {
-		const finalTitle = title ?? page.title;
-		const finalContent = content ?? page.content;
-		const tags = meta !== undefined ? meta.tags : await currentPageTags(orm, ctx, page.id);
-		statements.push(...buildFtsReindexStatements(ctx, page.id, finalTitle, finalContent, tags));
-	}
-	// PROJ-485: outgoing links are derived purely from content — a title/slug/parent-only
-	// update leaves them unchanged, so only reindex when content actually changed.
-	if (content !== undefined) {
-		statements.push(...(await buildWikiLinksReindexStatements(ctx, orm, page.id, content)));
-	}
-
-	try {
-		await ctx.db.batch(statements);
-	} catch (e) {
-		// PROJ-483: assertSlugAvailable-then-update isn't atomic — a concurrent rename
-		// can win the race between the check and this update. Surface the resulting
-		// unique-index violation as a structured conflict, not a raw 500.
-		if (isRename && e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
-			throw new ConflictError(`Slug '${slug}' is already in use`);
-		}
-		throw e;
-	}
-
-	await recordActivity(ctx, {
-		entityType: "wiki_page",
-		entityId: page.id,
-		action: "updated",
-		diff: buildWikiPageUpdateDiff({ title, content }),
-	});
-
-	// PROJ-493 (R11): covers plain edits, verify_wiki_page, and restore (both routed
-	// through this function). meta is only recomputed when content changed — otherwise
-	// fall back to the page's existing isTemplate, which this write left untouched.
-	const isTemplate = meta?.isTemplate ?? page.isTemplate;
-	if (!isTemplate) {
-		await notifyWikiWatchers(ctx, {
-			pageId: page.id,
-			parentId: parentId !== undefined ? parentId : page.parentId,
-			slug: slug ?? page.slug,
-			title: title ?? page.title,
-			action: "updated",
-		});
-	}
+	await writeUpdateWikiPageBatch(ctx, statements, isRename, slug);
+	await finalizeWikiPageUpdate(ctx, page, { title, content, parentId, slug, meta });
 
 	return { ok: true, url: wikiPagePath(slug ?? page.slug) };
 }
@@ -1612,6 +1722,82 @@ function applySectionOp(
 // needs either a SQL-level `content = content || ?` append or an optimistic-lock retry,
 // which is out of scope here. baseRevisionId is still required on the input for API
 // consistency and because a revision snapshot is still created either way.
+function findUniqueSectionOrThrow(
+	currentSections: readonly HeadingSection[],
+	heading: string
+): HeadingSection {
+	const currentMatches = findSections(currentSections, heading);
+	if (currentMatches.length === 0) {
+		throw new NotFoundError(`Heading '${heading}' not found`, {
+			currentHeadings: currentSections.map((s) => s.heading),
+		});
+	}
+	// PROJ-490: heading text is the whole address, so a page carrying the same heading
+	// twice (a "## Notes" under two different parents, or an H1 and H2 that read the
+	// same) has no unambiguous target. Silently taking the first match would write to a
+	// section the caller never looked at — rejected instead, per the PRD's "integrity
+	// over convenience" principle.
+	if (currentMatches.length > 1) {
+		throw new ValidationError({
+			formErrors: [
+				`Heading '${heading}' is ambiguous — it appears ${currentMatches.length} times ` +
+					`(levels ${currentMatches.map((s) => `h${s.level}`).join(", ")}); ` +
+					"patch operations need a unique heading",
+			],
+			// PROJ-523: alongside the prose, expose which heading levels collided as a
+			// structured field — an agent shouldn't have to regex the sentence to recover
+			// this, and NotFoundError's sibling case already hands back currentHeadings.
+			fieldErrors: { heading: currentMatches.map((s) => `h${s.level}`) },
+		});
+	}
+	return currentMatches[0];
+}
+
+async function assertNoSectionPatchConflict(
+	ctx: ServiceCtx,
+	pageId: string,
+	currentContent: string,
+	currentSection: HeadingSection,
+	data: Readonly<{ baseRevisionId: string | null; heading: string }>
+): Promise<void> {
+	const currentRevisionId = await getLatestRevisionId(ctx.db, pageId);
+	if (currentRevisionId === data.baseRevisionId) return;
+	const baseContent = await resolveBaseContent(
+		ctx.db,
+		pageId,
+		data.baseRevisionId,
+		currentContent
+	);
+	// A heading that was absent — or ambiguous — at base but resolves uniquely now means
+	// the section itself changed shape underneath the caller, so the empty base text
+	// below (correctly) trips the conflict check.
+	const baseMatches = findSections(parseHeadingSections(baseContent), data.heading);
+	const baseSectionText =
+		baseMatches.length === 1 ? extractSectionText(baseContent, baseMatches[0]) : "";
+	const currentSectionText = extractSectionText(currentContent, currentSection);
+	if (baseSectionText !== currentSectionText) {
+		throw new ConflictError(
+			`Section '${data.heading}' has been modified since baseRevisionId; rebase and retry`,
+			{ currentRevisionId, diff: buildUnifiedDiff(baseSectionText, currentSectionText) }
+		);
+	}
+}
+
+async function resolveSectionPatchContent(
+	ctx: ServiceCtx,
+	page: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>,
+	currentContent: string,
+	data: Extract<
+		PatchWikiPageInput,
+		{ op: "append_to_section" | "replace_section" | "insert_after_heading" }
+	>
+): Promise<string> {
+	const currentSections = parseHeadingSections(currentContent);
+	const currentSection = findUniqueSectionOrThrow(currentSections, data.heading);
+	await assertNoSectionPatchConflict(ctx, page.id, currentContent, currentSection, data);
+	return applySectionOp(currentContent, currentSection, data);
+}
+
 export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
 	const parsed = PatchWikiPageInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -1626,57 +1812,7 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 		await assertRevisionBelongsToPage(ctx.db, page.id, data.baseRevisionId);
 		newContent = appendToPageEnd(currentContent, data.text);
 	} else {
-		const currentSections = parseHeadingSections(currentContent);
-		const currentMatches = findSections(currentSections, data.heading);
-		if (currentMatches.length === 0) {
-			throw new NotFoundError(`Heading '${data.heading}' not found`, {
-				currentHeadings: currentSections.map((s) => s.heading),
-			});
-		}
-		// PROJ-490: heading text is the whole address, so a page carrying the same
-		// heading twice (a "## Notes" under two different parents, or an H1 and H2 that
-		// read the same) has no unambiguous target. Silently taking the first match
-		// would write to a section the caller never looked at — rejected instead, per
-		// the PRD's "integrity over convenience" principle.
-		if (currentMatches.length > 1) {
-			throw new ValidationError({
-				formErrors: [
-					`Heading '${data.heading}' is ambiguous — it appears ${currentMatches.length} times ` +
-						`(levels ${currentMatches.map((s) => `h${s.level}`).join(", ")}); ` +
-						"patch operations need a unique heading",
-				],
-				// PROJ-523: alongside the prose, expose which heading levels collided as a
-				// structured field — an agent shouldn't have to regex the sentence to recover
-				// this, and NotFoundError's sibling case already hands back currentHeadings.
-				fieldErrors: { heading: currentMatches.map((s) => `h${s.level}`) },
-			});
-		}
-		const currentSection = currentMatches[0];
-
-		const currentRevisionId = await getLatestRevisionId(ctx.db, page.id);
-		if (currentRevisionId !== data.baseRevisionId) {
-			const baseContent = await resolveBaseContent(
-				ctx.db,
-				page.id,
-				data.baseRevisionId,
-				currentContent
-			);
-			// A heading that was absent — or ambiguous — at base but resolves uniquely
-			// now means the section itself changed shape underneath the caller, so the
-			// empty base text below (correctly) trips the conflict check.
-			const baseMatches = findSections(parseHeadingSections(baseContent), data.heading);
-			const baseSectionText =
-				baseMatches.length === 1 ? extractSectionText(baseContent, baseMatches[0]) : "";
-			const currentSectionText = extractSectionText(currentContent, currentSection);
-			if (baseSectionText !== currentSectionText) {
-				throw new ConflictError(
-					`Section '${data.heading}' has been modified since baseRevisionId; rebase and retry`,
-					{ currentRevisionId, diff: buildUnifiedDiff(baseSectionText, currentSectionText) }
-				);
-			}
-		}
-
-		newContent = applySectionOp(currentContent, currentSection, data);
+		newContent = await resolveSectionPatchContent(ctx, page, currentContent, data);
 	}
 
 	const now = Math.floor(Date.now() / 1000);

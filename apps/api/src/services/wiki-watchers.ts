@@ -481,11 +481,10 @@ function extractDeletedPageInfo(diff: Record<string, unknown> | null): {
 // subtree watch on a proper ancestor) but walks the CURRENT tree — a page reparented out
 // of a watched subtree since the change occurred is (deliberately) not flagged watched,
 // same class of "current tree, not historical" approximation as the rest of this file.
-async function watchedPageIds(
+async function loadWikiWatchSets(
 	ctx: ServiceCtx,
-	orm: Orm,
-	candidatePageIds: string[]
-): Promise<Set<string>> {
+	orm: Orm
+): Promise<{ directWatchIds: Set<string>; subtreeRootIds: Set<string> }> {
 	const watches = await orm
 		.select({ pageId: schema.wikiWatchers.pageId, subtree: schema.wikiWatchers.subtree })
 		.from(schema.wikiWatchers)
@@ -495,25 +494,22 @@ async function watchedPageIds(
 				eq(schema.wikiWatchers.userId, ctx.userId)
 			)
 		);
-	if (watches.length === 0) return new Set();
+	return {
+		directWatchIds: new Set(watches.map((w) => w.pageId)),
+		subtreeRootIds: new Set(watches.filter((w) => w.subtree).map((w) => w.pageId)),
+	};
+}
 
-	const directWatchIds = new Set(watches.map((w) => w.pageId));
-	const subtreeRootIds = new Set(watches.filter((w) => w.subtree).map((w) => w.pageId));
-
-	const matched = new Set<string>();
-	// candidate page -> the ancestor its chain walk has currently reached.
-	const pending = new Map<string, string>();
-	for (const pageId of new Set(candidatePageIds)) {
-		if (directWatchIds.has(pageId)) {
-			matched.add(pageId);
-			continue;
-		}
-		if (subtreeRootIds.size > 0) pending.set(pageId, pageId);
-	}
-
-	// Walk every remaining candidate's parent chain in lock-step — one batched query per
-	// tree level (nesting is capped at depth 5) rather than a per-candidate chain walk,
-	// which would be O(candidates x depth) round-trips for a `limit` of up to 500.
+// Walks every candidate's parent chain in lock-step — one batched query per tree level
+// (nesting is capped at depth 5) rather than a per-candidate chain walk, which would be
+// O(candidates x depth) round-trips for a `limit` of up to 500. Mutates `matched` in place.
+async function matchSubtreeWatches(
+	ctx: ServiceCtx,
+	orm: Orm,
+	pending: Map<string, string>,
+	subtreeRootIds: ReadonlySet<string>,
+	matched: Set<string>
+): Promise<void> {
 	for (let depth = 0; depth < 6 && pending.size > 0; depth++) {
 		const frontier = [...new Set(pending.values())];
 		const rows = await inChunks(frontier, (chunk) =>
@@ -540,6 +536,28 @@ async function watchedPageIds(
 			}
 		}
 	}
+}
+
+async function watchedPageIds(
+	ctx: ServiceCtx,
+	orm: Orm,
+	candidatePageIds: string[]
+): Promise<Set<string>> {
+	const { directWatchIds, subtreeRootIds } = await loadWikiWatchSets(ctx, orm);
+	if (directWatchIds.size === 0 && subtreeRootIds.size === 0) return new Set();
+
+	const matched = new Set<string>();
+	// candidate page -> the ancestor its chain walk has currently reached.
+	const pending = new Map<string, string>();
+	for (const pageId of new Set(candidatePageIds)) {
+		if (directWatchIds.has(pageId)) {
+			matched.add(pageId);
+			continue;
+		}
+		if (subtreeRootIds.size > 0) pending.set(pageId, pageId);
+	}
+
+	await matchSubtreeWatches(ctx, orm, pending, subtreeRootIds, matched);
 	return matched;
 }
 
