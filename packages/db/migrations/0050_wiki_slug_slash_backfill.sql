@@ -6,7 +6,24 @@
 -- links/bookmarks keep resolving, mirroring migration 0041's collision strategy:
 -- keep the plain rewritten slug when nothing else in the workspace already holds
 -- it, otherwise suffix with the row's own id (never collides with an unrelated
--- pre-existing slug, unlike a fixed/counted suffix).
+-- pre-existing slug, unlike a fixed/counted suffix). The candidate is truncated to
+-- 191 chars before suffixing so the id-suffixed result never exceeds SlugSchema's
+-- 200-char max.
+-- Old slug may already carry a redirect row from an earlier, unrelated rename
+-- (e.g. some other page was renamed away from this exact slug in the past) —
+-- this backfill takes ownership of it, mirroring the onConflictDoUpdate upsert
+-- in services/wiki.ts's rename path, rather than aborting the whole migration.
+-- D1 rejects an UPSERT clause on an INSERT...SELECT whose source isn't a plain
+-- table reference (no CTE, no derived subquery — "near DO: syntax error"), so
+-- the upsert is expressed as delete-then-insert instead of ON CONFLICT.
+DELETE FROM wiki_redirects
+WHERE EXISTS (
+	SELECT 1 FROM wiki_pages wp
+	WHERE wp.slug LIKE '%/%'
+	  AND wp.workspace_id = wiki_redirects.workspace_id
+	  AND wp.slug = wiki_redirects.old_slug
+);
+
 WITH ranked AS (
 	SELECT
 		id,
@@ -33,7 +50,7 @@ resolved AS (
 					  AND wp.slug = r.candidate
 					  AND wp.id != r.id
 				)
-			THEN r.candidate || '-' || substr(r.id, 1, 8)
+			THEN substr(r.candidate, 1, 191) || '-' || substr(r.id, 1, 8)
 			ELSE r.candidate
 		END AS new_slug
 	FROM ranked r
@@ -71,7 +88,7 @@ resolved AS (
 					  AND wp.slug = r.candidate
 					  AND wp.id != r.id
 				)
-			THEN r.candidate || '-' || substr(r.id, 1, 8)
+			THEN substr(r.candidate, 1, 191) || '-' || substr(r.id, 1, 8)
 			ELSE r.candidate
 		END AS new_slug
 	FROM ranked r
