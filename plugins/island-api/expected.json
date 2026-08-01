@@ -45,10 +45,10 @@
       "priority": 15,
       "severity": "high",
       "file": "fixtures/apps/web/src/islands/fixture.ts",
-      "line": 33,
+      "line": 35,
       "column": 19,
-      "start_byte": 1372,
-      "end_byte": 1398,
+      "start_byte": 1587,
+      "end_byte": 1613,
       "message": "Raw \"fetch()\" call — use apiFetch from utils/api-client.ts instead.",
       "baselined": false
     },
@@ -58,10 +58,10 @@
       "priority": 15,
       "severity": "high",
       "file": "fixtures/apps/web/src/islands/fixture.ts",
-      "line": 34,
+      "line": 36,
       "column": 19,
-      "start_byte": 1439,
-      "end_byte": 1472,
+      "start_byte": 1654,
+      "end_byte": 1687,
       "message": "Raw \"window.fetch()\" call — use apiFetch from utils/api-client.ts instead.",
       "baselined": false
     }

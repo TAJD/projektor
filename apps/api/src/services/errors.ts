@@ -21,9 +21,9 @@ export class NotFoundError extends ServiceError {
 	// fields (e.g. patch_wiki_page's currentHeadings list on a heading-not-found miss)
 	// beyond the plain message. Optional so every pre-existing plain-message
 	// NotFoundError is unaffected.
-	// cofferdam-ignore: Refactor.UnusedVariable: public readonly property read by error-adapter.ts
 	constructor(
 		message = "Not found",
+		// cofferdam-ignore: Refactor.UnusedVariable: public readonly property read by error-adapter.ts
 		public readonly details?: Record<string, unknown>
 	) {
 		super(message);
@@ -42,9 +42,9 @@ export class ConflictError extends ServiceError {
 	// PROJ-484: `details` carries structured, client-facing extra fields (e.g. wiki's
 	// optimistic-lock conflict: currentRevisionId + a unified diff) beyond the plain
 	// message. Optional so every pre-existing plain-message ConflictError is unaffected.
-	// cofferdam-ignore: Refactor.UnusedVariable: public readonly property read by error-adapter.ts
 	constructor(
 		message = "Conflict",
+		// cofferdam-ignore: Refactor.UnusedVariable: public readonly property read by error-adapter.ts
 		public readonly details?: Record<string, unknown>
 	) {
 		super(message);

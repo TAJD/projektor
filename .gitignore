@@ -13,7 +13,7 @@ dist/
 # local dev / test artifacts
 .playwright-mcp/
 dev-server.log
-.cofferdam/cache/
+**/.cofferdam/cache/
 coverage/
 
 # local agent tooling state (spawn-claude worktrees, scratch plans/research) — a nested

@@ -1117,6 +1117,96 @@ async function deleteWikiFtsEntries(ctx: ServiceCtx, pageIds: string[]): Promise
 	});
 }
 
+// Builds the batch of statements for a single updateWikiPage call — content revision
+// snapshot, the page row update itself, FTS/link reindex, and the redirect upsert on
+// rename. Extracted from updateWikiPage to keep that function's own complexity/length
+// down; behavior (including the PROJ-511 atomicity guarantee — all of this lands in one
+// ctx.db.batch() call in the caller) is unchanged.
+function buildUpdateWikiPageStatements(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	page: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>,
+	now: number,
+	isRename: boolean,
+	meta: ReturnType<typeof parseWikiFrontmatter> | undefined,
+	fields: {
+		title?: string;
+		content?: string;
+		parentId?: string | null;
+		slug?: string;
+		summary?: string;
+	}
+): D1PreparedStatement[] {
+	const { title, content, parentId, slug, summary } = fields;
+	const statements: D1PreparedStatement[] = [];
+
+	if (content !== undefined) {
+		// PROJ-484: title snapshot is the page's title as of THIS revision (i.e. before
+		// this update applies any new title) — consistent with content, which snapshots
+		// the pre-edit value too. summary is this edit's optional changelog note.
+		statements.push(
+			toD1Statement(
+				ctx,
+				orm
+					.insert(schema.wikiRevisions)
+					.values({
+						id: crypto.randomUUID(),
+						pageId: page.id,
+						content: page.content,
+						title: page.title,
+						summary: summary ?? null,
+						authorId: ctx.userId,
+						createdAt: now,
+					})
+					.toSQL()
+			)
+		);
+	}
+
+	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug, meta });
+	statements.push(
+		toD1Statement(
+			ctx,
+			orm
+				.update(schema.wikiPages)
+				// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
+				.set(setData as any)
+				.where(eq(schema.wikiPages.id, page.id))
+				.toSQL()
+		)
+	);
+
+	// FTS and link-graph reindex statements are built separately by the caller (both need
+	// an async lookup — current tags / link-target resolution — before their statements
+	// exist) and concatenated onto this array; see updateWikiPage.
+
+	if (isRename) {
+		// Upsert: the old slug may already carry a stale redirect from an earlier rename
+		// of some other page — this rename takes ownership of it.
+		statements.push(
+			toD1Statement(
+				ctx,
+				orm
+					.insert(schema.wikiRedirects)
+					.values({
+						id: crypto.randomUUID(),
+						workspaceId: ctx.workspaceId,
+						oldSlug: page.slug,
+						pageId: page.id,
+						createdAt: now,
+					})
+					.onConflictDoUpdate({
+						target: [schema.wikiRedirects.workspaceId, schema.wikiRedirects.oldSlug],
+						set: { pageId: page.id, createdAt: now },
+					})
+					.toSQL()
+			)
+		);
+	}
+
+	return statements;
+}
+
 export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
 	const parsed = UpdatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -1180,43 +1270,13 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// resolution work above (frontmatter parse, link-target resolution inside
 	// buildWikiLinksReindexStatements) happens before any of these exist, so it can no
 	// longer leave the page updated with a stale/wiped links or FTS row.
-	const statements: D1PreparedStatement[] = [];
-
-	if (content !== undefined) {
-		// PROJ-484: title snapshot is the page's title as of THIS revision (i.e. before
-		// this update applies any new title) — consistent with content, which snapshots
-		// the pre-edit value too. summary is this edit's optional changelog note.
-		statements.push(
-			toD1Statement(
-				ctx,
-				orm
-					.insert(schema.wikiRevisions)
-					.values({
-						id: crypto.randomUUID(),
-						pageId: page.id,
-						content: page.content,
-						title: page.title,
-						summary: summary ?? null,
-						authorId: ctx.userId,
-						createdAt: now,
-					})
-					.toSQL()
-			)
-		);
-	}
-
-	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug, meta });
-	statements.push(
-		toD1Statement(
-			ctx,
-			orm
-				.update(schema.wikiPages)
-				// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
-				.set(setData as any)
-				.where(eq(schema.wikiPages.id, page.id))
-				.toSQL()
-		)
-	);
+	const statements = buildUpdateWikiPageStatements(ctx, orm, page, now, isRename, meta, {
+		title,
+		content,
+		parentId,
+		slug,
+		summary,
+	});
 
 	// PROJ-486/PROJ-520: only reindexed when title or content actually changed — a
 	// parentId/slug-only update leaves the FTS mirror row untouched, matching the old
@@ -1231,30 +1291,6 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// update leaves them unchanged, so only reindex when content actually changed.
 	if (content !== undefined) {
 		statements.push(...(await buildWikiLinksReindexStatements(ctx, orm, page.id, content)));
-	}
-
-	if (isRename) {
-		// Upsert: the old slug may already carry a stale redirect from an earlier rename
-		// of some other page — this rename takes ownership of it.
-		statements.push(
-			toD1Statement(
-				ctx,
-				orm
-					.insert(schema.wikiRedirects)
-					.values({
-						id: crypto.randomUUID(),
-						workspaceId: ctx.workspaceId,
-						oldSlug: page.slug,
-						pageId: page.id,
-						createdAt: now,
-					})
-					.onConflictDoUpdate({
-						target: [schema.wikiRedirects.workspaceId, schema.wikiRedirects.oldSlug],
-						set: { pageId: page.id, createdAt: now },
-					})
-					.toSQL()
-			)
-		);
 	}
 
 	try {
