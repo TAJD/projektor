@@ -1,6 +1,7 @@
 import type { RefObject } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
+import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
 import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
@@ -1680,13 +1681,7 @@ function WikiMainContent(props: {
 function slugFromPathname(pathname: string): string {
 	const match = /^\/wiki\/([^/]+)\/?$/.exec(pathname);
 	if (!match) return "";
-	// PROJ-512: a malformed percent-escape (e.g. `/wiki/100%`) makes decodeURIComponent
-	// throw — treat that as "no slug" rather than crashing the island.
-	try {
-		return decodeURIComponent(match[1]);
-	} catch {
-		return "";
-	}
+	return safeDecodeURIComponent(match[1]);
 }
 
 function useWikiUrlState(projectIdProp: string | undefined, slugProp: string | undefined) {

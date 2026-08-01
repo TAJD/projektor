@@ -37,7 +37,7 @@ function extractWikiSlugFromUrl(url: string): string | null {
 	// as same-workspace links (even a same-origin absolute URL is written as relative
 	// by the app, so this doesn't lose any real link).
 	if (/^(?:[a-z][a-z0-9+.-]*:)?\/\//i.test(url)) return null;
-	const pathMatch = url.match(/^\/wiki\/([a-z0-9-/]+)/i);
+	const pathMatch = url.match(/^\/wiki\/([a-z0-9-]+)/i);
 	const queryMatch = pathMatch ? null : url.match(/[?&]slug=([^&]+)/);
 	const raw = pathMatch?.[1] ?? queryMatch?.[1];
 	if (!raw) return null;

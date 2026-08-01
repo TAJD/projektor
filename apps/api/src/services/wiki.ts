@@ -11,6 +11,7 @@ import {
 	type PatchWikiPageInput,
 	PatchWikiPageInputSchema,
 	SearchWikiInputSchema,
+	SlugSchema,
 	UpdatePageSchema,
 	WikiRevisionDiffInputSchema,
 } from "../schemas/wiki";
@@ -682,7 +683,20 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		: (parsed.data.content ?? "");
 
 	const orm = drizzle(ctx.db, { schema });
-	const slug = customSlug ?? slugify(title);
+	let slug = customSlug;
+	if (!slug) {
+		// PROJ-517: slugify's charset can't produce "/", but a symbol-only or non-Latin
+		// title can still derive an empty or over-length slug — run it through the same
+		// SlugSchema the custom-slug path is validated against rather than trusting it.
+		const derivedSlug = SlugSchema.safeParse(slugify(title));
+		if (!derivedSlug.success) {
+			throw new ValidationError({
+				formErrors: derivedSlug.error.issues.map((i) => i.message),
+				fieldErrors: {},
+			});
+		}
+		slug = derivedSlug.data;
+	}
 	await assertSlugAvailable(orm, ctx.workspaceId, slug);
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);

@@ -334,7 +334,7 @@ app.get("/wiki", async (c) => {
 app.get("*", async (c) => {
 	if (!c.env.ASSETS) return c.notFound();
 	const { pathname } = new URL(c.req.url);
-	const wikiSlugMatch = /^\/wiki\/([^/]+)/.exec(pathname);
+	const wikiSlugMatch = /^\/wiki\/([^/]+)\/?$/.exec(pathname);
 	const fallbackPath = /^\/projects\/[^/]+\/issues\/\d+\//.test(pathname)
 		? "/issues/view/index.html"
 		: /^\/projects\/view\/[^/]+/.test(pathname)
