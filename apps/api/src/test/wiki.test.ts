@@ -2955,6 +2955,57 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(res.status).toBe(400);
 	});
 
+	// PROJ-524: append_to_page skips the *conflict* check for baseRevisionId (append is
+	// commutative), but still must validate the id belongs to the page — same as the
+	// section-addressed ops above — so a caller confused about which page it's targeting
+	// gets a signal instead of silent acceptance.
+	it("REST: append_to_page rejects a baseRevisionId that doesn't belong to the page", async () => {
+		await createPage("patch-append-garbage-base", "Patch Append Garbage Base", TWO_SECTIONS);
+		const res = await req("http://localhost/api/wiki/patch-append-garbage-base", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "append_to_page",
+				text: "Gamma body.",
+				baseRevisionId: crypto.randomUUID(),
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("REST: append_to_page accepts a baseRevisionId that DOES belong to the page, even though it's stale (staleness isn't rejected for this op)", async () => {
+		await createPage("patch-append-stale-base", "Patch Append Stale Base", TWO_SECTIONS);
+		const firstRes = await req("http://localhost/api/wiki/patch-append-stale-base", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "append_to_section",
+				heading: "Alpha",
+				text: "First edit.",
+				baseRevisionId: null,
+			}),
+		});
+		expect(firstRes.status).toBe(200);
+		const revisions = (await (
+			await req("http://localhost/api/wiki/patch-append-stale-base/revisions", {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as Array<{ id: string }>;
+
+		const res = await req("http://localhost/api/wiki/patch-append-stale-base", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "append_to_page",
+				text: "Appended after stale base.",
+				baseRevisionId: revisions[0].id,
+			}),
+		});
+		expect(res.status).toBe(200);
+		const page = await getPage("patch-append-stale-base");
+		expect(page.content.trim().endsWith("Appended after stale base.")).toBe(true);
+	});
+
 	it("MCP: patch_wiki_page parity — disjoint sections don't conflict, same section does", async () => {
 		const created = mcpData<{ slug: string }>(
 			await mcp("create_wiki_page", { title: "MCP Patch Doc", content: TWO_SECTIONS })
@@ -3601,6 +3652,98 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 	});
 });
 
+describe("Wiki write atomicity (PROJ-511)", () => {
+	let token: string;
+	let slug: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+	});
+
+	it("a slug race during create leaves wiki_links with only the winner's link, never a partial write", async () => {
+		// createWikiPage's assertSlugAvailable-then-insert isn't atomic (services/wiki.ts):
+		// two concurrent creates with the same title/slug can both pass the availability
+		// check, so one loses to a UNIQUE constraint failure inside the ctx.db.batch() call
+		// itself. PROJ-511 batches the page insert, its wiki_fts row, and its wiki_links
+		// rows together, so the loser's batch must fail as a whole — never leaving a
+		// dangling wiki_links row for a page insert that didn't happen.
+		const [resA, resB] = await Promise.all([
+			SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					title: "Atomicity Race Page",
+					content: "see [[Race Target Alpha]]",
+				}),
+			}),
+			SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title: "Atomicity Race Page", content: "see [[Race Target Beta]]" }),
+			}),
+		]);
+		const statuses = [resA.status, resB.status].sort();
+		expect(statuses).toEqual([201, 409]);
+
+		const brokenRes = await SELF.fetch("http://localhost/api/wiki/broken-links", {
+			headers: authHeaders(token, slug),
+		});
+		const broken = (await brokenRes.json()) as Array<{ targetTitle: string }>;
+		expect(broken).toHaveLength(1);
+		expect(["Race Target Alpha", "Race Target Beta"]).toContain(broken[0].targetTitle);
+	});
+
+	it("a failed rename (slug conflict) leaves the page's content, wiki_links, and wiki_fts untouched", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Atomic Runbook", content: "how to page" }),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Atomic Existing", content: "x" }),
+		});
+		const sourceRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Atomic Source", content: "see [[Atomic Runbook]]" }),
+		});
+		const source = (await sourceRes.json()) as { slug: string };
+
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const updateRes = await SELF.fetch(`http://localhost/api/wiki/${source.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "atomic-existing", content: "no longer links anywhere" }),
+		});
+		expect(updateRes.status).toBe(409);
+
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const pageRes = await SELF.fetch(`http://localhost/api/wiki/${source.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(await pageRes.json()).toEqual(
+			expect.objectContaining({ content: "see [[Atomic Runbook]]" })
+		);
+
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const backlinksRes = await SELF.fetch("http://localhost/api/wiki/atomic-runbook/backlinks", {
+			headers: authHeaders(token, slug),
+		});
+		const backlinks = (await backlinksRes.json()) as Array<{ slug: string }>;
+		expect(backlinks.map((b) => b.slug)).toEqual(["atomic-source"]);
+
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		const searchRes = await SELF.fetch("http://localhost/api/wiki/search?q=links+anywhere", {
+			headers: authHeaders(token, slug),
+		});
+		expect(await searchRes.json()).toEqual([]);
+	});
+});
+
 // PROJ-489 (R7): verification stamps + computed staleness surfacing.
 describe("computeFreshness (PROJ-489)", () => {
 	it("returns null when the page has neither verify_interval nor status", () => {
@@ -3894,6 +4037,46 @@ describe("Wiki freshness model (PROJ-489)", () => {
 		expect(results.map((r) => r.title)).toEqual(["Current Onboarding", "Deprecated Onboarding"]);
 	});
 
+	// PROJ-515: decided to NOT demote "unverified" (verify_interval declared, never
+	// verified) in search ranking — only in list_stale_pages (the maintenance queue).
+	// A freshly authored page that opts into verification tracking shouldn't rank worse
+	// than a legacy page with no frontmatter at all just for declaring an interval.
+	it("GET /api/wiki/search does NOT demote an unverified page below a lower-relevance page with no freshness signal", async () => {
+		// If "unverified" were still in the demotion tier, this page would sort AFTER
+		// "No Signal" below regardless of relevance, the same way a stale/deprecated page
+		// is forced below a fresh one in the tests above. Giving it the stronger (title)
+		// match proves the opposite: bm25 alone decides the order now.
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "Securitypolicykeyword Runbook",
+				content: unverifiedContent(),
+			}),
+		});
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				title: "No Signal Page",
+				content: "buried mention of securitypolicykeyword in the body",
+			}),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/search?q=securitypolicykeyword", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await res.json()) as Array<{
+			title: string;
+			freshness: { state: string } | null;
+		}>;
+		expect(results.map((r) => r.title)).toEqual([
+			"Securitypolicykeyword Runbook",
+			"No Signal Page",
+		]);
+		expect(results[0].freshness?.state).toBe("unverified");
+	});
+
 	it("GET /api/wiki/stale-pages lists computed-stale, unverified, and explicitly stale/deprecated pages, excluding fresh ones", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
@@ -4099,6 +4282,31 @@ describe("Wiki page templates (PROJ-491)", () => {
 		expect(results.map((r) => r.title)).not.toContain("Runbook Template");
 	});
 
+	// PROJ-525: listWikiPages/GET /api/wiki previously had no is_template exclusion,
+	// unlike search_wiki and listStaleWikiPages above — so a type=runbook filter listed
+	// "Runbook Template" alongside real runbook pages.
+	it("GET /api/wiki excludes template pages by default, matching search_wiki/list_stale_pages", async () => {
+		await createTemplate();
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Ordinary Runbook", content: "# Not a template" }),
+		});
+
+		const defaultRes = await SELF.fetch("http://localhost/api/wiki", {
+			headers: authHeaders(token, slug),
+		});
+		const defaultResults = (await defaultRes.json()) as Array<{ title: string }>;
+		expect(defaultResults.map((r) => r.title)).toContain("Ordinary Runbook");
+		expect(defaultResults.map((r) => r.title)).not.toContain("Runbook Template");
+
+		const includedRes = await SELF.fetch("http://localhost/api/wiki?includeTemplates=true", {
+			headers: authHeaders(token, slug),
+		});
+		const includedResults = (await includedRes.json()) as Array<{ title: string }>;
+		expect(includedResults.map((r) => r.title)).toContain("Runbook Template");
+	});
+
 	it("list_stale_pages excludes template pages even with an overdue verify_interval", async () => {
 		const overdueTemplateContent = [
 			"---",
@@ -4205,6 +4413,34 @@ describe("Wiki built-in template seeding on workspace creation (PROJ-491)", () =
 		});
 		expect(parentRes.status).toBe(200);
 		expect(((await parentRes.json()) as { title: string }).title).toBe("Templates");
+	});
+
+	// PROJ-522: the seeded "Templates" parent is a real, non-template, browsable page —
+	// unlike the three template pages under it (deliberately search-excluded) it needs a
+	// wiki_fts mirror row like every other write path maintains, or it's invisible to
+	// search_wiki until someone happens to edit it.
+	it("the seeded Templates parent page is findable via search_wiki", async () => {
+		const fixture = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(fixture.token, fixture.workspace.slug);
+		const newSlug = `seed-fts-test-${crypto.randomUUID().slice(0, 8)}`;
+
+		const created = mcpData<{ id: string; slug: string }>(
+			await mcpCall(
+				fixture.workspace.id,
+				"create_workspace",
+				{ slug: newSlug, name: "Seed FTS Test" },
+				ownerHeaders
+			)
+		);
+		const newToken = await seedToken(created.id, fixture.user.id);
+		const newHeaders = authHeaders(newToken, created.slug);
+
+		const searchRes = await SELF.fetch("http://localhost/api/wiki/search?q=Templates", {
+			headers: newHeaders,
+		});
+		expect(searchRes.status).toBe(200);
+		const results = (await searchRes.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toContain("Templates");
 	});
 });
 
@@ -4616,6 +4852,40 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		).json()) as { changes: Array<{ action: string; slug: string | null; title: string | null }> };
 		const deleteEvent = body.changes.find((c) => c.action === "deleted");
 		expect(deleteEvent).toMatchObject({ slug: "delta-delete", title: "Delta Delete" });
+	});
+
+	// PROJ-526: a cascade delete only records one activity row (for the root), so a
+	// poller building a local mirror needs the descendant ids surfaced on that one event
+	// to evict them too — otherwise they never get told the descendants also vanished.
+	it("list_wiki_changes surfaces deletedPageIds on a cascade delete's root event", async () => {
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+		const parent = await createPage("delta-cascade-parent", "Delta Cascade Parent", "content");
+		const child = await createChildPage(
+			"delta-cascade-child",
+			"Delta Cascade Child",
+			"child",
+			parent.id
+		);
+
+		const delRes = await req(`http://localhost/api/wiki/${parent.slug}?cascade=true`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(delRes.status).toBe(200);
+
+		const body = (await (
+			await req(`http://localhost/api/wiki/changes?since=${t0}`, {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as {
+			changes: Array<{ action: string; pageId: string; deletedPageIds: string[] | null }>;
+		};
+		const deleteEvent = body.changes.find((c) => c.action === "deleted" && c.pageId === parent.id);
+		expect(deleteEvent?.deletedPageIds?.sort()).toEqual([child.id, parent.id].sort());
+
+		// Non-cascade events (e.g. the earlier "created" events) carry no deletedPageIds.
+		const createdEvent = body.changes.find((c) => c.action === "created" && c.pageId === parent.id);
+		expect(createdEvent?.deletedPageIds ?? null).toBeNull();
 	});
 
 	it("list_wiki_changes hides changes to a project-scoped page the caller can't see", async () => {

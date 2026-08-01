@@ -49,7 +49,7 @@ import {
 	liveLeasedIssueIds,
 } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
-import { inChunks } from "./sql";
+import { inChunks, sanitizeFtsQuery } from "./sql";
 import { resolveStatus } from "./task-statuses";
 import type { ServiceCtx } from "./types";
 
@@ -1499,15 +1499,6 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 	const ready = includeNotReady ? annotated : annotated.filter((i) => !("needsGrooming" in i));
 
 	return { issues: ready.slice(0, limit), droppedNotReady: includeNotReady ? 0 : droppedNotReady };
-}
-
-function sanitizeFtsQuery(q: string): string {
-	return q
-		.trim()
-		.split(/\s+/)
-		.filter((t) => Boolean(t) && /\w/.test(t))
-		.map((t) => `"${t.replace(/"/g, '""')}"`)
-		.join(" ");
 }
 
 export async function searchIssues(ctx: ServiceCtx, raw: unknown) {

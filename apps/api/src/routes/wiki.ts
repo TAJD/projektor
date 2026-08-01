@@ -17,8 +17,20 @@ router.get("/", async (c) => {
 		const type = c.req.query("type");
 		const status = c.req.query("status");
 		const tags = c.req.query("tags");
+		// PROJ-525: "true"/"1" opt-in for the template-picker's own use case; any other
+		// value (including absent) leaves the schema's default false in place.
+		const includeTemplatesParam = c.req.query("includeTemplates");
+		const includeTemplates =
+			includeTemplatesParam === "true" || includeTemplatesParam === "1" ? true : undefined;
 		return c.json(
-			await wikiService.listWikiPages(ctx, { parentId, projectId, type, status, tags })
+			await wikiService.listWikiPages(ctx, {
+				parentId,
+				projectId,
+				type,
+				status,
+				tags,
+				includeTemplates,
+			})
 		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);

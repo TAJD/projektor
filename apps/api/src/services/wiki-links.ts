@@ -190,31 +190,23 @@ async function resolveLinkTargets(
 const LINK_INSERT_CHUNK_SIZE = 15;
 
 /**
- * Recompute a page's outgoing wiki_links rows from its current content: delete-then-
- * reinsert, mirroring services/wiki.ts's reindexWikiFts. Call after every content write
- * (create or update) — never partially, since a stale row would misreport backlinks.
- *
- *
- * Not atomic: the delete and the reinsert are separate awaits, and neither shares a
- * transaction/batch with the content write in services/wiki.ts. A throw in between
- * commits the content but leaves wiki_links empty until the next save. PROJ-510 closed
- * the only known trigger (parse errors); the gap itself is PROJ-511.
+ * Builds (without executing) the DELETE + chunked re-INSERT statements that recompute a
+ * page's outgoing wiki_links rows from its current content — the write half of
+ * reindexWikiLinks, split out so services/wiki.ts can fold these statements into the same
+ * db.batch() as the page's content write, revision insert, and FTS reindex (PROJ-511).
+ * All resolution (parsing + the resolveLinkTargets reads) happens BEFORE this returns, so
+ * by the time these statements exist there is nothing left to throw between them and the
+ * delete — the whole write becomes one atomic D1 batch when passed to ctx.db.batch().
  */
-export async function reindexWikiLinks(
+export async function buildWikiLinksReindexStatements(
 	ctx: ServiceCtx,
 	orm: Orm,
 	sourcePageId: string,
 	content: string
-): Promise<void> {
-	await ctx.db
-		.prepare("DELETE FROM wiki_links WHERE source_page_id = ? AND workspace_id = ?")
-		.bind(sourcePageId, ctx.workspaceId)
-		.run();
-
+): Promise<D1PreparedStatement[]> {
 	const targets = parseWikiLinkTargets(content);
-	if (targets.length === 0) return;
-
-	const resolved = await resolveLinkTargets(orm, ctx.workspaceId, targets);
+	const resolved =
+		targets.length > 0 ? await resolveLinkTargets(orm, ctx.workspaceId, targets) : [];
 	const now = Math.floor(Date.now() / 1000);
 	const rows = resolved.map((r) => ({
 		id: crypto.randomUUID(),
@@ -225,9 +217,52 @@ export async function reindexWikiLinks(
 		createdAt: now,
 	}));
 
+	const statements: D1PreparedStatement[] = [
+		ctx.db
+			.prepare("DELETE FROM wiki_links WHERE source_page_id = ? AND workspace_id = ?")
+			.bind(sourcePageId, ctx.workspaceId),
+	];
 	for (let i = 0; i < rows.length; i += LINK_INSERT_CHUNK_SIZE) {
-		await orm.insert(schema.wikiLinks).values(rows.slice(i, i + LINK_INSERT_CHUNK_SIZE));
+		const chunk = rows.slice(i, i + LINK_INSERT_CHUNK_SIZE);
+		const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+		const params = chunk.flatMap((r) => [
+			r.id,
+			r.workspaceId,
+			r.sourcePageId,
+			r.targetPageId,
+			r.targetTitle,
+			r.createdAt,
+		]);
+		statements.push(
+			ctx.db
+				.prepare(
+					`INSERT INTO wiki_links (id, workspace_id, source_page_id, target_page_id, target_title, created_at) VALUES ${placeholders}`
+				)
+				.bind(...params)
+		);
 	}
+	return statements;
+}
+
+/**
+ * Recompute a page's outgoing wiki_links rows from its current content: delete-then-
+ * reinsert, mirroring services/wiki.ts's reindexWikiFts. Call after every content write
+ * (create or update) — never partially, since a stale row would misreport backlinks.
+ *
+ * Runs the statements from buildWikiLinksReindexStatements as their own atomic db.batch —
+ * used by callers (e.g. backfillWikiLinks) that don't fold link reindexing into a larger
+ * page-write batch themselves. services/wiki.ts's createWikiPage/updateWikiPage/
+ * patchWikiPage call buildWikiLinksReindexStatements directly instead, to include these
+ * statements in the same batch as the content write/revision/FTS reindex (PROJ-511).
+ */
+export async function reindexWikiLinks(
+	ctx: ServiceCtx,
+	orm: Orm,
+	sourcePageId: string,
+	content: string
+): Promise<void> {
+	const statements = await buildWikiLinksReindexStatements(ctx, orm, sourcePageId, content);
+	await ctx.db.batch(statements);
 }
 
 /**

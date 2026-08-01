@@ -38,6 +38,13 @@ export const wikiTools: MCPTool[] = [
 					items: { type: "string" },
 					description: "Filter to pages carrying at least one of these frontmatter tags",
 				},
+				includeTemplates: {
+					type: "boolean",
+					default: false,
+					description:
+						"Include template pages in the results (default false, matching search_wiki/" +
+						"list_stale_pages). Use list_wiki_templates for the template-picker use case instead.",
+				},
 			},
 		},
 		async handler(input, ctx) {

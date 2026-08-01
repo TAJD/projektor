@@ -117,6 +117,11 @@ export const ListPagesInputSchema = z.object({
 	tags: TagsFilterSchema,
 	type: WikiTypeFilterSchema,
 	status: WikiStatusFilterSchema,
+	// PROJ-525: default false — templates are excluded from ordinary browsing, matching
+	// search_wiki/listStaleWikiPages. The template-picker's own use case (listWikiTemplates)
+	// is a separate function, unaffected by this flag; this is for a caller of
+	// listWikiPages itself that specifically wants templates included.
+	includeTemplates: z.boolean().optional().default(false),
 });
 
 export const SearchWikiInputSchema = z.object({
