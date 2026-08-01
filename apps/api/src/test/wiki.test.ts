@@ -2890,8 +2890,12 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		if (isMcpError(result)) {
 			expect(result.error.code).toBe(-32602);
 			expect(result.error.message).toBe("Invalid params");
-			const data = result.error.data as { formErrors: string[] };
+			const data = result.error.data as {
+				formErrors: string[];
+				fieldErrors: Record<string, string[]>;
+			};
 			expect(data.formErrors.join(" ")).toContain("ambiguous");
+			expect(data.fieldErrors.heading).toEqual(["h1", "h2"]);
 		}
 	});
 
@@ -2970,8 +2974,11 @@ describe("Wiki patch operations (PROJ-490)", () => {
 			}),
 		});
 		expect(res.status).toBe(400);
-		const body = (await res.json()) as { error: { formErrors: string[] } };
+		const body = (await res.json()) as {
+			error: { formErrors: string[]; fieldErrors: Record<string, string[]> };
+		};
 		expect(body.error.formErrors.join(" ")).toContain("ambiguous");
+		expect(body.error.fieldErrors.heading).toEqual(["h1", "h2"]);
 		// Nothing was written.
 		expect((await getPage("patch-ambiguous")).content).toBe(content);
 	});
