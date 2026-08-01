@@ -46,7 +46,10 @@ async function resolveWatchTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 		.where(
 			and(
 				or(eq(schema.wikiPages.id, idOrSlug), eq(schema.wikiPages.slug, idOrSlug)),
-				eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+				// PROJ-496: a trashed page can't be (un)watched — same "trashed = gone" rule
+				// as every other page reference entry point (services/wiki.ts).
+				isNull(schema.wikiPages.deletedAt)
 			)
 		)
 		.get();
@@ -76,7 +79,8 @@ async function resolveWatchTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 				.where(
 					and(
 						eq(schema.wikiPages.id, redirect.pageId),
-						eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+						eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+						isNull(schema.wikiPages.deletedAt)
 					)
 				)
 				.get();
@@ -152,7 +156,11 @@ export async function listWikiWatches(ctx: ServiceCtx) {
 		.where(
 			and(
 				eq(schema.wikiWatchers.workspaceId, ctx.workspaceId),
-				eq(schema.wikiWatchers.userId, ctx.userId)
+				eq(schema.wikiWatchers.userId, ctx.userId),
+				// PROJ-496: a watch row on a page that's since been trashed lingers until
+				// purge (deleteWikiWatchersForPages now only runs at purge time) — filtered
+				// out here so the caller's watch list doesn't show a page they can't open.
+				isNull(schema.wikiPages.deletedAt)
 			)
 		)
 		.orderBy(desc(schema.wikiWatchers.createdAt));
@@ -543,6 +551,7 @@ export async function listWikiChanges(
 			pageSlug: schema.wikiPages.slug,
 			pageTitle: schema.wikiPages.title,
 			pageProjectId: schema.wikiPages.projectId,
+			pageDeletedAt: schema.wikiPages.deletedAt,
 		})
 		.from(schema.activity)
 		.leftJoin(schema.wikiPages, eq(schema.wikiPages.id, schema.activity.entityId))
@@ -584,6 +593,12 @@ export async function listWikiChanges(
 	for (const r of batch) {
 		if (r.createdAt > nextSince) nextSince = r.createdAt;
 		const action = r.action as "created" | "updated" | "deleted";
+		// PROJ-496: a "created"/"updated" event for a page that's now trashed is stale —
+		// the page itself is excluded from every other read path, so the delta feed drops
+		// it too rather than pointing an agent at a page get_wiki_page will 404 on. The
+		// "deleted" event for that same trash action is NOT dropped (below): it's the one
+		// event that's supposed to report the page went away.
+		if (action !== "deleted" && r.pageDeletedAt !== null && r.pageDeletedAt !== undefined) continue;
 		const deleted = action === "deleted" ? extractDeletedPageInfo(r.diff) : null;
 		const slug = deleted ? deleted.slug : r.pageSlug;
 		const title = deleted ? deleted.title : r.pageTitle;

@@ -873,7 +873,7 @@ describe("Wiki API", () => {
 		return { attachmentId: id, r2Key: row!.r2_key };
 	}
 
-	it("DELETE /api/wiki/:slug (default) removes the R2 object for a file attached to the page (PROJ-426)", async () => {
+	it("DELETE /api/wiki/:slug (default) trashes the page but leaves its R2 attachment in place until purge (PROJ-426/PROJ-496)", async () => {
 		const owner = await seedFixture({ role: "owner" });
 		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
 
@@ -897,14 +897,16 @@ describe("Wiki API", () => {
 		});
 		expect(delRes.status).toBe(200);
 
-		expect(await env.R2.get(r2Key)).toBeNull();
+		// PROJ-496: R2 cleanup moved to purge time — a soft-deleted page's attachment
+		// object/row must still exist (e.g. so undelete leaves the page fully intact).
+		expect(await env.R2.get(r2Key)).not.toBeNull();
 		const row = await env.DB.prepare("SELECT id FROM attachments WHERE id = ?")
 			.bind(attachmentId)
 			.first();
-		expect(row).toBeNull();
+		expect(row).not.toBeNull();
 	});
 
-	it("DELETE /api/wiki/:slug?cascade=true removes R2 objects for files attached across the subtree (PROJ-426)", async () => {
+	it("DELETE /api/wiki/:slug?cascade=true trashes the subtree but leaves R2 attachments in place until purge (PROJ-426/PROJ-496)", async () => {
 		const owner = await seedFixture({ role: "owner" });
 		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
 
@@ -933,8 +935,8 @@ describe("Wiki API", () => {
 		});
 		expect(delRes.status).toBe(200);
 
-		expect(await env.R2.get(parentFile.r2Key)).toBeNull();
-		expect(await env.R2.get(childFile.r2Key)).toBeNull();
+		expect(await env.R2.get(parentFile.r2Key)).not.toBeNull();
+		expect(await env.R2.get(childFile.r2Key)).not.toBeNull();
 	});
 
 	it("DELETE /api/wiki/:slug returns 403 for viewer role", async () => {
@@ -4421,17 +4423,19 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		expect(deleteNotifs.length).toBe(1);
 		expect(deleteNotifs[0]).toMatchObject({ pageId: child.id, slug: "cascade-kid" });
 
-		// No dangling watch row left pointing at a page that no longer exists.
+		// PROJ-496: the watch row itself is no longer cleared at delete time (that moved
+		// to purge, along with R2/wiki_links/wiki_drafts cleanup) — but the trashed page
+		// still drops out of the caller's watch LIST (listWikiWatches filters deleted_at).
 		const watchesRes = await req("http://localhost/api/wiki/watches", {
 			headers: authHeaders(watcher.token, slug),
 		});
 		expect(await watchesRes.json()).toEqual([]);
-		const orphaned = await env.DB.prepare(
+		const stillThere = await env.DB.prepare(
 			"SELECT COUNT(*) AS c FROM wiki_watchers WHERE page_id = ?"
 		)
 			.bind(child.id)
 			.first<{ c: number }>();
-		expect(orphaned?.c).toBe(0);
+		expect(stillThere?.c).toBe(1);
 	});
 
 	it("unreadOnly=false / watchedOnly=false are honored as false, not coerced true", async () => {
@@ -4817,7 +4821,7 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 		expect(publishRes.status).toBe(409);
 	});
 
-	it("deleting a page (cascade or not) cleans up its draft rows", async () => {
+	it("trashing a page (cascade or not) leaves its draft rows in place until purge (PROJ-496)", async () => {
 		const parent = await createPage("draft-delete-parent", "Draft Delete Parent", "content");
 		const child = (await req("http://localhost/api/wiki", {
 			method: "POST",
@@ -4856,10 +4860,33 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 		});
 		expect(delRes.status).toBe(200);
 
-		const rowsAfter = await env.DB.prepare("SELECT page_id FROM wiki_drafts WHERE workspace_id = ?")
+		// PROJ-496: draft cleanup moved to purge time — trashing the page (even cascaded)
+		// leaves the draft rows untouched.
+		const rowsAfterDelete = await env.DB.prepare(
+			"SELECT page_id FROM wiki_drafts WHERE workspace_id = ?"
+		)
 			.bind(workspaceId)
 			.all();
-		expect(rowsAfter.results.length).toBe(0);
+		expect(rowsAfterDelete.results.length).toBe(2);
+
+		// Backdate past the 30-day retention window and purge.
+		await env.DB.prepare(
+			"UPDATE wiki_pages SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NOT NULL"
+		)
+			.bind(Math.floor(Date.now() / 1000) - 31 * 24 * 60 * 60, workspaceId)
+			.run();
+		const purgeRes = await req("http://localhost/api/wiki/purge-trash", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(purgeRes.status).toBe(200);
+
+		const rowsAfterPurge = await env.DB.prepare(
+			"SELECT page_id FROM wiki_drafts WHERE workspace_id = ?"
+		)
+			.bind(workspaceId)
+			.all();
+		expect(rowsAfterPurge.results.length).toBe(0);
 	});
 
 	it("validation: title and content are required on save", async () => {
@@ -4899,5 +4926,372 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 			await mcp("get_wiki_draft", { slug: page.slug })
 		);
 		expect(afterDiscard).toBeNull();
+	});
+});
+
+describe("Wiki trash (PROJ-496)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		// admin: deleteWikiPage/undeleteWikiPage/purgeExpiredWikiPages on a workspace-level
+		// page all require admin/owner (requireWikiDelete / isWorkspaceAdmin).
+		const fixture = await seedFixture({ role: "admin" });
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+	});
+
+	async function req(url: string, opts?: RequestInit) {
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+		return SELF.fetch(url, opts);
+	}
+
+	async function createPage(title: string, content: string, opts?: Record<string, unknown>) {
+		const res = await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title, content, ...opts }),
+		});
+		expect(res.status).toBe(201);
+		return (await res.json()) as { id: string; slug: string };
+	}
+
+	async function trashPage(pageSlug: string, cascade = false) {
+		const res = await req(
+			`http://localhost/api/wiki/${pageSlug}${cascade ? "?cascade=true" : ""}`,
+			{ method: "DELETE", headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+	}
+
+	function backdateTrash(seconds = 31 * 24 * 60 * 60) {
+		return env.DB.prepare(
+			"UPDATE wiki_pages SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NOT NULL"
+		)
+			.bind(Math.floor(Date.now() / 1000) - seconds, workspaceId)
+			.run();
+	}
+
+	it("a trashed page disappears from the list, tree, search, stale-pages, and templates endpoints", async () => {
+		const page = await createPage("Trash List Page", "trash-list-searchterm");
+		await trashPage(page.slug);
+
+		const listRes = await req("http://localhost/api/wiki", { headers: authHeaders(token, slug) });
+		expect(((await listRes.json()) as Array<{ id: string }>).some((p) => p.id === page.id)).toBe(
+			false
+		);
+
+		const treeRes = await req("http://localhost/api/wiki/tree", {
+			headers: authHeaders(token, slug),
+		});
+		type TreeNode = { id: string; children: TreeNode[] };
+		const flatten = (nodes: TreeNode[]): string[] =>
+			nodes.flatMap((n) => [n.id, ...flatten(n.children ?? [])]);
+		expect(flatten((await treeRes.json()) as TreeNode[])).not.toContain(page.id);
+
+		const searchRes = await req("http://localhost/api/wiki/search?q=trash-list-searchterm", {
+			headers: authHeaders(token, slug),
+		});
+		expect(await searchRes.json()).toEqual([]);
+
+		const templatePage = await createPage(
+			"Trash Template Page",
+			["---", "template: true", "---", "content"].join("\n")
+		);
+		await trashPage(templatePage.slug);
+		const templatesRes = await req("http://localhost/api/wiki/templates", {
+			headers: authHeaders(token, slug),
+		});
+		expect(
+			((await templatesRes.json()) as Array<{ id: string }>).some((p) => p.id === templatePage.id)
+		).toBe(false);
+	});
+
+	it("GET /api/wiki/:slug and GET /api/wiki/:id both 404 for a trashed page", async () => {
+		const page = await createPage("Trash Get Page", "content");
+		await trashPage(page.slug);
+
+		const bySlug = await req(`http://localhost/api/wiki/${page.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(bySlug.status).toBe(404);
+
+		const byId = await req(`http://localhost/api/wiki/${page.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(byId.status).toBe(404);
+	});
+
+	it("a trashed source page no longer counts as a backlink", async () => {
+		const target = await createPage("Trash Backlink Target", "target content");
+		const source = await createPage("Trash Backlink Source", "see [[Trash Backlink Target]]");
+
+		let backlinksRes = await req(`http://localhost/api/wiki/${target.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		expect((await backlinksRes.json()) as Array<{ slug: string }>).toEqual([
+			expect.objectContaining({ slug: source.slug, title: "Trash Backlink Source" }),
+		]);
+
+		await trashPage(source.slug);
+		backlinksRes = await req(`http://localhost/api/wiki/${target.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(await backlinksRes.json()).toEqual([]);
+	});
+
+	it("a redirect pointing at a trashed page 404s instead of resolving", async () => {
+		const page = await createPage("Trash Redirect Target", "content");
+		const renameRes = await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "trash-redirect-target-renamed" }),
+		});
+		expect(renameRes.status).toBe(200);
+
+		// The OLD slug is now just a redirect; it must still resolve to the live page...
+		const stillLive = await req(`http://localhost/api/wiki/${page.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(stillLive.status).toBe(200);
+
+		// ...but once the page (now at the new slug) is trashed, the redirect must 404
+		// rather than resolving to a page that no longer exists in any live read path.
+		await trashPage("trash-redirect-target-renamed");
+		const afterTrash = await req(`http://localhost/api/wiki/${page.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(afterTrash.status).toBe(404);
+	});
+
+	it("cascade trash moves the whole subtree as one unit: same deleted_at, all 404 via the API", async () => {
+		const parent = await createPage("Trash Cascade Parent", "content");
+		const child = await createPage("Trash Cascade Child", "content", { parentId: parent.id });
+		const grandchild = await createPage("Trash Cascade Grandchild", "content", {
+			parentId: child.id,
+		});
+
+		await trashPage(parent.slug, true);
+
+		const rows = await env.DB.prepare("SELECT id, deleted_at FROM wiki_pages WHERE id IN (?, ?, ?)")
+			.bind(parent.id, child.id, grandchild.id)
+			.all<{ id: string; deleted_at: number | null }>();
+		expect(rows.results.length).toBe(3);
+		const deletedAts = new Set(rows.results.map((r) => r.deleted_at));
+		expect(deletedAts.size).toBe(1);
+		expect(rows.results.every((r) => r.deleted_at !== null)).toBe(true);
+
+		for (const p of [parent, child, grandchild]) {
+			const res = await req(`http://localhost/api/wiki/${p.slug}`, {
+				headers: authHeaders(token, slug),
+			});
+			expect(res.status).toBe(404);
+		}
+	});
+
+	it("GET /api/wiki/trash lists trashed pages with a purgeAfter timestamp, and excludes live pages", async () => {
+		const live = await createPage("Trash List Live", "content");
+		const trashed = await createPage("Trash List Trashed", "content");
+		await trashPage(trashed.slug);
+
+		const res = await req("http://localhost/api/wiki/trash", { headers: authHeaders(token, slug) });
+		expect(res.status).toBe(200);
+		const rows = (await res.json()) as Array<{
+			id: string;
+			deleted_at: number;
+			purgeAfter: number;
+		}>;
+		expect(rows.some((r) => r.id === live.id)).toBe(false);
+		const row = rows.find((r) => r.id === trashed.id);
+		expect(row).toBeDefined();
+		expect(row?.purgeAfter).toBe(row!.deleted_at + 30 * 24 * 60 * 60);
+	});
+
+	it("POST /api/wiki/trash/:id/undelete restores a trashed page: it becomes visible again", async () => {
+		const page = await createPage("Trash Undelete Page", "content");
+		await trashPage(page.slug);
+
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${page.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(200);
+		expect(await undeleteRes.json()).toMatchObject({ ok: true, id: page.id, slug: page.slug });
+
+		const getRes = await req(`http://localhost/api/wiki/${page.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(getRes.status).toBe(200);
+	});
+
+	it("undelete rejects a slug that's since been taken by a new live page (409 conflict)", async () => {
+		const page = await createPage("Trash Conflict Page", "content");
+		await trashPage(page.slug);
+
+		// A brand-new page can now legitimately claim the freed-up slug.
+		const reclaimed = await createPage("Trash Conflict Reclaimed", "content", {
+			slug: page.slug,
+		});
+		expect(reclaimed.slug).toBe(page.slug);
+
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${page.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(409);
+	});
+
+	it("undelete 404s for an unknown id and 400s for a page that isn't actually trashed", async () => {
+		const unknownRes = await req(
+			`http://localhost/api/wiki/trash/${crypto.randomUUID()}/undelete`,
+			{ method: "POST", headers: authHeaders(token, slug) }
+		);
+		expect(unknownRes.status).toBe(404);
+
+		const live = await createPage("Trash Not Trashed Page", "content");
+		const notTrashedRes = await req(`http://localhost/api/wiki/trash/${live.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(notTrashedRes.status).toBe(400);
+	});
+
+	it("POST /api/wiki/purge-trash requires an admin/owner", async () => {
+		const memberUser = await seedUser(
+			`trash-member-${crypto.randomUUID().slice(0, 8)}@example.com`
+		);
+		await seedMember(workspaceId, memberUser.id, "member");
+		const memberToken = await seedToken(workspaceId, memberUser.id);
+
+		const res = await req("http://localhost/api/wiki/purge-trash", {
+			method: "POST",
+			headers: authHeaders(memberToken, slug),
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("purge permanently removes only pages trashed more than 30 days ago, and cleans up every dependent table + R2", async () => {
+		const oldPage = await createPage("Trash Purge Old", "purge-old-searchterm");
+		await createPage("Trash Purge Old Target", "content");
+		await req(`http://localhost/api/wiki/${oldPage.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "see [[Trash Purge Old Target]]" }),
+		});
+		const oldForm = new FormData();
+		oldForm.append("file", new File(["old"], "old.txt", { type: "text/plain" }));
+		oldForm.append("entityType", "wiki_page");
+		oldForm.append("entityId", oldPage.id);
+		const oldUploadRes = await req("http://localhost/api/files", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${token}`, "X-Workspace-Slug": slug },
+			body: oldForm,
+		});
+		const { id: oldAttachmentId } = (await oldUploadRes.json()) as { id: string };
+		const oldR2Key = (
+			await env.DB.prepare("SELECT r2_key FROM attachments WHERE id = ?")
+				.bind(oldAttachmentId)
+				.first<{ r2_key: string }>()
+		)?.r2_key;
+		await req(`http://localhost/api/wiki/${oldPage.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({}),
+		});
+		await req(`http://localhost/api/wiki/${oldPage.slug}/draft`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: oldPage.slug, content: "draft", baseRevisionId: null }),
+		});
+		await req(`http://localhost/api/wiki/${oldPage.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "trash-purge-old-renamed" }),
+		});
+
+		const recentPage = await createPage("Trash Purge Recent", "content");
+
+		await trashPage("trash-purge-old-renamed");
+		await trashPage(recentPage.slug);
+
+		// Only the OLD page's trash timestamp is backdated past the retention window.
+		await env.DB.prepare("UPDATE wiki_pages SET deleted_at = ? WHERE id = ?")
+			.bind(Math.floor(Date.now() / 1000) - 31 * 24 * 60 * 60, oldPage.id)
+			.run();
+
+		const purgeRes = await req("http://localhost/api/wiki/purge-trash", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(purgeRes.status).toBe(200);
+		const purged = (await purgeRes.json()) as { purgedCount: number; purgedIds: string[] };
+		expect(purged.purgedCount).toBe(1);
+		expect(purged.purgedIds).toEqual([oldPage.id]);
+
+		expect(
+			await env.DB.prepare("SELECT id FROM wiki_pages WHERE id = ?").bind(oldPage.id).first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare("SELECT id FROM attachments WHERE id = ?").bind(oldAttachmentId).first()
+		).toBeNull();
+		if (oldR2Key) expect(await env.R2.get(oldR2Key)).toBeNull();
+		expect(
+			await env.DB.prepare("SELECT page_id FROM wiki_fts WHERE page_id = ?")
+				.bind(oldPage.id)
+				.first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare("SELECT id FROM wiki_links WHERE source_page_id = ?")
+				.bind(oldPage.id)
+				.first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare("SELECT page_id FROM wiki_watchers WHERE page_id = ?")
+				.bind(oldPage.id)
+				.first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare("SELECT page_id FROM wiki_drafts WHERE page_id = ?")
+				.bind(oldPage.id)
+				.first()
+		).toBeNull();
+		expect(
+			await env.DB.prepare("SELECT id FROM wiki_redirects WHERE page_id = ?")
+				.bind(oldPage.id)
+				.first()
+		).toBeNull();
+
+		// The recently-trashed page (not yet 30 days old) survives the purge untouched.
+		expect(
+			await env.DB.prepare("SELECT id FROM wiki_pages WHERE id = ?").bind(recentPage.id).first()
+		).not.toBeNull();
+	});
+
+	it("MCP list_wiki_trash / undelete_wiki_page / purge_wiki_trash mirror the REST behavior", async () => {
+		async function mcp<T>(name: string, args: unknown) {
+			await env.DB.prepare("DELETE FROM rate_limit").run();
+			return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+		}
+		const page = await createPage("MCP Trash Page", "content");
+		await trashPage(page.slug);
+
+		const trashList = mcpData<Array<{ id: string; purgeAfter: number }>>(
+			await mcp("list_wiki_trash", {})
+		);
+		expect(trashList.some((r) => r.id === page.id)).toBe(true);
+
+		const restored = mcpData<{ ok: boolean; id: string }>(
+			await mcp("undelete_wiki_page", { id: page.id })
+		);
+		expect(restored).toMatchObject({ ok: true, id: page.id });
+
+		await trashPage(page.slug);
+		await backdateTrash();
+		const purged = mcpData<{ purgedCount: number; purgedIds: string[] }>(
+			await mcp("purge_wiki_trash", {})
+		);
+		expect(purged.purgedIds).toContain(page.id);
 	});
 });

@@ -10,6 +10,9 @@
 // don't need a single resolved page so they're self-contained here.
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+// PROJ-496 (R14): a trashed page is treated as gone for link resolution purposes — see
+// resolveTitleTargets/resolveSlugTarget/backlinksForResolvedPage/listBrokenWikiLinks
+// below for the `isNull(schema.wikiPages.deletedAt)` filters this adds.
 import { safeDecodeURIComponent, wikiPagePath } from "../lib/urls";
 import { ListBrokenWikiLinksInputSchema } from "../schemas/wiki";
 import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
@@ -85,7 +88,8 @@ async function resolveTitleTargets(
 					sql`lower(${schema.wikiPages.title}) IN (${sql.join(
 						chunk.map((t) => sql`${t}`),
 						sql`, `
-					)})`
+					)})`,
+					isNull(schema.wikiPages.deletedAt)
 				)
 			)
 	);
@@ -104,7 +108,13 @@ async function resolveSlugTarget(
 	const direct = await orm
 		.select({ id: schema.wikiPages.id, title: schema.wikiPages.title })
 		.from(schema.wikiPages)
-		.where(and(eq(schema.wikiPages.workspaceId, workspaceId), eq(schema.wikiPages.slug, slug)))
+		.where(
+			and(
+				eq(schema.wikiPages.workspaceId, workspaceId),
+				eq(schema.wikiPages.slug, slug),
+				isNull(schema.wikiPages.deletedAt)
+			)
+		)
 		.get();
 	if (direct) return direct;
 	// PROJ-483 redirects: an old slug still resolves to its page.
@@ -120,7 +130,14 @@ async function resolveSlugTarget(
 		.select({ id: schema.wikiPages.id, title: schema.wikiPages.title })
 		.from(schema.wikiPages)
 		.where(
-			and(eq(schema.wikiPages.id, redirect.pageId), eq(schema.wikiPages.workspaceId, workspaceId))
+			and(
+				eq(schema.wikiPages.id, redirect.pageId),
+				eq(schema.wikiPages.workspaceId, workspaceId),
+				// PROJ-496: same "trashed = gone" rule as resolveWikiPageByRedirect in
+				// services/wiki.ts — a link to a page's old slug doesn't resolve while the
+				// page is in the trash.
+				isNull(schema.wikiPages.deletedAt)
+			)
 		)
 		.get();
 	return page ?? null;
@@ -351,7 +368,9 @@ export async function backlinksForResolvedPage(
 		.where(
 			and(
 				eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
-				eq(schema.wikiLinks.targetPageId, page.id)
+				eq(schema.wikiLinks.targetPageId, page.id),
+				// PROJ-496: a trashed page's outgoing links don't count as backlinks anymore.
+				isNull(schema.wikiPages.deletedAt)
 			)
 		);
 
@@ -415,7 +434,18 @@ export async function listBrokenWikiLinks(
 	const orm = drizzle(ctx.db, { schema });
 	const conditions = [
 		eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
-		isNull(schema.wikiLinks.targetPageId),
+		// PROJ-496: a link is "broken" both when its target was hard-cleared (targetPageId
+		// IS NULL, e.g. after purge) AND when its target still resolves to an id but that
+		// page is now trashed — target_page_id isn't cleared until purge time anymore, so
+		// without this second clause a link to a trashed-but-not-yet-purged page would
+		// silently stop being reported as broken.
+		or(
+			isNull(schema.wikiLinks.targetPageId),
+			sql`EXISTS (SELECT 1 FROM wiki_pages tp WHERE tp.id = ${schema.wikiLinks.targetPageId} AND tp.deleted_at IS NOT NULL)`
+		),
+		// PROJ-496: a trashed source page's broken links aren't a maintenance concern
+		// anymore — they'll be purged along with the page.
+		isNull(schema.wikiPages.deletedAt),
 	];
 	if (projectId) conditions.push(eq(schema.wikiPages.projectId, projectId));
 
