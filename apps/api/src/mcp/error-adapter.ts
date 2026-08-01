@@ -48,9 +48,7 @@ function summarizeIssues(issues: ZodFlattenOutput): string {
 			: []),
 		...Object.entries(issues.fieldErrors)
 			.filter(([, messages]) => messages && messages.length > 0)
-			.map(
-				([field, messages]) => `${field}: ${truncate(messages.join(", "), MAX_DETAIL_VALUE_CHARS)}`
-			),
+			.map(([field, messages]) => `${field}: ${truncate(messages!.join(", "), MAX_DETAIL_VALUE_CHARS)}`),
 	];
 	return truncate(parts.join("; "), MAX_DETAIL_SUMMARY_CHARS);
 }
