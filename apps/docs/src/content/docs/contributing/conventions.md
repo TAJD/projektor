@@ -79,6 +79,10 @@ audits:
   endpoint is intentionally unauthenticated by token).
 - **`get_prioritized_issues`** — MCP-only. An agent-productivity tool ("what should I
   work on next") with no natural REST/browser analog.
+- **Wiki export (`GET /api/wiki/export`)** — REST-only. Returns a binary zip
+  (markdown + attachments) which can't cross JSON-RPC the same way file download
+  can't (see the file-attachment exception above); import is explicitly out of
+  scope (PROJ-497) so there's no round-trip MCP surface to keep parity with either.
 - **Public feedback submission (`POST /api/feedback/submit`)** — REST-only.
   Anonymous end-user feedback from a third-party product, authenticated by a per-source
   bearer token, not a session — there's no ServiceCtx user/role for an MCP tool to act as.
