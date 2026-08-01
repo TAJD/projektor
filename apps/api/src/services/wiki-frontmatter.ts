@@ -18,7 +18,7 @@ export type WikiFrontmatterMeta = {
 	isTemplate: boolean;
 };
 
-export const EMPTY_WIKI_FRONTMATTER: WikiFrontmatterMeta = {
+const EMPTY_WIKI_FRONTMATTER: WikiFrontmatterMeta = {
 	type: null,
 	tags: [],
 	status: null,

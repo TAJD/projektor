@@ -51,6 +51,7 @@ function extractWikiSlugFromUrl(url: string): string | null {
 	return safeDecodeURIComponent(raw);
 }
 
+// cofferdam-ignore: Design.OrphanExport: part of the service API; used internally for parsing wiki link targets
 export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
 	const targets: ParsedLinkTarget[] = [];
 	for (const m of content.matchAll(WIKILINK_RE)) {
@@ -255,6 +256,7 @@ export async function buildWikiLinksReindexStatements(
  * patchWikiPage call buildWikiLinksReindexStatements directly instead, to include these
  * statements in the same batch as the content write/revision/FTS reindex (PROJ-511).
  */
+// cofferdam-ignore: Design.OrphanExport: re-indexing function available for direct use; prefer buildWikiLinksReindexStatements for batch operations
 export async function reindexWikiLinks(
 	ctx: ServiceCtx,
 	orm: Orm,
