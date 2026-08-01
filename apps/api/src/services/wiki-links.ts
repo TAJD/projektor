@@ -237,7 +237,8 @@ export async function buildWikiLinksReindexStatements(
 		statements.push(
 			ctx.db
 				.prepare(
-					`INSERT INTO wiki_links (id, workspace_id, source_page_id, target_page_id, target_title, created_at) VALUES ${placeholders}`
+					`INSERT INTO wiki_links (id, workspace_id, source_page_id, target_page_id, target_title,
+						created_at) VALUES ${placeholders}`
 				)
 				.bind(...params)
 		);
@@ -256,7 +257,7 @@ export async function buildWikiLinksReindexStatements(
  * patchWikiPage call buildWikiLinksReindexStatements directly instead, to include these
  * statements in the same batch as the content write/revision/FTS reindex (PROJ-511).
  */
-// cofferdam-ignore: Design.OrphanExport: re-indexing function available for direct use; prefer buildWikiLinksReindexStatements for batch operations
+// cofferdam-ignore: Design.OrphanExport: available for direct use; prefer buildWikiLinksReindexStatements for batches
 export async function reindexWikiLinks(
 	ctx: ServiceCtx,
 	orm: Orm,
@@ -478,7 +479,8 @@ export async function listBrokenWikiLinks(
 		// silently stop being reported as broken.
 		or(
 			isNull(schema.wikiLinks.targetPageId),
-			sql`EXISTS (SELECT 1 FROM wiki_pages tp WHERE tp.id = ${schema.wikiLinks.targetPageId} AND tp.deleted_at IS NOT NULL)`
+			sql`EXISTS (SELECT 1 FROM wiki_pages tp WHERE tp.id = ${schema.wikiLinks.targetPageId}
+				AND tp.deleted_at IS NOT NULL)`
 		),
 		// PROJ-496: a trashed source page's broken links aren't a maintenance concern
 		// anymore — they'll be purged along with the page.

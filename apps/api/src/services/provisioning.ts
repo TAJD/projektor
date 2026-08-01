@@ -341,7 +341,10 @@ async function runProvisioning(env: Env, user: { id: string; email: string }): P
  * on this is the hot path for every anonymous request. There is exactly one public-viewer
  * identity, so the marker is shared by all of them.
  */
-export async function provisionPublicViewer(env: Env, user: Readonly<{ id: string }>): Promise<void> {
+export async function provisionPublicViewer(
+	env: Env,
+	user: Readonly<{ id: string }>
+): Promise<void> {
 	if (await alreadyProvisioned(env, user.id)) return;
 
 	const slug = env.DEFAULT_WORKSPACE_SLUG?.trim() || "projektor";

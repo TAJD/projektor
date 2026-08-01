@@ -13,7 +13,8 @@ interface MeResponse {
 }
 
 const POPOVER_MARGIN = 8;
-const PUBLIC_VIEWER_EMAIL = "public-viewer@projektor.local"; // PROJ-373 anonymous fallback — apps/api/src/middleware/auth.ts
+// PROJ-373 anonymous fallback — apps/api/src/middleware/auth.ts
+const PUBLIC_VIEWER_EMAIL = "public-viewer@projektor.local";
 
 function initials(name: string, email: string): string {
 	const source = name.trim() || email;

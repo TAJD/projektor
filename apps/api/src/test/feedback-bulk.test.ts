@@ -29,7 +29,8 @@ async function seedFeedbackRow(
 	const id = crypto.randomUUID();
 	await env.DB.prepare(
 		`INSERT INTO feedback
-       (id, source_id, workspace_id, project_id, rating, rating_scale, body, submitter_label, status, linked_issue_id, created_at)
+       (id, source_id, workspace_id, project_id, rating, rating_scale, body, submitter_label,
+        status, linked_issue_id, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	)
 		.bind(

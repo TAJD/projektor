@@ -87,7 +87,8 @@ export const issuesTools: MCPTool[] = [
 				needsAudit: {
 					type: "boolean",
 					description:
-						"Filter to agent-initiated done-closures flagged for human audit — true for unverifiable evidence, false for externally-checkable evidence",
+						"Filter to agent-initiated done-closures flagged for human audit — true for " +
+							"unverifiable evidence, false for externally-checkable evidence",
 				},
 				includeRollups: {
 					type: "boolean",

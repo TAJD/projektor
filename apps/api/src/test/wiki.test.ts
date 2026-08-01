@@ -118,7 +118,7 @@ describe("Wiki API", () => {
 			expect(tree.find((p) => p.slug === "weekly-updates")?.url).toBe("/wiki/weekly-updates");
 		});
 
-		it("does not include projectId in the url when the page is scoped to a project (slugs are workspace-unique, PROJ-483)", async () => {
+		it("omits projectId from the url for a project-scoped page (slugs are workspace-unique, PROJ-483)", async () => {
 			const project = await seedProject(workspaceId);
 			await seedGroupGrant(workspaceId, userId, project.id);
 			const createRes = await SELF.fetch("http://localhost/api/wiki", {
@@ -877,7 +877,7 @@ describe("Wiki API", () => {
 		return { attachmentId: id, r2Key: row!.r2_key };
 	}
 
-	it("DELETE /api/wiki/:slug (default) trashes the page but leaves its R2 attachment in place until purge (PROJ-426/PROJ-496)", async () => {
+	it("DELETE :slug trashes the page, leaving its R2 attachment until purge (PROJ-426/496)", async () => {
 		const owner = await seedFixture({ role: "owner" });
 		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
 
@@ -910,7 +910,7 @@ describe("Wiki API", () => {
 		expect(row).not.toBeNull();
 	});
 
-	it("DELETE /api/wiki/:slug?cascade=true trashes the subtree but leaves R2 attachments in place until purge (PROJ-426/PROJ-496)", async () => {
+	it("DELETE ?cascade=true trashes the subtree, leaving R2 attachments until purge (PROJ-426/496)", async () => {
 		const owner = await seedFixture({ role: "owner" });
 		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
 
@@ -1126,7 +1126,7 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(res.status).toBe(400);
 	});
 
-	it("POST /api/wiki falls back to an opaque slug for a symbol-only/non-Latin title whose derived slug would be empty (PROJ-517/512 finding 5)", async () => {
+	it("POST /api/wiki uses an opaque slug for a non-Latin title (empty derived slug, PROJ-517 #5)", async () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
@@ -1143,7 +1143,7 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(fetched.title).toBe("測試");
 	});
 
-	it("POST /api/wiki falls back to an opaque slug for a title whose derived slug would exceed SlugSchema's 200-char max (PROJ-517/512 finding 5)", async () => {
+	it("POST /api/wiki uses an opaque slug when derived slug exceeds SlugSchema's 200-char max (PROJ-517)", async () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
@@ -1184,13 +1184,14 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(isMcpError(res)).toBe(true);
 	});
 
-	it("a slashy slug rewritten by the PROJ-517 backfill migration still resolves, and the old slug redirects (finding 1)", async () => {
+	it("a slashy slug rewritten by the PROJ-517 backfill still resolves, and the old slug redirects (#1)", async () => {
 		// Simulate a pre-PROJ-517 row that predates SlugSchema's no-slash rule by
 		// inserting directly (SlugSchema would now reject this via the service layer).
 		const pageId = crypto.randomUUID();
 		const now = Math.floor(Date.now() / 1000);
 		await env.DB.prepare(
-			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
+			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content,
+				parent_id, created_by_id, updated_by_id, created_at, updated_at)
 			 VALUES (?, ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?)`
 		)
 			.bind(
@@ -2289,7 +2290,7 @@ describe("Wiki optimistic locking (PROJ-484)", () => {
 		expect(res.status).toBe(400);
 	});
 
-	it("MCP: update_wiki_page parity — matching baseRevisionId succeeds, stale is rejected with a structured conflict", async () => {
+	it("MCP: update_wiki_page — matching baseRevisionId succeeds, stale is rejected with a conflict", async () => {
 		const created = mcpData<{ slug: string }>(
 			await mcp("create_wiki_page", { title: "MCP Locked Doc", content: "v1" })
 		);
@@ -2494,7 +2495,7 @@ describe("Wiki revision diff (PROJ-492)", () => {
 		expect(result.diff).toContain("+beta");
 	});
 
-	it("restore is a plain update_wiki_page call with the old revision's content — creates a new revision, never rewrites history", async () => {
+	it("restore is a plain update_wiki_page call with old content — new revision, never rewrites history", async () => {
 		await req("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
@@ -2539,7 +2540,7 @@ describe("Wiki revision diff (PROJ-492)", () => {
 		expect(revisions.map((r) => r.id)).toContain(latest.id);
 	});
 
-	it("restore with a baseRevisionId that went stale while history was open is a 409, not a silent overwrite", async () => {
+	it("restore with a baseRevisionId stale from open history is a 409, not a silent overwrite", async () => {
 		await req("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
@@ -2790,7 +2791,7 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(body.currentHeadings).toEqual(["Alpha", "Beta"]);
 	});
 
-	it("REST: disjoint-section writes never conflict — two agents patching different sections against a stale baseRevisionId both succeed", async () => {
+	it("REST: disjoint-section writes never conflict — two patches vs. a stale baseRevisionId both succeed", async () => {
 		await createPage("patch-disjoint", "Patch Disjoint", TWO_SECTIONS);
 		const revRes = await req("http://localhost/api/wiki/patch-disjoint/revisions", {
 			headers: authHeaders(token, slug),
@@ -2973,7 +2974,7 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(res.status).toBe(400);
 	});
 
-	it("REST: append_to_page accepts a baseRevisionId that DOES belong to the page, even though it's stale (staleness isn't rejected for this op)", async () => {
+	it("REST: append_to_page accepts a stale baseRevisionId belonging to the page (staleness ignored here)", async () => {
 		await createPage("patch-append-stale-base", "Patch Append Stale Base", TWO_SECTIONS);
 		const firstRes = await req("http://localhost/api/wiki/patch-append-stale-base", {
 			method: "PATCH",
@@ -3371,7 +3372,7 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 		expect(backlinks).toEqual([]);
 	});
 
-	it("PROJ-510: a malformed %-escape in a markdown link URL doesn't crash the write, and other links on the page still index", async () => {
+	it("PROJ-510: a malformed %-escape in a link URL doesn't crash the write; other links still index", async () => {
 		const runbook = await createPage("Runbook Eta", "how to page");
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
@@ -3607,13 +3608,15 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 		// pre-PROJ-485 content that predates the link graph.
 		const now = Math.floor(Date.now() / 1000);
 		await env.DB.prepare(
-			"INSERT INTO wiki_pages (id, workspace_id, slug, title, content, created_by_id, updated_by_id, created_at, updated_at) " +
+			"INSERT INTO wiki_pages (id, workspace_id, slug, title, content, created_by_id, " +
+				"updated_by_id, created_at, updated_at) " +
 				"VALUES ('legacy-target', ?, 'legacy-target', 'Legacy Target', 'x', ?, ?, ?, ?)"
 		)
 			.bind(owner.workspace.id, owner.user.id, owner.user.id, now, now)
 			.run();
 		await env.DB.prepare(
-			"INSERT INTO wiki_pages (id, workspace_id, slug, title, content, created_by_id, updated_by_id, created_at, updated_at) " +
+			"INSERT INTO wiki_pages (id, workspace_id, slug, title, content, created_by_id, " +
+				"updated_by_id, created_at, updated_at) " +
 				"VALUES ('legacy-source', ?, 'legacy-source', 'Legacy Source', '[[Legacy Target]]', ?, ?, ?, ?)"
 		)
 			.bind(owner.workspace.id, owner.user.id, owner.user.id, now, now)
@@ -4041,7 +4044,7 @@ describe("Wiki freshness model (PROJ-489)", () => {
 	// verified) in search ranking — only in list_stale_pages (the maintenance queue).
 	// A freshly authored page that opts into verification tracking shouldn't rank worse
 	// than a legacy page with no frontmatter at all just for declaring an interval.
-	it("GET /api/wiki/search does NOT demote an unverified page below a lower-relevance page with no freshness signal", async () => {
+	it("GET /api/wiki/search does NOT demote an unverified page below a page with no freshness signal", async () => {
 		// If "unverified" were still in the demotion tier, this page would sort AFTER
 		// "No Signal" below regardless of relevance, the same way a stale/deprecated page
 		// is forced below a fresh one in the tests above. Giving it the stronger (title)
@@ -4077,7 +4080,7 @@ describe("Wiki freshness model (PROJ-489)", () => {
 		expect(results[0].freshness?.state).toBe("unverified");
 	});
 
-	it("GET /api/wiki/stale-pages lists computed-stale, unverified, and explicitly stale/deprecated pages, excluding fresh ones", async () => {
+	it("GET /api/wiki/stale-pages lists computed-stale, unverified, deprecated pages, excluding fresh", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
@@ -4654,7 +4657,7 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		expect(await notifications(watcher.token)).toEqual([]);
 	});
 
-	it("a cascade delete generates a single 'deleted' notification for the root page, not one per descendant", async () => {
+	it("a cascade delete generates a single 'deleted' notification for the root, not one per descendant", async () => {
 		const parent = await createPage("cascade-parent", "Cascade Parent", "content");
 		await createChildPage("cascade-child", "Cascade Child", "child", parent.id);
 		const watcher = await seedWatcher();
@@ -4711,7 +4714,7 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		expect(stillThere?.c).toBe(1);
 	});
 
-	it("a cascade undelete notifies someone watching a DESCENDANT directly (PROJ-496 follow-up: symmetric with cascade delete)", async () => {
+	it("a cascade undelete notifies someone watching a DESCENDANT (PROJ-496: symmetric with cascade delete)", async () => {
 		const parent = await createPage("cascade-restore-root", "Cascade Restore Root", "content");
 		const child = await createChildPage(
 			"cascade-restore-kid",
@@ -4814,7 +4817,7 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		expect((await notifications(watcher.token, "?unreadOnly=true")).length).toBe(0);
 	});
 
-	it("list_wiki_changes: since is exclusive, nextSince advances, default scope isn't limited to watched pages", async () => {
+	it("list_wiki_changes: since is exclusive, nextSince advances, default scope isn't watched-only", async () => {
 		const t0 = Math.floor(Date.now() / 1000) - 1;
 		const page = await createPage("delta-doc", "Delta Doc", "content");
 
@@ -5075,7 +5078,7 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 		expect(await otherGet.json()).toBeNull();
 	});
 
-	it("publishing the draft's content through the normal update path works, and discarding after publish clears it", async () => {
+	it("publishing the draft's content via the normal update path works; discarding after publish clears it", async () => {
 		const page = await createPage("draft-publish", "Draft Publish", "v0");
 		const pageRes = await req(`http://localhost/api/wiki/${page.slug}`, {
 			headers: authHeaders(token, slug),
@@ -5115,7 +5118,7 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 		expect(await getRes.json()).toBeNull();
 	});
 
-	it("a stale baseRevisionId on publish still hits the normal 409 conflict — no separate draft conflict mechanism", async () => {
+	it("a stale baseRevisionId on publish still hits the normal 409 — no separate draft conflict mechanism", async () => {
 		const page = await createPage("draft-conflict", "Draft Conflict", "v0");
 
 		// Establish a first revision, and capture its id the way startEdit() would —
@@ -5513,7 +5516,7 @@ describe("Wiki trash (PROJ-496)", () => {
 		expect(res.status).toBe(403);
 	});
 
-	it("purge permanently removes only pages trashed more than 30 days ago, and cleans up every dependent table + R2", async () => {
+	it("purge removes only pages trashed >30 days ago, cleaning up every dependent table + R2", async () => {
 		const oldPage = await createPage("Trash Purge Old", "purge-old-searchterm");
 		await createPage("Trash Purge Old Target", "content");
 		await req(`http://localhost/api/wiki/${oldPage.slug}`, {
@@ -5747,7 +5750,7 @@ describe("Wiki trash (PROJ-496)", () => {
 		}
 	});
 
-	it("undeleting a cascade-trashed root 409s when a descendant's slug was reclaimed while trashed, instead of a raw 500", async () => {
+	it("undeleting a cascade-trashed root 409s (not a raw 500) when a descendant's slug was reclaimed", async () => {
 		const parent = await createPage("Cascade Undelete Conflict Parent", "content");
 		const child = await createPage("Cascade Undelete Conflict Child", "content", {
 			parentId: parent.id,
@@ -5778,7 +5781,7 @@ describe("Wiki trash (PROJ-496)", () => {
 		expect(parentRow?.deleted_at).not.toBeNull();
 	});
 
-	it("undeleting a cascade-trashed root does NOT restore a descendant that was independently trashed in the same batch-collision window", async () => {
+	it("undeleting a cascade-trashed root does NOT restore a descendant trashed separately, same window", async () => {
 		// Regression test for the trash_batch_id disambiguation (PROJ-496 follow-up):
 		// trashing the child alone and then cascade-trashing the parent right after, with
 		// no artificial time offset, used to be indistinguishable from "trashed in one
@@ -5805,7 +5808,7 @@ describe("Wiki trash (PROJ-496)", () => {
 		expect(childRow?.deleted_at).not.toBeNull();
 	});
 
-	it("non-cascade trash leaves an already-trashed child's parent_id untouched, and undelete restores it under the original parent", async () => {
+	it("non-cascade trash leaves a trashed child's parent_id untouched; undelete restores original parent", async () => {
 		const parent = await createPage("Noncascade Reparent Parent", "content");
 		const child = await createPage("Noncascade Reparent Child", "content", {
 			parentId: parent.id,

@@ -22,7 +22,8 @@ async function seedManyPages(
 	const now = Math.floor(Date.now() / 1000);
 	const statements = Array.from({ length: count }, (_, i) =>
 		env.DB.prepare(
-			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
+			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content,
+			 parent_id, created_by_id, updated_by_id, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, '', NULL, ?, ?, ?, ?)`
 		).bind(
 			crypto.randomUUID(),
@@ -258,8 +259,10 @@ describe("Wiki export (PROJ-497)", () => {
 		// child's projectId from diverging from its parent's — writing directly via SQL
 		// simulates a regression of that write-time invariant.
 		await env.DB.prepare(
-			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
-			 VALUES (?, ?, NULL, ?, ?, ?, ?, (SELECT created_by_id FROM wiki_pages WHERE id = ?), (SELECT updated_by_id FROM wiki_pages WHERE id = ?), ?, ?)`
+			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content,
+			 parent_id, created_by_id, updated_by_id, created_at, updated_at)
+			 VALUES (?, ?, NULL, ?, ?, ?, ?, (SELECT created_by_id FROM wiki_pages WHERE id = ?),
+				 (SELECT updated_by_id FROM wiki_pages WHERE id = ?), ?, ?)`
 		)
 			.bind(
 				mismatchedId,
@@ -299,7 +302,8 @@ describe("Wiki export (PROJ-497)", () => {
 		const now = Math.floor(Date.now() / 1000);
 		const statements = Array.from({ length: MAX_EXPORT_PAGES + 1 }, (_, i) =>
 			env.DB.prepare(
-				`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
+				`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content,
+				 parent_id, created_by_id, updated_by_id, created_at, updated_at)
 				 VALUES (?, ?, NULL, ?, ?, '', ?, ?, ?, ?, ?)`
 			).bind(
 				crypto.randomUUID(),

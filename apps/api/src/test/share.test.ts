@@ -142,13 +142,14 @@ describe("Share tokens", () => {
 		expect(res.status).toBe(403);
 	});
 
-	it("PROJ-241: excludes internal custom fields and includes non-internal ones from the public share payload", async () => {
+	it("PROJ-241: public share payload excludes internal custom fields, includes non-internal ones", async () => {
 		const { env } = await import("cloudflare:test");
 		const now = Math.floor(Date.now() / 1000);
 
 		const internalFieldId = crypto.randomUUID();
 		await env.DB.prepare(
-			"INSERT INTO custom_field_definitions (id, workspace_id, project_id, key, label, type, options, created_at, is_internal) VALUES (?, ?, NULL, ?, ?, 'text', NULL, ?, 1)"
+			"INSERT INTO custom_field_definitions (id, workspace_id, project_id, key, label, type, " +
+				"options, created_at, is_internal) VALUES (?, ?, NULL, ?, ?, 'text', NULL, ?, 1)"
 		)
 			.bind(internalFieldId, workspaceId, "secret_notes", "Secret Notes", now)
 			.run();
@@ -160,7 +161,8 @@ describe("Share tokens", () => {
 
 		const publicFieldId = crypto.randomUUID();
 		await env.DB.prepare(
-			"INSERT INTO custom_field_definitions (id, workspace_id, project_id, key, label, type, options, created_at, is_internal) VALUES (?, ?, NULL, ?, ?, 'text', NULL, ?, 0)"
+			"INSERT INTO custom_field_definitions (id, workspace_id, project_id, key, label, type, " +
+				"options, created_at, is_internal) VALUES (?, ?, NULL, ?, ?, 'text', NULL, ?, 0)"
 		)
 			.bind(publicFieldId, workspaceId, "public_note", "Public Note", now)
 			.run();

@@ -146,7 +146,8 @@ export async function seedComment(
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
 	await env.DB.prepare(
-		"INSERT INTO issue_comments (id, issue_id, author_id, body, created_at, updated_at, author_kind) VALUES (?, ?, ?, ?, ?, ?, ?)"
+		"INSERT INTO issue_comments (id, issue_id, author_id, body, created_at, updated_at, " +
+			"author_kind) VALUES (?, ?, ?, ?, ?, ?, ?)"
 	)
 		.bind(id, issueId, authorId, body, now, now, authorKind ?? null)
 		.run();
@@ -155,7 +156,13 @@ export async function seedComment(
 
 export async function seedTaskType(
 	workspaceId: string,
-	opts?: Readonly<{ id?: string; key?: string; name?: string; isDefault?: boolean; position?: number }>
+	opts?: Readonly<{
+		id?: string;
+		key?: string;
+		name?: string;
+		isDefault?: boolean;
+		position?: number;
+	}>
 ) {
 	const id = opts?.id ?? crypto.randomUUID();
 	const key = opts?.key ?? `type-${id.slice(0, 8)}`;
@@ -170,7 +177,13 @@ export async function seedTaskType(
 
 export async function seedTaskStatus(
 	workspaceId: string,
-	opts?: Readonly<{ key?: string; name?: string; category?: string; isDefault?: boolean; position?: number }>
+	opts?: Readonly<{
+		key?: string;
+		name?: string;
+		category?: string;
+		isDefault?: boolean;
+		position?: number;
+	}>
 ) {
 	const id = crypto.randomUUID();
 	const key = opts?.key ?? `status-${id.slice(0, 8)}`;
@@ -331,7 +344,9 @@ export async function seedAgentLease(
 }
 
 /** Seed a complete workspace + user + member + token in one call */
-export async function seedFixture(opts?: Readonly<{ slug?: string; email?: string; role?: string }>) {
+export async function seedFixture(
+	opts?: Readonly<{ slug?: string; email?: string; role?: string }>
+) {
 	const workspace = await seedWorkspace(opts?.slug ?? `ws-${crypto.randomUUID().slice(0, 8)}`);
 	const user = await seedUser(opts?.email ?? `u-${crypto.randomUUID().slice(0, 8)}@example.com`);
 	await seedMember(workspace.id, user.id, opts?.role ?? "member");

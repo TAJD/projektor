@@ -28,7 +28,9 @@ const PROJECT_ROLE_RANK: Record<"viewer" | "member" | "admin", number> = {
 	admin: 3,
 };
 
-function strongestGrant(roles: readonly ("viewer" | "member" | "admin")[]): "viewer" | "member" | "admin" {
+function strongestGrant(
+	roles: readonly ("viewer" | "member" | "admin")[]
+): "viewer" | "member" | "admin" {
 	return roles.reduce((best, r) => (PROJECT_ROLE_RANK[r] > PROJECT_ROLE_RANK[best] ? r : best));
 }
 

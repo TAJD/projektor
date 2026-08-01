@@ -32,7 +32,7 @@ import { Category, defineCheck, Severity, type AstNode } from "@cofferdam/check-
 const BUILD_HEADERS_PATTERN = /\b(function|const)\s+buildHeaders\b/;
 const GLOBAL_FETCH_OBJECTS = new Set(["window", "globalThis", "self"]);
 
-// cofferdam-ignore: Design.OrphanExport: loaded dynamically via cofferdam.toml's `plugins = ["./plugins/island-api"]`, not a static import
+// cofferdam-ignore: Design.OrphanExport: loaded dynamically via cofferdam.toml's plugins list
 export default defineCheck({
   id: "IslandApiConvention",
   category: Category.Warning,

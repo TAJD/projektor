@@ -89,7 +89,10 @@ function resolveProjectId(
 	return validated ?? projects[0]?.id ?? null;
 }
 
-function defaultCreateProjectId(projectId: string | null, projects: readonly ProjectMeta[]): string {
+function defaultCreateProjectId(
+	projectId: string | null,
+	projects: readonly ProjectMeta[]
+): string {
 	if (projectId) return projects.find((p) => p.id === projectId)?.id ?? projects[0]?.id ?? "";
 	return projects[0]?.id ?? "";
 }
@@ -356,7 +359,7 @@ function useEpicsData({
 		if (projectIdReady) fetchEpics();
 	}, [fetchEpics, projectIdReady]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { epics, loading, error, fetchEpics };
 }
 

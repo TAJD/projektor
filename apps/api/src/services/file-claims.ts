@@ -90,7 +90,8 @@ async function assertNoConflicts(
 	}
 	if (firstConflict) {
 		throw new ConflictError(
-			`Path "${firstConflict.path}" is held by issue ${firstConflict.issueId}${firstConflict.agentId ? ` (agent ${firstConflict.agentId})` : ""}`
+			`Path "${firstConflict.path}" is held by issue ${firstConflict.issueId}` +
+				`${firstConflict.agentId ? ` (agent ${firstConflict.agentId})` : ""}`
 		);
 	}
 }

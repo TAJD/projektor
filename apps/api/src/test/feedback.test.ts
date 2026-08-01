@@ -859,7 +859,9 @@ describe("PROJ-390: cross-project feedback source mutation is rejected", () => {
 });
 
 describe("PROJ-390: mutating a revoked feedback source", () => {
-	async function seedRevokedSource(f: Readonly<{ projectId: string; token: string; slug: string }>) {
+	async function seedRevokedSource(
+		f: Readonly<{ projectId: string; token: string; slug: string }>
+	) {
 		const created = await SELF.fetch(
 			`http://localhost/api/projects/${f.projectId}/feedback-sources`,
 			{

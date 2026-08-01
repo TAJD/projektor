@@ -231,7 +231,7 @@ describe("WikiPage — path-based routing (PROJ-487)", () => {
 		});
 	});
 
-	it("redirects straight to the current canonical slug, not the requested one (avoids a redirect chain, PROJ-483)", async () => {
+	it("redirects to the current canonical slug, not the requested one (no redirect chain, PROJ-483)", async () => {
 		// The old/renamed slug was requested (e.g. via a stale bookmark that hit the
 		// Worker's pretty-URL fallback), but the API's live-then-redirect lookup
 		// resolved it to the page's current slug.
@@ -1123,11 +1123,13 @@ describe("revision history: diff view + restore (PROJ-492)", () => {
 		summary: "Fixed a typo",
 	};
 
-	function mockFetchWithRevision(opts: Readonly<{
-		diff?: { from: string; to: string; diff: string };
-		oldRevisionContent?: string;
-		putResponse?: { ok: boolean; status?: number };
-	}>) {
+	function mockFetchWithRevision(
+		opts: Readonly<{
+			diff?: { from: string; to: string; diff: string };
+			oldRevisionContent?: string;
+			putResponse?: { ok: boolean; status?: number };
+		}>
+	) {
 		return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
 			const u = String(url);
 			if (u.includes("/diff")) {

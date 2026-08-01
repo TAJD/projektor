@@ -182,7 +182,11 @@ interface TaskTypeLookup {
 export function buildOptimisticIssue(
 	created: Readonly<{ id: string; number: number }>,
 	input: CreateIssueInput,
-	lookups: Readonly<{ projects: ProjectLookup[]; statuses: StatusLookup[]; taskTypes: TaskTypeLookup[] }>
+	lookups: Readonly<{
+		projects: ProjectLookup[];
+		statuses: StatusLookup[];
+		taskTypes: TaskTypeLookup[];
+	}>
 ): Issue {
 	const proj = lookups.projects.find((p) => p.id === input.createProjectId);
 	const chosenStatus = lookups.statuses.find((s) => s.id === input.createStatusId);

@@ -201,7 +201,8 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 		// so the factory-health tile has fault data instead of nothing tracked.
 		await ctx.db
 			.prepare(
-				"INSERT INTO wip_cap_denials (id, workspace_id, project_id, issue_id, agent_session_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?)"
+				"INSERT INTO wip_cap_denials (id, workspace_id, project_id, issue_id, agent_session_id, " +
+					"occurred_at) VALUES (?, ?, ?, ?, ?, ?)"
 			)
 			.bind(crypto.randomUUID(), ctx.workspaceId, projectId, issueId, agentId, now)
 			.run();

@@ -155,7 +155,11 @@ const SORT_COMPARATORS: Record<SortKey, (a: Issue, b: Issue) => number> = {
 };
 
 /** Sorts a copy of an issue list by the given SortKey. */
-export function sortIssues(issues: readonly Issue[], sortBy: SortKey, sortDir: "asc" | "desc"): Issue[] {
+export function sortIssues(
+	issues: readonly Issue[],
+	sortBy: SortKey,
+	sortDir: "asc" | "desc"
+): Issue[] {
 	const compare = SORT_COMPARATORS[sortBy];
 	return [...issues].sort((a, b) => {
 		const diff = compare ? compare(a, b) : 0;

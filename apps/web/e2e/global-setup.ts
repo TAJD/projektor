@@ -117,7 +117,8 @@ export default async function globalSetup(): Promise<void> {
 	const inProgressStatus = seededStatuses.find((s) => s.key === "in_progress");
 	if (!todoStatus || !inProgressStatus) {
 		throw new Error(
-			`Expected default 'todo' and 'in_progress' task statuses to be seeded for workspace ${slug}, got keys: ${seededStatuses.map((s) => s.key).join(", ")}`
+			`Expected default 'todo' and 'in_progress' task statuses to be seeded for workspace ${slug}, ` +
+				`got keys: ${seededStatuses.map((s) => s.key).join(", ")}`
 		);
 	}
 

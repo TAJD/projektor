@@ -1084,11 +1084,13 @@ function now(): number {
 	return Math.floor(Date.now() / 1000);
 }
 
-function formatCompletionReportComment(report: Readonly<{
-	summary: string;
-	verification: string;
-	prLink?: string;
-}>): string {
+function formatCompletionReportComment(
+	report: Readonly<{
+		summary: string;
+		verification: string;
+		prLink?: string;
+	}>
+): string {
 	const lines = [
 		"**Completion report**",
 		"",

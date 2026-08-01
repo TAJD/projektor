@@ -11,7 +11,10 @@ export function deriveProjectDescription(
 }
 
 /** Status filter options: prefer the statuses endpoint, else derive from loaded issues. */
-export function deriveStatusOptions(issues: readonly Issue[], statuses: readonly TaskStatus[]): readonly TaskStatus[] {
+export function deriveStatusOptions(
+	issues: readonly Issue[],
+	statuses: readonly TaskStatus[]
+): readonly TaskStatus[] {
 	if (statuses.length > 0) return statuses;
 	return [
 		...new Map(
@@ -33,7 +36,9 @@ export function deriveStatusOptions(issues: readonly Issue[], statuses: readonly
 	];
 }
 
-export function deriveProjectOptions(issues: readonly Issue[]): Array<{ key: string; name: string }> {
+export function deriveProjectOptions(
+	issues: readonly Issue[]
+): Array<{ key: string; name: string }> {
 	return [
 		...new Map(
 			issues

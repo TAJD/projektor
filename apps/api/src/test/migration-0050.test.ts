@@ -26,7 +26,8 @@ async function runMigration0050() {
 async function insertPage(workspaceId: string, userId: string, slug: string, createdAt: number) {
 	const id = crypto.randomUUID();
 	await env.DB.prepare(
-		`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
+		`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content,
+		 parent_id, created_by_id, updated_by_id, created_at, updated_at)
 		 VALUES (?, ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?)`
 	)
 		.bind(id, workspaceId, slug, slug, "content", userId, userId, createdAt, createdAt)
@@ -113,7 +114,7 @@ describe("0050 wiki slug slash backfill", () => {
 		expect(redirect?.page_id).toBe(pageId);
 	});
 
-	it("truncates an oversized rewritten candidate before appending the id suffix so it never exceeds 200 chars", async () => {
+	it("truncates an oversized rewritten candidate before appending the id suffix, staying under 200 chars", async () => {
 		const now = Math.floor(Date.now() / 1000);
 		const candidate = `${"b".repeat(120)}-${"c".repeat(120)}`; // 241 chars
 		const slashy = `${"b".repeat(120)}/${"c".repeat(120)}`; // same length, collides once rewritten

@@ -870,7 +870,8 @@ describe("Factory health tiles (PROJ-334)", () => {
 	) {
 		const now = Math.floor(Date.now() / 1000);
 		await env.DB.prepare(
-			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, released_at, release_reason) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)"
+			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, " +
+				"released_at, release_reason) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)"
 		)
 			.bind(
 				crypto.randomUUID(),
@@ -894,7 +895,8 @@ describe("Factory health tiles (PROJ-334)", () => {
 
 	async function seedWipCapDenial(project: string, issueId: string, occurredAt: number) {
 		await env.DB.prepare(
-			"INSERT INTO wip_cap_denials (id, workspace_id, project_id, issue_id, agent_session_id, occurred_at) VALUES (?, ?, ?, ?, NULL, ?)"
+			"INSERT INTO wip_cap_denials (id, workspace_id, project_id, issue_id, agent_session_id, " +
+				"occurred_at) VALUES (?, ?, ?, ?, NULL, ?)"
 		)
 			.bind(crypto.randomUUID(), workspaceId, project, issueId, occurredAt)
 			.run();
