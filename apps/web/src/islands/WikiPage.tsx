@@ -90,9 +90,7 @@ const WIKI_TYPE_FILTER_OPTIONS: SelectOption[] = [
 	{ value: "note", label: "Note" },
 ];
 
-const WIKI_WELL_KNOWN_TYPES = new Set(
-	WIKI_TYPE_FILTER_OPTIONS.map((o) => o.value).filter(Boolean)
-);
+const WIKI_WELL_KNOWN_TYPES = new Set(WIKI_TYPE_FILTER_OPTIONS.map((o) => o.value).filter(Boolean));
 
 // PROJ-514: frontmatter `type` is freeform (PROJ-513) — merge in any other distinct
 // types actually present in the workspace so pages using e.g. `type: whitepaper` stay

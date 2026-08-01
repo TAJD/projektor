@@ -839,9 +839,7 @@ describe("WikiPage sidebar type filter — freeform types (PROJ-514)", () => {
 
 		expect(await screen.findByText("Product Brief")).toBeTruthy();
 		await waitFor(() => {
-			expect(
-				fetchMock.mock.calls.some(([u]) => String(u).includes("type=whitepaper"))
-			).toBe(true);
+			expect(fetchMock.mock.calls.some(([u]) => String(u).includes("type=whitepaper"))).toBe(true);
 		});
 	});
 
