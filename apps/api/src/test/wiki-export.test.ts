@@ -3,6 +3,42 @@ import { unzipSync } from "fflate";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedFixture, seedProject, seedProjectFixture } from "./helpers";
 
+// MAX_EXPORT_PAGES in services/wiki-export.ts — kept in sync manually since the
+// constant isn't exported; a mismatch would just make this test seed a few more/fewer
+// rows than strictly necessary, not silently pass.
+const MAX_EXPORT_PAGES = 500;
+
+/**
+ * Seeds `count` wiki pages directly via SQL (bypassing the create-page API) so a
+ * page-count-cap test stays fast — content bodies are kept empty since the cap must
+ * reject the export before any page content is ever fetched.
+ */
+async function seedManyPages(
+	workspaceId: string,
+	userId: string,
+	count: number,
+	projectId: string | null = null
+): Promise<void> {
+	const now = Math.floor(Date.now() / 1000);
+	const statements = Array.from({ length: count }, (_, i) =>
+		env.DB.prepare(
+			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, '', NULL, ?, ?, ?, ?)`
+		).bind(
+			crypto.randomUUID(),
+			workspaceId,
+			projectId,
+			`bulk-page-${i}`,
+			`Bulk Page ${i}`,
+			userId,
+			userId,
+			now,
+			now
+		)
+	);
+	await env.DB.batch(statements);
+}
+
 async function createPage(
 	token: string,
 	slug: string,
@@ -58,12 +94,14 @@ describe("Wiki export (PROJ-497)", () => {
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
+	let userId: string;
 
 	beforeEach(async () => {
 		const fixture = await seedFixture({ role: "admin" });
 		token = fixture.token;
 		slug = fixture.workspace.slug;
 		workspaceId = fixture.workspace.id;
+		userId = fixture.user.id;
 	});
 
 	it("exports workspace-level pages with frontmatter when scope=space and no projectId", async () => {
@@ -241,5 +279,40 @@ describe("Wiki export (PROJ-497)", () => {
 		expect(status).toBe(200);
 		const names = Object.keys(entries ?? {});
 		expect(names).toEqual(["pages/root.md"]);
+	});
+
+	it("rejects a space export whose page count exceeds the cap before fetching content", async () => {
+		await seedManyPages(workspaceId, userId, MAX_EXPORT_PAGES + 1);
+
+		const { status } = await exportZip(token, slug, "scope=space");
+		expect(status).toBe(400);
+	});
+
+	it("rejects a subtree export whose descendant count exceeds the cap during the BFS walk", async () => {
+		const root = await createPage(token, slug, { title: "Big Root", content: "root" });
+		// Every bulk page is parented directly under root, so collectDescendantIds's BFS
+		// sees the whole set on its first level and must bail before pagesByIds fetches
+		// content for MAX_EXPORT_PAGES+1 rows.
+		const now = Math.floor(Date.now() / 1000);
+		const statements = Array.from({ length: MAX_EXPORT_PAGES + 1 }, (_, i) =>
+			env.DB.prepare(
+				`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
+				 VALUES (?, ?, NULL, ?, ?, '', ?, ?, ?, ?, ?)`
+			).bind(
+				crypto.randomUUID(),
+				workspaceId,
+				`bulk-child-${i}`,
+				`Bulk Child ${i}`,
+				root.id,
+				userId,
+				userId,
+				now,
+				now
+			)
+		);
+		await env.DB.batch(statements);
+
+		const { status } = await exportZip(token, slug, `scope=subtree&pageId=${root.slug}`);
+		expect(status).toBe(400);
 	});
 });

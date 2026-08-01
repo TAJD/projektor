@@ -24,13 +24,17 @@ type ExportedPage = {
 const MAX_EXPORT_PAGES = 500;
 const MAX_EXPORT_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MB total per export
 
-function assertExportSizeAllowed(pageCount: number, totalAttachmentBytes: number): void {
+function assertPageCountAllowed(pageCount: number): void {
 	if (pageCount > MAX_EXPORT_PAGES) {
 		throw new ValidationError({
 			formErrors: [`Export exceeds the ${MAX_EXPORT_PAGES}-page limit (${pageCount} pages)`],
 			fieldErrors: {},
 		});
 	}
+}
+
+function assertExportSizeAllowed(pageCount: number, totalAttachmentBytes: number): void {
+	assertPageCountAllowed(pageCount);
 	if (totalAttachmentBytes > MAX_EXPORT_ATTACHMENT_BYTES) {
 		throw new ValidationError({
 			formErrors: [
@@ -123,6 +127,10 @@ async function collectDescendantIds(
 		const inScope = children.filter((c) => (c.projectId ?? null) === rootProjectId);
 		frontier = inScope.map((c) => c.id);
 		descendants.push(...frontier);
+		// Bail out as soon as the walk itself proves the subtree is oversized, rather than
+		// continuing to accumulate ids and only rejecting after pagesByIds fetches every body.
+		// +1 accounts for the root page, which isn't in `descendants`.
+		assertPageCountAllowed(descendants.length + 1);
 	}
 	return descendants;
 }
@@ -241,9 +249,16 @@ async function buildZip(
 
 	return new ReadableStream<Uint8Array>({
 		async start(controller) {
+			let streamErrored = false;
+			const failStream = (err: unknown) => {
+				if (streamErrored) return;
+				streamErrored = true;
+				controller.error(err);
+			};
+
 			const zip = new Zip((err, chunk, final) => {
 				if (err) {
-					controller.error(err);
+					failStream(err);
 					return;
 				}
 				if (chunk && chunk.length > 0) controller.enqueue(chunk);
@@ -283,7 +298,7 @@ async function buildZip(
 
 				zip.end();
 			} catch (err) {
-				controller.error(err);
+				failStream(err);
 			}
 		},
 	});
@@ -316,7 +331,11 @@ export async function exportWiki(
 						? eq(schema.wikiPages.projectId, data.projectId)
 						: isNull(schema.wikiPages.projectId)
 				)
-			);
+			)
+			// Fetch one row past the cap so an oversized space can be rejected here, before
+			// content bodies for the full (potentially huge) page set are ever loaded.
+			.limit(MAX_EXPORT_PAGES + 1);
+		assertPageCountAllowed(pages.length);
 
 		const stream = await buildZip(ctx, pages);
 		const filename = data.projectId
