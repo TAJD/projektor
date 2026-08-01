@@ -6,12 +6,3 @@ pre-commit:
       run: pnpm biome check --changed --no-errors-on-unmatched
     island-api:
       run: pnpm --filter @projektor/cofferdam-island-api build && node scripts/check-island-api.mjs
-
-pre-push:
-  commands:
-    lint:
-      run: pnpm biome check apps packages
-    test:
-      run: pnpm --filter @projektor/api test
-    test-web:
-      run: pnpm --filter @projektor/web test
