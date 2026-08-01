@@ -126,15 +126,26 @@ describe("mcp/error-adapter: toMcpError", () => {
 	});
 
 	// PROJ-508: structured NotFoundError.details (e.g. patch_wiki_page's currentHeadings)
-	// used to be JSON-encoded into `message` as a workaround; now it travels in `data`.
-	it("maps a NotFoundError with details to -32000 with the details in error.data", () => {
+	// used to be JSON-encoded into `message` as a workaround; now it travels in `data`,
+	// with a bounded human-readable summary also folded into `message` as a fallback for
+	// MCP hosts that don't surface `data` to the calling model.
+	it("maps a NotFoundError with details to -32000 with the details in error.data and a message summary", () => {
 		const result = toMcpError(
 			new NotFoundError("Heading 'Nope' not found", { currentHeadings: ["Alpha", "Beta"] })
 		);
 		expect(result).toEqual({
 			code: -32000,
-			message: "Heading 'Nope' not found",
+			message: "Heading 'Nope' not found (currentHeadings: Alpha, Beta)",
 			data: { currentHeadings: ["Alpha", "Beta"] },
+		});
+	});
+
+	// PROJ-508: an empty details object must be treated the same as no details at all —
+	// omit `data` (per the JSON-RPC 2.0 contract) rather than sending `data: {}`.
+	it("treats an empty NotFoundError.details object as no details", () => {
+		expect(toMcpError(new NotFoundError("Issue not found", {}))).toEqual({
+			code: -32000,
+			message: "Issue not found",
 		});
 	});
 
@@ -154,15 +165,35 @@ describe("mcp/error-adapter: toMcpError", () => {
 
 	// PROJ-508: structured ConflictError.details (e.g. wiki's optimistic-lock
 	// currentRevisionId + diff) used to be JSON-encoded into `message` as a workaround
-	// (PROJ-484); now it travels in `data`.
-	it("maps a ConflictError with details to -32000 with the details in error.data", () => {
+	// (PROJ-484); now it travels in `data`, with a bounded human-readable summary also
+	// folded into `message` as a fallback for MCP hosts that don't surface `data`.
+	it("maps a ConflictError with details to -32000 with the details in error.data and a message summary", () => {
 		const result = toMcpError(
 			new ConflictError("Revision conflict", { currentRevisionId: "rev-2", diff: "..." })
 		);
 		expect(result).toEqual({
 			code: -32000,
-			message: "Revision conflict",
+			message: "Revision conflict (currentRevisionId: rev-2; diff: ...)",
 			data: { currentRevisionId: "rev-2", diff: "..." },
+		});
+	});
+
+	// PROJ-508: a long diff shouldn't blow up the message with unbounded text — the
+	// summary folded into `message` is truncated; `data` still carries the full value.
+	it("truncates a long detail value in the message summary but not in error.data", () => {
+		const longDiff = "x".repeat(500);
+		const result = toMcpError(new ConflictError("Revision conflict", { diff: longDiff }));
+		expect(result.data).toEqual({ diff: longDiff });
+		expect(result.message.length).toBeLessThan(150);
+		expect(result.message).toContain("diff: xxx");
+	});
+
+	// PROJ-508: an empty details object must be treated the same as no details at all —
+	// omit `data` (per the JSON-RPC 2.0 contract) rather than sending `data: {}`.
+	it("treats an empty ConflictError.details object as no details", () => {
+		expect(toMcpError(new ConflictError("Slug taken", {}))).toEqual({
+			code: -32000,
+			message: "Slug taken",
 		});
 	});
 

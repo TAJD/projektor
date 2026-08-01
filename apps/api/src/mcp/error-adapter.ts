@@ -1,5 +1,37 @@
 import { ConflictError, NotFoundError, ServiceError, ValidationError } from "../services/errors";
 
+const MAX_DETAIL_VALUE_CHARS = 80;
+const MAX_DETAIL_SUMMARY_CHARS = 300;
+
+function truncate(s: string, max: number): string {
+	return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+// Not every MCP host surfaces the JSON-RPC 2.0 `error.data` member to the calling
+// model — many render only `code`/`message`. `data` stays the primary, complete
+// machine-readable channel, but a bounded human-readable summary is folded into
+// `message` too so an agent without `data` access isn't left blind to *why* a
+// structured error (conflict diff, ambiguous headings, ...) happened.
+function summarizeDetails(details: Record<string, unknown>): string {
+	const summary = Object.entries(details)
+		.map(([key, value]) => {
+			const rendered = Array.isArray(value)
+				? value.join(", ")
+				: typeof value === "string"
+					? value
+					: JSON.stringify(value);
+			return `${key}: ${truncate(rendered, MAX_DETAIL_VALUE_CHARS)}`;
+		})
+		.join("; ");
+	return truncate(summary, MAX_DETAIL_SUMMARY_CHARS);
+}
+
+function hasDetails(
+	details: Record<string, unknown> | undefined
+): details is Record<string, unknown> {
+	return details !== undefined && Object.keys(details).length > 0;
+}
+
 export function toMcpError(err: unknown): { code: number; message: string; data?: unknown } {
 	if (err instanceof ValidationError) {
 		// PROJ-508/PROJ-523: surface the Zod issue detail (formErrors/fieldErrors) via
@@ -20,9 +52,14 @@ export function toMcpError(err: unknown): { code: number; message: string; data?
 			case "not_found":
 				// PROJ-490 / PROJ-508: structured not-found details (e.g. patch_wiki_page's
 				// currentHeadings) now travel in `data` — the proper JSON-RPC 2.0 channel —
-				// rather than JSON-encoded into `message`.
-				if (err instanceof NotFoundError && err.details) {
-					return { code: -32000, message: err.message, data: err.details };
+				// rather than JSON-encoded into `message`. A bounded summary is also folded
+				// into `message` as a fallback for MCP hosts that don't surface `data`.
+				if (err instanceof NotFoundError && hasDetails(err.details)) {
+					return {
+						code: -32000,
+						message: `${err.message} (${summarizeDetails(err.details)})`,
+						data: err.details,
+					};
 				}
 				return { code: -32000, message: err.message };
 			case "forbidden":
@@ -30,8 +67,14 @@ export function toMcpError(err: unknown): { code: number; message: string; data?
 			case "conflict":
 				// PROJ-484 / PROJ-508: a structured conflict (e.g. wiki's currentRevisionId +
 				// diff) now travels in `data` instead of being JSON-encoded into `message`.
-				if (err instanceof ConflictError && err.details) {
-					return { code: -32000, message: err.message, data: err.details };
+				// A bounded summary is also folded into `message` as a fallback for MCP
+				// hosts that don't surface `data`.
+				if (err instanceof ConflictError && hasDetails(err.details)) {
+					return {
+						code: -32000,
+						message: `${err.message} (${summarizeDetails(err.details)})`,
+						data: err.details,
+					};
 				}
 				return { code: -32000, message: err.message };
 			default:
