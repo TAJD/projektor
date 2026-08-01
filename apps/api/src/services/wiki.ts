@@ -107,6 +107,12 @@ const RESERVED_WIKI_SLUGS = new Set(["view", "index", "templates"]);
 // page (and its R2 attachments) once it's been soft-deleted for at least this long.
 const WIKI_TRASH_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 
+// PROJ-526: caps the deletedPageIds list written into a cascade delete's activity row —
+// an unbounded BFS result (collectDescendantIds has no depth/count limit) would otherwise
+// write an arbitrarily large JSON blob into a single activity row and every list_wiki_changes
+// response covering it. deletedCount always reports the true total regardless of truncation.
+const MAX_DELETED_PAGE_IDS = 500;
+
 // PROJ-483: wiki_pages(workspace_id, slug) is unique among LIVE pages — surface a
 // structured ConflictError instead of letting the constraint throw a raw D1 error.
 // PROJ-496: the underlying unique index is now PARTIAL (`WHERE deleted_at IS NULL`,
@@ -898,8 +904,9 @@ async function resolveBaseContent(
 	return nextRow?.content ?? currentContent;
 }
 
-// PROJ-524: append_to_page skips the section-conflict check entirely (append is
-// commutative — see patchWikiPage's comment on why), but a non-null baseRevisionId
+// PROJ-524: append_to_page skips the section-conflict check entirely (there's no
+// section to compare against — see patchWikiPage's comment for the actual, unresolved
+// race this leaves), but a non-null baseRevisionId
 // still needs to actually belong to this page, same as the section ops' base-content
 // lookup (resolveBaseContent) rejects a foreign/garbage id. Unlike resolveBaseContent,
 // this never needs the base content itself (append never diffs against it), so it's a
@@ -1558,11 +1565,15 @@ function applySectionOp(
 // already accepts for its whole-page check (see getLatestRevisionId's TOCTOU note
 // above) — full section-level history tracking is out of scope for R8.
 //
-// append_to_page is exempt from the section-lock entirely: appending at the document's
-// tail is commutative with any edit elsewhere in the page (it can never clobber
-// content another writer touched), so there is no section to compare and no way for
-// it to conflict. baseRevisionId is still required on the input for API consistency
-// and because a revision snapshot is still created either way.
+// append_to_page is exempt from the section-lock entirely: there is no section to
+// compare it against, and it never conflicts with edits to OTHER sections. It is NOT
+// truly race-free, though — this is a whole-page read (currentContent)/modify/write,
+// so two concurrent appends can still race: both read content C, compute C+A and C+B,
+// and the second UPDATE silently overwrites the first (lost update, no conflict
+// surfaced, both callers see 200). See PROJ-524 for tracking; fixing this for real
+// needs either a SQL-level `content = content || ?` append or an optimistic-lock retry,
+// which is out of scope here. baseRevisionId is still required on the input for API
+// consistency and because a revision snapshot is still created either way.
 export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
 	const parsed = PatchWikiPageInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -2092,7 +2103,8 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 				...deleteDiffBase,
 				cascade: true,
 				deletedCount: allIds.length,
-				deletedPageIds: allIds,
+				deletedPageIds: allIds.slice(0, MAX_DELETED_PAGE_IDS),
+				deletedPageIdsTruncated: allIds.length > MAX_DELETED_PAGE_IDS,
 			},
 		});
 		return { ok: true, deletedCount: allIds.length, linkedByCount };

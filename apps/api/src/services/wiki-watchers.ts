@@ -427,11 +427,18 @@ export interface WikiChangeEvent {
 	projectId: string | null;
 	actorId: string | null;
 	createdAt: number;
-	// PROJ-526: for a cascade delete's root event only — ids of descendant pages that were
-	// deleted alongside it (root id itself excluded, it's already `pageId`). null for
-	// every non-cascade event, so a poller building a local mirror can evict these ids
-	// without needing a separate activity row per descendant.
+	// PROJ-526: for a cascade delete's root event only — ids of every page removed by the
+	// cascade, INCLUDING the root's own id (== `pageId`), capped at MAX_DELETED_PAGE_IDS.
+	// null for every non-cascade event, so a poller building a local mirror can evict
+	// these ids without needing a separate activity row per descendant. Note: post-R14
+	// (PROJ-496), "deleted" here means "trashed" — the pages are recoverable via
+	// undelete_wiki_page within the retention window, so a poller should treat eviction
+	// as provisional, not permanent.
 	deletedPageIds: string[] | null;
+	// PROJ-526: true when the cascade exceeded MAX_DELETED_PAGE_IDS and deletedPageIds was
+	// truncated — deletedCount on the same event still reports the true total, so a poller
+	// can detect a truncated mirror-eviction list and fall back to a full resync.
+	deletedPageIdsTruncated: boolean;
 }
 
 // PROJ-493: for created/updated events, current page state (slug/title/projectId) is
@@ -446,17 +453,26 @@ function extractDeletedPageInfo(diff: Record<string, unknown> | null): {
 	title: string | null;
 	projectId: string | null;
 	deletedPageIds: string[] | null;
+	deletedPageIdsTruncated: boolean;
 } {
-	if (!diff) return { slug: null, title: null, projectId: null, deletedPageIds: null };
+	if (!diff)
+		return {
+			slug: null,
+			title: null,
+			projectId: null,
+			deletedPageIds: null,
+			deletedPageIdsTruncated: false,
+		};
 	return {
 		slug: typeof diff.slug === "string" ? diff.slug : null,
 		title: typeof diff.title === "string" ? diff.title : null,
 		projectId: typeof diff.projectId === "string" ? diff.projectId : null,
 		// PROJ-526: only present on a cascade root's diff (services/wiki.ts#deleteWikiPage);
-		// includes the root's own id, which callers building a mirror should already have.
+		// includes the root's own id — see WikiChangeEvent's doc for the full contract.
 		deletedPageIds: Array.isArray(diff.deletedPageIds)
 			? diff.deletedPageIds.filter((id): id is string => typeof id === "string")
 			: null,
+		deletedPageIdsTruncated: diff.deletedPageIdsTruncated === true,
 	};
 }
 
@@ -635,6 +651,7 @@ export async function listWikiChanges(
 			actorId: r.actorId,
 			createdAt: r.createdAt,
 			deletedPageIds: deleted?.deletedPageIds ?? null,
+			deletedPageIdsTruncated: deleted?.deletedPageIdsTruncated ?? false,
 		});
 	}
 

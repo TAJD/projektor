@@ -1344,7 +1344,6 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(((await intermediateRes.json()) as { slug: string }).slug).toBe("docs-v3");
 	});
 
-
 	it("getWikiPage prefers a live page over a stale redirect for a reused slug (never ambiguous)", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
@@ -2974,7 +2973,7 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(res.status).toBe(400);
 	});
 
-	it("REST: append_to_page accepts a baseRevisionId that DOES belong to the page, even though it's stale (append is commutative)", async () => {
+	it("REST: append_to_page accepts a baseRevisionId that DOES belong to the page, even though it's stale (staleness isn't rejected for this op)", async () => {
 		await createPage("patch-append-stale-base", "Patch Append Stale Base", TWO_SECTIONS);
 		const firstRes = await req("http://localhost/api/wiki/patch-append-stale-base", {
 			method: "PATCH",
