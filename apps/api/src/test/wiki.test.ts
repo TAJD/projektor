@@ -2889,7 +2889,8 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(isMcpError(result)).toBe(true);
 		if (isMcpError(result)) {
 			expect(result.error.code).toBe(-32602);
-			expect(result.error.message).toBe("Invalid params");
+			expect(result.error.message).toContain("Invalid params");
+			expect(result.error.message).toContain("ambiguous");
 			const data = result.error.data as {
 				formErrors: string[];
 				fieldErrors: Record<string, string[]>;

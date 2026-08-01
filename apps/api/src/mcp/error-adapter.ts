@@ -1,4 +1,10 @@
-import { ConflictError, NotFoundError, ServiceError, ValidationError } from "../services/errors";
+import {
+	ConflictError,
+	NotFoundError,
+	ServiceError,
+	ValidationError,
+	type ZodFlattenOutput,
+} from "../services/errors";
 
 const MAX_DETAIL_VALUE_CHARS = 80;
 const MAX_DETAIL_SUMMARY_CHARS = 300;
@@ -32,13 +38,45 @@ function hasDetails(
 	return details !== undefined && Object.keys(details).length > 0;
 }
 
+// Same bounded-summary treatment as NotFoundError/ConflictError's `details`, but for
+// ValidationError's Zod-flattened `issues` shape (formErrors + fieldErrors) instead of
+// a flat details object.
+function summarizeIssues(issues: ZodFlattenOutput): string {
+	const parts: string[] = [];
+	if (issues.formErrors.length > 0) {
+		parts.push(truncate(issues.formErrors.join(", "), MAX_DETAIL_VALUE_CHARS));
+	}
+	for (const [field, messages] of Object.entries(issues.fieldErrors)) {
+		if (messages && messages.length > 0) {
+			parts.push(`${field}: ${truncate(messages.join(", "), MAX_DETAIL_VALUE_CHARS)}`);
+		}
+	}
+	return truncate(parts.join("; "), MAX_DETAIL_SUMMARY_CHARS);
+}
+
+function hasIssues(issues: ZodFlattenOutput): boolean {
+	return (
+		issues.formErrors.length > 0 ||
+		Object.values(issues.fieldErrors).some((messages) => messages && messages.length > 0)
+	);
+}
+
 export function toMcpError(err: unknown): { code: number; message: string; data?: unknown } {
 	if (err instanceof ValidationError) {
 		// PROJ-508/PROJ-523: surface the Zod issue detail (formErrors/fieldErrors) via
 		// the JSON-RPC 2.0 `error.data` member instead of dropping it. This covers
 		// ordinary schema-validation failures and hand-thrown ValidationErrors alike
 		// (e.g. patch_wiki_page's ambiguous-heading case), so an MCP agent can always
-		// read back *why* its params were rejected, not just that they were.
+		// read back *why* its params were rejected, not just that they were. A bounded
+		// summary is also folded into `message` — same fallback as NotFoundError/
+		// ConflictError below — for MCP hosts that don't surface `data`.
+		if (hasIssues(err.issues)) {
+			return {
+				code: -32602,
+				message: `Invalid params (${summarizeIssues(err.issues)})`,
+				data: err.issues,
+			};
+		}
 		return { code: -32602, message: "Invalid params", data: err.issues };
 	}
 	if (err instanceof ServiceError) {

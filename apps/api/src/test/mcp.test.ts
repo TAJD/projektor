@@ -227,9 +227,10 @@ describe("MCP endpoint", () => {
 			headers
 		)) as JsonRpcError;
 		expect(res.error.code).toBe(-32602);
-		expect(res.error.message).toBe("Invalid params");
+		expect(res.error.message).toContain("Invalid params");
 		const data = res.error.data as { formErrors: string[]; fieldErrors: Record<string, string[]> };
 		expect(data.fieldErrors.title).toBeTruthy();
+		expect(res.error.message).toContain("title");
 	});
 
 	// A ServiceError with no structured `details` (e.g. a plain ValidationError-less

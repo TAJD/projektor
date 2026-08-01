@@ -112,10 +112,14 @@ describe("mcp/error-adapter: toMcpError", () => {
 	// no way to learn why its params were rejected. They're deliberately client-facing
 	// (field names + validation messages, never internals), so they now travel in the
 	// JSON-RPC 2.0 `error.data` member instead.
-	it("maps ValidationError to -32602 with the issues in error.data", () => {
+	it("maps ValidationError to -32602 with the issues in error.data and a message summary", () => {
 		const issues = { formErrors: ["ambiguous heading"], fieldErrors: {} };
 		const result = toMcpError(new ValidationError(issues));
-		expect(result).toEqual({ code: -32602, message: "Invalid params", data: issues });
+		expect(result).toEqual({
+			code: -32602,
+			message: "Invalid params (ambiguous heading)",
+			data: issues,
+		});
 	});
 
 	it("maps NotFoundError to -32000 with its client-facing message", () => {
