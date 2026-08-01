@@ -19,6 +19,7 @@
     "@projektor/plugin-sdk": "workspace:*",
     "@projektor/types": "workspace:*",
     "drizzle-orm": "^0.33.0",
+    "fflate": "^0.8.2",
     "hono": "^4.6.0",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"

@@ -4,6 +4,7 @@ import { serviceErrToResponse } from "../http/error-adapter";
 import { ctxFromHono } from "../services/types";
 import * as wikiService from "../services/wiki";
 import * as wikiDraftsService from "../services/wiki-drafts";
+import { exportWiki } from "../services/wiki-export";
 import * as wikiWatchersService from "../services/wiki-watchers";
 
 const router = new Hono<HonoEnv>();
@@ -152,6 +153,29 @@ router.get("/changes", async (c) => {
 		return c.json(
 			await wikiWatchersService.listWikiChanges(ctx, { since, limit, projectId, watchedOnly })
 		);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+// PROJ-497 (R15): must be registered before the /:slug catch-all below, same as every
+// other fixed-path route above. REST-only — see AGENTS.md's "Deliberate REST↔MCP
+// parity exceptions" for why (binary zip response, same rationale as file downloads).
+router.get("/export", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const scope = c.req.query("scope");
+		const projectId = c.req.query("projectId");
+		const pageId = c.req.query("pageId");
+		const { filename, stream } = await exportWiki(ctx, { scope, projectId, pageId });
+		const safeFilename = filename.replace(/[\r\n"\\]/g, "_");
+		return new Response(stream, {
+			headers: {
+				"Content-Type": "application/zip",
+				"Content-Disposition": `attachment; filename="${safeFilename}"`,
+				"X-Content-Type-Options": "nosniff",
+			},
+		});
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

@@ -238,6 +238,15 @@ export const ListWikiChangesInputSchema = z.object({
 	watchedOnly: BooleanQueryParam.optional().default(false),
 });
 
+// PROJ-497 (R15): per-space or per-subtree markdown export. `scope: "space"` exports
+// every page in the given project (or, when `projectId` is omitted, every workspace-
+// level page); `scope: "subtree"` exports the given page plus its full descendant
+// chain. `pageId` accepts a slug or id, matching every other single-page endpoint.
+export const ExportWikiInputSchema = z.discriminatedUnion("scope", [
+	z.object({ scope: z.literal("space"), projectId: z.string().uuid().optional() }),
+	z.object({ scope: z.literal("subtree"), pageId: z.string().min(1).max(200) }),
+]);
+
 // PROJ-495 (R13): server-side per-user draft, replacing the PROJ-227 localStorage
 // autosave. title/content are both required (a draft is always a full snapshot of the
 // editor state, not a partial patch). baseRevisionId is optional/nullable, but unlike
