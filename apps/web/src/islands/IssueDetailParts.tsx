@@ -1643,7 +1643,10 @@ export function CommentsSection({
 					rows={4}
 					// text-base (16px) on phones: below 16px iOS Safari zooms the viewport
 					// when the field takes focus. sm:text-sm keeps desktop as it was.
-					class="w-full px-3 py-2 border border-border rounded text-base sm:text-sm resize-y box-border mb-2 bg-bg text-text-base"
+					class={
+						"w-full px-3 py-2 border border-border rounded text-base sm:text-sm " +
+						"resize-y box-border mb-2 bg-bg text-text-base"
+					}
 				/>
 				<button
 					type="submit"

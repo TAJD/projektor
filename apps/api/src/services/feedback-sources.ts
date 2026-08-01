@@ -89,7 +89,8 @@ export async function createFeedbackSource(
 	await ctx.db
 		.prepare(
 			`INSERT INTO feedback_sources
-       (id, token_hash, workspace_id, project_id, name, description, is_active, allowed_origins, created_by, created_at, revoked_at)
+       (id, token_hash, workspace_id, project_id, name, description, is_active,
+        allowed_origins, created_by, created_at, revoked_at)
        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, NULL)`
 		)
 		.bind(

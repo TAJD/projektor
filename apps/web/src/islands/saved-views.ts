@@ -88,16 +88,16 @@ export function parseSavedViews(raw: string | null): SavedView[] {
 }
 
 /** Insert or replace a view by name (names are unique within a bucket). */
-export function upsertView(views: SavedView[], view: SavedView): SavedView[] {
+export function upsertView(views: readonly SavedView[], view: SavedView): SavedView[] {
 	return [...views.filter((v) => v.name !== view.name), view];
 }
 
-export function removeView(views: SavedView[], name: string): SavedView[] {
+export function removeView(views: readonly SavedView[], name: string): SavedView[] {
 	return views.filter((v) => v.name !== name);
 }
 
 /** Order-insensitive equality for the two list-valued filters. */
-function sameSet(a: string[], b: string[]): boolean {
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
 	return JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
 }
 

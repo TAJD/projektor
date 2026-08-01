@@ -4,7 +4,9 @@ description: "Architecture contract and conventions for working on the Projektor
 sidebar:
   order: 1
 ---
-> **Note:** this page is generated from [`AGENTS.md`](https://github.com/TAJD/projektor/blob/main/AGENTS.md) in the repo root by `scripts/gen-conventions-page.ts`. Edit that file, not this page - it is overwritten on every generate.
+> **Note:** this page is generated from [`AGENTS.md`](https://github.com/TAJD/projektor/blob/main/AGENTS.md)
+> in the repo root by `scripts/gen-conventions-page.ts`. Edit that file, not this page - it is
+> overwritten on every generate.
 
 Guidance for AI agents (and humans) working **on** the projektor codebase.
 Read this before making changes - it captures conventions that aren't obvious from the code alone.

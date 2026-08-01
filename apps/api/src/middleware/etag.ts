@@ -31,7 +31,7 @@ export async function etagMiddleware(c: Context<HonoEnv>, next: Next): Promise<v
 	const etag = `"${await sha256Prefix(body)}"`;
 
 	if (ifNoneMatchMatches(c.req.header("If-None-Match"), etag)) {
-		// cofferdam-ignore: Refactor.MutatedParameter: setting c.res is the standard Hono middleware contract, not an accidental mutation
+		// cofferdam-ignore: Refactor.MutatedParameter: setting c.res is the standard Hono contract
 		c.res = new Response(null, {
 			status: 304,
 			headers: { ETag: etag, "Cache-Control": CACHE_CONTROL },

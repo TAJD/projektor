@@ -7,7 +7,10 @@ function buildHeaders(
 	return h;
 }
 
-/** Thrown when `apiFetch`'s underlying `fetch` call rejects (network failure/offline), as opposed to a completed HTTP error response. */
+/**
+ * Thrown when `apiFetch`'s underlying `fetch` call rejects (network failure/offline), as opposed
+ * to a completed HTTP error response.
+ */
 export class ApiOfflineError extends Error {
 	constructor(path: string, method: string) {
 		super(`API ${method} ${path} failed: network unavailable`);

@@ -496,7 +496,7 @@ async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx,
 	);
 }
 
-function computeChildRollup(childRows: Array<{ status: string; count: number }>) {
+function computeChildRollup(childRows: ReadonlyArray<{ status: string; count: number }>) {
 	const byStatus: Record<string, number> = {};
 	let total = 0;
 	for (const r of childRows) {
@@ -658,7 +658,7 @@ type CreateIssueData = z.infer<typeof CreateIssueSchema>;
 async function insertIssueRow(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
-	params: {
+	params: Readonly<{
 		id: string;
 		projectId: string;
 		title: string;
@@ -671,7 +671,7 @@ async function insertIssueRow(
 		parentId: string | null;
 		resolvedTypeId: string | null;
 		now: number;
-	}
+	}>
 ): Promise<void> {
 	// Atomic number allocation: the subquery for MAX(number) and the INSERT run as
 	// a single SQLite statement, eliminating the read-then-write race that existed
@@ -922,12 +922,12 @@ function applyFlowTimestampTransitions(
 function applyReviewTransitions(
 	setValues: SetValues,
 	existing: ExistingIssue,
-	transition: {
+	transition: Readonly<{
 		resolvedStatusKey: string;
 		newStatusCategory: string | undefined;
 		enteringInReview: boolean;
 		enteringDone: boolean;
-	}
+	}>
 ): boolean {
 	const { resolvedStatusKey, newStatusCategory, enteringInReview, enteringDone } = transition;
 	if (enteringInReview && existing.inReviewAt == null) setValues.inReviewAt = now();
@@ -990,7 +990,7 @@ async function assertReviewGate(
 	ctx: ServiceCtx,
 	data: UpdateIssueData,
 	existing: ExistingIssue,
-	transition: { enteringInReview: boolean; enteringDone: boolean }
+	transition: Readonly<{ enteringInReview: boolean; enteringDone: boolean }>
 ): Promise<void> {
 	const { enteringInReview, enteringDone } = transition;
 	if (!enteringInReview && !enteringDone) return;
@@ -1084,11 +1084,13 @@ function now(): number {
 	return Math.floor(Date.now() / 1000);
 }
 
-function formatCompletionReportComment(report: {
-	summary: string;
-	verification: string;
-	prLink?: string;
-}): string {
+function formatCompletionReportComment(
+	report: Readonly<{
+		summary: string;
+		verification: string;
+		prLink?: string;
+	}>
+): string {
 	const lines = [
 		"**Completion report**",
 		"",
@@ -1435,7 +1437,7 @@ async function computeStoryPoints(
 }
 
 function scoreOpenIssues(
-	openIssues: OpenIssue[],
+	openIssues: readonly OpenIssue[],
 	inDegree: Record<string, number>,
 	storyPoints: Record<string, number>
 ) {

@@ -33,7 +33,7 @@ const ROW_2 = {
 	createdAt: 1001,
 };
 
-function stubFetch(rows: unknown[] = [ROW, ROW_2], bulkConvertStatus = 201) {
+function stubFetch(rows: readonly unknown[] = [ROW, ROW_2], bulkConvertStatus = 201) {
 	const fetchMock = vi.fn().mockImplementation((url: string, _init?: RequestInit) => {
 		const u = String(url);
 		if (u.includes("/bulk-convert-to-issue")) {

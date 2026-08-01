@@ -92,7 +92,7 @@ export function assigneeInitials(name: string): string {
  * For other categories: returns the first status in that category.
  */
 export function getFirstStatusForCategory(
-	statuses: TaskStatus[],
+	statuses: readonly TaskStatus[],
 	category: string
 ): TaskStatus | undefined {
 	if (category === "todo") {
@@ -108,22 +108,22 @@ export function getFirstStatusForCategory(
  * Returns issues to display in a board column.
  * Todo column excludes backlog issues (those belong to the Backlog view).
  */
-export function getBoardColumnIssues(issues: Issue[], category: string): Issue[] {
+export function getBoardColumnIssues(issues: readonly Issue[], category: string): Issue[] {
 	return issues.filter(
 		(i) => i.status_category === category && (category !== "todo" || i.status_key !== "backlog")
 	);
 }
 
 /** Returns issues for the Backlog view: todo category with backlog key. */
-export function getBacklogIssues(issues: Issue[]): Issue[] {
+export function getBacklogIssues(issues: readonly Issue[]): Issue[] {
 	return issues.filter((i) => i.status_category === "todo" && i.status_key === "backlog");
 }
 
 /** Applies multi-predicate filtering to an issue list (all predicates are AND-ed). */
 export function filterIssues(
-	issues: Issue[],
-	filterStatuses: string[],
-	filterPriorities: string[],
+	issues: readonly Issue[],
+	filterStatuses: readonly string[],
+	filterPriorities: readonly string[],
 	filterProject: string,
 	filterType: string
 ): Issue[] {
@@ -155,7 +155,11 @@ const SORT_COMPARATORS: Record<SortKey, (a: Issue, b: Issue) => number> = {
 };
 
 /** Sorts a copy of an issue list by the given SortKey. */
-export function sortIssues(issues: Issue[], sortBy: SortKey, sortDir: "asc" | "desc"): Issue[] {
+export function sortIssues(
+	issues: readonly Issue[],
+	sortBy: SortKey,
+	sortDir: "asc" | "desc"
+): Issue[] {
 	const compare = SORT_COMPARATORS[sortBy];
 	return [...issues].sort((a, b) => {
 		const diff = compare ? compare(a, b) : 0;

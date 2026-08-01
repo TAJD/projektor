@@ -32,7 +32,7 @@ const SPRINT: Sprint = {
 	createdAt: 1000,
 };
 
-function mockFetchSprints(sprints: Sprint[] = [SPRINT]) {
+function mockFetchSprints(sprints: readonly Sprint[] = [SPRINT]) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {

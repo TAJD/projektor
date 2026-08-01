@@ -30,7 +30,7 @@ function applyEpicParams(
 	qs: URLSearchParams,
 	filterEpicId: string,
 	hideEpics: boolean,
-	taskTypes: KeyedById[]
+	taskTypes: readonly KeyedById[]
 ): void {
 	if (filterEpicId && filterEpicId !== "none") qs.set("parentId", filterEpicId);
 	if (filterEpicId === "none") qs.set("noParent", "true");
@@ -60,7 +60,7 @@ export function applyDateRangeParams(
 // (everything except limit/cursor, which the callers set).
 export function buildFilterQueryParams(
 	filters: FilterQueryFilters,
-	projects: KeyedById[],
+	projects: readonly KeyedById[],
 	taskTypes: KeyedById[]
 ): URLSearchParams {
 	const {
@@ -180,9 +180,13 @@ interface TaskTypeLookup {
 }
 
 export function buildOptimisticIssue(
-	created: { id: string; number: number },
+	created: Readonly<{ id: string; number: number }>,
 	input: CreateIssueInput,
-	lookups: { projects: ProjectLookup[]; statuses: StatusLookup[]; taskTypes: TaskTypeLookup[] }
+	lookups: Readonly<{
+		projects: ProjectLookup[];
+		statuses: StatusLookup[];
+		taskTypes: TaskTypeLookup[];
+	}>
 ): Issue {
 	const proj = lookups.projects.find((p) => p.id === input.createProjectId);
 	const chosenStatus = lookups.statuses.find((s) => s.id === input.createStatusId);

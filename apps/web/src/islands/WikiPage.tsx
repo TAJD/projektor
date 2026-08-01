@@ -99,7 +99,7 @@ const WIKI_WELL_KNOWN_TYPES = new Set(WIKI_TYPE_FILTER_OPTIONS.map((o) => o.valu
 // case-insensitively (frontmatter `type` is never case-normalized) so e.g. `Runbook`
 // doesn't produce a second, visually-indistinguishable entry alongside the well-known
 // lowercase `runbook`.
-function buildTypeFilterOptions(discoveredTypes: string[]): SelectOption[] {
+function buildTypeFilterOptions(discoveredTypes: readonly string[]): SelectOption[] {
 	const seen = new Set(Array.from(WIKI_WELL_KNOWN_TYPES).map((t) => t.toLowerCase()));
 	const extras: string[] = [];
 	for (const t of discoveredTypes) {
@@ -213,9 +213,19 @@ function WikiMetadataCard({
 	if (!hasMetadata && !hasVerificationSignal) return null;
 
 	return (
-		<div class="flex flex-wrap items-center gap-2 mb-4 p-3 border border-border rounded-lg bg-surface text-[0.8rem] text-text-muted">
+		<div
+			class={
+				"flex flex-wrap items-center gap-2 mb-4 p-3 border border-border rounded-lg " +
+				"bg-surface text-[0.8rem] text-text-muted"
+			}
+		>
 			{page.type && (
-				<span class="inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold uppercase tracking-wide bg-bg border border-border text-text-muted">
+				<span
+					class={
+						"inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold " +
+						"uppercase tracking-wide bg-bg border border-border text-text-muted"
+					}
+				>
 					{page.type}
 				</span>
 			)}
@@ -309,7 +319,7 @@ function formatBytes(bytes: number): string {
 
 // PROJ-514: walks the tree already fetched by useWikiTree to discover distinct `type`
 // values for the sidebar filter dropdown, instead of issuing a second unfiltered fetch.
-function collectTreeTypes(nodes: TreeNode[]): string[] {
+function collectTreeTypes(nodes: readonly TreeNode[]): string[] {
 	const types: string[] = [];
 	for (const node of nodes) {
 		if (node.type) types.push(node.type);
@@ -318,7 +328,10 @@ function collectTreeTypes(nodes: TreeNode[]): string[] {
 	return types;
 }
 
-function flattenTree(nodes: TreeNode[], parentId: string | null = null): Record<string, FlatEntry> {
+function flattenTree(
+	nodes: readonly TreeNode[],
+	parentId: string | null = null
+): Record<string, FlatEntry> {
 	const map: Record<string, FlatEntry> = {};
 	for (const node of nodes) {
 		map[node.id] = { id: node.id, slug: node.slug, title: node.title, parentId };
@@ -1108,7 +1121,12 @@ function RevisionDiffView({ diff }: { diff: string }) {
 		return <p class="mt-2 mb-1 text-[0.75rem] text-text-muted italic">No changes.</p>;
 	}
 	return (
-		<pre class="mt-2 mb-1 p-2 bg-surface border border-border rounded-md text-[0.75rem] overflow-x-auto leading-snug whitespace-pre-wrap">
+		<pre
+			class={
+				"mt-2 mb-1 p-2 bg-surface border border-border rounded-md text-[0.75rem] " +
+				"overflow-x-auto leading-snug whitespace-pre-wrap"
+			}
+		>
 			{diff.split("\n").map((line, i) => {
 				const cls = line.startsWith("+")
 					? "text-green-600"
@@ -1678,15 +1696,17 @@ interface CreateFormProps {
 	onCancel: () => void;
 }
 
-function WikiMainContent(props: {
-	creating: boolean;
-	createProps: CreateFormProps;
-	slug: string;
-	loading: boolean;
-	error: string | null;
-	page: WikiPageData | null;
-	articleProps: Omit<PageArticleProps, "page">;
-}) {
+function WikiMainContent(
+	props: Readonly<{
+		creating: boolean;
+		createProps: CreateFormProps;
+		slug: string;
+		loading: boolean;
+		error: string | null;
+		page: WikiPageData | null;
+		articleProps: Omit<PageArticleProps, "page">;
+	}>
+) {
 	if (props.creating) return <CreatePageForm {...props.createProps} />;
 	if (!props.slug) {
 		return <p class="text-text-muted">Select a page from the sidebar or create a new one.</p>;
@@ -1824,7 +1844,7 @@ function useWikiStalePages(workspaceSlug: string | undefined, projectId: string)
 function useWikiFilters(
 	workspaceSlug: string | undefined,
 	projectId: string,
-	pageTree: TreeNode[]
+	pageTree: readonly TreeNode[]
 ) {
 	const [filterType, setFilterType] = useState("");
 	const [filterStatus, setFilterStatus] = useState("");
@@ -1880,7 +1900,7 @@ function useWikiFilters(
 function useWikiSearch(
 	workspaceSlug: string | undefined,
 	projectId: string,
-	filters: { filterType: string; filterStatus: string; filterTags: string }
+	filters: Readonly<{ filterType: string; filterStatus: string; filterTags: string }>
 ) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -1976,7 +1996,7 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 		}
 	}, [slug, fetchPage, fetchRevisions]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return {
 		page,
 		setPage,
@@ -2044,7 +2064,7 @@ function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTM
 		const headings = Array.from(container.querySelectorAll("h1, h2, h3")) as HTMLElement[];
 		headings.forEach((h) => {
 			if (!h.id) {
-				// cofferdam-ignore: Refactor.MutatedParameter: setting a live DOM element's id is the point (anchor IDs for the ToC), not a code smell
+				// cofferdam-ignore: Refactor.MutatedParameter: setting a live DOM element's id is the point (anchor IDs)
 				h.id = (h.textContent ?? "")
 					.toLowerCase()
 					.replace(/[^a-z0-9]+/g, "-")
@@ -2397,7 +2417,8 @@ function useWikiEditing(
 			// part of it, and slugs like "proj-409-notes" would otherwise read as conflicts.
 			if (String(e).endsWith("failed: 409")) {
 				setSaveError(
-					"This page was changed by someone else since you loaded it. Reload the page before saving to avoid overwriting their changes."
+					"This page was changed by someone else since you loaded it. Reload the page before " +
+						"saving to avoid overwriting their changes."
 				);
 			} else {
 				setSaveError(`Save failed: ${String(e)}`);
@@ -2684,20 +2705,22 @@ function useCreatePageForm(
 	};
 }
 
-function createWikiActions(args: {
-	workspaceSlug: string | undefined;
-	page: WikiPageData | null;
-	fetchTree: () => Promise<void>;
-	setSlug: (s: string) => void;
-	setCreating: (v: boolean) => void;
-	setEditing: (v: boolean) => void;
-	setPage: (p: WikiPageData | null) => void;
-	setError: (e: string | null) => void;
-	setToc: (t: TocItem[]) => void;
-	rawStartCreate: (parentId: string | null) => void;
-	rawSubmitCreate: () => Promise<string | undefined>;
-	cancelMove: () => void;
-}) {
+function createWikiActions(
+	args: Readonly<{
+		workspaceSlug: string | undefined;
+		page: WikiPageData | null;
+		fetchTree: () => Promise<void>;
+		setSlug: (s: string) => void;
+		setCreating: (v: boolean) => void;
+		setEditing: (v: boolean) => void;
+		setPage: (p: WikiPageData | null) => void;
+		setError: (e: string | null) => void;
+		setToc: (t: TocItem[]) => void;
+		rawStartCreate: (parentId: string | null) => void;
+		rawSubmitCreate: () => Promise<string | undefined>;
+		cancelMove: () => void;
+	}>
+) {
 	const {
 		workspaceSlug,
 		page,
@@ -2794,30 +2817,32 @@ const WIKI_PAGE_STYLES = `
 	}
 `;
 
-function WikiPageShell(props: {
-	workspaceSlug: string | undefined;
-	projectId: string;
-	searchQuery: string;
-	onSearchQueryChange: (v: string) => void;
-	searchResults: SearchResult[];
-	searchLoading: boolean;
-	treeLoading: boolean;
-	pageTree: TreeNode[];
-	slug: string;
-	onNavigate: (slug: string) => void;
-	onCreate: () => void;
-	filters: ReturnType<typeof useWikiFilters>;
-	stale: ReturnType<typeof useWikiStalePages>;
-	mainContentProps: {
-		creating: boolean;
-		createProps: CreateFormProps;
+function WikiPageShell(
+	props: Readonly<{
+		workspaceSlug: string | undefined;
+		projectId: string;
+		searchQuery: string;
+		onSearchQueryChange: (v: string) => void;
+		searchResults: SearchResult[];
+		searchLoading: boolean;
+		treeLoading: boolean;
+		pageTree: TreeNode[];
 		slug: string;
-		loading: boolean;
-		error: string | null;
-		page: WikiPageData | null;
-		articleProps: Omit<PageArticleProps, "page">;
-	};
-}) {
+		onNavigate: (slug: string) => void;
+		onCreate: () => void;
+		filters: ReturnType<typeof useWikiFilters>;
+		stale: ReturnType<typeof useWikiStalePages>;
+		mainContentProps: {
+			creating: boolean;
+			createProps: CreateFormProps;
+			slug: string;
+			loading: boolean;
+			error: string | null;
+			page: WikiPageData | null;
+			articleProps: Omit<PageArticleProps, "page">;
+		};
+	}>
+) {
 	return (
 		<div class="flex min-h-screen max-sm:flex-col">
 			<style>{WIKI_PAGE_STYLES}</style>
@@ -2861,7 +2886,7 @@ function deriveWikiPageState(
 	pageMap: Record<string, FlatEntry>,
 	editState: ReturnType<typeof useWikiEditing>,
 	createForm: ReturnType<typeof useCreatePageForm>,
-	toc: TocItem[]
+	toc: readonly TocItem[]
 ) {
 	const latestRevision = pageData.revisions[0] ?? null;
 	// Breadcrumbs for current page (PROJ-114)
@@ -2881,23 +2906,25 @@ function deriveWikiPageState(
 	return { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions };
 }
 
-function buildCreateFormProps(create: {
-	createParentTitle: string | null;
-	createTitle: string;
-	createSlug: string;
-	createContent: string;
-	createError: string | null;
-	createSaving: boolean;
-	templates: TemplateOption[];
-	createTemplateSlug: string;
-	onCreateTitleChange: (v: string) => void;
-	onCreateSlugChange: (v: string) => void;
-	setCreateContent: (v: string) => void;
-	onCreateTemplateChange: (v: string) => void;
-	submitCreate: () => void;
-	cancelCreate: () => void;
-}): CreateFormProps {
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
+function buildCreateFormProps(
+	create: Readonly<{
+		createParentTitle: string | null;
+		createTitle: string;
+		createSlug: string;
+		createContent: string;
+		createError: string | null;
+		createSaving: boolean;
+		templates: TemplateOption[];
+		createTemplateSlug: string;
+		onCreateTitleChange: (v: string) => void;
+		onCreateSlugChange: (v: string) => void;
+		setCreateContent: (v: string) => void;
+		onCreateTemplateChange: (v: string) => void;
+		submitCreate: () => void;
+		cancelCreate: () => void;
+	}>
+): CreateFormProps {
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return {
 		parentTitle: create.createParentTitle,
 		title: create.createTitle,
@@ -2916,43 +2943,45 @@ function buildCreateFormProps(create: {
 	};
 }
 
-function buildArticleProps(article: {
-	breadcrumbs: FlatEntry[];
-	navigateTo: (slug: string) => void;
-	showToc: boolean;
-	toc: TocItem[];
-	activeHeadingId: string;
-	contentRef: RefObject<HTMLDivElement>;
-	editing: boolean;
-	editTitle: string;
-	setEditTitle: (v: string) => void;
-	saving: boolean;
-	save: () => void;
-	cancelEdit: () => void;
-	startEdit: () => void;
-	startCreate: (parentId: string | null) => void;
-	deletePage: () => void;
-	onVerify: () => void;
-	verifying: boolean;
-	verifyError: string | null;
-	latestRevision: WikiRevision | null;
-	saveError: string | null;
-	draftBanner: ServerDraft | null;
-	restoreDraft: () => void;
-	discardDraft: () => void;
-	editContent: string;
-	setEditContent: (v: string) => void;
-	wikiPages: FlatEntry[];
-	revisions: WikiRevision[];
-	showHistory: boolean;
-	setShowHistory: (updater: (h: boolean) => boolean) => void;
-	onRestoreRevision: (revision: WikiRevision) => void;
-	restoringRevisionId: string | null;
-	attach: ReturnType<typeof useWikiAttachments>;
-	workspaceSlug: string | undefined;
-	move: ReturnType<typeof useMovePage>;
-	moveOptions: SelectOption[];
-}): Omit<PageArticleProps, "page"> {
+function buildArticleProps(
+	article: Readonly<{
+		breadcrumbs: FlatEntry[];
+		navigateTo: (slug: string) => void;
+		showToc: boolean;
+		toc: TocItem[];
+		activeHeadingId: string;
+		contentRef: RefObject<HTMLDivElement>;
+		editing: boolean;
+		editTitle: string;
+		setEditTitle: (v: string) => void;
+		saving: boolean;
+		save: () => void;
+		cancelEdit: () => void;
+		startEdit: () => void;
+		startCreate: (parentId: string | null) => void;
+		deletePage: () => void;
+		onVerify: () => void;
+		verifying: boolean;
+		verifyError: string | null;
+		latestRevision: WikiRevision | null;
+		saveError: string | null;
+		draftBanner: ServerDraft | null;
+		restoreDraft: () => void;
+		discardDraft: () => void;
+		editContent: string;
+		setEditContent: (v: string) => void;
+		wikiPages: FlatEntry[];
+		revisions: WikiRevision[];
+		showHistory: boolean;
+		setShowHistory: (updater: (h: boolean) => boolean) => void;
+		onRestoreRevision: (revision: WikiRevision) => void;
+		restoringRevisionId: string | null;
+		attach: ReturnType<typeof useWikiAttachments>;
+		workspaceSlug: string | undefined;
+		move: ReturnType<typeof useMovePage>;
+		moveOptions: SelectOption[];
+	}>
+): Omit<PageArticleProps, "page"> {
 	return {
 		breadcrumbs: article.breadcrumbs,
 		onNavigate: article.navigateTo,

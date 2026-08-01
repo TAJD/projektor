@@ -13,7 +13,7 @@ const OPEN_TRIGGER_KEYS = new Set(["ArrowDown", "Enter", " "]);
 function useCloseOnOutside(
 	open: boolean,
 	close: () => void,
-	rootRef: { current: HTMLDivElement | null }
+	rootRef: Readonly<{ current: HTMLDivElement | null }>
 ) {
 	useEffect(() => {
 		if (!open) return;

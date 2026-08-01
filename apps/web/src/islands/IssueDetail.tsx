@@ -337,7 +337,7 @@ function useIssueCore({
 		return () => clearTimeout(t);
 	}, [fetchAttachments, issueId]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return {
 		issue,
 		setIssue,
@@ -352,15 +352,17 @@ function useIssueCore({
 	};
 }
 
-function useIssueMutations(args: {
-	issue: IssueData | null;
-	setIssue: (updater: (prev: IssueData | null) => IssueData | null) => void;
-	issueId: string;
-	workspaceSlug: string | undefined;
-	statuses: TaskStatus[];
-	members: Member[];
-	fetchIssue: () => Promise<void>;
-}) {
+function useIssueMutations(
+	args: Readonly<{
+		issue: IssueData | null;
+		setIssue: (updater: (prev: IssueData | null) => IssueData | null) => void;
+		issueId: string;
+		workspaceSlug: string | undefined;
+		statuses: TaskStatus[];
+		members: Member[];
+		fetchIssue: () => Promise<void>;
+	}>
+) {
 	const { issue, setIssue, issueId, workspaceSlug, statuses, members, fetchIssue } = args;
 	const [updatingStatus, setUpdatingStatus] = useState(false);
 	const [updatingPriority, setUpdatingPriority] = useState(false);
@@ -473,34 +475,36 @@ function IssueBreadcrumb({ issue, backHref }: { issue: IssueData; backHref: stri
 	);
 }
 
-function IssueDetailView(props: {
-	issue: IssueData;
-	issueId: string;
-	workspaceSlug?: string;
-	backHref: string | null;
-	issueRef: string;
-	copyUrl: string;
-	blockedByLinks: IssueLink[];
-	parentEpic: IssueData | null;
-	childIssues: IssueData[];
-	links: IssueLink[];
-	fetchingLinks: boolean;
-	fetchLinks: () => Promise<void>;
-	attachments: Attachment[];
-	fetchAttachments: () => Promise<void>;
-	comments: Comment[];
-	currentUserId: string | null;
-	fetchComments: () => Promise<void>;
-	statuses: TaskStatus[];
-	members: Member[];
-	updatingStatus: boolean;
-	updatingPriority: boolean;
-	updatingAssignee: boolean;
-	changeStatus: (statusId: string) => void;
-	changePriority: (priority: string) => void;
-	changeAssignee: (assigneeId: string) => void;
-	fetchIssue: () => Promise<void>;
-}) {
+function IssueDetailView(
+	props: Readonly<{
+		issue: IssueData;
+		issueId: string;
+		workspaceSlug?: string;
+		backHref: string | null;
+		issueRef: string;
+		copyUrl: string;
+		blockedByLinks: IssueLink[];
+		parentEpic: IssueData | null;
+		childIssues: IssueData[];
+		links: IssueLink[];
+		fetchingLinks: boolean;
+		fetchLinks: () => Promise<void>;
+		attachments: Attachment[];
+		fetchAttachments: () => Promise<void>;
+		comments: Comment[];
+		currentUserId: string | null;
+		fetchComments: () => Promise<void>;
+		statuses: TaskStatus[];
+		members: Member[];
+		updatingStatus: boolean;
+		updatingPriority: boolean;
+		updatingAssignee: boolean;
+		changeStatus: (statusId: string) => void;
+		changePriority: (priority: string) => void;
+		changeAssignee: (assigneeId: string) => void;
+		fetchIssue: () => Promise<void>;
+	}>
+) {
 	const { issue, issueId, workspaceSlug } = props;
 	return (
 		<article class="max-w-[900px] mx-auto">

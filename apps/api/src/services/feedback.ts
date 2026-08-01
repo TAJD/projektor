@@ -60,7 +60,8 @@ async function insertFeedbackRow(
 	await db
 		.prepare(
 			`INSERT INTO feedback
-       (id, source_id, workspace_id, project_id, rating, rating_scale, body, submitter_label, source_url, app_version, status, linked_issue_id, created_at)
+       (id, source_id, workspace_id, project_id, rating, rating_scale, body, submitter_label,
+        source_url, app_version, status, linked_issue_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, ?)`
 		)
 		.bind(
@@ -401,7 +402,7 @@ interface FeedbackSummaryRow {
 
 export async function getFeedbackSummary(
 	ctx: ServiceCtx,
-	input: { projectId: string }
+	input: Readonly<{ projectId: string }>
 ): Promise<FeedbackSourceSummary[]> {
 	const { projectId } = input;
 

@@ -364,7 +364,7 @@ describe("Sprints role guards", () => {
 		expect(completeRes.status).toBe(403);
 	});
 
-	it("PROJ-357: a member with write access only on the sprint's project cannot move an issue from a project they have no grant on", async () => {
+	it("PROJ-357: write access only on the sprint's project can't move an issue from an ungranted one", async () => {
 		const roles = await seedWorkspaceRoles();
 		const projectA = await seedProject(roles.workspace.id, "PJA");
 		const projectB = await seedProject(roles.workspace.id, "PJB");

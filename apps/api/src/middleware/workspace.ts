@@ -54,7 +54,7 @@ function mcpWorkspaceIdFromPath(path: string): string | undefined {
 // Checked before membership so a token pointed at the wrong workspace gets the same 403
 // it always did, rather than leaking whether the caller happens to be a member there.
 function tokenConfinedToOtherWorkspace(
-	row: { id: string },
+	row: Readonly<{ id: string }>,
 	tokenWorkspaceId: string | null | undefined
 ): boolean {
 	return tokenWorkspaceId != null && row.id !== tokenWorkspaceId;

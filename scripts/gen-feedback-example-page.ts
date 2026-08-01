@@ -43,7 +43,13 @@ description: "Collect end-user feedback from your own site and route it into a p
 sidebar:
   order: 4
 ---
-> **Note:** the code below is generated from [\`apps/api/src/examples/feedback-widget-submit.ts\`](https://github.com/TAJD/projektor/blob/main/apps/api/src/examples/feedback-widget-submit.ts) by \`scripts/gen-feedback-example-page.ts\`, and is executed against a live projektor instance in [\`apps/api/src/test/feedback-example.test.ts\`](https://github.com/TAJD/projektor/blob/main/apps/api/src/test/feedback-example.test.ts) - edit that source file, not this page, and run \`pnpm gen:docs\`.
+> **Note:** the code below is generated from [\`apps/api/src/examples/feedback-widget-submit.ts\`][src]
+> by \`scripts/gen-feedback-example-page.ts\`, and is executed against a live projektor instance in
+> [\`apps/api/src/test/feedback-example.test.ts\`][test] - edit that source file, not this page, and
+> run \`pnpm gen:docs\`.
+
+[src]: https://github.com/TAJD/projektor/blob/main/apps/api/src/examples/feedback-widget-submit.ts
+[test]: https://github.com/TAJD/projektor/blob/main/apps/api/src/test/feedback-example.test.ts
 
 A **feedback source** is a named, independently-credentialed collection point (e.g.
 "Onboarding survey", "In-app rating widget") that a project owner or admin creates once.

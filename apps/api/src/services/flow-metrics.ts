@@ -13,7 +13,7 @@ interface Distribution {
 	p90: number | null;
 }
 
-function summarize(durations: number[]): Distribution {
+function summarize(durations: readonly number[]): Distribution {
 	if (durations.length === 0) return { count: 0, avg: null, p50: null, p90: null };
 	const sorted = [...durations].sort((a, b) => a - b);
 	const avg = sorted.reduce((sum, d) => sum + d, 0) / sorted.length;
@@ -49,7 +49,7 @@ type FlowIssueRow = {
 };
 
 function buildWipOverTime(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	since: number,
 	until: number
 ): Array<{ date: string; count: number }> {
@@ -74,7 +74,7 @@ function mondayAtOrBefore(t: number): number {
 }
 
 function buildThroughputOverTime(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	since: number,
 	until: number,
 	granularity: "day" | "week"
@@ -103,7 +103,7 @@ function buildThroughputOverTime(
 // as any other non-bug type. bugSharePercent is null (not 0) when a bucket completed
 // nothing, so an empty bucket reads as "no data" rather than "zero defects".
 function buildBugShareOverTime(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	since: number,
 	until: number,
 	granularity: "day" | "week"
@@ -138,7 +138,7 @@ function buildBugShareOverTime(
 // PROJ-328: review latency (in_review -> done) bucketed the same way as throughput, but
 // showing the bucket's p50 rather than a count — the "trend" the ticket asks for.
 function buildReviewLatencyOverTime(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	since: number,
 	until: number,
 	granularity: "day" | "week"
@@ -173,7 +173,7 @@ function buildReviewLatencyOverTime(
 // the net (created - completed), bucketed the same way as throughput. Answers "is the
 // backlog growing or burning?" at a glance.
 function buildArrivalVsCompletion(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	since: number,
 	until: number,
 	granularity: "day" | "week"
@@ -218,7 +218,7 @@ function classifyCfdBand(issue: FlowIssueRow, sampleAt: number): CfdBand {
 }
 
 function countCfdBands(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	sampleAt: number
 ): { backlogTodo: number; inProgress: number; inReview: number; done: number } {
 	let backlogTodo = 0;
@@ -305,7 +305,7 @@ async function fetchHumanCommentCounts(
 // still held when the issue finished counts through doneAt, not "now".
 async function fetchLeaseHeldSeconds(
 	orm: ReturnType<typeof drizzle>,
-	issues: FlowIssueRow[]
+	issues: readonly FlowIssueRow[]
 ): Promise<Map<string, number>> {
 	const doneAtById = new Map(issues.map((i) => [i.id, i.doneAt]));
 	const rows = await inChunks(
@@ -333,7 +333,7 @@ async function fetchLeaseHeldSeconds(
 // PROJ-328: human interventions per completed issue = human comments + status bounces
 // out of review. The primary "how much human attention did this take" signal.
 function computeHumanInterventions(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	humanCommentCounts: Map<string, number>,
 	inWindow: (t: number) => boolean
 ): number[] {
@@ -345,7 +345,7 @@ function computeHumanInterventions(
 // PROJ-328: autonomy ratio per completed issue = lease-held time / cycle time. Clamped
 // to [0, 1] — sequential re-leases can sum close to the full cycle but shouldn't exceed it.
 function computeAutonomyRatios(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	leaseHeldSeconds: Map<string, number>,
 	inWindow: (t: number) => boolean
 ): number[] {
@@ -367,7 +367,7 @@ function computeAutonomyRatios(
 // "waste", so it's always <= autonomyRatio for the same issue. Clamped to [0, 1] for the
 // same reason as autonomyRatio (sequential re-leases can sum close to the full lead time).
 function computeFlowEfficiencies(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	leaseHeldSeconds: Map<string, number>,
 	inWindow: (t: number) => boolean
 ): number[] {
@@ -389,7 +389,7 @@ function computeFlowEfficiencies(
 // reflects the shared date-range controls. Surfaces items stuck long enough to be worth
 // investigating before they finish and pollute the cycle-time percentiles.
 function buildAgingWip(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	now: number
 ): Array<{ id: string; status: "in_progress" | "in_review"; ageSeconds: number }> {
 	return issues

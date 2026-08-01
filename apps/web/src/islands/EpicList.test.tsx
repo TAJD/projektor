@@ -79,7 +79,7 @@ const LOW_EPIC: Issue = {
 	created_at: 1000,
 };
 
-function mockFetchEpics(issues: Issue[] = [EPIC_ISSUE]) {
+function mockFetchEpics(issues: readonly Issue[] = [EPIC_ISSUE]) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {

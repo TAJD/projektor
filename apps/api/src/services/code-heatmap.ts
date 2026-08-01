@@ -46,7 +46,7 @@ export interface ContentionHeatmapEntry {
 // directory's children" step a file explorer takes, so the caller drills down by
 // re-requesting with `prefix` set to the entry clicked.
 function groupClaimsByNextSegment(
-	claims: Array<{ path: string; issueId: string }>,
+	claims: ReadonlyArray<{ path: string; issueId: string }>,
 	prefix: string
 ): CodeHeatmapEntry[] {
 	const prefixWithSlash = prefix ? `${prefix}/` : "";
@@ -87,7 +87,7 @@ function groupClaimsByNextSegment(
 // PROJ-338: contention counterpart to groupClaimsByNextSegment — same segment-splitting
 // and isLeaf-freeze behavior, but tracks rejected-issue ids and raw conflict rows.
 function groupConflictsByNextSegment(
-	conflicts: Array<{ path: string; rejectedIssueId: string }>,
+	conflicts: ReadonlyArray<{ path: string; rejectedIssueId: string }>,
 	prefix: string
 ): ContentionHeatmapEntry[] {
 	const prefixWithSlash = prefix ? `${prefix}/` : "";

@@ -108,7 +108,7 @@ export function useIssueFetching(
 		fetchIssues();
 	}, [fetchIssues]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return {
 		issues,
 		setIssues,

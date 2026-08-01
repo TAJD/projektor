@@ -74,7 +74,7 @@ export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
 async function resolveTitleTargets(
 	orm: Orm,
 	workspaceId: string,
-	titles: string[]
+	titles: readonly string[]
 ): Promise<Map<string, string>> {
 	const byLower = new Map<string, string>();
 	if (titles.length === 0) return byLower;
@@ -149,7 +149,7 @@ type ResolvedLink = { targetPageId: string | null; targetTitle: string };
 async function resolveLinkTargets(
 	orm: Orm,
 	workspaceId: string,
-	targets: ParsedLinkTarget[]
+	targets: readonly ParsedLinkTarget[]
 ): Promise<ResolvedLink[]> {
 	// Dedupe by resolved page id (or the raw unresolved key) so a page linking to the
 	// same target multiple times only gets one wiki_links row.
@@ -237,7 +237,8 @@ export async function buildWikiLinksReindexStatements(
 		statements.push(
 			ctx.db
 				.prepare(
-					`INSERT INTO wiki_links (id, workspace_id, source_page_id, target_page_id, target_title, created_at) VALUES ${placeholders}`
+					`INSERT INTO wiki_links (id, workspace_id, source_page_id, target_page_id, target_title,
+						created_at) VALUES ${placeholders}`
 				)
 				.bind(...params)
 		);
@@ -256,7 +257,7 @@ export async function buildWikiLinksReindexStatements(
  * patchWikiPage call buildWikiLinksReindexStatements directly instead, to include these
  * statements in the same batch as the content write/revision/FTS reindex (PROJ-511).
  */
-// cofferdam-ignore: Design.OrphanExport: re-indexing function available for direct use; prefer buildWikiLinksReindexStatements for batch operations
+// cofferdam-ignore: Design.OrphanExport: available for direct use; prefer buildWikiLinksReindexStatements for batches
 export async function reindexWikiLinks(
 	ctx: ServiceCtx,
 	orm: Orm,
@@ -387,7 +388,7 @@ export interface WikiBacklink {
  */
 export async function backlinksForResolvedPage(
 	ctx: ServiceCtx,
-	page: { id: string }
+	page: Readonly<{ id: string }>
 ): Promise<WikiBacklink[]> {
 	const orm = drizzle(ctx.db, { schema });
 	const rows = await orm
@@ -436,7 +437,7 @@ export async function backlinksForResolvedPage(
 // Resolves which of `rows` (all project-scoped) the caller has an effective grant on.
 async function visibleSourcePageIds(
 	ctx: ServiceCtx,
-	rows: Array<{ pageId: string; projectId: string | null }>
+	rows: ReadonlyArray<{ pageId: string; projectId: string | null }>
 ): Promise<string[]> {
 	if (rows.length === 0) return [];
 	const uniqueProjectIds = [
@@ -478,7 +479,8 @@ export async function listBrokenWikiLinks(
 		// silently stop being reported as broken.
 		or(
 			isNull(schema.wikiLinks.targetPageId),
-			sql`EXISTS (SELECT 1 FROM wiki_pages tp WHERE tp.id = ${schema.wikiLinks.targetPageId} AND tp.deleted_at IS NOT NULL)`
+			sql`EXISTS (SELECT 1 FROM wiki_pages tp WHERE tp.id = ${schema.wikiLinks.targetPageId}
+				AND tp.deleted_at IS NOT NULL)`
 		),
 		// PROJ-496: a trashed source page's broken links aren't a maintenance concern
 		// anymore — they'll be purged along with the page.

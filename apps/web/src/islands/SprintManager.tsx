@@ -90,7 +90,7 @@ async function fetchSprintIssues(
 	return data.items;
 }
 
-function computeVelocity(sprint: Sprint, issues: Issue[]): SprintVelocity {
+function computeVelocity(sprint: Sprint, issues: readonly Issue[]): SprintVelocity {
 	return {
 		sprint,
 		pointsCompleted: issues
@@ -100,11 +100,11 @@ function computeVelocity(sprint: Sprint, issues: Issue[]): SprintVelocity {
 	};
 }
 
-function activeCountOf(sprints: Sprint[]): number {
+function activeCountOf(sprints: readonly Sprint[]): number {
 	return sprints.filter((s) => s.status === "active").length;
 }
 
-function completedSprintsOf(sprints: Sprint[]): Sprint[] {
+function completedSprintsOf(sprints: readonly Sprint[]): Sprint[] {
 	return sprints.filter((s) => s.status === "completed");
 }
 
@@ -321,11 +321,11 @@ function useSprintData(workspaceSlug: string | undefined) {
 		if (projectId) fetchSprints(projectId);
 	}, [projectId, fetchSprints]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { projectId, project, sprints, loading, error, fetchSprints };
 }
 
-function useSprintVelocity(sprints: Sprint[], workspaceSlug: string | undefined) {
+function useSprintVelocity(sprints: readonly Sprint[], workspaceSlug: string | undefined) {
 	const [velocityData, setVelocityData] = useState<SprintVelocity[]>([]);
 	const [velocityLoading, setVelocityLoading] = useState(false);
 
@@ -429,7 +429,7 @@ function useSprintCreateForm(
 
 function useSprintComplete(
 	projectId: string | null,
-	sprints: Sprint[],
+	sprints: readonly Sprint[],
 	workspaceSlug: string | undefined,
 	refetch: (pid: string) => Promise<void>
 ) {

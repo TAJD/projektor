@@ -6,7 +6,7 @@ import type { Issue, TaskStatus } from "../board-utils";
 /** Owns the status/priority PATCH flows shared by the board, backlog, and list views. */
 export function useIssueMutations(
 	workspaceSlug: string | undefined,
-	statuses: TaskStatus[],
+	statuses: readonly TaskStatus[],
 	setIssues: Dispatch<StateUpdater<Issue[]>>,
 	fetchIssues: () => Promise<void>
 ) {

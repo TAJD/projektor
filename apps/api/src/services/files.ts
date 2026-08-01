@@ -171,7 +171,7 @@ export async function createLinkAttachment(
 // back to the default for unset/invalid/non-positive values.
 const DEFAULT_STORAGE_QUOTA_BYTES = 1024 * 1024 * 1024; // 1 GiB per workspace
 
-export function storageQuotaBytes(env: { STORAGE_QUOTA_BYTES?: string }): number {
+export function storageQuotaBytes(env: Readonly<{ STORAGE_QUOTA_BYTES?: string }>): number {
 	const n = Number(env.STORAGE_QUOTA_BYTES);
 	return Number.isFinite(n) && n > 0 ? n : DEFAULT_STORAGE_QUOTA_BYTES;
 }
@@ -187,7 +187,7 @@ async function workspaceStorageUsageBytes(ctx: ServiceCtx): Promise<number> {
 /** Validates size/type/quota for a would-be upload; throws the matching typed error. */
 export async function assertUploadAllowed(
 	ctx: ServiceCtx,
-	params: { size: number; contentType: string; quotaBytes?: number }
+	params: Readonly<{ size: number; contentType: string; quotaBytes?: number }>
 ): Promise<void> {
 	if (params.size > MAX_UPLOAD_SIZE) {
 		throw new PayloadTooLargeError("File too large (max 50 MB)");

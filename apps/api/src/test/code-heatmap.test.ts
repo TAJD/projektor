@@ -48,7 +48,8 @@ describe("Code heatmap (PROJ-332)", () => {
 	// distinct.
 	async function seedClaim(issueId: string, path: string, claimedAt: number, releasedAt?: number) {
 		await env.DB.prepare(
-			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, released_at) VALUES (?, ?, ?, NULL, ?, ?, ?)"
+			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, " +
+				"released_at) VALUES (?, ?, ?, NULL, ?, ?, ?)"
 		)
 			.bind(crypto.randomUUID(), workspaceId, issueId, path, claimedAt, releasedAt ?? null)
 			.run();
@@ -62,7 +63,8 @@ describe("Code heatmap (PROJ-332)", () => {
 		forced = 0
 	) {
 		await env.DB.prepare(
-			"INSERT INTO claim_conflicts (id, workspace_id, path, rejected_issue_id, rejected_agent_id, holding_issue_id, holding_agent_id, forced, occurred_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)"
+			"INSERT INTO claim_conflicts (id, workspace_id, path, rejected_issue_id, rejected_agent_id, " +
+				"holding_issue_id, holding_agent_id, forced, occurred_at) VALUES (?, ?, ?, ?, NULL, ?, NULL, ?, ?)"
 		)
 			.bind(
 				crypto.randomUUID(),

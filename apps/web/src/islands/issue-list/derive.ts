@@ -3,7 +3,7 @@ import type { ProjectMeta } from "./types";
 
 /** Description of the active project filter, for the banner under the toolbar. */
 export function deriveProjectDescription(
-	projects: ProjectMeta[],
+	projects: readonly ProjectMeta[],
 	filterProject: string
 ): string | null {
 	if (!filterProject) return null;
@@ -11,7 +11,10 @@ export function deriveProjectDescription(
 }
 
 /** Status filter options: prefer the statuses endpoint, else derive from loaded issues. */
-export function deriveStatusOptions(issues: Issue[], statuses: TaskStatus[]): TaskStatus[] {
+export function deriveStatusOptions(
+	issues: readonly Issue[],
+	statuses: readonly TaskStatus[]
+): readonly TaskStatus[] {
 	if (statuses.length > 0) return statuses;
 	return [
 		...new Map(
@@ -33,7 +36,9 @@ export function deriveStatusOptions(issues: Issue[], statuses: TaskStatus[]): Ta
 	];
 }
 
-export function deriveProjectOptions(issues: Issue[]): Array<{ key: string; name: string }> {
+export function deriveProjectOptions(
+	issues: readonly Issue[]
+): Array<{ key: string; name: string }> {
 	return [
 		...new Map(
 			issues
@@ -48,7 +53,7 @@ export function deriveProjectOptions(issues: Issue[]): Array<{ key: string; name
 	];
 }
 
-export function deriveTypeOptions(issues: Issue[]): Array<[string, string]> {
+export function deriveTypeOptions(issues: readonly Issue[]): Array<[string, string]> {
 	return [
 		...new Map(
 			issues

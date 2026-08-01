@@ -336,7 +336,7 @@ export async function validateCustomFields(
 export async function writeCustomFieldValues(
 	db: D1Database,
 	issueId: string,
-	writes: Array<{ fieldId: string; value: string }>
+	writes: ReadonlyArray<{ fieldId: string; value: string }>
 ) {
 	const orm = drizzle(db, { schema });
 	for (const { fieldId, value } of writes) {

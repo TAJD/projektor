@@ -203,7 +203,9 @@ export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
 type JwtHeader = { alg: string; kid?: string };
 type JwtPayload = { exp: number; aud?: string | string[]; iss?: string; email: string };
 
-function decodeJwtFields(parts: string[]): { header: JwtHeader; payload: JwtPayload } | null {
+function decodeJwtFields(
+	parts: readonly string[]
+): { header: JwtHeader; payload: JwtPayload } | null {
 	try {
 		const header = JSON.parse(base64urlDecode(parts[0]));
 		const payload = JSON.parse(base64urlDecode(parts[1]));
@@ -230,7 +232,10 @@ function jwtClaimsValid(
 	return payload.iss === issuer;
 }
 
-async function verifySignatureAgainstKeys(parts: string[], keys: JsonWebKey[]): Promise<boolean> {
+async function verifySignatureAgainstKeys(
+	parts: readonly string[],
+	keys: readonly JsonWebKey[]
+): Promise<boolean> {
 	const signingInput = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
 	const sig = base64urlToUint8Array(parts[2]);
 
@@ -270,7 +275,7 @@ export async function verifyJwtPayload(
 
 // Pre-screen without keys: avoids a JWKS fetch for obviously-invalid tokens.
 // Mirrors the order of checks in verifyJwtPayload so early exits fire first.
-function preScreenCfAccessJwt(parts: string[], env: Env): boolean {
+function preScreenCfAccessJwt(parts: readonly string[], env: Env): boolean {
 	try {
 		const hdr = JSON.parse(base64urlDecode(parts[0]));
 		if (hdr.alg !== "RS256") return false;
@@ -354,7 +359,10 @@ async function getCfAccessKeysOrUnavailable(
 	}
 }
 
-async function getCfAccessKeys(env: Env, opts?: { forceRefresh?: boolean }): Promise<JsonWebKey[]> {
+async function getCfAccessKeys(
+	env: Env,
+	opts?: Readonly<{ forceRefresh?: boolean }>
+): Promise<JsonWebKey[]> {
 	if (opts?.forceRefresh) {
 		const now = Date.now();
 		if (now - lastForcedRefreshAt >= FORCE_REFRESH_COOLDOWN_MS) {

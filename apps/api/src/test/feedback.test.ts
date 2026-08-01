@@ -132,7 +132,7 @@ describe("Feedback sources REST", () => {
 });
 
 async function mintSource(
-	f: { projectId: string; token: string; slug: string },
+	f: Readonly<{ projectId: string; token: string; slug: string }>,
 	body: Record<string, unknown> = { name: "Widget" }
 ): Promise<string> {
 	const res = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources`, {
@@ -322,7 +322,7 @@ async function seedFeedbackRow(
 	sourceId: string,
 	workspaceId: string,
 	projectId: string,
-	opts: { body?: string; status?: string } = {}
+	opts: Readonly<{ body?: string; status?: string }> = {}
 ): Promise<string> {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -859,7 +859,9 @@ describe("PROJ-390: cross-project feedback source mutation is rejected", () => {
 });
 
 describe("PROJ-390: mutating a revoked feedback source", () => {
-	async function seedRevokedSource(f: { projectId: string; token: string; slug: string }) {
+	async function seedRevokedSource(
+		f: Readonly<{ projectId: string; token: string; slug: string }>
+	) {
 		const created = await SELF.fetch(
 			`http://localhost/api/projects/${f.projectId}/feedback-sources`,
 			{

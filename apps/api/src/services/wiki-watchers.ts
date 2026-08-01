@@ -210,13 +210,13 @@ const ACTION_LABEL: Record<"created" | "updated" | "deleted", string> = {
 // their own change.
 export async function notifyWikiWatchers(
 	ctx: ServiceCtx,
-	opts: {
+	opts: Readonly<{
 		pageId: string;
 		parentId: string | null;
 		slug: string;
 		title: string;
 		action: "created" | "updated" | "deleted";
-	}
+	}>
 ): Promise<void> {
 	const ancestorIds = await resolveAncestorChain(
 		ctx.db,
@@ -255,7 +255,7 @@ export async function notifyWikiWatchers(
 async function insertNotifications(
 	ctx: ServiceCtx,
 	orm: Orm,
-	entries: {
+	entries: readonly {
 		userId: string;
 		pageId: string;
 		slug: string;
@@ -301,7 +301,7 @@ async function insertNotifications(
 // side — otherwise they'd get a "deleted" event with no matching "restored" one.
 export async function notifyCascadeDescendantWatchers(
 	ctx: ServiceCtx,
-	descendants: { id: string; slug: string; title: string; isTemplate: boolean }[],
+	descendants: readonly { id: string; slug: string; title: string; isTemplate: boolean }[],
 	action: "created" | "updated" | "deleted" = "deleted"
 ): Promise<void> {
 	const pages = descendants.filter((p) => !p.isTemplate);
@@ -620,28 +620,28 @@ export async function listWikiChanges(
 		return visible;
 	};
 
-	let nextSince = since;
-	const events: WikiChangeEvent[] = [];
-	for (const r of batch) {
-		if (r.createdAt > nextSince) nextSince = r.createdAt;
+	// Resolves one activity row to an event, or null if it should be dropped (stale
+	// trash-shadowed row, wrong project, or not visible to the caller). Extracted from
+	// the loop below to keep listWikiChanges's own complexity/length down.
+	const toEvent = async (r: (typeof batch)[number]): Promise<WikiChangeEvent | null> => {
 		const action = r.action as "created" | "updated" | "deleted";
 		// PROJ-496: a "created"/"updated" event for a page that's now trashed is stale —
 		// the page itself is excluded from every other read path, so the delta feed drops
 		// it too rather than pointing an agent at a page get_wiki_page will 404 on. The
 		// "deleted" event for that same trash action is NOT dropped (below): it's the one
 		// event that's supposed to report the page went away.
-		if (action !== "deleted" && r.pageDeletedAt !== null && r.pageDeletedAt !== undefined) continue;
+		if (action !== "deleted" && r.pageDeletedAt !== null && r.pageDeletedAt !== undefined)
+			return null;
 		const deleted = action === "deleted" ? extractDeletedPageInfo(r.diff) : null;
 		const slug = deleted ? deleted.slug : r.pageSlug;
 		const title = deleted ? deleted.title : r.pageTitle;
 		const eventProjectId = deleted ? deleted.projectId : r.pageProjectId;
 
-		if (projectId && eventProjectId !== projectId) continue;
-		if (!projectId && eventProjectId !== null && !(await canSeeProject(eventProjectId))) {
-			continue;
-		}
+		if (projectId && eventProjectId !== projectId) return null;
+		if (!projectId && eventProjectId !== null && !(await canSeeProject(eventProjectId)))
+			return null;
 
-		events.push({
+		return {
 			id: r.id,
 			action,
 			pageId: r.entityId,
@@ -652,7 +652,15 @@ export async function listWikiChanges(
 			createdAt: r.createdAt,
 			deletedPageIds: deleted?.deletedPageIds ?? null,
 			deletedPageIdsTruncated: deleted?.deletedPageIdsTruncated ?? false,
-		});
+		};
+	};
+
+	let nextSince = since;
+	const events: WikiChangeEvent[] = [];
+	for (const r of batch) {
+		if (r.createdAt > nextSince) nextSince = r.createdAt;
+		const event = await toEvent(r);
+		if (event) events.push(event);
 	}
 
 	if (watchedOnly) {

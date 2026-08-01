@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { authHeaders, seedIssue, seedProjectFixture } from "./helpers";
 
 async function mintSource(
-	f: { projectId: string; token: string; slug: string },
+	f: Readonly<{ projectId: string; token: string; slug: string }>,
 	body: Record<string, unknown> = { name: "Widget" }
 ): Promise<void> {
 	await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources`, {
@@ -17,19 +17,20 @@ async function seedFeedbackRow(
 	sourceId: string,
 	workspaceId: string,
 	projectId: string,
-	opts: {
+	opts: Readonly<{
 		rating?: number;
 		ratingScale?: string;
 		body?: string;
 		submitterLabel?: string;
 		status?: string;
 		linkedIssueId?: string;
-	} = {}
+	}> = {}
 ): Promise<string> {
 	const id = crypto.randomUUID();
 	await env.DB.prepare(
 		`INSERT INTO feedback
-       (id, source_id, workspace_id, project_id, rating, rating_scale, body, submitter_label, status, linked_issue_id, created_at)
+       (id, source_id, workspace_id, project_id, rating, rating_scale, body, submitter_label,
+        status, linked_issue_id, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	)
 		.bind(

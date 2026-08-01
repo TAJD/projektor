@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { authHeaders, seedProjectFixture } from "./helpers";
 
 async function mintSource(
-	f: { projectId: string; token: string; slug: string },
+	f: Readonly<{ projectId: string; token: string; slug: string }>,
 	body: Record<string, unknown> = { name: "Widget" }
 ): Promise<string> {
 	const res = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources`, {
@@ -18,13 +18,13 @@ async function seedFeedbackRow(
 	sourceId: string,
 	workspaceId: string,
 	projectId: string,
-	opts: {
+	opts: Readonly<{
 		rating?: number;
 		ratingScale?: string;
 		body?: string;
 		appVersion?: string;
 		createdAt?: number;
-	} = {}
+	}> = {}
 ): Promise<string> {
 	const id = crypto.randomUUID();
 	const now = opts.createdAt ?? Math.floor(Date.now() / 1000);

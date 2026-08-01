@@ -189,7 +189,7 @@ function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
 			.finally(() => setLoading(false));
 	}, [projectId, workspaceSlug, range.since, range.until, range.granularity]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { projectId, metrics, loading, error };
 }
 
@@ -324,7 +324,12 @@ function HealthTile({ metricId, value }: { metricId: MetricId; value: number }) 
 					: undefined
 			}
 		>
-			<p class="m-0 mb-1 text-[0.72rem] font-semibold text-text-muted uppercase tracking-[0.04em] inline-flex items-center gap-1">
+			<p
+				class={
+					"m-0 mb-1 text-[0.72rem] font-semibold text-text-muted uppercase " +
+					"tracking-[0.04em] inline-flex items-center gap-1"
+				}
+			>
 				{def.label}
 				<MetricHelp id={metricId} />
 			</p>
@@ -378,7 +383,7 @@ function BugShareChart({
 							const maxTicks = Math.max(2, Math.floor(u.width / 70));
 							const stride = Math.max(1, Math.ceil(n / maxTicks));
 							const idxs: number[] = [];
-							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map over a fixed-length source
+							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map
 							for (let i = 0; i < n; i += stride) idxs.push(i);
 							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
 							return idxs;
@@ -446,7 +451,7 @@ function ReviewLatencyChart({ data }: { data: FlowMetrics["reviewLatencyOverTime
 							const maxTicks = Math.max(2, Math.floor(u.width / 70));
 							const stride = Math.max(1, Math.ceil(n / maxTicks));
 							const idxs: number[] = [];
-							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map over a fixed-length source
+							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map
 							for (let i = 0; i < n; i += stride) idxs.push(i);
 							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
 							return idxs;
@@ -575,7 +580,7 @@ function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsComple
 							const maxTicks = Math.max(2, Math.floor(u.width / 70));
 							const stride = Math.max(1, Math.ceil(n / maxTicks));
 							const idxs: number[] = [];
-							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map over a fixed-length source
+							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map
 							for (let i = 0; i < n; i += stride) idxs.push(i);
 							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
 							return idxs;
@@ -768,7 +773,10 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 						<div class="mb-8">
 							<SectionHeading
 								metricId="aging-wip"
-								caption="Age since claim for every currently open issue, against this window's cycle-time p50/p90 — stuck items show up before they finish and skew the percentiles"
+								caption={
+									"Age since claim for every currently open issue, against this window's cycle-time " +
+									"p50/p90 — stuck items show up before they finish and skew the percentiles"
+								}
 							/>
 							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 								<AgingWipScatter

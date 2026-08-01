@@ -70,7 +70,7 @@ export async function createWorkspace(db: D1Database, userId: string, input: unk
 
 export async function getWorkspaceWithMembers(
 	ctx: ServiceCtx,
-	workspace: { id: string; name: string; slug: string }
+	workspace: Readonly<{ id: string; name: string; slug: string }>
 ) {
 	const orm = drizzle(ctx.db, { schema });
 	const members = await orm
@@ -310,7 +310,7 @@ export async function deleteWorkspace(
 
 export async function getWorkspaceMcpInfo(
 	_ctx: ServiceCtx,
-	workspace: { id: string; slug: string },
+	workspace: Readonly<{ id: string; slug: string }>,
 	origin: string
 ): Promise<{
 	mcpUrl: string;

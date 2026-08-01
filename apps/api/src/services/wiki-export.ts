@@ -166,7 +166,7 @@ function ensureFrontmatter(page: ExportedPage): string {
 // pointer attachments have an empty r2_key and nothing to zip).
 async function collectAttachments(
 	ctx: ServiceCtx,
-	pages: ExportedPage[]
+	pages: readonly ExportedPage[]
 ): Promise<Array<{ pageSlug: string; filename: string; r2Key: string; size: number }>> {
 	if (pages.length === 0) return [];
 	const orm = drizzle(ctx.db, { schema });
@@ -204,7 +204,7 @@ async function collectAttachments(
 }
 
 function safeZipPathSegment(value: string): string {
-	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally stripping NUL/control chars from zip entry names
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control chars from zip names
 	const stripped = value.replace(/[\\/]/g, "_").replace(/[\x00-\x1f]/g, "");
 	return /^\.+$/.test(stripped) ? "_" : stripped;
 }

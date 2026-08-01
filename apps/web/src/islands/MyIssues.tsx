@@ -58,7 +58,7 @@ interface ProjectGroup {
 	issues: Issue[];
 }
 
-function groupIssuesByProject(visible: Issue[]): {
+function groupIssuesByProject(visible: readonly Issue[]): {
 	order: string[];
 	byProject: Map<string, ProjectGroup>;
 } {

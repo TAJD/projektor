@@ -364,7 +364,7 @@ describe("PROJ-354: CF Access auth caches are isolate-local", () => {
 // ---------------------------------------------------------------------------
 
 describe("PROJ-358: JWKS force-refresh on signature verification failure", () => {
-	it("token signed by an uncached key authenticates via forced refresh; a further bad signature within the cooldown does not refetch again", async () => {
+	it("uncached-key token authenticates via forced refresh; bad sig within cooldown doesn't refetch again", async () => {
 		const genKeyPair = () =>
 			crypto.subtle.generateKey(
 				{

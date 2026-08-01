@@ -4,7 +4,13 @@ description: "Collect end-user feedback from your own site and route it into a p
 sidebar:
   order: 4
 ---
-> **Note:** the code below is generated from [`apps/api/src/examples/feedback-widget-submit.ts`](https://github.com/TAJD/projektor/blob/main/apps/api/src/examples/feedback-widget-submit.ts) by `scripts/gen-feedback-example-page.ts`, and is executed against a live projektor instance in [`apps/api/src/test/feedback-example.test.ts`](https://github.com/TAJD/projektor/blob/main/apps/api/src/test/feedback-example.test.ts) - edit that source file, not this page, and run `pnpm gen:docs`.
+> **Note:** the code below is generated from [`apps/api/src/examples/feedback-widget-submit.ts`][src]
+> by `scripts/gen-feedback-example-page.ts`, and is executed against a live projektor instance in
+> [`apps/api/src/test/feedback-example.test.ts`][test] - edit that source file, not this page, and
+> run `pnpm gen:docs`.
+
+[src]: https://github.com/TAJD/projektor/blob/main/apps/api/src/examples/feedback-widget-submit.ts
+[test]: https://github.com/TAJD/projektor/blob/main/apps/api/src/test/feedback-example.test.ts
 
 A **feedback source** is a named, independently-credentialed collection point (e.g.
 "Onboarding survey", "In-app rating widget") that a project owner or admin creates once.
@@ -63,7 +69,7 @@ export interface FeedbackPayload {
  * meant to be embedded in client-side code, the same trust category as a
  * Sentry DSN or a Stripe publishable key.
  */
-// cofferdam-ignore: Design.DuplicateExportName: deliberately mirrors services/feedback.ts's submitFeedback name for the docs example; never imported together
+// cofferdam-ignore: Design.DuplicateExportName: mirrors feedback.ts's submitFeedback name; never imported together
 export async function submitFeedback(
 	endpoint: string,
 	token: string,

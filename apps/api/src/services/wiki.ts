@@ -278,7 +278,7 @@ async function validateUpdatedPageParent(
 	db: D1Database,
 	parentId: string,
 	workspaceId: string,
-	page: { id: string; projectId: string | null }
+	page: Readonly<{ id: string; projectId: string | null }>
 ): Promise<void> {
 	const orm = drizzle(db, { schema });
 	const parentPage = await orm
@@ -311,13 +311,13 @@ async function validateUpdatedPageParent(
 function buildWikiPageUpdateSet(
 	now: number,
 	updatedById: string,
-	fields: {
+	fields: Readonly<{
 		title?: string;
 		content?: string;
 		parentId?: string | null;
 		slug?: string;
 		meta?: WikiFrontmatterMeta;
-	}
+	}>
 ): Record<string, unknown> {
 	const setData: Record<string, unknown> = { updatedAt: now, updatedById };
 	if (fields.title !== undefined) setData.title = fields.title;
@@ -339,10 +339,12 @@ function buildWikiPageUpdateSet(
 	return setData;
 }
 
-function buildWikiPageUpdateDiff(fields: {
-	title?: string;
-	content?: string;
-}): Record<string, unknown> {
+function buildWikiPageUpdateDiff(
+	fields: Readonly<{
+		title?: string;
+		content?: string;
+	}>
+): Record<string, unknown> {
 	const diff: Record<string, unknown> = {};
 	if (fields.title !== undefined) diff.title = fields.title;
 	if (fields.content !== undefined) diff.content = fields.content;
@@ -354,7 +356,7 @@ function buildWikiPageUpdateDiff(fields: {
 // way to query into a JSON array column without denormalizing it into its own table;
 // `tags` has no direct index (see 0045_wiki_frontmatter.sql), so this is a per-row
 // scan, acceptable at current wiki sizes — revisit with a join table if it becomes hot.
-function tagsFilterCondition(tags: string[]) {
+function tagsFilterCondition(tags: readonly string[]) {
 	if (tags.length === 0) return undefined;
 	return sql`EXISTS (SELECT 1 FROM json_each(${schema.wikiPages.tags}) WHERE value IN (${sql.join(
 		tags.map((t) => sql`${t}`),
@@ -936,7 +938,7 @@ const MAX_DIFF_CELLS = 1_000_000;
 
 type DiffOp = { type: "equal" | "add" | "remove"; line: string };
 
-function computeLineDiff(oldLines: string[], newLines: string[]): DiffOp[] {
+function computeLineDiff(oldLines: readonly string[], newLines: readonly string[]): DiffOp[] {
 	const n = oldLines.length;
 	const m = newLines.length;
 	if (n * m > MAX_DIFF_CELLS) {
@@ -1041,7 +1043,7 @@ export function buildUnifiedDiff(baseContent: string, currentContent: string): s
 // D1PreparedStatement, not drizzle's own query builders.
 function toD1Statement(
 	ctx: ServiceCtx,
-	query: { sql: string; params: unknown[] }
+	query: Readonly<{ sql: string; params: unknown[] }>
 ): D1PreparedStatement {
 	return ctx.db.prepare(query.sql).bind(...query.params);
 }
@@ -1055,7 +1057,7 @@ function buildFtsInsertStatement(
 	id: string,
 	title: string,
 	content: string,
-	tags: string[]
+	tags: readonly string[]
 ): D1PreparedStatement {
 	// PROJ-488: tags is space-joined — wiki_fts's default unicode61 tokenizer splits on
 	// non-alphanumeric, so a comma join would tokenize identically, but space matches how
@@ -1115,6 +1117,96 @@ async function deleteWikiFtsEntries(ctx: ServiceCtx, pageIds: string[]): Promise
 			.run();
 		return [];
 	});
+}
+
+// Builds the batch of statements for a single updateWikiPage call — content revision
+// snapshot, the page row update itself, FTS/link reindex, and the redirect upsert on
+// rename. Extracted from updateWikiPage to keep that function's own complexity/length
+// down; behavior (including the PROJ-511 atomicity guarantee — all of this lands in one
+// ctx.db.batch() call in the caller) is unchanged.
+function buildUpdateWikiPageStatements(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	page: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>,
+	now: number,
+	isRename: boolean,
+	meta: ReturnType<typeof parseWikiFrontmatter> | undefined,
+	fields: Readonly<{
+		title?: string;
+		content?: string;
+		parentId?: string | null;
+		slug?: string;
+		summary?: string;
+	}>
+): D1PreparedStatement[] {
+	const { title, content, parentId, slug, summary } = fields;
+	const statements: D1PreparedStatement[] = [];
+
+	if (content !== undefined) {
+		// PROJ-484: title snapshot is the page's title as of THIS revision (i.e. before
+		// this update applies any new title) — consistent with content, which snapshots
+		// the pre-edit value too. summary is this edit's optional changelog note.
+		statements.push(
+			toD1Statement(
+				ctx,
+				orm
+					.insert(schema.wikiRevisions)
+					.values({
+						id: crypto.randomUUID(),
+						pageId: page.id,
+						content: page.content,
+						title: page.title,
+						summary: summary ?? null,
+						authorId: ctx.userId,
+						createdAt: now,
+					})
+					.toSQL()
+			)
+		);
+	}
+
+	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug, meta });
+	statements.push(
+		toD1Statement(
+			ctx,
+			orm
+				.update(schema.wikiPages)
+				// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
+				.set(setData as any)
+				.where(eq(schema.wikiPages.id, page.id))
+				.toSQL()
+		)
+	);
+
+	// FTS and link-graph reindex statements are built separately by the caller (both need
+	// an async lookup — current tags / link-target resolution — before their statements
+	// exist) and concatenated onto this array; see updateWikiPage.
+
+	if (isRename) {
+		// Upsert: the old slug may already carry a stale redirect from an earlier rename
+		// of some other page — this rename takes ownership of it.
+		statements.push(
+			toD1Statement(
+				ctx,
+				orm
+					.insert(schema.wikiRedirects)
+					.values({
+						id: crypto.randomUUID(),
+						workspaceId: ctx.workspaceId,
+						oldSlug: page.slug,
+						pageId: page.id,
+						createdAt: now,
+					})
+					.onConflictDoUpdate({
+						target: [schema.wikiRedirects.workspaceId, schema.wikiRedirects.oldSlug],
+						set: { pageId: page.id, createdAt: now },
+					})
+					.toSQL()
+			)
+		);
+	}
+
+	return statements;
 }
 
 export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
@@ -1180,43 +1272,13 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// resolution work above (frontmatter parse, link-target resolution inside
 	// buildWikiLinksReindexStatements) happens before any of these exist, so it can no
 	// longer leave the page updated with a stale/wiped links or FTS row.
-	const statements: D1PreparedStatement[] = [];
-
-	if (content !== undefined) {
-		// PROJ-484: title snapshot is the page's title as of THIS revision (i.e. before
-		// this update applies any new title) — consistent with content, which snapshots
-		// the pre-edit value too. summary is this edit's optional changelog note.
-		statements.push(
-			toD1Statement(
-				ctx,
-				orm
-					.insert(schema.wikiRevisions)
-					.values({
-						id: crypto.randomUUID(),
-						pageId: page.id,
-						content: page.content,
-						title: page.title,
-						summary: summary ?? null,
-						authorId: ctx.userId,
-						createdAt: now,
-					})
-					.toSQL()
-			)
-		);
-	}
-
-	const setData = buildWikiPageUpdateSet(now, ctx.userId, { title, content, parentId, slug, meta });
-	statements.push(
-		toD1Statement(
-			ctx,
-			orm
-				.update(schema.wikiPages)
-				// biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setData is safe
-				.set(setData as any)
-				.where(eq(schema.wikiPages.id, page.id))
-				.toSQL()
-		)
-	);
+	const statements = buildUpdateWikiPageStatements(ctx, orm, page, now, isRename, meta, {
+		title,
+		content,
+		parentId,
+		slug,
+		summary,
+	});
 
 	// PROJ-486/PROJ-520: only reindexed when title or content actually changed — a
 	// parentId/slug-only update leaves the FTS mirror row untouched, matching the old
@@ -1231,30 +1293,6 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// update leaves them unchanged, so only reindex when content actually changed.
 	if (content !== undefined) {
 		statements.push(...(await buildWikiLinksReindexStatements(ctx, orm, page.id, content)));
-	}
-
-	if (isRename) {
-		// Upsert: the old slug may already carry a stale redirect from an earlier rename
-		// of some other page — this rename takes ownership of it.
-		statements.push(
-			toD1Statement(
-				ctx,
-				orm
-					.insert(schema.wikiRedirects)
-					.values({
-						id: crypto.randomUUID(),
-						workspaceId: ctx.workspaceId,
-						oldSlug: page.slug,
-						pageId: page.id,
-						createdAt: now,
-					})
-					.onConflictDoUpdate({
-						target: [schema.wikiRedirects.workspaceId, schema.wikiRedirects.oldSlug],
-						set: { pageId: page.id, createdAt: now },
-					})
-					.toSQL()
-			)
-		);
 	}
 
 	try {
@@ -1471,7 +1509,7 @@ function parseHeadingSections(content: string): HeadingSection[] {
 	}));
 }
 
-function findSections(sections: HeadingSection[], heading: string): HeadingSection[] {
+function findSections(sections: readonly HeadingSection[], heading: string): HeadingSection[] {
 	const target = heading.trim();
 	return sections.filter((s) => s.heading === target);
 }
@@ -1480,13 +1518,13 @@ function extractSectionText(content: string, section: HeadingSection): string {
 	return content.split("\n").slice(section.startLine, section.endLine).join("\n");
 }
 
-function trimTrailingBlankLines(lines: string[]): string[] {
+function trimTrailingBlankLines(lines: readonly string[]): string[] {
 	const out = [...lines];
 	while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
 	return out;
 }
 
-function trimLeadingBlankLines(lines: string[]): string[] {
+function trimLeadingBlankLines(lines: readonly string[]): string[] {
 	const out = [...lines];
 	while (out.length > 0 && out[0].trim() === "") out.shift();
 	return out;

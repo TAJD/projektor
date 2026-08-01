@@ -34,8 +34,10 @@ async function loadGroup(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, group
  */
 export async function listGroups(ctx: ServiceCtx) {
 	const orm = drizzle(ctx.db, { schema });
-	const memberCount = sql<number>`(SELECT count(*) FROM user_group_members m WHERE m.group_id = ${schema.userGroups.id})`;
-	const grantCount = sql<number>`(SELECT count(*) FROM group_project_grants g WHERE g.group_id = ${schema.userGroups.id})`;
+	const memberCount = sql<number>`(SELECT count(*) FROM user_group_members m
+		WHERE m.group_id = ${schema.userGroups.id})`;
+	const grantCount = sql<number>`(SELECT count(*) FROM group_project_grants g
+		WHERE g.group_id = ${schema.userGroups.id})`;
 	const cols = {
 		id: schema.userGroups.id,
 		name: schema.userGroups.name,

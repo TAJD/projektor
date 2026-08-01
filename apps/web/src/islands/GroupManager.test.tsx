@@ -98,7 +98,7 @@ describe("GroupManager rename", () => {
 // Groups so the flows above stay reachable without switching tabs first.
 const REGULAR_MEMBER = { id: "u2", email: "mo@example.com", name: "Mo Member", role: "member" };
 
-function mockFetchForTabs(opts: { role: string }) {
+function mockFetchForTabs(opts: Readonly<{ role: string }>) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {

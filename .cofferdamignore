@@ -1,0 +1,5 @@
+# CD-69: this fixture deliberately contains IslandApiConvention violations
+# for plugins/island-api's own regression test (scripts/check-fixture.mjs),
+# which invokes cofferdam directly against this path with its own
+# cofferdam.toml — excluding it here only affects the whole-repo scan.
+plugins/island-api/fixtures/

@@ -11,7 +11,7 @@ import {
 	statusBadge,
 } from "./issue-render-helpers";
 
-function applyBacklogOrder(issues: Issue[], backlogOrder: string[]): Issue[] {
+function applyBacklogOrder(issues: readonly Issue[], backlogOrder: string[]): readonly Issue[] {
 	if (backlogOrder.length === 0) return issues;
 	const inOrder = backlogOrder.flatMap((id) => {
 		const issue = issues.find((i) => i.id === id);
@@ -175,7 +175,7 @@ function BacklogMobileCards({
 	updatingPriorityId,
 	changePriority,
 }: {
-	issues: Issue[];
+	issues: readonly Issue[];
 	updatingPriorityId: string | null;
 	changePriority: (issueId: string, priority: string) => void;
 }) {

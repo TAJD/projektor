@@ -68,11 +68,11 @@ function sortByRecency<T extends { updated_at: number }>(items: unknown, limit: 
 async function loadProjectData(
 	idOrSlug: string,
 	workspaceSlug: string | undefined,
-	setters: {
+	setters: Readonly<{
 		setProject: (p: Project) => void;
 		setRecentIssues: (v: RecentIssue[]) => void;
 		setRecentWiki: (v: RecentWikiPage[]) => void;
-	}
+	}>
 ) {
 	// /api/projects/:id resolves either a UUID or a slug, but the issues/wiki
 	// endpoints below filter on the real project UUID — resolve the project first.
@@ -318,7 +318,10 @@ function RecentWikiSection({ pages, projectId }: { pages: RecentWikiPage[]; proj
 						<div key={page.id} class="py-2 border-b border-border last:border-b-0">
 							<div class="flex justify-between items-baseline gap-2">
 								<a
-									href={`/wiki/${encodeURIComponent(page.slug)}${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`}
+									href={
+										`/wiki/${encodeURIComponent(page.slug)}` +
+										`${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`
+									}
 									class="text-text-base no-underline text-sm hover:underline focus:underline"
 								>
 									{page.title}
