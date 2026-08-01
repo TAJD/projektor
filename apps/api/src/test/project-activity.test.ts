@@ -63,7 +63,7 @@ async function seedWikiPage(
 	workspaceId: string,
 	projectId: string,
 	authorId: string,
-	opts: { title?: string; slug?: string; updatedAt?: number } = {}
+	opts: { title?: string; slug?: string; updatedAt?: number; deletedAt?: number } = {}
 ) {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -71,8 +71,8 @@ async function seedWikiPage(
 	const updatedAt = opts.updatedAt ?? now;
 	await env.DB.prepare(
 		`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, created_by_id, updated_by_id,
-       created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?)`
+       created_at, updated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)`
 	)
 		.bind(
 			id,
@@ -83,7 +83,8 @@ async function seedWikiPage(
 			authorId,
 			authorId,
 			now,
-			updatedAt
+			updatedAt,
+			opts.deletedAt ?? null
 		)
 		.run();
 	return { id, slug };
@@ -214,6 +215,25 @@ describe("list_project_activity MCP tool", () => {
 
 		const edited = events.filter((e) => e.type === "wiki_page_edited");
 		expect(edited).toHaveLength(0);
+	});
+
+	it("excludes trashed wiki pages from wiki_page_created/wiki_page_edited events", async () => {
+		await seedWikiPage(workspaceId, projectId, userId, {
+			title: "Trashed Doc",
+			deletedAt: Math.floor(Date.now() / 1000),
+			updatedAt: Math.floor(Date.now() / 1000) + 10,
+		});
+
+		const res = (await mcpCall<McpContent>(
+			workspaceId,
+			"list_project_activity",
+			{ projectId },
+			headers
+		)) as JsonRpcResult<McpContent>;
+		const events = JSON.parse(res.result.content[0].text) as Array<{ type: string }>;
+
+		expect(events.some((e) => e.type === "wiki_page_created")).toBe(false);
+		expect(events.some((e) => e.type === "wiki_page_edited")).toBe(false);
 	});
 
 	it("returns sprint_started events for active sprints with a start_date", async () => {

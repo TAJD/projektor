@@ -598,7 +598,7 @@ describe("Files API", () => {
 			expect(entry?.wikiPage).toBeNull();
 		});
 
-		it("deleting the linked wiki page also removes the wiki_ref attachment", async () => {
+		it("trashing the linked wiki page leaves the wiki_ref attachment in place until purge (PROJ-496)", async () => {
 			// Deleting a workspace-level page requires admin/owner, so create+delete
 			// through a dedicated admin rather than the default member fixture.
 			const adminUser = await seedUser(`admin-${crypto.randomUUID()}@example.com`);
@@ -630,12 +630,47 @@ describe("Files API", () => {
 			});
 			expect(delRes.status).toBe(200);
 
+			// PROJ-496: wiki attachment/wiki_ref cleanup (deleteWikiPageAttachments) moved
+			// from delete time to purge time — the pointer attachment must still exist right
+			// after the page is trashed.
 			const listRes = await SELF.fetch(
 				`http://localhost/api/files?entityType=issue&entityId=${entityId}`,
 				{ headers: adminHeaders }
 			);
-			const list = (await listRes.json()) as Array<{ kind: string }>;
-			expect(list.find((l) => l.kind === "wiki_ref")).toBeUndefined();
+			const list = (await listRes.json()) as Array<{ kind: string; id: string; wikiPage: unknown }>;
+			const trashedEntry = list.find((l) => l.kind === "wiki_ref");
+			expect(trashedEntry).toBeDefined();
+			// The page still exists (not yet purged) but is trashed — it must behave like the
+			// existing "unavailable ref" case (a non-visible/deleted page), not resolve full
+			// title/url details for a page the user can no longer see live.
+			expect(trashedEntry?.wikiPage).toBeNull();
+
+			await env.DB.prepare("DELETE FROM rate_limit").run();
+			const metadata = await mcpToolResult<{ wikiPage: unknown }>(
+				workspaceId,
+				"get_attachment",
+				{ id: trashedEntry?.id },
+				adminHeaders
+			);
+			expect(metadata.wikiPage).toBeNull();
+
+			await env.DB.prepare("UPDATE wiki_pages SET deleted_at = ? WHERE id = ?")
+				.bind(Math.floor(Date.now() / 1000) - 31 * 24 * 60 * 60, wikiPageId)
+				.run();
+			await env.DB.prepare("DELETE FROM rate_limit").run();
+			const purgeRes = await SELF.fetch("http://localhost/api/wiki/purge-trash", {
+				method: "POST",
+				headers: adminHeaders,
+			});
+			expect(purgeRes.status).toBe(200);
+
+			await env.DB.prepare("DELETE FROM rate_limit").run();
+			const listAfterPurge = await SELF.fetch(
+				`http://localhost/api/files?entityType=issue&entityId=${entityId}`,
+				{ headers: adminHeaders }
+			);
+			const listAfter = (await listAfterPurge.json()) as Array<{ kind: string }>;
+			expect(listAfter.find((l) => l.kind === "wiki_ref")).toBeUndefined();
 		});
 	});
 

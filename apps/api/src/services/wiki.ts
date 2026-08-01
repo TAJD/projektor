@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { wikiPagePath } from "../lib/urls";
 import { IdSchema } from "../schemas/common";
 import {
@@ -8,6 +8,7 @@ import {
 	ListPagesInputSchema,
 	ListStaleWikiPagesInputSchema,
 	ListWikiTemplatesInputSchema,
+	ListWikiTrashInputSchema,
 	type PatchWikiPageInput,
 	PatchWikiPageInputSchema,
 	SearchWikiInputSchema,
@@ -102,8 +103,15 @@ function slugify(title: string): string {
 // / migration 0047).
 const RESERVED_WIKI_SLUGS = new Set(["view", "index", "templates"]);
 
-// PROJ-483: wiki_pages(workspace_id, slug) is unique — surface a structured
-// ConflictError instead of letting the constraint throw a raw D1 error.
+// PROJ-496 (R14): 30-day trash retention — purgeExpiredWikiPages permanently removes a
+// page (and its R2 attachments) once it's been soft-deleted for at least this long.
+const WIKI_TRASH_RETENTION_SECONDS = 30 * 24 * 60 * 60;
+
+// PROJ-483: wiki_pages(workspace_id, slug) is unique among LIVE pages — surface a
+// structured ConflictError instead of letting the constraint throw a raw D1 error.
+// PROJ-496: the underlying unique index is now PARTIAL (`WHERE deleted_at IS NULL`,
+// 0051_wiki_trash.sql) so a trashed page's slug is immediately available again — this
+// check mirrors that by only considering live rows.
 async function assertSlugAvailable(
 	orm: ReturnType<typeof drizzle<typeof schema>>,
 	workspaceId: string,
@@ -119,7 +127,13 @@ async function assertSlugAvailable(
 	const existing = await orm
 		.select({ id: schema.wikiPages.id })
 		.from(schema.wikiPages)
-		.where(and(eq(schema.wikiPages.workspaceId, workspaceId), eq(schema.wikiPages.slug, slug)))
+		.where(
+			and(
+				eq(schema.wikiPages.workspaceId, workspaceId),
+				eq(schema.wikiPages.slug, slug),
+				isNull(schema.wikiPages.deletedAt)
+			)
+		)
 		.get();
 	if (existing && existing.id !== excludePageId) {
 		throw new ConflictError(`Slug '${slug}' is already in use`);
@@ -154,7 +168,10 @@ async function resolvePageByIdOrSlug(
 		.where(
 			and(
 				or(eq(schema.wikiPages.id, idOrSlug), eq(schema.wikiPages.slug, idOrSlug)),
-				eq(schema.wikiPages.workspaceId, workspaceId)
+				eq(schema.wikiPages.workspaceId, workspaceId),
+				// PROJ-496: a trashed page is treated as gone for every normal read/write
+				// entry point — only undeleteWikiPage/listWikiTrash bypass this filter.
+				isNull(schema.wikiPages.deletedAt)
 			)
 		)
 		.get();
@@ -227,7 +244,14 @@ async function validateNewPageParent(
 	const parentPage = await orm
 		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
 		.from(schema.wikiPages)
-		.where(and(eq(schema.wikiPages.id, parentId), eq(schema.wikiPages.workspaceId, workspaceId)))
+		.where(
+			and(
+				eq(schema.wikiPages.id, parentId),
+				eq(schema.wikiPages.workspaceId, workspaceId),
+				// PROJ-496: a page can't be (re)parented under a trashed page.
+				isNull(schema.wikiPages.deletedAt)
+			)
+		)
 		.get();
 	if (!parentPage) {
 		throw new ValidationError({
@@ -254,7 +278,14 @@ async function validateUpdatedPageParent(
 	const parentPage = await orm
 		.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
 		.from(schema.wikiPages)
-		.where(and(eq(schema.wikiPages.id, parentId), eq(schema.wikiPages.workspaceId, workspaceId)))
+		.where(
+			and(
+				eq(schema.wikiPages.id, parentId),
+				eq(schema.wikiPages.workspaceId, workspaceId),
+				// PROJ-496: a page can't be (re)parented under a trashed page.
+				isNull(schema.wikiPages.deletedAt)
+			)
+		)
 		.get();
 	if (!parentPage) {
 		throw new ValidationError({
@@ -350,7 +381,11 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 
 	const orm = drizzle(ctx.db, { schema });
-	const conditions = [eq(schema.wikiPages.workspaceId, ctx.workspaceId)];
+	const conditions = [
+		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+		// PROJ-496: trashed pages never appear in the normal listing.
+		isNull(schema.wikiPages.deletedAt),
+	];
 	if (parsed.data.parentId) {
 		conditions.push(eq(schema.wikiPages.parentId, parsed.data.parentId));
 	}
@@ -460,7 +495,11 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
             -- PROJ-491 (R9): templates are a picker-only concern (list_wiki_templates), not
             -- search results — excluded unconditionally rather than behind an opt-in filter.
             WHERE wiki_fts MATCH ? AND wiki_fts.workspace_id = ?
-              AND p.is_template = 0`;
+              AND p.is_template = 0
+              -- PROJ-496: FTS rows for a trashed page aren't purged until 30 days out —
+              -- joining wiki_pages and filtering here (not just querying wiki_fts) is what
+              -- keeps a trashed page out of search results in the meantime.
+              AND p.deleted_at IS NULL`;
 	const params: unknown[] = [ftsQuery, ctx.workspaceId];
 
 	if (projectId) {
@@ -587,7 +626,14 @@ async function resolveWikiPageByRedirect(
 		.select(wikiPageDetailColumns)
 		.from(schema.wikiPages)
 		.where(
-			and(eq(schema.wikiPages.id, redirect.pageId), eq(schema.wikiPages.workspaceId, workspaceId))
+			and(
+				eq(schema.wikiPages.id, redirect.pageId),
+				eq(schema.wikiPages.workspaceId, workspaceId),
+				// PROJ-496: a redirect to a page that's since been trashed does not resolve —
+				// a trashed page is treated as gone, same as a hard-deleted one, until it's
+				// undeleted (see the PR description for this call).
+				isNull(schema.wikiPages.deletedAt)
+			)
 		)
 		.get();
 }
@@ -600,7 +646,8 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 		.where(
 			and(
 				or(eq(schema.wikiPages.id, slugOrId), eq(schema.wikiPages.slug, slugOrId)),
-				eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+				isNull(schema.wikiPages.deletedAt)
 			)
 		)
 		.get();
@@ -632,7 +679,8 @@ export async function getWikiBacklinks(ctx: ServiceCtx, slugOrId: string): Promi
 		.where(
 			and(
 				or(eq(schema.wikiPages.id, slugOrId), eq(schema.wikiPages.slug, slugOrId)),
-				eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+				isNull(schema.wikiPages.deletedAt)
 			)
 		)
 		.get();
@@ -1197,6 +1245,8 @@ export async function listStaleWikiPages(ctx: ServiceCtx, input: unknown) {
 		// PROJ-491 (R9): a template shouldn't show up in the maintenance queue — it isn't
 		// content that needs re-verification, it's a skeleton other pages are seeded from.
 		eq(schema.wikiPages.isTemplate, false),
+		// PROJ-496: a trashed page needs no re-verification either.
+		isNull(schema.wikiPages.deletedAt),
 	];
 	if (projectId) {
 		conditions.push(eq(schema.wikiPages.projectId, projectId));
@@ -1532,6 +1582,8 @@ export async function listWikiTemplates(ctx: ServiceCtx, input: unknown) {
 	const conditions = [
 		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
 		eq(schema.wikiPages.isTemplate, true),
+		// PROJ-496: a trashed template isn't offered by the picker.
+		isNull(schema.wikiPages.deletedAt),
 	];
 	if (projectId) {
 		conditions.push(eq(schema.wikiPages.projectId, projectId));
@@ -1678,6 +1730,10 @@ export async function seedDefaultWikiTemplates(
 
 // PROJ-238: breadth-first walk of parent_id children, chunked to stay under D1's
 // bound-parameter cap regardless of subtree size.
+// PROJ-496: only walks LIVE descendants — an already-trashed descendant (trashed
+// independently, or a leftover from an earlier soft-delete) is left with its own
+// deleted_at untouched rather than being folded into this cascade and having its
+// retention clock reset.
 async function collectDescendantIds(
 	db: D1Database,
 	rootId: string,
@@ -1694,7 +1750,45 @@ async function collectDescendantIds(
 				.where(
 					and(
 						inArray(schema.wikiPages.parentId, chunk),
-						eq(schema.wikiPages.workspaceId, workspaceId)
+						eq(schema.wikiPages.workspaceId, workspaceId),
+						isNull(schema.wikiPages.deletedAt)
+					)
+				)
+		);
+		frontier = children.map((c) => c.id);
+		descendants.push(...frontier);
+	}
+	return descendants;
+}
+
+// PROJ-496 follow-up: mirror of collectDescendantIds for the undelete path — walks
+// parent_id children that are IN THE TRASH and share the exact same trash_batch_id as
+// the root being restored (deleteWikiPage's cascade branch stamps the whole subtree
+// with one batch id in a single call). Batch id — not deleted_at — is what identifies
+// "trashed together": two independent single-page trashes can land in the same
+// wall-clock second and would otherwise be mistaken for one cascade batch. A
+// descendant trashed independently (different batch id) is left out, same as
+// collectDescendantIds leaves it out of a subsequent cascade delete.
+async function collectCascadeTrashedDescendantIds(
+	db: D1Database,
+	rootId: string,
+	workspaceId: string,
+	trashBatchId: string | null
+): Promise<string[]> {
+	if (trashBatchId === null) return [];
+	const orm = drizzle(db, { schema });
+	const descendants: string[] = [];
+	let frontier = [rootId];
+	while (frontier.length > 0) {
+		const children = await inChunks(frontier, (chunk) =>
+			orm
+				.select({ id: schema.wikiPages.id })
+				.from(schema.wikiPages)
+				.where(
+					and(
+						inArray(schema.wikiPages.parentId, chunk),
+						eq(schema.wikiPages.workspaceId, workspaceId),
+						eq(schema.wikiPages.trashBatchId, trashBatchId)
 					)
 				)
 		);
@@ -1754,6 +1848,12 @@ async function requireWikiDelete(ctx: ServiceCtx, projectId: string | null): Pro
 	}
 }
 
+// PROJ-496 (R14): deletes are now SOFT — this stamps deleted_at instead of removing
+// rows. Everything the pre-R14 hard delete used to clean up immediately (R2 attachment
+// objects, wiki_links, wiki_watchers, wiki_drafts, wiki_fts rows, wiki_redirects) now
+// waits for purgeExpiredWikiPages, 30 days later — see deleteWikiPageAttachments and
+// the other per-table helpers below, which purgeExpiredWikiPages calls directly.
+//
 // PROJ-509: resolved via resolvePageByIdOrSlug (id-or-slug + redirect fallback), same
 // as getWikiPage/updateWikiPage/getWikiBacklinks/listWikiRevisions/getWikiRevision —
 // a delete-by-old-slug-after-rename request resolves to the same page rather than
@@ -1779,23 +1879,27 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 
 	await requireWikiDelete(ctx, page.projectId);
 
-	// PROJ-493 (R11): slug/title/projectId are captured here (not read off the row after
-	// delete, which no longer exists) so list_wiki_changes can still report what a
-	// "deleted" event was about, and still enforce the workspace-scoping/project-
-	// visibility invariant for it — see wiki-watchers.ts#extractDeletedPageInfo.
+	const now = Math.floor(Date.now() / 1000);
+	// PROJ-493 (R11)/PROJ-496: slug/title/projectId are captured here (not re-read off
+	// the row later) so list_wiki_changes can still report what a "deleted" event was
+	// about even after the page drops out of every deleted_at IS NULL read path, and
+	// still enforce the workspace-scoping/project-visibility invariant for it — see
+	// wiki-watchers.ts#extractDeletedPageInfo.
 	const deleteDiffBase = { slug: page.slug, title: page.title, projectId: page.projectId };
 
 	if (cascade) {
+		// PROJ-496: moves the WHOLE subtree to trash as a single unit — every id here gets
+		// the same deleted_at AND trash_batch_id stamp, so undeleting the root later doesn't
+		// leave descendants behind (undeleting a descendant independently is still possible,
+		// see undeleteWikiPage's "orphan-in-trash" note). trash_batch_id (not deleted_at) is
+		// what identifies batch membership — see collectCascadeTrashedDescendantIds.
 		const descendantIds = await collectDescendantIds(ctx.db, page.id, ctx.workspaceId);
 		const allIds = [page.id, ...descendantIds];
-		// PROJ-485: read before the delete — target_page_id is ON DELETE SET NULL, so the
-		// count would read as 0 once the pages are gone. Non-blocking: surfaced as info on
-		// the response, matching the PRD's "delete warnings" (not a hard block).
+		const trashBatchId = crypto.randomUUID();
+		// PROJ-485: read before the trash stamp — not that it would change (soft delete
+		// doesn't touch wiki_links), but kept for parity with the pre-R14 read-before-write
+		// ordering and because a future purge racing this call shouldn't matter either way.
 		const linkedByCount = await countBacklinkSources(ctx, allIds);
-		// PROJ-493: notify BEFORE deleting the page rows — wiki_watchers.page_id is
-		// ON DELETE CASCADE, so a watcher's own watch row (including the root page's
-		// watchers this notifies) would otherwise already be gone by the time
-		// notifyWikiWatchers queries the table.
 		if (!page.isTemplate) {
 			await notifyWikiWatchers(ctx, {
 				pageId: page.id,
@@ -1807,7 +1911,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		}
 		// PROJ-493: subtree watchers rooted at/above the cascade root got the single
 		// notification above, but someone watching one of the DESCENDANTS directly would
-		// otherwise hear nothing at all before their watch row disappeared with the page.
+		// otherwise hear nothing at all about their page being trashed.
 		if (descendantIds.length > 0) {
 			const descendants = await inChunks(descendantIds, (chunk) =>
 				orm
@@ -1828,20 +1932,12 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 			await notifyCascadeDescendantWatchers(ctx, descendants);
 		}
 		await inChunks(allIds, async (chunk) => {
-			await deleteWikiPageAttachments(ctx, orm, chunk);
+			await orm
+				.update(schema.wikiPages)
+				.set({ deletedAt: now, trashBatchId })
+				.where(inArray(schema.wikiPages.id, chunk));
 			return [];
 		});
-		await inChunks(allIds, async (chunk) => {
-			await orm.delete(schema.wikiPages).where(inArray(schema.wikiPages.id, chunk));
-			return [];
-		});
-		await deleteWikiFtsEntries(ctx, allIds);
-		// PROJ-407-style defensive cleanup: mirror the FK's ON DELETE CASCADE/SET NULL at
-		// the app level too, since D1 doesn't guarantee FK enforcement on every connection.
-		await deleteWikiLinksForPages(ctx, allIds);
-		await clearIncomingLinkTargets(ctx, allIds);
-		await deleteWikiWatchersForPages(ctx, allIds);
-		await deleteWikiDraftsForPages(ctx, allIds);
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
@@ -1851,17 +1947,18 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		return { ok: true, deletedCount: allIds.length, linkedByCount };
 	}
 
-	// PROJ-238: no FK constraint on parent_id, so a plain delete would otherwise leave
-	// children pointing at a row that no longer exists. Default behavior is to promote
-	// them to the deleted page's own parent (which may be null, i.e. the root).
+	// PROJ-238: no FK constraint on parent_id, so a plain (non-cascade) trash would
+	// otherwise leave children pointing at a parent that's no longer visible. Default
+	// behavior is to promote them to the trashed page's own parent (which may be null,
+	// i.e. the root) — unchanged by PROJ-496, this still runs against the LIVE children
+	// (a child that's independently trashed keeps its own parent_id untouched, same as
+	// the pre-R14 behavior for a hard-deleted child).
 	await orm
 		.update(schema.wikiPages)
 		.set({ parentId: page.parentId })
-		.where(eq(schema.wikiPages.parentId, page.id));
+		.where(and(eq(schema.wikiPages.parentId, page.id), isNull(schema.wikiPages.deletedAt)));
 
 	const linkedByCount = await countBacklinkSources(ctx, [page.id]);
-	// PROJ-493: notify BEFORE deleting the page row — see the cascade branch above for why
-	// (wiki_watchers.page_id is ON DELETE CASCADE).
 	if (!page.isTemplate) {
 		await notifyWikiWatchers(ctx, {
 			pageId: page.id,
@@ -1871,13 +1968,10 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 			action: "deleted",
 		});
 	}
-	await deleteWikiPageAttachments(ctx, orm, [page.id]);
-	await orm.delete(schema.wikiPages).where(eq(schema.wikiPages.id, page.id));
-	await deleteWikiFtsEntries(ctx, [page.id]);
-	await deleteWikiLinksForPages(ctx, [page.id]);
-	await clearIncomingLinkTargets(ctx, [page.id]);
-	await deleteWikiWatchersForPages(ctx, [page.id]);
-	await deleteWikiDraftsForPages(ctx, [page.id]);
+	await orm
+		.update(schema.wikiPages)
+		.set({ deletedAt: now, trashBatchId: crypto.randomUUID() })
+		.where(eq(schema.wikiPages.id, page.id));
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
 		entityId: page.id,
@@ -1887,9 +1981,300 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 	return { ok: true, deletedCount: 1, linkedByCount };
 }
 
+// PROJ-496 (R14): undelete a trashed page. Takes an ID only (not a slug) — a slug is
+// only unique among LIVE pages (0051_wiki_trash.sql's partial index), so more than one
+// trashed page can carry the same now-recycled slug; an id is the only unambiguous
+// reference once a page is in the trash. Same permission as deleteWikiPage (reversing a
+// delete needs the same authority as performing one).
+//
+// Design decisions (see PR description for the full reasoning):
+//   - Parent's trash state is NOT checked. Undeleting a page whose parent is still
+//     trashed (or was cascade-trashed alongside it) is allowed; the page shows up as a
+//     root in list/tree views until its parent is also undeleted — the same "orphan"
+//     rendering getWikiTree already does for any page whose parent isn't in the current
+//     result set (map.has() check), so this needs no special-casing there.
+//   - Slug reuse: every page in the restore batch (root AND every descendant) has its
+//     slug re-checked against LIVE pages only (assertSlugAvailable, which now filters
+//     deleted_at IS NULL) and rejected with a structured ConflictError naming the
+//     colliding slug if a new page has since taken it — the caller must rename the new
+//     page (or the page being undeleted, via update_wiki_page, which isn't possible
+//     until it's live again) to resolve the collision. No partial restore happens: the
+//     whole batch is checked before any row is updated.
+export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
+	const idCheck = IdSchema.safeParse(id);
+	if (!idCheck.success)
+		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
+
+	const orm = drizzle(ctx.db, { schema });
+	const page = await orm
+		.select({
+			id: schema.wikiPages.id,
+			slug: schema.wikiPages.slug,
+			title: schema.wikiPages.title,
+			projectId: schema.wikiPages.projectId,
+			parentId: schema.wikiPages.parentId,
+			isTemplate: schema.wikiPages.isTemplate,
+			deletedAt: schema.wikiPages.deletedAt,
+			trashBatchId: schema.wikiPages.trashBatchId,
+		})
+		.from(schema.wikiPages)
+		.where(and(eq(schema.wikiPages.id, id), eq(schema.wikiPages.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!page) throw new NotFoundError("Wiki page not found");
+	if (page.deletedAt === null) {
+		throw new ValidationError({ formErrors: ["Page is not in the trash"], fieldErrors: {} });
+	}
+
+	await requireWikiDelete(ctx, page.projectId);
+
+	// PROJ-496 follow-up: restore the whole cascade-trashed subtree, not just the root —
+	// a page trashed via deleteWikiPage's cascade branch stamps every descendant with the
+	// same trash_batch_id, so walking descendants that share that exact id recovers
+	// exactly the batch that was trashed together (see collectCascadeTrashedDescendantIds).
+	// Independently-trashed descendants (a different batch id) are left alone.
+	const descendantIds = await collectCascadeTrashedDescendantIds(
+		ctx.db,
+		page.id,
+		ctx.workspaceId,
+		page.trashBatchId
+	);
+	const allIds = [page.id, ...descendantIds];
+
+	const descendantRows =
+		descendantIds.length > 0
+			? await inChunks(descendantIds, (chunk) =>
+					orm
+						.select({
+							id: schema.wikiPages.id,
+							slug: schema.wikiPages.slug,
+							title: schema.wikiPages.title,
+							isTemplate: schema.wikiPages.isTemplate,
+						})
+						.from(schema.wikiPages)
+						.where(
+							and(
+								inArray(schema.wikiPages.id, chunk),
+								eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+							)
+						)
+				)
+			: [];
+
+	// PROJ-496 follow-up: every id in the cascade batch must clear the slug check, not
+	// just the root — the partial-unique slug index only enforces uniqueness among LIVE
+	// pages, so a descendant's slug can have been taken by an unrelated new page while
+	// the whole subtree sat in the trash. Checking only the root let that case fall
+	// through to a raw SQLite constraint violation on the batch UPDATE below (a 500)
+	// instead of the structured ConflictError the design here promises.
+	await assertSlugAvailable(orm, ctx.workspaceId, page.slug, page.id);
+	for (const descendant of descendantRows) {
+		await assertSlugAvailable(orm, ctx.workspaceId, descendant.slug, descendant.id);
+	}
+
+	const now = Math.floor(Date.now() / 1000);
+	await inChunks(allIds, async (chunk) => {
+		await orm
+			.update(schema.wikiPages)
+			.set({ deletedAt: null, trashBatchId: null, updatedAt: now, updatedById: ctx.userId })
+			.where(inArray(schema.wikiPages.id, chunk));
+		return [];
+	});
+
+	// PROJ-496: recorded as "updated" (not a new activity/notification action) so it
+	// slots into the existing typed action union (recordActivity, WikiChangeEvent,
+	// notifyWikiWatchers) rather than widening it repo-wide for a single edge case — a
+	// restore genuinely IS "this page changed state and is worth telling watchers about",
+	// which is exactly what an "updated" event already means to every consumer.
+	await recordActivity(ctx, {
+		entityType: "wiki_page",
+		entityId: page.id,
+		action: "updated",
+		diff: {
+			restored: true,
+			slug: page.slug,
+			title: page.title,
+			projectId: page.projectId,
+			restoredCount: allIds.length,
+		},
+	});
+	if (!page.isTemplate) {
+		await notifyWikiWatchers(ctx, {
+			pageId: page.id,
+			parentId: page.parentId,
+			slug: page.slug,
+			title: page.title,
+			action: "updated",
+		});
+	}
+	// PROJ-496 follow-up: mirrors deleteWikiPage's cascade branch notifying descendant
+	// watchers on trash — without this, someone watching a descendant directly hears
+	// about the delete but never a matching "restored" event on cascade undelete.
+	if (descendantRows.length > 0) {
+		await notifyCascadeDescendantWatchers(ctx, descendantRows, "updated");
+	}
+
+	return {
+		ok: true,
+		id: page.id,
+		slug: page.slug,
+		url: wikiPagePath(page.slug),
+		restoredCount: allIds.length,
+	};
+}
+
+// PROJ-496 (R14): trash listing, scoped the same way listWikiPages is — a project-scoped
+// trashed page is only listed for callers who could see that project (workspace admins
+// see everything).
+export async function listWikiTrash(ctx: ServiceCtx, input: unknown) {
+	const parsed = ListWikiTrashInputSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, limit, offset } = parsed.data;
+
+	if (projectId) {
+		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+			return [];
+		}
+	}
+
+	const orm = drizzle(ctx.db, { schema });
+	const conditions = [
+		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+		isNotNull(schema.wikiPages.deletedAt),
+	];
+	if (projectId) {
+		conditions.push(eq(schema.wikiPages.projectId, projectId));
+	} else {
+		const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
+		if (visible) {
+			const cond = or(isNull(schema.wikiPages.projectId), visible);
+			if (cond) conditions.push(cond);
+		}
+	}
+
+	const rows = await orm
+		.select({
+			id: schema.wikiPages.id,
+			slug: schema.wikiPages.slug,
+			title: schema.wikiPages.title,
+			// eslint-disable-next-line camelcase
+			parent_id: schema.wikiPages.parentId,
+			// eslint-disable-next-line camelcase
+			project_id: schema.wikiPages.projectId,
+			// eslint-disable-next-line camelcase
+			deleted_at: schema.wikiPages.deletedAt,
+		})
+		.from(schema.wikiPages)
+		.where(and(...conditions))
+		.orderBy(desc(schema.wikiPages.deletedAt))
+		.limit(limit)
+		.offset(offset);
+
+	return rows.map((r) => ({
+		...r,
+		// PROJ-496: purge is due 30 days after deletedAt — surfaced so a UI/agent can show
+		// "N days left" without re-deriving the retention constant.
+		purgeAfter: (r.deleted_at ?? 0) + WIKI_TRASH_RETENTION_SECONDS,
+	}));
+}
+
+// PROJ-496 (R14): permanently removes every page in this workspace that's been trashed
+// for at least WIKI_TRASH_RETENTION_SECONDS — R2 attachment objects, wiki_revisions,
+// wiki_links, wiki_watchers, wiki_drafts, wiki_fts rows, and wiki_redirects that were
+// left in place at (soft) delete time, plus a re-parent fixup for any live child left
+// pointing at a page in this batch. Owner/admin only, same as backfill_wiki_links —
+// this is a maintenance action over the whole workspace, not scoped to a single
+// project's grants. Also reachable via a daily Workers Cron Trigger (see the
+// `scheduled` handler in index.ts, which iterates every workspace) in addition to the
+// manual REST/MCP call.
+export async function purgeExpiredWikiPages(
+	ctx: ServiceCtx
+): Promise<{ purgedCount: number; purgedIds: string[] }> {
+	if (!isWorkspaceAdmin(ctx.role)) throw new ForbiddenError("Insufficient permissions");
+
+	const orm = drizzle(ctx.db, { schema });
+	const cutoff = Math.floor(Date.now() / 1000) - WIKI_TRASH_RETENTION_SECONDS;
+	const expired = await orm
+		.select({ id: schema.wikiPages.id, parentId: schema.wikiPages.parentId })
+		.from(schema.wikiPages)
+		.where(
+			and(
+				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+				isNotNull(schema.wikiPages.deletedAt),
+				lte(schema.wikiPages.deletedAt, cutoff)
+			)
+		);
+	const ids = expired.map((p) => p.id);
+	if (ids.length === 0) return { purgedCount: 0, purgedIds: [] };
+
+	// PROJ-238/PROJ-496: a live child can end up pointing at a page that's about to be
+	// purged — e.g. it was cascade-trashed alongside its parent, then undeleted on its
+	// own while the parent stayed in the trash. parent_id has no FK, so without this
+	// fixup a purge would leave it dangling. Walk each purged page's parent chain past
+	// any other page that's ALSO being purged in this batch, mirroring deleteWikiPage's
+	// re-parent-to-nearest-surviving-ancestor behavior.
+	const expiredSet = new Set(ids);
+	const parentById = new Map(expired.map((p) => [p.id, p.parentId]));
+	const resolveReparentTarget = (id: string): string | null => {
+		let current = parentById.get(id) ?? null;
+		const seen = new Set<string>();
+		while (current !== null && expiredSet.has(current) && !seen.has(current)) {
+			seen.add(current);
+			current = parentById.get(current) ?? null;
+		}
+		return current;
+	};
+	for (const id of ids) {
+		await orm
+			.update(schema.wikiPages)
+			.set({ parentId: resolveReparentTarget(id) })
+			.where(and(eq(schema.wikiPages.parentId, id), isNull(schema.wikiPages.deletedAt)));
+	}
+
+	await inChunks(ids, async (chunk) => {
+		await deleteWikiPageAttachments(ctx, orm, chunk);
+		return [];
+	});
+	await inChunks(ids, async (chunk) => {
+		await orm.delete(schema.wikiRevisions).where(inArray(schema.wikiRevisions.pageId, chunk));
+		return [];
+	});
+	await inChunks(ids, async (chunk) => {
+		await orm.delete(schema.wikiPages).where(inArray(schema.wikiPages.id, chunk));
+		return [];
+	});
+	await deleteWikiFtsEntries(ctx, ids);
+	await deleteWikiLinksForPages(ctx, ids);
+	await clearIncomingLinkTargets(ctx, ids);
+	await deleteWikiWatchersForPages(ctx, ids);
+	await deleteWikiDraftsForPages(ctx, ids);
+	// PROJ-407-style defensive cleanup, same rationale as every other per-table helper
+	// here: D1 doesn't guarantee FK enforcement on every connection, so wiki_redirects'
+	// ON DELETE CASCADE on page_id is mirrored explicitly.
+	await inChunks(ids, async (chunk) => {
+		await orm
+			.delete(schema.wikiRedirects)
+			.where(
+				and(
+					eq(schema.wikiRedirects.workspaceId, ctx.workspaceId),
+					inArray(schema.wikiRedirects.pageId, chunk)
+				)
+			);
+		return [];
+	});
+
+	return { purgedCount: ids.length, purgedIds: ids };
+}
+
 export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<TreeNode[]> {
 	const orm = drizzle(ctx.db, { schema });
-	const conditions = [eq(schema.wikiPages.workspaceId, ctx.workspaceId)];
+	const conditions = [
+		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+		// PROJ-496: a trashed page (and, naturally, its whole trashed subtree) drops out of
+		// the tree. A live page whose PARENT is trashed becomes a root in the tree instead
+		// of disappearing — see the map.has() check below, unchanged — which is the "orphan-
+		// in-trash" case documented on undeleteWikiPage.
+		isNull(schema.wikiPages.deletedAt),
+	];
 	if (projectId) conditions.push(eq(schema.wikiPages.projectId, projectId));
 	// PROJ-311: same visibility filter as listWikiPages.
 	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);

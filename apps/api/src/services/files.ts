@@ -105,8 +105,8 @@ export async function listAttachments(ctx: ServiceCtx, input: unknown): Promise<
 	// the restricted page's title.
 	const visible = visibleProjectSqlFragment(ctx, "w.project_id");
 	const joinCond = visible
-		? `w.id = a.linked_wiki_page_id AND (w.project_id IS NULL OR ${visible.sql})`
-		: "w.id = a.linked_wiki_page_id";
+		? `w.id = a.linked_wiki_page_id AND w.deleted_at IS NULL AND (w.project_id IS NULL OR ${visible.sql})`
+		: "w.id = a.linked_wiki_page_id AND w.deleted_at IS NULL";
 
 	const rows = await ctx.db
 		.prepare(
@@ -264,8 +264,8 @@ export async function getAttachmentMetadata(
 
 	const visible = visibleProjectSqlFragment(ctx, "w.project_id");
 	const joinCond = visible
-		? `w.id = a.linked_wiki_page_id AND (w.project_id IS NULL OR ${visible.sql})`
-		: "w.id = a.linked_wiki_page_id";
+		? `w.id = a.linked_wiki_page_id AND w.deleted_at IS NULL AND (w.project_id IS NULL OR ${visible.sql})`
+		: "w.id = a.linked_wiki_page_id AND w.deleted_at IS NULL";
 
 	const row = await ctx.db
 		.prepare(

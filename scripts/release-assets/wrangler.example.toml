@@ -23,6 +23,12 @@ directory = "./vendor/web"
 binding = "ASSETS"
 run_worker_first = ["/api/*", "/mcp/*", "/wiki"]
 
+# ─── Cron Triggers ─────────────────────────────────────────────
+# Daily sweep for the 30-day wiki trash purge (see `scheduled` in src/index.ts).
+# Cron expressions are UTC.
+[triggers]
+crons = ["0 3 * * *"]
+
 # ─── D1 Database ───────────────────────────────────────────────
 # Create with: wrangler d1 create projektor
 [[d1_databases]]

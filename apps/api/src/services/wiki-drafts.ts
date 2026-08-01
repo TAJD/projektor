@@ -6,7 +6,7 @@
 // are duplicated in miniature here rather than imported, mirroring
 // services/wiki-watchers.ts's resolveWatchTarget precedent.
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { SaveWikiDraftInputSchema } from "../schemas/wiki";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
@@ -33,7 +33,10 @@ async function resolveDraftTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 		.where(
 			and(
 				or(eq(schema.wikiPages.id, idOrSlug), eq(schema.wikiPages.slug, idOrSlug)),
-				eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+				// PROJ-496: no drafts on a trashed page — same "trashed = gone" rule as every
+				// other page reference entry point (services/wiki.ts).
+				isNull(schema.wikiPages.deletedAt)
 			)
 		)
 		.get();
@@ -61,7 +64,8 @@ async function resolveDraftTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 				.where(
 					and(
 						eq(schema.wikiPages.id, redirect.pageId),
-						eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+						eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+						isNull(schema.wikiPages.deletedAt)
 					)
 				)
 				.get();
@@ -156,7 +160,8 @@ export async function discardWikiDraft(ctx: ServiceCtx, idOrSlug: string) {
 }
 
 // PROJ-495: app-level mirror of wiki_drafts.page_id's ON DELETE CASCADE, called from
-// services/wiki.ts#deleteWikiPage — same belt-and-braces precedent as
+// services/wiki.ts#purgeExpiredWikiPages (PROJ-496: draft cleanup moved from delete
+// time to purge time) — same belt-and-braces precedent as
 // wiki-watchers.ts#deleteWikiWatchersForPages (PROJ-407: D1 doesn't guarantee FK
 // enforcement on every connection).
 export async function deleteWikiDraftsForPages(ctx: ServiceCtx, pageIds: string[]): Promise<void> {

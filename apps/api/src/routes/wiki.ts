@@ -143,6 +143,38 @@ router.post("/notifications/read", async (c) => {
 	}
 });
 
+// PROJ-496 (R14): must be registered before the /:slug catch-all below, same as every
+// other fixed-path route above.
+router.get("/trash", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		const projectId = c.req.query("projectId");
+		const limit = c.req.query("limit");
+		const offset = c.req.query("offset");
+		return c.json(await wikiService.listWikiTrash(ctx, { projectId, limit, offset }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.post("/trash/:id/undelete", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiService.undeleteWikiPage(ctx, c.req.param("id")));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.post("/purge-trash", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await wikiService.purgeExpiredWikiPages(ctx));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
 router.get("/changes", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {

@@ -659,4 +659,64 @@ export const wikiTools: MCPTool[] = [
 			return wikiDraftsService.discardWikiDraft(ctx as ServiceCtx, slug);
 		},
 	},
+	{
+		name: "list_wiki_trash",
+		description:
+			"List trashed (soft-deleted) wiki pages in the workspace, optionally scoped to a " +
+			"project. Same visibility rule as list_wiki_pages — a project-scoped trashed page " +
+			"only appears for callers who could see that project. Each result includes " +
+			"`purgeAfter` (unix seconds) — the page is permanently removed by purge_wiki_trash " +
+			"once that time passes (30 days after deletion).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				projectId: {
+					type: "string",
+					description: "Restrict to trashed pages belonging to this project ID",
+				},
+				limit: { type: "number", default: 50 },
+				offset: { type: "number", default: 0 },
+			},
+		},
+		async handler(input, ctx) {
+			return wikiService.listWikiTrash(ctx, input);
+		},
+	},
+	{
+		name: "undelete_wiki_page",
+		description:
+			"Restore a trashed wiki page by ID (not slug — a slug is only unique among live " +
+			"pages, so more than one trashed page can share the same now-recycled slug; use " +
+			"list_wiki_trash to find the ID). Requires the same permission as delete_wiki_page. " +
+			"If this page was cascade-trashed together with descendants, the whole subtree is " +
+			"restored as one batch — the response's restoredCount reports how many pages came " +
+			"back. Rejected with a structured conflict (no partial restore) if the ID's own " +
+			"slug OR any descendant's slug has since been taken by another live page — the " +
+			"conflict names the colliding slug; rename that page first, then retry. The " +
+			"restored page's parent may itself still be trashed; if so the page appears as a " +
+			"root until the parent is also restored.",
+		inputSchema: {
+			type: "object",
+			required: ["id"],
+			properties: { id: { type: "string", description: "Trashed page ID" } },
+		},
+		async handler(input, ctx) {
+			const { id } = input as { id: string };
+			return wikiService.undeleteWikiPage(ctx as ServiceCtx, id);
+		},
+	},
+	{
+		name: "purge_wiki_trash",
+		description:
+			"Permanently remove every wiki page in the workspace that's been trashed for at " +
+			"least 30 days — deletes R2 attachment objects, wiki_revisions/wiki_links/" +
+			"wiki_watchers/wiki_drafts/wiki_redirects rows, and the page row itself, re-parenting " +
+			"any live child left pointing at a purged page. Irreversible. Owner/admin only. Also " +
+			"runs automatically once daily via a Workers Cron Trigger — call this manually only " +
+			"to force an off-cycle purge.",
+		inputSchema: { type: "object", properties: {} },
+		async handler(_input, ctx) {
+			return wikiService.purgeExpiredWikiPages(ctx as ServiceCtx);
+		},
+	},
 ];

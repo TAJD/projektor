@@ -11,6 +11,11 @@ account_id = "REPLACE_WITH_YOUR_CLOUDFLARE_ACCOUNT_ID"
 [dev]
 port = 8787
 
+# PROJ-496: daily sweep for the 30-day wiki trash purge (see `scheduled` in src/index.ts).
+# Cron expressions are UTC; 03:00 UTC is off-peak for all deployed regions so far.
+[triggers]
+crons = ["0 3 * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "projektor"
