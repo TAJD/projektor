@@ -58,7 +58,7 @@ export const METRIC_DEFINITIONS: Record<MetricId, MetricDefinition> = {
 		definition: "What fraction of completed work each bucket was bug fixes, not new work.",
 		computation:
 			"Bug share = bug-typed issues completed ÷ all issues completed, per bucket; buckets with " +
-				"no completions are gapped, not zero.",
+			"no completions are gapped, not zero.",
 	},
 	"review-latency": {
 		label: "Review latency",
@@ -106,10 +106,10 @@ export const METRIC_DEFINITIONS: Record<MetricId, MetricDefinition> = {
 		label: "Aging WIP",
 		definition:
 			"How long issues that are still open have already been in progress or review — stuck " +
-				"work shows up here before it finishes.",
+			"work shows up here before it finishes.",
 		computation:
 			"Age since claim for every currently open in_progress/in_review issue, plotted against " +
-				"this window's cycle-time p50/p90.",
+			"this window's cycle-time p50/p90.",
 	},
 	"lease-expiries": {
 		label: "Lease expiries",
@@ -148,6 +148,6 @@ export const METRIC_DEFINITIONS: Record<MetricId, MetricDefinition> = {
 			"Which parts of the codebase cause agents to collide over file claims, blocking parallelism.",
 		computation:
 			"Directories/paths sized by distinct issues whose claim_files attempt was rejected or " +
-				"overridden there, in the window.",
+			"overridden there, in the window.",
 	},
 };

@@ -774,9 +774,9 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 							<SectionHeading
 								metricId="aging-wip"
 								caption={
-								"Age since claim for every currently open issue, against this window's cycle-time " +
-								"p50/p90 — stuck items show up before they finish and skew the percentiles"
-							}
+									"Age since claim for every currently open issue, against this window's cycle-time " +
+									"p50/p90 — stuck items show up before they finish and skew the percentiles"
+								}
 							/>
 							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
 								<AgingWipScatter

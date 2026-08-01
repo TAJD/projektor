@@ -40,7 +40,7 @@ export const groupsTools: MCPTool[] = [
 		name: "list_member_groups",
 		description:
 			"List every workspace member with the access groups they belong to (owner/admin only). " +
-				"Members with no groups appear with an empty list — the pending/default-deny state.",
+			"Members with no groups appear with an empty list — the pending/default-deny state.",
 		inputSchema: { type: "object", properties: {} },
 		async handler(_input, ctx) {
 			return listMemberGroups(ctx as ServiceCtx);
