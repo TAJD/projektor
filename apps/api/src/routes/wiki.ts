@@ -167,9 +167,9 @@ router.get("/export", async (c) => {
 		const scope = c.req.query("scope");
 		const projectId = c.req.query("projectId");
 		const pageId = c.req.query("pageId");
-		const { filename, bytes } = await exportWiki(ctx, { scope, projectId, pageId });
+		const { filename, stream } = await exportWiki(ctx, { scope, projectId, pageId });
 		const safeFilename = filename.replace(/[\r\n"\\]/g, "_");
-		return new Response(bytes, {
+		return new Response(stream, {
 			headers: {
 				"Content-Type": "application/zip",
 				"Content-Disposition": `attachment; filename="${safeFilename}"`,

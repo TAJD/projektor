@@ -1,6 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { type Zippable, zipSync } from "fflate";
+import { Zip, ZipDeflate } from "fflate";
 import { stringify as stringifyYaml } from "yaml";
 import { ExportWikiInputSchema } from "../schemas/wiki";
 import { effectiveProjectRole, isWorkspaceAdmin, requireProjectInWorkspace } from "./access";
@@ -14,6 +14,32 @@ type ExportedPage = {
 	title: string;
 	content: string;
 };
+
+// A Worker isolate has a 128 MB memory ceiling and uploads allow up to 50 MB per file
+// (MAX_UPLOAD_SIZE in services/files.ts). These caps bound export size before any R2
+// fetch or zip work starts, so an oversized export fails fast with a typed error
+// instead of buffering its way into an OOM/500. The streaming zip build below (buildZip)
+// is the primary defense against memory blowup — these are a belt-and-braces backstop
+// against pathological page counts / attachment totals.
+const MAX_EXPORT_PAGES = 500;
+const MAX_EXPORT_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MB total per export
+
+function assertExportSizeAllowed(pageCount: number, totalAttachmentBytes: number): void {
+	if (pageCount > MAX_EXPORT_PAGES) {
+		throw new ValidationError({
+			formErrors: [`Export exceeds the ${MAX_EXPORT_PAGES}-page limit (${pageCount} pages)`],
+			fieldErrors: {},
+		});
+	}
+	if (totalAttachmentBytes > MAX_EXPORT_ATTACHMENT_BYTES) {
+		throw new ValidationError({
+			formErrors: [
+				`Export attachments exceed the ${MAX_EXPORT_ATTACHMENT_BYTES}-byte limit (${totalAttachmentBytes} bytes)`,
+			],
+			fieldErrors: {},
+		});
+	}
+}
 
 // PROJ-311: same visibility rule as wiki.ts's assertWikiPageVisible — a workspace-level
 // page (projectId null) is visible to every member; a project-scoped page needs an
@@ -133,7 +159,7 @@ function ensureFrontmatter(page: ExportedPage): string {
 async function collectAttachments(
 	ctx: ServiceCtx,
 	pageIds: string[]
-): Promise<Array<{ pageSlug: string; filename: string; r2Key: string }>> {
+): Promise<Array<{ pageSlug: string; filename: string; r2Key: string; size: number }>> {
 	if (pageIds.length === 0) return [];
 	const orm = drizzle(ctx.db, { schema });
 	const bySlug = new Map<string, string>();
@@ -145,10 +171,12 @@ async function collectAttachments(
 				entityId: schema.attachments.entityId,
 				filename: schema.attachments.filename,
 				r2Key: schema.attachments.r2Key,
+				size: schema.attachments.size,
 			})
 			.from(schema.attachments)
 			.where(
 				and(
+					eq(schema.attachments.workspaceId, ctx.workspaceId),
 					eq(schema.attachments.entityType, "wiki_page"),
 					inArray(schema.attachments.entityId, chunk),
 					eq(schema.attachments.kind, "file")
@@ -162,50 +190,109 @@ async function collectAttachments(
 			pageSlug: bySlug.get(r.entityId) ?? r.entityId,
 			filename: r.filename,
 			r2Key: r.r2Key,
+			size: r.size,
 		}));
 }
 
 function safeZipPathSegment(value: string): string {
-	return value.replace(/[\\/]/g, "_");
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally stripping NUL/control chars from zip entry names
+	const stripped = value.replace(/[\\/]/g, "_").replace(/[\x00-\x1f]/g, "");
+	return /^\.+$/.test(stripped) ? "_" : stripped;
 }
 
-async function buildZip(ctx: ServiceCtx, pages: ExportedPage[]): Promise<Uint8Array> {
-	const files: Zippable = {};
-	const seenNames = new Map<string, number>();
-
-	for (const page of pages) {
-		const base = safeZipPathSegment(page.slug || page.id);
-		let name = `pages/${base}.md`;
-		const count = seenNames.get(name) ?? 0;
-		seenNames.set(name, count + 1);
-		if (count > 0) name = `pages/${base}-${count}.md`;
-		files[name] = new TextEncoder().encode(ensureFrontmatter(page));
+// Keeps incrementing the collision suffix until it lands on a name nobody has used yet
+// (including previously-renamed names) — a plain "rename once" scheme can produce a
+// second collision (e.g. two "notes.txt" plus a real "1-notes.txt") that silently
+// clobbers a file, since the zip entries are looked up by name.
+function reserveUniqueName(
+	usedNames: Set<string>,
+	candidate: string,
+	altFor: (n: number) => string
+): string {
+	if (!usedNames.has(candidate)) {
+		usedNames.add(candidate);
+		return candidate;
 	}
+	let n = 1;
+	let alt = altFor(n);
+	while (usedNames.has(alt)) {
+		n += 1;
+		alt = altFor(n);
+	}
+	usedNames.add(alt);
+	return alt;
+}
 
+// Streams the archive rather than building it fully in memory: fflate's streaming Zip
+// writer emits compressed chunks as each entry is pushed, so the response body never
+// requires holding the complete zip (or every page/attachment at once) in memory. Only
+// one attachment's bytes are held at a time, and the total attachment budget is checked
+// up front (assertExportSizeAllowed) before any R2 fetch happens.
+async function buildZip(
+	ctx: ServiceCtx,
+	pages: ExportedPage[]
+): Promise<ReadableStream<Uint8Array>> {
 	const attachments = await collectAttachments(
 		ctx,
 		pages.map((p) => p.id)
 	);
-	for (const att of attachments) {
-		const obj = await ctx.r2.get(att.r2Key);
-		if (!obj) continue; // orphaned row (object missing from storage) — skip, don't fail the export
-		const bytes = new Uint8Array(await obj.arrayBuffer());
-		const dir = safeZipPathSegment(att.pageSlug);
-		const filename = safeZipPathSegment(att.filename);
-		let name = `attachments/${dir}/${filename}`;
-		const count = seenNames.get(name) ?? 0;
-		seenNames.set(name, count + 1);
-		if (count > 0) name = `attachments/${dir}/${count}-${filename}`;
-		files[name] = bytes;
-	}
+	const totalAttachmentBytes = attachments.reduce((sum, a) => sum + a.size, 0);
+	assertExportSizeAllowed(pages.length, totalAttachmentBytes);
 
-	return zipSync(files);
+	return new ReadableStream<Uint8Array>({
+		async start(controller) {
+			const zip = new Zip((err, chunk, final) => {
+				if (err) {
+					controller.error(err);
+					return;
+				}
+				if (chunk && chunk.length > 0) controller.enqueue(chunk);
+				if (final) controller.close();
+			});
+
+			try {
+				const usedNames = new Set<string>();
+
+				for (const page of pages) {
+					const base = safeZipPathSegment(page.slug || page.id);
+					const name = reserveUniqueName(
+						usedNames,
+						`pages/${base}.md`,
+						(n) => `pages/${base}-${n}.md`
+					);
+					const entry = new ZipDeflate(name);
+					zip.add(entry);
+					entry.push(new TextEncoder().encode(ensureFrontmatter(page)), true);
+				}
+
+				for (const att of attachments) {
+					const obj = await ctx.r2.get(att.r2Key);
+					if (!obj) continue; // orphaned row (object missing from storage) — skip, don't fail the export
+					const dir = safeZipPathSegment(att.pageSlug);
+					const filename = safeZipPathSegment(att.filename);
+					const name = reserveUniqueName(
+						usedNames,
+						`attachments/${dir}/${filename}`,
+						(n) => `attachments/${dir}/${n}-${filename}`
+					);
+					const entry = new ZipDeflate(name);
+					zip.add(entry);
+					const bytes = new Uint8Array(await obj.arrayBuffer());
+					entry.push(bytes, true);
+				}
+
+				zip.end();
+			} catch (err) {
+				controller.error(err);
+			}
+		},
+	});
 }
 
 export async function exportWiki(
 	ctx: ServiceCtx,
 	input: unknown
-): Promise<{ filename: string; bytes: Uint8Array }> {
+): Promise<{ filename: string; stream: ReadableStream<Uint8Array> }> {
 	const parsed = ExportWikiInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const data = parsed.data;
@@ -231,11 +318,11 @@ export async function exportWiki(
 				)
 			);
 
-		const bytes = await buildZip(ctx, pages);
+		const stream = await buildZip(ctx, pages);
 		const filename = data.projectId
 			? `wiki-export-${data.projectId}.zip`
 			: "wiki-export-workspace.zip";
-		return { filename, bytes };
+		return { filename, stream };
 	}
 
 	const root = await resolveExportRoot(ctx, data.pageId);
@@ -243,6 +330,6 @@ export async function exportWiki(
 	const descendantIds = await collectDescendantIds(ctx, root.id, root.projectId);
 	const pages = await pagesByIds(ctx, [root.id, ...descendantIds]);
 
-	const bytes = await buildZip(ctx, pages);
-	return { filename: `wiki-export-${root.slug}.zip`, bytes };
+	const stream = await buildZip(ctx, pages);
+	return { filename: `wiki-export-${root.slug}.zip`, stream };
 }

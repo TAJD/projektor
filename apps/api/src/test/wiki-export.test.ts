@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { unzipSync } from "fflate";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedFixture, seedProject, seedProjectFixture } from "./helpers";
@@ -186,5 +186,60 @@ describe("Wiki export (PROJ-497)", () => {
 			headers: authHeaders(token, slug),
 		});
 		expect(res.status).toBe(400);
+	});
+
+	it("keeps colliding attachment filenames distinct in the zip, with correct content each", async () => {
+		const page = await createPage(token, slug, { title: "Collide", content: "body" });
+		// The second "notes.txt" renames to "1-notes.txt", which must not clobber the
+		// real "1-notes.txt" uploaded after it.
+		await uploadAttachment(token, slug, page.id, "notes.txt", "first");
+		await uploadAttachment(token, slug, page.id, "notes.txt", "second");
+		await uploadAttachment(token, slug, page.id, "1-notes.txt", "third");
+
+		const { status, entries } = await exportZip(token, slug, "scope=space");
+		expect(status).toBe(200);
+		const names = Object.keys(entries ?? {})
+			.filter((n) => n.startsWith("attachments/"))
+			.sort();
+		expect(names).toHaveLength(3);
+
+		const contents = names.map((n) => entryText(entries!, n)).sort();
+		expect(contents).toEqual(["first", "second", "third"]);
+	});
+
+	it("defensively excludes a descendant whose projectId mismatches the subtree root's", async () => {
+		const project = await seedProject(workspaceId);
+		const root = await createPage(token, slug, {
+			title: "Root",
+			content: "root body",
+			projectId: project.id,
+		});
+		const now = Math.floor(Date.now() / 1000);
+		const mismatchedId = crypto.randomUUID();
+		// Bypasses validateNewPageParent (services/wiki.ts), which normally forbids a
+		// child's projectId from diverging from its parent's — writing directly via SQL
+		// simulates a regression of that write-time invariant.
+		await env.DB.prepare(
+			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
+			 VALUES (?, ?, NULL, ?, ?, ?, ?, (SELECT created_by_id FROM wiki_pages WHERE id = ?), (SELECT updated_by_id FROM wiki_pages WHERE id = ?), ?, ?)`
+		)
+			.bind(
+				mismatchedId,
+				workspaceId,
+				"mismatched-child",
+				"Mismatched Child",
+				"child body",
+				root.id,
+				root.id,
+				root.id,
+				now,
+				now
+			)
+			.run();
+
+		const { status, entries } = await exportZip(token, slug, `scope=subtree&pageId=${root.slug}`);
+		expect(status).toBe(200);
+		const names = Object.keys(entries ?? {});
+		expect(names).toEqual(["pages/root.md"]);
 	});
 });
