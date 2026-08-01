@@ -160,7 +160,8 @@ export async function discardWikiDraft(ctx: ServiceCtx, idOrSlug: string) {
 }
 
 // PROJ-495: app-level mirror of wiki_drafts.page_id's ON DELETE CASCADE, called from
-// services/wiki.ts#deleteWikiPage — same belt-and-braces precedent as
+// services/wiki.ts#purgeExpiredWikiPages (PROJ-496: draft cleanup moved from delete
+// time to purge time) — same belt-and-braces precedent as
 // wiki-watchers.ts#deleteWikiWatchersForPages (PROJ-407: D1 doesn't guarantee FK
 // enforcement on every connection).
 export async function deleteWikiDraftsForPages(ctx: ServiceCtx, pageIds: string[]): Promise<void> {

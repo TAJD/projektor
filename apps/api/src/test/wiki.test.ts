@@ -5294,4 +5294,60 @@ describe("Wiki trash (PROJ-496)", () => {
 		);
 		expect(purged.purgedIds).toContain(page.id);
 	});
+
+	it("a link to a trashed-but-not-purged page is reported as broken (listBrokenWikiLinks)", async () => {
+		const target = await createPage("Trash Broken Link Target", "target content");
+		const source = await createPage("Trash Broken Link Source", "see [[Trash Broken Link Target]]");
+
+		let brokenRes = await req("http://localhost/api/wiki/broken-links", {
+			headers: authHeaders(token, slug),
+		});
+		expect(
+			((await brokenRes.json()) as Array<{ targetTitle: string }>).some(
+				(b) => b.targetTitle === "Trash Broken Link Target"
+			)
+		).toBe(false);
+
+		// The target is trashed but not yet purged — target_page_id is still set (purge
+		// is what nulls it out), so without the EXISTS-deleted_at clause this link would
+		// stay silently "resolved" until the 30-day purge finally clears it.
+		await trashPage(target.slug);
+
+		brokenRes = await req("http://localhost/api/wiki/broken-links", {
+			headers: authHeaders(token, slug),
+		});
+		expect(
+			((await brokenRes.json()) as Array<{ targetTitle: string; sourceSlug: string }>).some(
+				(b) => b.targetTitle === "Trash Broken Link Target" && b.sourceSlug === source.slug
+			)
+		).toBe(true);
+	});
+
+	it("purge only removes trash in the caller's own workspace", async () => {
+		const other = await seedFixture({ role: "admin" });
+		const createOtherRes = await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(other.token, other.workspace.slug),
+			body: JSON.stringify({ title: "Other Workspace Trash Page", content: "content" }),
+		});
+		const otherPage = (await createOtherRes.json()) as { id: string; slug: string };
+		await req(`http://localhost/api/wiki/${otherPage.slug}`, {
+			method: "DELETE",
+			headers: authHeaders(other.token, other.workspace.slug),
+		});
+		await env.DB.prepare("UPDATE wiki_pages SET deleted_at = ? WHERE id = ?")
+			.bind(Math.floor(Date.now() / 1000) - 31 * 24 * 60 * 60, otherPage.id)
+			.run();
+
+		const purgeRes = await req("http://localhost/api/wiki/purge-trash", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(purgeRes.status).toBe(200);
+		const purged = (await purgeRes.json()) as { purgedIds: string[] };
+		expect(purged.purgedIds).not.toContain(otherPage.id);
+		expect(
+			await env.DB.prepare("SELECT id FROM wiki_pages WHERE id = ?").bind(otherPage.id).first()
+		).not.toBeNull();
+	});
 });
