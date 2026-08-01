@@ -2210,7 +2210,8 @@ interface UseServerDraftAutosaveOptions {
 }
 
 function useServerDraftAutosave(options: UseServerDraftAutosaveOptions) {
-	const { workspaceSlug, editing, editTitle, editContent, page, draftBanner, baseRevisionId } = options;
+	const { workspaceSlug, editing, editTitle, editContent, page, draftBanner, baseRevisionId } =
+		options;
 	// Latest edit state for the flush-on-leave effect below, since its cleanup
 	// closure would otherwise only see the values from when `editing` last changed.
 	const latestDraftStateRef = useRef({ editTitle, editContent, page, draftBanner, baseRevisionId });
