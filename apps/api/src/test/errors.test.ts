@@ -108,17 +108,33 @@ describe("http/error-adapter: serviceErrToResponse", () => {
 });
 
 describe("mcp/error-adapter: toMcpError", () => {
-	it("maps ValidationError to -32602 without leaking the issues", () => {
-		const result = toMcpError(
-			new ValidationError({ formErrors: ["secret internals"], fieldErrors: {} })
-		);
-		expect(result).toEqual({ code: -32602, message: "Invalid params" });
+	// PROJ-508: previously the Zod issues were dropped entirely so an MCP caller had
+	// no way to learn why its params were rejected. They're deliberately client-facing
+	// (field names + validation messages, never internals), so they now travel in the
+	// JSON-RPC 2.0 `error.data` member instead.
+	it("maps ValidationError to -32602 with the issues in error.data", () => {
+		const issues = { formErrors: ["ambiguous heading"], fieldErrors: {} };
+		const result = toMcpError(new ValidationError(issues));
+		expect(result).toEqual({ code: -32602, message: "Invalid params", data: issues });
 	});
 
 	it("maps NotFoundError to -32000 with its client-facing message", () => {
 		expect(toMcpError(new NotFoundError("Issue not found"))).toEqual({
 			code: -32000,
 			message: "Issue not found",
+		});
+	});
+
+	// PROJ-508: structured NotFoundError.details (e.g. patch_wiki_page's currentHeadings)
+	// used to be JSON-encoded into `message` as a workaround; now it travels in `data`.
+	it("maps a NotFoundError with details to -32000 with the details in error.data", () => {
+		const result = toMcpError(
+			new NotFoundError("Heading 'Nope' not found", { currentHeadings: ["Alpha", "Beta"] })
+		);
+		expect(result).toEqual({
+			code: -32000,
+			message: "Heading 'Nope' not found",
+			data: { currentHeadings: ["Alpha", "Beta"] },
 		});
 	});
 
@@ -133,6 +149,20 @@ describe("mcp/error-adapter: toMcpError", () => {
 		expect(toMcpError(new ConflictError("Slug taken"))).toEqual({
 			code: -32000,
 			message: "Slug taken",
+		});
+	});
+
+	// PROJ-508: structured ConflictError.details (e.g. wiki's optimistic-lock
+	// currentRevisionId + diff) used to be JSON-encoded into `message` as a workaround
+	// (PROJ-484); now it travels in `data`.
+	it("maps a ConflictError with details to -32000 with the details in error.data", () => {
+		const result = toMcpError(
+			new ConflictError("Revision conflict", { currentRevisionId: "rev-2", diff: "..." })
+		);
+		expect(result).toEqual({
+			code: -32000,
+			message: "Revision conflict",
+			data: { currentRevisionId: "rev-2", diff: "..." },
 		});
 	});
 
