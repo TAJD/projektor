@@ -42,15 +42,14 @@ function hasDetails(
 // ValidationError's Zod-flattened `issues` shape (formErrors + fieldErrors) instead of
 // a flat details object.
 function summarizeIssues(issues: ZodFlattenOutput): string {
-	const parts: string[] = [];
-	if (issues.formErrors.length > 0) {
-		parts.push(truncate(issues.formErrors.join(", "), MAX_DETAIL_VALUE_CHARS));
-	}
-	for (const [field, messages] of Object.entries(issues.fieldErrors)) {
-		if (messages && messages.length > 0) {
-			parts.push(`${field}: ${truncate(messages.join(", "), MAX_DETAIL_VALUE_CHARS)}`);
-		}
-	}
+	const parts: string[] = [
+		...(issues.formErrors.length > 0
+			? [truncate(issues.formErrors.join(", "), MAX_DETAIL_VALUE_CHARS)]
+			: []),
+		...Object.entries(issues.fieldErrors)
+			.filter(([, messages]) => messages && messages.length > 0)
+			.map(([field, messages]) => `${field}: ${truncate(messages.join(", "), MAX_DETAIL_VALUE_CHARS)}`),
+	];
 	return truncate(parts.join("; "), MAX_DETAIL_SUMMARY_CHARS);
 }
 

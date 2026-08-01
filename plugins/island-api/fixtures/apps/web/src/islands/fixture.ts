@@ -26,6 +26,7 @@ function withConstBuildHeadersAndStringLiteral() {
   return buildHeaders();
 }
 
+// cofferdam-ignore: Refactor.UnusedVariable: declare statement type signature, not executed code
 declare function apiFetch(url: string): Promise<unknown>;
 declare const someClient: { fetch(url: string): Promise<unknown> };
 
