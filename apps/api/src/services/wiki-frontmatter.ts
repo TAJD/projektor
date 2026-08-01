@@ -62,9 +62,11 @@ export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
 	let raw: unknown;
 	try {
 		raw = parseYaml(match[1]);
-	} catch (e) {
+	} catch {
+		// Never interpolate the third-party YAML parser's own exception message —
+		// it can describe internal parser state, not just the caller's input.
 		throw new ValidationError({
-			formErrors: [`Invalid YAML frontmatter: ${e instanceof Error ? e.message : String(e)}`],
+			formErrors: ["Invalid YAML frontmatter"],
 			fieldErrors: {},
 		});
 	}

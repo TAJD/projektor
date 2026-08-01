@@ -157,8 +157,8 @@ router.post("/:workspaceId", async (c) => {
 					})
 				);
 			} catch (err) {
-				const { code, message } = toMcpError(err);
-				return c.json(jsonRpcError(body.id, code, message));
+				const { code, message, data } = toMcpError(err);
+				return c.json(jsonRpcError(body.id, code, message, data));
 			}
 		}
 
@@ -199,9 +199,15 @@ function jsonRpcResult(id: unknown, result: unknown) {
 	return { jsonrpc: "2.0", id, result };
 }
 
-function jsonRpcError(id: unknown, code: number, message: string) {
+function jsonRpcError(id: unknown, code: number, message: string, data?: unknown) {
 	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: this returns a JSON-RPC error object per spec (jsonrpc 2.0), not a code-style error-shaped return
-	return { jsonrpc: "2.0", id, error: { code, message } };
+	// `data` is the JSON-RPC 2.0 spec's optional error.data member — omitted entirely
+	// (not sent as `null`/`undefined`) when the error has no structured payload.
+	return {
+		jsonrpc: "2.0",
+		id,
+		error: data === undefined ? { code, message } : { code, message, data },
+	};
 }
 
 export { router as mcpRouter };

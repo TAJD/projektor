@@ -13,7 +13,11 @@ import {
 } from "./helpers";
 
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
-type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
+type JsonRpcError = {
+	jsonrpc: "2.0";
+	id: unknown;
+	error: { code: number; message: string; data?: unknown };
+};
 
 async function mcpCall<T>(
 	workspaceId: string,
@@ -2319,16 +2323,13 @@ describe("Wiki optimistic locking (PROJ-484)", () => {
 		expect(isMcpError(conflictResult)).toBe(true);
 		if (isMcpError(conflictResult)) {
 			expect(conflictResult.error.code).toBe(-32000);
-			const parsed = JSON.parse(conflictResult.error.message) as {
-				currentRevisionId: string;
-				diff: string;
-			};
-			expect(parsed.currentRevisionId).toBe(currentLatest.id);
+			const data = conflictResult.error.data as { currentRevisionId: string; diff: string };
+			expect(data.currentRevisionId).toBe(currentLatest.id);
 			// staleRevision snapshots the pre-edit content of the FIRST edit ("v1"); the
 			// content the caller actually had is the NEXT revision's snapshot ("v2"), which
 			// is the correct diff base — not staleRevision's own "v1".
-			expect(parsed.diff).toContain("v2");
-			expect(parsed.diff).toContain("v3");
+			expect(data.diff).toContain("v2");
+			expect(data.diff).toContain("v3");
 		}
 	});
 });
@@ -2985,8 +2986,8 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(isMcpError(conflict)).toBe(true);
 		if (isMcpError(conflict)) {
 			expect(conflict.error.code).toBe(-32000);
-			const parsed = JSON.parse(conflict.error.message) as { currentRevisionId: string };
-			expect(typeof parsed.currentRevisionId).toBe("string");
+			const data = conflict.error.data as { currentRevisionId: string };
+			expect(typeof data.currentRevisionId).toBe("string");
 		}
 
 		const missingHeading = await mcp("patch_wiki_page", {
@@ -2998,8 +2999,41 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		});
 		expect(isMcpError(missingHeading)).toBe(true);
 		if (isMcpError(missingHeading)) {
-			const parsed = JSON.parse(missingHeading.error.message) as { currentHeadings: string[] };
-			expect(parsed.currentHeadings).toEqual(["Alpha", "Beta"]);
+			const data = missingHeading.error.data as { currentHeadings: string[] };
+			expect(data.currentHeadings).toEqual(["Alpha", "Beta"]);
+		}
+	});
+
+	// PROJ-523: the sibling ambiguous-heading case is a ValidationError, not a
+	// NotFoundError — before PROJ-508's error.data plumbing it collapsed to a bare
+	// "Invalid params" over MCP, dropping the duplicate-heading detail REST callers
+	// got via body.error.formErrors. Twin of the REST test below.
+	it("MCP: patch_wiki_page rejects an ambiguous heading with formErrors in error.data", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcp("create_wiki_page", {
+				title: "MCP Patch Ambiguous",
+				content: "# Notes\nOne.\n\n## Other\nx\n\n## Notes\nTwo.\n",
+			})
+		);
+
+		const result = await mcp("patch_wiki_page", {
+			slug: created.slug,
+			op: "replace_section",
+			heading: "Notes",
+			text: "Replaced.",
+			baseRevisionId: null,
+		});
+		expect(isMcpError(result)).toBe(true);
+		if (isMcpError(result)) {
+			expect(result.error.code).toBe(-32602);
+			expect(result.error.message).toContain("Invalid params");
+			expect(result.error.message).toContain("ambiguous");
+			const data = result.error.data as {
+				formErrors: string[];
+				fieldErrors: Record<string, string[]>;
+			};
+			expect(data.formErrors.join(" ")).toContain("ambiguous");
+			expect(data.fieldErrors.heading).toEqual(["h1", "h2"]);
 		}
 	});
 
@@ -3078,8 +3112,11 @@ describe("Wiki patch operations (PROJ-490)", () => {
 			}),
 		});
 		expect(res.status).toBe(400);
-		const body = (await res.json()) as { error: { formErrors: string[] } };
+		const body = (await res.json()) as {
+			error: { formErrors: string[]; fieldErrors: Record<string, string[]> };
+		};
 		expect(body.error.formErrors.join(" ")).toContain("ambiguous");
+		expect(body.error.fieldErrors.heading).toEqual(["h1", "h2"]);
 		// Nothing was written.
 		expect((await getPage("patch-ambiguous")).content).toBe(content);
 	});

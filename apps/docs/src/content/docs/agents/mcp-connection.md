@@ -277,6 +277,13 @@ Error codes: `-32600` invalid request, `-32601` method/tool not found, `-32602` 
 | `-32003` | Token lacks the required scope |
 | `-32000` | Other (not found, forbidden, conflict) |
 
+Errors carrying structured detail beyond the message also set the JSON-RPC 2.0
+`error.data` member — e.g. a `-32602` from a validation failure sets `data` to the
+Zod-flattened issues (`formErrors`/`fieldErrors`), and a `-32000` conflict or
+not-found error sets `data` to its detail payload (e.g. `currentRevisionId`/`diff`,
+or `currentHeadings`). `data` is omitted entirely when an error has no structured
+detail beyond its message.
+
 ### Stable API contracts
 
 These are the load-bearing shapes the Worker enforces - verified against the source:

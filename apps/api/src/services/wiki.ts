@@ -1428,7 +1428,10 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 						`(levels ${currentMatches.map((s) => `h${s.level}`).join(", ")}); ` +
 						"patch operations need a unique heading",
 				],
-				fieldErrors: {},
+				// PROJ-523: alongside the prose, expose which heading levels collided as a
+				// structured field — an agent shouldn't have to regex the sentence to recover
+				// this, and NotFoundError's sibling case already hands back currentHeadings.
+				fieldErrors: { heading: currentMatches.map((s) => `h${s.level}`) },
 			});
 		}
 		const currentSection = currentMatches[0];

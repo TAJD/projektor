@@ -13,7 +13,11 @@ import {
 } from "./helpers";
 
 type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
-type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
+type JsonRpcError = {
+	jsonrpc: "2.0";
+	id: unknown;
+	error: { code: number; message: string; data?: unknown };
+};
 
 async function mcpFetch(
 	workspaceId: string,
@@ -210,6 +214,36 @@ describe("MCP endpoint", () => {
 		)) as JsonRpcError;
 		expect(res.error.code).toBe(-32601);
 		expect(res.error.message).toContain("does_not_exist");
+	});
+
+	// PROJ-508: a ValidationError's Zod issues now travel in the JSON-RPC 2.0
+	// `error.data` member instead of being dropped behind the bare "Invalid params"
+	// message.
+	it("tools/call ValidationError carries Zod issues in error.data", async () => {
+		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+			workspaceId,
+			"tools/call",
+			{ name: "create_issue", arguments: { projectId, title: 123 } },
+			headers
+		)) as JsonRpcError;
+		expect(res.error.code).toBe(-32602);
+		expect(res.error.message).toContain("Invalid params");
+		const data = res.error.data as { formErrors: string[]; fieldErrors: Record<string, string[]> };
+		expect(data.fieldErrors.title).toBeTruthy();
+		expect(res.error.message).toContain("title");
+	});
+
+	// A ServiceError with no structured `details` (e.g. a plain ValidationError-less
+	// not-found) still omits `data` entirely rather than sending it as null.
+	it("tools/call error without structured details omits error.data", async () => {
+		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+			workspaceId,
+			"tools/call",
+			{ name: "get_issue", arguments: { id: crypto.randomUUID() } },
+			headers
+		)) as JsonRpcError;
+		expect(res.error.code).toBe(-32000);
+		expect("data" in res.error).toBe(false);
 	});
 
 	// --- Issues: REST/MCP parity tests ---
