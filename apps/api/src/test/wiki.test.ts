@@ -1120,22 +1120,32 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(res.status).toBe(400);
 	});
 
-	it("POST /api/wiki rejects a symbol-only title whose derived slug would be empty (PROJ-517 finding 3, 400)", async () => {
+	it("POST /api/wiki falls back to an opaque slug for a symbol-only/non-Latin title whose derived slug would be empty (PROJ-517/512 finding 5)", async () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
 			body: JSON.stringify({ title: "測試", content: "v1" }),
 		});
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(201);
+		const page = (await res.json()) as { slug: string; id: string };
+		expect(page.slug).toMatch(/^page-[0-9a-f]{8}$/);
+
+		const getRes = await SELF.fetch(`http://localhost/api/wiki/${page.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const fetched = (await getRes.json()) as { title: string };
+		expect(fetched.title).toBe("測試");
 	});
 
-	it("POST /api/wiki rejects a title whose derived slug would exceed SlugSchema's 200-char max (PROJ-517 finding 3, 400)", async () => {
+	it("POST /api/wiki falls back to an opaque slug for a title whose derived slug would exceed SlugSchema's 200-char max (PROJ-517/512 finding 5)", async () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
 			body: JSON.stringify({ title: "a".repeat(300), content: "v1" }),
 		});
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(201);
+		const page = (await res.json()) as { slug: string };
+		expect(page.slug).toMatch(/^page-[0-9a-f]{8}$/);
 	});
 
 	it("MCP create_wiki_page rejects a slug containing '/' (PROJ-517, REST/MCP parity)", async () => {
@@ -3244,6 +3254,17 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 		});
 		const backlinks = (await res.json()) as Array<{ slug: string }>;
 		expect(backlinks.map((b) => b.slug)).toEqual(["gamma"]);
+	});
+
+	it("PROJ-517/512: a multi-segment /wiki/ URL is never indexed against the first segment's page", async () => {
+		const operations = await createPage("Operations", "contents");
+		await createPage("Runbook", `[Runbook](/wiki/${operations.slug}/admin-allow-list)`);
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${operations.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		const backlinks = (await res.json()) as Array<{ slug: string }>;
+		expect(backlinks).toEqual([]);
 	});
 
 	it("an absolute cross-host URL is never indexed as a same-workspace link", async () => {
