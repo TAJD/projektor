@@ -352,7 +352,7 @@ function useIssueCore({
 	};
 }
 
-function useIssueMutations(args: {
+function useIssueMutations(args: Readonly<{
 	issue: IssueData | null;
 	setIssue: (updater: (prev: IssueData | null) => IssueData | null) => void;
 	issueId: string;
@@ -360,7 +360,7 @@ function useIssueMutations(args: {
 	statuses: TaskStatus[];
 	members: Member[];
 	fetchIssue: () => Promise<void>;
-}) {
+}>) {
 	const { issue, setIssue, issueId, workspaceSlug, statuses, members, fetchIssue } = args;
 	const [updatingStatus, setUpdatingStatus] = useState(false);
 	const [updatingPriority, setUpdatingPriority] = useState(false);
@@ -473,7 +473,7 @@ function IssueBreadcrumb({ issue, backHref }: { issue: IssueData; backHref: stri
 	);
 }
 
-function IssueDetailView(props: {
+function IssueDetailView(props: Readonly<{
 	issue: IssueData;
 	issueId: string;
 	workspaceSlug?: string;
@@ -500,7 +500,7 @@ function IssueDetailView(props: {
 	changePriority: (priority: string) => void;
 	changeAssignee: (assigneeId: string) => void;
 	fetchIssue: () => Promise<void>;
-}) {
+}>) {
 	const { issue, issueId, workspaceSlug } = props;
 	return (
 		<article class="max-w-[900px] mx-auto">

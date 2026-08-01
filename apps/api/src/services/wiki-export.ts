@@ -166,7 +166,7 @@ function ensureFrontmatter(page: ExportedPage): string {
 // pointer attachments have an empty r2_key and nothing to zip).
 async function collectAttachments(
 	ctx: ServiceCtx,
-	pages: ExportedPage[]
+	pages: readonly ExportedPage[]
 ): Promise<Array<{ pageSlug: string; filename: string; r2Key: string; size: number }>> {
 	if (pages.length === 0) return [];
 	const orm = drizzle(ctx.db, { schema });

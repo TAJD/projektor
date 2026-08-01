@@ -161,7 +161,7 @@ interface ToolbarProps extends FilterSelectsProps {
 	isSearchActive: boolean;
 	searchInputRef: RefObject<HTMLInputElement>;
 
-	derivedStatuses: TaskStatus[];
+	derivedStatuses: readonly TaskStatus[];
 	filterStatuses: string[];
 	setFilterStatuses: Dispatch<StateUpdater<string[]>>;
 	filterPriorities: string[];

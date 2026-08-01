@@ -99,7 +99,7 @@ const WIKI_WELL_KNOWN_TYPES = new Set(WIKI_TYPE_FILTER_OPTIONS.map((o) => o.valu
 // case-insensitively (frontmatter `type` is never case-normalized) so e.g. `Runbook`
 // doesn't produce a second, visually-indistinguishable entry alongside the well-known
 // lowercase `runbook`.
-function buildTypeFilterOptions(discoveredTypes: string[]): SelectOption[] {
+function buildTypeFilterOptions(discoveredTypes: readonly string[]): SelectOption[] {
 	const seen = new Set(Array.from(WIKI_WELL_KNOWN_TYPES).map((t) => t.toLowerCase()));
 	const extras: string[] = [];
 	for (const t of discoveredTypes) {
@@ -309,7 +309,7 @@ function formatBytes(bytes: number): string {
 
 // PROJ-514: walks the tree already fetched by useWikiTree to discover distinct `type`
 // values for the sidebar filter dropdown, instead of issuing a second unfiltered fetch.
-function collectTreeTypes(nodes: TreeNode[]): string[] {
+function collectTreeTypes(nodes: readonly TreeNode[]): string[] {
 	const types: string[] = [];
 	for (const node of nodes) {
 		if (node.type) types.push(node.type);
@@ -318,7 +318,7 @@ function collectTreeTypes(nodes: TreeNode[]): string[] {
 	return types;
 }
 
-function flattenTree(nodes: TreeNode[], parentId: string | null = null): Record<string, FlatEntry> {
+function flattenTree(nodes: readonly TreeNode[], parentId: string | null = null): Record<string, FlatEntry> {
 	const map: Record<string, FlatEntry> = {};
 	for (const node of nodes) {
 		map[node.id] = { id: node.id, slug: node.slug, title: node.title, parentId };
@@ -1678,7 +1678,7 @@ interface CreateFormProps {
 	onCancel: () => void;
 }
 
-function WikiMainContent(props: {
+function WikiMainContent(props: Readonly<{
 	creating: boolean;
 	createProps: CreateFormProps;
 	slug: string;
@@ -1686,7 +1686,7 @@ function WikiMainContent(props: {
 	error: string | null;
 	page: WikiPageData | null;
 	articleProps: Omit<PageArticleProps, "page">;
-}) {
+}>) {
 	if (props.creating) return <CreatePageForm {...props.createProps} />;
 	if (!props.slug) {
 		return <p class="text-text-muted">Select a page from the sidebar or create a new one.</p>;
@@ -1824,7 +1824,7 @@ function useWikiStalePages(workspaceSlug: string | undefined, projectId: string)
 function useWikiFilters(
 	workspaceSlug: string | undefined,
 	projectId: string,
-	pageTree: TreeNode[]
+	pageTree: readonly TreeNode[]
 ) {
 	const [filterType, setFilterType] = useState("");
 	const [filterStatus, setFilterStatus] = useState("");
@@ -1880,7 +1880,7 @@ function useWikiFilters(
 function useWikiSearch(
 	workspaceSlug: string | undefined,
 	projectId: string,
-	filters: { filterType: string; filterStatus: string; filterTags: string }
+	filters: Readonly<{ filterType: string; filterStatus: string; filterTags: string }>
 ) {
 	const [searchQuery, setSearchQuery] = useState("");
 	const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -2684,7 +2684,7 @@ function useCreatePageForm(
 	};
 }
 
-function createWikiActions(args: {
+function createWikiActions(args: Readonly<{
 	workspaceSlug: string | undefined;
 	page: WikiPageData | null;
 	fetchTree: () => Promise<void>;
@@ -2697,7 +2697,7 @@ function createWikiActions(args: {
 	rawStartCreate: (parentId: string | null) => void;
 	rawSubmitCreate: () => Promise<string | undefined>;
 	cancelMove: () => void;
-}) {
+}>) {
 	const {
 		workspaceSlug,
 		page,
@@ -2794,7 +2794,7 @@ const WIKI_PAGE_STYLES = `
 	}
 `;
 
-function WikiPageShell(props: {
+function WikiPageShell(props: Readonly<{
 	workspaceSlug: string | undefined;
 	projectId: string;
 	searchQuery: string;
@@ -2817,7 +2817,7 @@ function WikiPageShell(props: {
 		page: WikiPageData | null;
 		articleProps: Omit<PageArticleProps, "page">;
 	};
-}) {
+}>) {
 	return (
 		<div class="flex min-h-screen max-sm:flex-col">
 			<style>{WIKI_PAGE_STYLES}</style>
@@ -2861,7 +2861,7 @@ function deriveWikiPageState(
 	pageMap: Record<string, FlatEntry>,
 	editState: ReturnType<typeof useWikiEditing>,
 	createForm: ReturnType<typeof useCreatePageForm>,
-	toc: TocItem[]
+	toc: readonly TocItem[]
 ) {
 	const latestRevision = pageData.revisions[0] ?? null;
 	// Breadcrumbs for current page (PROJ-114)
@@ -2881,7 +2881,7 @@ function deriveWikiPageState(
 	return { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions };
 }
 
-function buildCreateFormProps(create: {
+function buildCreateFormProps(create: Readonly<{
 	createParentTitle: string | null;
 	createTitle: string;
 	createSlug: string;
@@ -2896,7 +2896,7 @@ function buildCreateFormProps(create: {
 	onCreateTemplateChange: (v: string) => void;
 	submitCreate: () => void;
 	cancelCreate: () => void;
-}): CreateFormProps {
+}>): CreateFormProps {
 	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data, error, loading} state so components can render error UI declaratively — standard pattern in this codebase's data hooks
 	return {
 		parentTitle: create.createParentTitle,
@@ -2916,7 +2916,7 @@ function buildCreateFormProps(create: {
 	};
 }
 
-function buildArticleProps(article: {
+function buildArticleProps(article: Readonly<{
 	breadcrumbs: FlatEntry[];
 	navigateTo: (slug: string) => void;
 	showToc: boolean;
@@ -2952,7 +2952,7 @@ function buildArticleProps(article: {
 	workspaceSlug: string | undefined;
 	move: ReturnType<typeof useMovePage>;
 	moveOptions: SelectOption[];
-}): Omit<PageArticleProps, "page"> {
+}>): Omit<PageArticleProps, "page"> {
 	return {
 		breadcrumbs: article.breadcrumbs,
 		onNavigate: article.navigateTo,

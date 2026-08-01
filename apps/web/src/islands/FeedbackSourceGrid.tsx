@@ -101,7 +101,7 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 	const [showCreate, setShowCreate] = useState(false);
 
 	const fetchAll = useCallback(
-		async (opts?: { background?: boolean }) => {
+		async (opts?: Readonly<{ background?: boolean }>) => {
 			if (!projectId) return;
 			if (!opts?.background) setLoading(true);
 			setError(null);

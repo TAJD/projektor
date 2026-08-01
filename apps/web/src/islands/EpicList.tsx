@@ -82,22 +82,22 @@ function persistResolvedProjectId(resolved: string) {
 function resolveProjectId(
 	prev: string | null,
 	stored: string | null,
-	projects: ProjectMeta[]
+	projects: readonly ProjectMeta[]
 ): string | null {
 	if (prev) return prev;
 	const validated = stored && projects.some((p) => p.id === stored) ? stored : null;
 	return validated ?? projects[0]?.id ?? null;
 }
 
-function defaultCreateProjectId(projectId: string | null, projects: ProjectMeta[]): string {
+function defaultCreateProjectId(projectId: string | null, projects: readonly ProjectMeta[]): string {
 	if (projectId) return projects.find((p) => p.id === projectId)?.id ?? projects[0]?.id ?? "";
 	return projects[0]?.id ?? "";
 }
 
 function computeFilteredEpics(
-	epics: Issue[],
-	filterStatuses: string[],
-	filterPriorities: string[]
+	epics: readonly Issue[],
+	filterStatuses: readonly string[],
+	filterPriorities: readonly string[]
 ): Issue[] {
 	return epics.filter((ep) => {
 		if (filterStatuses.length > 0 && (!ep.status_id || !filterStatuses.includes(ep.status_id)))
@@ -107,7 +107,7 @@ function computeFilteredEpics(
 	});
 }
 
-function computeDerivedStatuses(epics: Issue[]): TaskStatus[] {
+function computeDerivedStatuses(epics: readonly Issue[]): TaskStatus[] {
 	const derived: TaskStatus[] = [];
 	const seen = new Set<string>();
 	for (const ep of epics) {
@@ -363,7 +363,7 @@ function useEpicsData({
 function useCreateEpicForm(
 	workspaceSlug: string | undefined,
 	projectId: string | null,
-	projects: ProjectMeta[],
+	projects: readonly ProjectMeta[],
 	epicTypeId: string | null,
 	fetchEpics: () => Promise<void>
 ) {

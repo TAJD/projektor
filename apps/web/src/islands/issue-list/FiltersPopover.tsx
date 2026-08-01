@@ -16,7 +16,7 @@ function StatusPills({
 	filterStatuses,
 	setFilterStatuses,
 }: {
-	derivedStatuses: TaskStatus[];
+	derivedStatuses: readonly TaskStatus[];
 	filterStatuses: string[];
 	setFilterStatuses: Dispatch<StateUpdater<string[]>>;
 }) {
@@ -153,7 +153,7 @@ function DateRangeFilter({
 }
 
 interface FiltersPopoverProps {
-	derivedStatuses: TaskStatus[];
+	derivedStatuses: readonly TaskStatus[];
 	filterStatuses: string[];
 	setFilterStatuses: Dispatch<StateUpdater<string[]>>;
 	filterPriorities: string[];

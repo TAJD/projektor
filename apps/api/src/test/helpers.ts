@@ -37,7 +37,7 @@ export async function seedMember(workspaceId: string, userId: string, role = "me
 export async function seedToken(
 	workspaceId: string,
 	userId: string,
-	opts?: { scopes?: string[]; expiresAt?: number }
+	opts?: Readonly<{ scopes?: string[]; expiresAt?: number }>
 ): Promise<string> {
 	const raw = `tok_${crypto.randomUUID().replace(/-/g, "")}`;
 	const hash = await hashToken(raw);
@@ -63,7 +63,7 @@ export async function seedToken(
 /** Seed a user-scoped token (NULL workspace_id — valid across all the user's workspaces). */
 export async function seedUserToken(
 	userId: string,
-	opts?: { scopes?: string[]; expiresAt?: number }
+	opts?: Readonly<{ scopes?: string[]; expiresAt?: number }>
 ): Promise<string> {
 	const raw = `tok_${crypto.randomUUID().replace(/-/g, "")}`;
 	const hash = await hashToken(raw);
@@ -155,7 +155,7 @@ export async function seedComment(
 
 export async function seedTaskType(
 	workspaceId: string,
-	opts?: { id?: string; key?: string; name?: string; isDefault?: boolean; position?: number }
+	opts?: Readonly<{ id?: string; key?: string; name?: string; isDefault?: boolean; position?: number }>
 ) {
 	const id = opts?.id ?? crypto.randomUUID();
 	const key = opts?.key ?? `type-${id.slice(0, 8)}`;
@@ -170,7 +170,7 @@ export async function seedTaskType(
 
 export async function seedTaskStatus(
 	workspaceId: string,
-	opts?: { key?: string; name?: string; category?: string; isDefault?: boolean; position?: number }
+	opts?: Readonly<{ key?: string; name?: string; category?: string; isDefault?: boolean; position?: number }>
 ) {
 	const id = crypto.randomUUID();
 	const key = opts?.key ?? `status-${id.slice(0, 8)}`;
@@ -195,7 +195,7 @@ export async function seedIssue(
 	workspaceId: string,
 	projectId: string,
 	createdById: string,
-	opts?: {
+	opts?: Readonly<{
 		title?: string;
 		status?: string;
 		statusId?: string;
@@ -204,7 +204,7 @@ export async function seedIssue(
 		parentId?: string;
 		typeId?: string;
 		createdAt?: number;
-	}
+	}>
 ) {
 	const id = crypto.randomUUID();
 	const now = opts?.createdAt ?? Math.floor(Date.now() / 1000);
@@ -244,13 +244,13 @@ export async function seedIssue(
 
 export async function seedCustomFieldDef(
 	workspaceId: string,
-	opts: {
+	opts: Readonly<{
 		key: string;
 		label?: string;
 		type?: string;
 		options?: string[];
 		projectId?: string | null;
-	}
+	}>
 ) {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -290,7 +290,7 @@ export async function seedCustomFieldValue(issueId: string, fieldId: string, val
 export async function seedAgentLease(
 	workspaceId: string,
 	issueId: string,
-	opts?: { kind?: "agent" | "human"; live?: boolean; name?: string }
+	opts?: Readonly<{ kind?: "agent" | "human"; live?: boolean; name?: string }>
 ): Promise<{ agentSessionId: string; leaseId: string }> {
 	const now = Math.floor(Date.now() / 1000);
 	const live = opts?.live ?? true;
@@ -331,7 +331,7 @@ export async function seedAgentLease(
 }
 
 /** Seed a complete workspace + user + member + token in one call */
-export async function seedFixture(opts?: { slug?: string; email?: string; role?: string }) {
+export async function seedFixture(opts?: Readonly<{ slug?: string; email?: string; role?: string }>) {
 	const workspace = await seedWorkspace(opts?.slug ?? `ws-${crypto.randomUUID().slice(0, 8)}`);
 	const user = await seedUser(opts?.email ?? `u-${crypto.randomUUID().slice(0, 8)}@example.com`);
 	await seedMember(workspace.id, user.id, opts?.role ?? "member");
@@ -340,7 +340,7 @@ export async function seedFixture(opts?: { slug?: string; email?: string; role?:
 }
 
 /** Seed a workspace fixture plus a project in it — the common `beforeEach` shape across API tests. */
-export async function seedProjectFixture(opts?: { role?: string }) {
+export async function seedProjectFixture(opts?: Readonly<{ role?: string }>) {
 	const fixture = await seedFixture({ role: opts?.role });
 	const project = await seedProject(fixture.workspace.id);
 	// PROJ-311: access is default-deny, so a non-admin fixture would otherwise see
@@ -360,7 +360,7 @@ export async function seedProjectFixture(opts?: { role?: string }) {
 }
 
 /** Seed a project fixture plus an issue in it. */
-export async function seedIssueFixture(opts?: { role?: string; issueTitle?: string }) {
+export async function seedIssueFixture(opts?: Readonly<{ role?: string; issueTitle?: string }>) {
 	const base = await seedProjectFixture({ role: opts?.role });
 	const issue = await seedIssue(base.workspaceId, base.projectId, base.userId, {
 		title: opts?.issueTitle ?? "Test Issue",

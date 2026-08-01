@@ -75,7 +75,7 @@ const OPEN_ISSUE_PROJ_B: Issue = {
 	created_at: 1000,
 };
 
-function setupFetch(issues: Issue[] = [OPEN_ISSUE_PROJ_A, DONE_ISSUE_PROJ_A, OPEN_ISSUE_PROJ_B]) {
+function setupFetch(issues: readonly Issue[] = [OPEN_ISSUE_PROJ_A, DONE_ISSUE_PROJ_A, OPEN_ISSUE_PROJ_B]) {
 	return vi.fn().mockImplementation((url: string) => {
 		const u = String(url);
 		if (u.includes("/api/issues")) {

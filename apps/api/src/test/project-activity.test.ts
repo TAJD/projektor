@@ -36,7 +36,7 @@ function parseEvents(res: JsonRpcResult<McpContent> | JsonRpcError): unknown[] {
 async function seedSprint(
 	workspaceId: string,
 	projectId: string,
-	opts: { name?: string; status?: string; startDate?: number; endDate?: number } = {}
+	opts: Readonly<{ name?: string; status?: string; startDate?: number; endDate?: number }> = {}
 ) {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -63,7 +63,7 @@ async function seedWikiPage(
 	workspaceId: string,
 	projectId: string,
 	authorId: string,
-	opts: { title?: string; slug?: string; updatedAt?: number; deletedAt?: number } = {}
+	opts: Readonly<{ title?: string; slug?: string; updatedAt?: number; deletedAt?: number }> = {}
 ) {
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);

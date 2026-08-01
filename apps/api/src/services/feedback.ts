@@ -401,7 +401,7 @@ interface FeedbackSummaryRow {
 
 export async function getFeedbackSummary(
 	ctx: ServiceCtx,
-	input: { projectId: string }
+	input: Readonly<{ projectId: string }>
 ): Promise<FeedbackSourceSummary[]> {
 	const { projectId } = input;
 

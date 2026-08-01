@@ -62,7 +62,7 @@ export default defineConfig({
     // These are expected — every failing test asserts the resulting JSON-RPC
     // error and passes. Suppress only our discriminated ServiceError kinds;
     // any other unhandled error still fails the run.
-    onUnhandledError(error: { kind?: string }) {
+    onUnhandledError(error: Readonly<{ kind?: string }>) {
       const KNOWN = ['validation', 'not_found', 'forbidden', 'conflict']
       if (error?.kind && KNOWN.includes(error.kind)) return false
     },

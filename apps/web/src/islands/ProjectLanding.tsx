@@ -68,11 +68,11 @@ function sortByRecency<T extends { updated_at: number }>(items: unknown, limit: 
 async function loadProjectData(
 	idOrSlug: string,
 	workspaceSlug: string | undefined,
-	setters: {
+	setters: Readonly<{
 		setProject: (p: Project) => void;
 		setRecentIssues: (v: RecentIssue[]) => void;
 		setRecentWiki: (v: RecentWikiPage[]) => void;
-	}
+	}>
 ) {
 	// /api/projects/:id resolves either a UUID or a slug, but the issues/wiki
 	// endpoints below filter on the real project UUID — resolve the project first.

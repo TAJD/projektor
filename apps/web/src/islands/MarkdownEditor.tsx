@@ -44,7 +44,7 @@ function imageFilesFromDrop(data: DataTransfer | null): File[] {
 // positions. A file whose upload fails (onImageFile resolves null) is silently skipped.
 async function insertUploadedImages(
 	view: EditorView,
-	files: File[],
+	files: readonly File[],
 	pos: number,
 	onImageFile: (file: File) => Promise<string | null>
 ): Promise<void> {
@@ -353,7 +353,7 @@ function useMarkdownEditorView(
 	return { containerRef, viewRef };
 }
 
-function useMarkdownCommands(viewRef: { current: EditorView | null }) {
+function useMarkdownCommands(viewRef: Readonly<{ current: EditorView | null }>) {
 	function bold() {
 		if (viewRef.current) wrapSelection(viewRef.current, "**", "**");
 	}

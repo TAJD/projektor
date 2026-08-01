@@ -17,7 +17,7 @@ const TOKEN = {
 	createdAt: 1000,
 };
 
-function mockFetchTokens(tokens: (typeof TOKEN)[] = [TOKEN]) {
+function mockFetchTokens(tokens: readonly (typeof TOKEN)[] = [TOKEN]) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {

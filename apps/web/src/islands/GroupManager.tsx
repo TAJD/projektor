@@ -215,7 +215,7 @@ function useGroupActions(
 
 // WAI-ARIA tabs pattern: arrow keys move focus AND activate (automatic
 // activation), Home/End jump to the first/last tab.
-function nextTabId(tabs: TabId[], activeTab: TabId, key: string): TabId | null {
+function nextTabId(tabs: readonly TabId[], activeTab: TabId, key: string): TabId | null {
 	const idx = tabs.indexOf(activeTab);
 	if (key === "ArrowRight") return tabs[(idx + 1) % tabs.length];
 	if (key === "ArrowLeft") return tabs[(idx - 1 + tabs.length) % tabs.length];
@@ -236,7 +236,7 @@ function useTabRefs() {
 // Role indicator — tells the caller what they can do here
 // ---------------------------------------------------------------------------
 
-function RoleBanner(props: { role: string; isAdmin: boolean }) {
+function RoleBanner(props: Readonly<{ role: string; isAdmin: boolean }>) {
 	return (
 		<div class={INFO}>
 			<span class={ROLE_TAG}>{props.role}</span>
@@ -253,10 +253,10 @@ function RoleBanner(props: { role: string; isAdmin: boolean }) {
 // Members overview — group chips + pending badge
 // ---------------------------------------------------------------------------
 
-function MemberGroupsCell(props: {
+function MemberGroupsCell(props: Readonly<{
 	member: WsMember;
 	groups: Array<{ id: string; name: string }>;
-}) {
+}>) {
 	const isAdmin = props.member.role === "owner" || props.member.role === "admin";
 	if (isAdmin) {
 		return <span class="text-[0.78rem] text-text-muted">All projects (bypasses groups)</span>;
@@ -273,10 +273,10 @@ function MemberGroupsCell(props: {
 	);
 }
 
-function MembersMobileCards(props: {
+function MembersMobileCards(props: Readonly<{
 	members: WsMember[];
 	groupsByUser: Map<string, Array<{ id: string; name: string }>>;
-}) {
+}>) {
 	return (
 		<div class="hidden max-sm:flex max-sm:flex-col max-sm:gap-3">
 			{props.members.map((m) => (
@@ -293,7 +293,7 @@ function MembersMobileCards(props: {
 	);
 }
 
-function MembersOverview(props: { members: WsMember[]; memberGroups: MemberGroupsRow[] }) {
+function MembersOverview(props: Readonly<{ members: WsMember[]; memberGroups: MemberGroupsRow[] }>) {
 	const groupsByUser = new Map(props.memberGroups.map((r) => [r.userId, r.groups]));
 	return (
 		<section class={CARD}>

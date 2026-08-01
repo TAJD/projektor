@@ -58,14 +58,14 @@ async function loadActiveClaimsByPath(
 
 async function assertNoConflicts(
 	orm: ReturnType<typeof drizzle>,
-	params: {
+	params: Readonly<{
 		workspaceId: string;
 		issueId: string;
 		agentId: string | undefined;
 		paths: string[];
 		claimsByPath: Map<string, { issueId: string; agentId: string | null }>;
 		now: number;
-	}
+	}>
 ) {
 	const { workspaceId, issueId, agentId, paths, claimsByPath, now } = params;
 	// Record every contended path (rejection is all-or-nothing, but each simultaneously
@@ -98,14 +98,14 @@ async function assertNoConflicts(
 async function overrideConflictingClaims(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
-	params: {
+	params: Readonly<{
 		workspaceId: string;
 		issueId: string;
 		agentId: string | undefined;
 		paths: string[];
 		claimsByPath: Map<string, typeof schema.issueFileClaims.$inferSelect>;
 		now: number;
-	}
+	}>
 ) {
 	const { workspaceId, issueId, agentId, paths, claimsByPath, now } = params;
 	const overridden: (typeof schema.issueFileClaims.$inferSelect)[] = [];
@@ -140,13 +140,13 @@ async function overrideConflictingClaims(
 
 async function insertClaims(
 	orm: ReturnType<typeof drizzle>,
-	params: {
+	params: Readonly<{
 		workspaceId: string;
 		issueId: string;
 		agentId: string | undefined;
 		paths: string[];
 		now: number;
-	}
+	}>
 ) {
 	const { workspaceId, issueId, agentId, paths, now } = params;
 	const created: (typeof schema.issueFileClaims.$inferSelect)[] = [];

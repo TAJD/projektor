@@ -5328,7 +5328,7 @@ describe("Wiki trash (PROJ-496)", () => {
 			headers: authHeaders(token, slug),
 		});
 		type TreeNode = { id: string; children: TreeNode[] };
-		const flatten = (nodes: TreeNode[]): string[] =>
+		const flatten = (nodes: readonly TreeNode[]): string[] =>
 			nodes.flatMap((n) => [n.id, ...flatten(n.children ?? [])]);
 		expect(flatten((await treeRes.json()) as TreeNode[])).not.toContain(page.id);
 

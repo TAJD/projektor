@@ -278,7 +278,7 @@ async function validateUpdatedPageParent(
 	db: D1Database,
 	parentId: string,
 	workspaceId: string,
-	page: { id: string; projectId: string | null }
+	page: Readonly<{ id: string; projectId: string | null }>
 ): Promise<void> {
 	const orm = drizzle(db, { schema });
 	const parentPage = await orm
@@ -311,13 +311,13 @@ async function validateUpdatedPageParent(
 function buildWikiPageUpdateSet(
 	now: number,
 	updatedById: string,
-	fields: {
+	fields: Readonly<{
 		title?: string;
 		content?: string;
 		parentId?: string | null;
 		slug?: string;
 		meta?: WikiFrontmatterMeta;
-	}
+	}>
 ): Record<string, unknown> {
 	const setData: Record<string, unknown> = { updatedAt: now, updatedById };
 	if (fields.title !== undefined) setData.title = fields.title;
@@ -339,10 +339,12 @@ function buildWikiPageUpdateSet(
 	return setData;
 }
 
-function buildWikiPageUpdateDiff(fields: {
-	title?: string;
-	content?: string;
-}): Record<string, unknown> {
+function buildWikiPageUpdateDiff(
+	fields: Readonly<{
+		title?: string;
+		content?: string;
+	}>
+): Record<string, unknown> {
 	const diff: Record<string, unknown> = {};
 	if (fields.title !== undefined) diff.title = fields.title;
 	if (fields.content !== undefined) diff.content = fields.content;
@@ -354,7 +356,7 @@ function buildWikiPageUpdateDiff(fields: {
 // way to query into a JSON array column without denormalizing it into its own table;
 // `tags` has no direct index (see 0045_wiki_frontmatter.sql), so this is a per-row
 // scan, acceptable at current wiki sizes — revisit with a join table if it becomes hot.
-function tagsFilterCondition(tags: string[]) {
+function tagsFilterCondition(tags: readonly string[]) {
 	if (tags.length === 0) return undefined;
 	return sql`EXISTS (SELECT 1 FROM json_each(${schema.wikiPages.tags}) WHERE value IN (${sql.join(
 		tags.map((t) => sql`${t}`),
@@ -936,7 +938,7 @@ const MAX_DIFF_CELLS = 1_000_000;
 
 type DiffOp = { type: "equal" | "add" | "remove"; line: string };
 
-function computeLineDiff(oldLines: string[], newLines: string[]): DiffOp[] {
+function computeLineDiff(oldLines: readonly string[], newLines: readonly string[]): DiffOp[] {
 	const n = oldLines.length;
 	const m = newLines.length;
 	if (n * m > MAX_DIFF_CELLS) {
@@ -1041,7 +1043,7 @@ export function buildUnifiedDiff(baseContent: string, currentContent: string): s
 // D1PreparedStatement, not drizzle's own query builders.
 function toD1Statement(
 	ctx: ServiceCtx,
-	query: { sql: string; params: unknown[] }
+	query: Readonly<{ sql: string; params: unknown[] }>
 ): D1PreparedStatement {
 	return ctx.db.prepare(query.sql).bind(...query.params);
 }
@@ -1055,7 +1057,7 @@ function buildFtsInsertStatement(
 	id: string,
 	title: string,
 	content: string,
-	tags: string[]
+	tags: readonly string[]
 ): D1PreparedStatement {
 	// PROJ-488: tags is space-joined — wiki_fts's default unicode61 tokenizer splits on
 	// non-alphanumeric, so a comma join would tokenize identically, but space matches how
@@ -1129,13 +1131,13 @@ function buildUpdateWikiPageStatements(
 	now: number,
 	isRename: boolean,
 	meta: ReturnType<typeof parseWikiFrontmatter> | undefined,
-	fields: {
+	fields: Readonly<{
 		title?: string;
 		content?: string;
 		parentId?: string | null;
 		slug?: string;
 		summary?: string;
-	}
+	}>
 ): D1PreparedStatement[] {
 	const { title, content, parentId, slug, summary } = fields;
 	const statements: D1PreparedStatement[] = [];
@@ -1507,7 +1509,7 @@ function parseHeadingSections(content: string): HeadingSection[] {
 	}));
 }
 
-function findSections(sections: HeadingSection[], heading: string): HeadingSection[] {
+function findSections(sections: readonly HeadingSection[], heading: string): HeadingSection[] {
 	const target = heading.trim();
 	return sections.filter((s) => s.heading === target);
 }
@@ -1516,13 +1518,13 @@ function extractSectionText(content: string, section: HeadingSection): string {
 	return content.split("\n").slice(section.startLine, section.endLine).join("\n");
 }
 
-function trimTrailingBlankLines(lines: string[]): string[] {
+function trimTrailingBlankLines(lines: readonly string[]): string[] {
 	const out = [...lines];
 	while (out.length > 0 && out[out.length - 1].trim() === "") out.pop();
 	return out;
 }
 
-function trimLeadingBlankLines(lines: string[]): string[] {
+function trimLeadingBlankLines(lines: readonly string[]): string[] {
 	const out = [...lines];
 	while (out.length > 0 && out[0].trim() === "") out.shift();
 	return out;

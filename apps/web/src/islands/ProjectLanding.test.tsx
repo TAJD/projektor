@@ -38,8 +38,8 @@ const WIKI_PAGE = {
 };
 
 function mockFetchProject(
-	issues: (typeof ISSUE)[] = [ISSUE],
-	wiki: unknown[] = [],
+	issues: readonly (typeof ISSUE)[] = [ISSUE],
+	wiki: readonly unknown[] = [],
 	flowMetrics: unknown = { throughputOverTime: [], cfdOverTime: [] }
 ) {
 	vi.stubGlobal(

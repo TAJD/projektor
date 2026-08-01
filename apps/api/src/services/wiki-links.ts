@@ -74,7 +74,7 @@ export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
 async function resolveTitleTargets(
 	orm: Orm,
 	workspaceId: string,
-	titles: string[]
+	titles: readonly string[]
 ): Promise<Map<string, string>> {
 	const byLower = new Map<string, string>();
 	if (titles.length === 0) return byLower;
@@ -149,7 +149,7 @@ type ResolvedLink = { targetPageId: string | null; targetTitle: string };
 async function resolveLinkTargets(
 	orm: Orm,
 	workspaceId: string,
-	targets: ParsedLinkTarget[]
+	targets: readonly ParsedLinkTarget[]
 ): Promise<ResolvedLink[]> {
 	// Dedupe by resolved page id (or the raw unresolved key) so a page linking to the
 	// same target multiple times only gets one wiki_links row.
@@ -387,7 +387,7 @@ export interface WikiBacklink {
  */
 export async function backlinksForResolvedPage(
 	ctx: ServiceCtx,
-	page: { id: string }
+	page: Readonly<{ id: string }>
 ): Promise<WikiBacklink[]> {
 	const orm = drizzle(ctx.db, { schema });
 	const rows = await orm
@@ -436,7 +436,7 @@ export async function backlinksForResolvedPage(
 // Resolves which of `rows` (all project-scoped) the caller has an effective grant on.
 async function visibleSourcePageIds(
 	ctx: ServiceCtx,
-	rows: Array<{ pageId: string; projectId: string | null }>
+	rows: ReadonlyArray<{ pageId: string; projectId: string | null }>
 ): Promise<string[]> {
 	if (rows.length === 0) return [];
 	const uniqueProjectIds = [
