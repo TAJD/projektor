@@ -281,6 +281,9 @@ describe("Wiki export (PROJ-497)", () => {
 		expect(names).toEqual(["pages/root.md"]);
 	});
 
+	// Follow-up: these two tests only assert the 400 status, not that the cap check ran
+	// before content was fetched — a mutation reverting the early-exit ordering would
+	// still pass. Properly covering that needs a query-recording proxy on ctx.db.
 	it("rejects a space export whose page count exceeds the cap before fetching content", async () => {
 		await seedManyPages(workspaceId, userId, MAX_EXPORT_PAGES + 1);
 

@@ -166,12 +166,13 @@ function ensureFrontmatter(page: ExportedPage): string {
 // pointer attachments have an empty r2_key and nothing to zip).
 async function collectAttachments(
 	ctx: ServiceCtx,
-	pageIds: string[]
+	pages: ExportedPage[]
 ): Promise<Array<{ pageSlug: string; filename: string; r2Key: string; size: number }>> {
-	if (pageIds.length === 0) return [];
+	if (pages.length === 0) return [];
 	const orm = drizzle(ctx.db, { schema });
 	const bySlug = new Map<string, string>();
-	for (const p of await pagesByIds(ctx, pageIds)) bySlug.set(p.id, p.slug);
+	for (const p of pages) bySlug.set(p.id, p.slug);
+	const pageIds = pages.map((p) => p.id);
 
 	const rows = await inChunks(pageIds, (chunk) =>
 		orm
@@ -240,10 +241,7 @@ async function buildZip(
 	ctx: ServiceCtx,
 	pages: ExportedPage[]
 ): Promise<ReadableStream<Uint8Array>> {
-	const attachments = await collectAttachments(
-		ctx,
-		pages.map((p) => p.id)
-	);
+	const attachments = await collectAttachments(ctx, pages);
 	const totalAttachmentBytes = attachments.reduce((sum, a) => sum + a.size, 0);
 	assertExportSizeAllowed(pages.length, totalAttachmentBytes);
 
