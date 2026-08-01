@@ -6,12 +6,12 @@ describe("safeDecodeURIComponent", () => {
 		expect(safeDecodeURIComponent("100%25")).toBe("100%");
 	});
 
-	it("returns an empty string for a bare '%' with no following hex digits", () => {
-		expect(safeDecodeURIComponent("100%")).toBe("");
+	it("returns null for a bare '%' with no following hex digits", () => {
+		expect(safeDecodeURIComponent("100%")).toBeNull();
 	});
 
-	it("returns an empty string for a non-hex escape ('%zz')", () => {
-		expect(safeDecodeURIComponent("a%zz")).toBe("");
+	it("returns null for a non-hex escape ('%zz')", () => {
+		expect(safeDecodeURIComponent("a%zz")).toBeNull();
 	});
 
 	it("passes through a string with no percent-escapes unchanged", () => {

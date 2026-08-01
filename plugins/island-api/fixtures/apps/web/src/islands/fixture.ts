@@ -26,9 +26,11 @@ function withConstBuildHeadersAndStringLiteral() {
   return buildHeaders();
 }
 
+// cofferdam-ignore: Refactor.UnusedVariable: declare statement type signature, not executed code
 declare function apiFetch(url: string): Promise<unknown>;
 declare const someClient: { fetch(url: string): Promise<unknown> };
 
+// cofferdam-ignore: Design.OrphanExport: test fixture for IslandApiConvention plugin; exported for cofferdam checks
 export async function loadIssue(id: string) {
   const a = await fetch(`/api/issues/${id}`); // FLAG bare fetch()
   const b = await window.fetch(`/api/issues/${id}`); // FLAG window.fetch()

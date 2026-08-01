@@ -1720,7 +1720,8 @@ function WikiMainContent(props: {
 function slugFromPathname(pathname: string): string {
 	const match = /^\/wiki\/([^/]+)\/?$/.exec(pathname);
 	if (!match) return "";
-	return safeDecodeURIComponent(match[1]);
+	const decoded = safeDecodeURIComponent(match[1]);
+	return decoded ?? "";
 }
 
 function useWikiUrlState(projectIdProp: string | undefined, slugProp: string | undefined) {
@@ -2198,15 +2199,19 @@ function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageDat
 // localStorage version so an in-progress edit survives a device switch, not just a
 // same-browser crash. Same ~1s debounce cadence as before; debouncing stays entirely
 // client-side (no server-side throttling) so this is just a plain PUT on a timer.
-function useServerDraftAutosave(
-	workspaceSlug: string | undefined,
-	editing: boolean,
-	editTitle: string,
-	editContent: string,
-	page: WikiPageData | null,
-	draftBanner: ServerDraft | null,
-	baseRevisionId: string | null | undefined
-) {
+interface UseServerDraftAutosaveOptions {
+	workspaceSlug: string | undefined;
+	editing: boolean;
+	editTitle: string;
+	editContent: string;
+	page: WikiPageData | null;
+	draftBanner: ServerDraft | null;
+	baseRevisionId: string | null | undefined;
+}
+
+function useServerDraftAutosave(options: UseServerDraftAutosaveOptions) {
+	const { workspaceSlug, editing, editTitle, editContent, page, draftBanner, baseRevisionId } =
+		options;
 	// Latest edit state for the flush-on-leave effect below, since its cleanup
 	// closure would otherwise only see the values from when `editing` last changed.
 	const latestDraftStateRef = useRef({ editTitle, editContent, page, draftBanner, baseRevisionId });
@@ -2293,15 +2298,15 @@ function useWikiEditing(
 	// be now.
 	const [baseRevisionId, setBaseRevisionId] = useState<string | null | undefined>(undefined);
 
-	const skipLeaveFlushRef = useServerDraftAutosave(
+	const skipLeaveFlushRef = useServerDraftAutosave({
 		workspaceSlug,
 		editing,
 		editTitle,
 		editContent,
 		page,
 		draftBanner,
-		baseRevisionId
-	);
+		baseRevisionId,
+	});
 
 	// PROJ-495: draft is fetched from the server (not just a local check) so it
 	// restores across devices, not only after a same-browser crash. Editing opens

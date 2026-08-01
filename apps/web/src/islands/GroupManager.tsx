@@ -160,6 +160,7 @@ function useGroupManagerData(slug: string) {
 		void refetch();
 	}, [refetch]);
 
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: React hooks conventionally return {data, loading, error} state objects, not throw errors
 	return { data, loading, error, setError, forbidden, refetch };
 }
 
