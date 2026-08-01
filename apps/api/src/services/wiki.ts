@@ -1758,6 +1758,41 @@ async function collectDescendantIds(
 	return descendants;
 }
 
+// PROJ-496: mirror of collectDescendantIds for the undelete path — walks parent_id
+// children that are IN THE TRASH and share the exact same deleted_at stamp as the
+// root being restored (deleteWikiPage's cascade branch stamps the whole subtree with
+// one `now` value in a single batch). Restricting to the same timestamp is what keeps
+// this from also restoring a descendant that was independently trashed at some other
+// time — that page stays in the trash, same as collectDescendantIds leaves it out of
+// a subsequent cascade delete.
+async function collectCascadeTrashedDescendantIds(
+	db: D1Database,
+	rootId: string,
+	workspaceId: string,
+	deletedAt: number
+): Promise<string[]> {
+	const orm = drizzle(db, { schema });
+	const descendants: string[] = [];
+	let frontier = [rootId];
+	while (frontier.length > 0) {
+		const children = await inChunks(frontier, (chunk) =>
+			orm
+				.select({ id: schema.wikiPages.id })
+				.from(schema.wikiPages)
+				.where(
+					and(
+						inArray(schema.wikiPages.parentId, chunk),
+						eq(schema.wikiPages.workspaceId, workspaceId),
+						eq(schema.wikiPages.deletedAt, deletedAt)
+					)
+				)
+		);
+		frontier = children.map((c) => c.id);
+		descendants.push(...frontier);
+	}
+	return descendants;
+}
+
 // PROJ-426: file attachments uploaded directly to a wiki page (entityType="wiki_page",
 // entityId=pageId) aren't covered by the FK cascade on linkedWikiPageId — that column is
 // only set for wiki_ref pointer attachments elsewhere that link to this page. Delete the
@@ -1914,7 +1949,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 	await orm
 		.update(schema.wikiPages)
 		.set({ parentId: page.parentId })
-		.where(eq(schema.wikiPages.parentId, page.id));
+		.where(and(eq(schema.wikiPages.parentId, page.id), isNull(schema.wikiPages.deletedAt)));
 
 	const linkedByCount = await countBacklinkSources(ctx, [page.id]);
 	if (!page.isTemplate) {
@@ -1983,11 +2018,27 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 	await requireWikiDelete(ctx, page.projectId);
 	await assertSlugAvailable(orm, ctx.workspaceId, page.slug, page.id);
 
+	// PROJ-496: restore the whole cascade-trashed subtree, not just the root — a page
+	// trashed via deleteWikiPage's cascade branch stamps every descendant with the same
+	// deleted_at, so walking descendants that share that exact stamp recovers exactly
+	// the batch that was trashed together (see collectCascadeTrashedDescendantIds).
+	// Independently-trashed descendants (a different deleted_at) are left alone.
+	const descendantIds = await collectCascadeTrashedDescendantIds(
+		ctx.db,
+		page.id,
+		ctx.workspaceId,
+		page.deletedAt
+	);
+	const allIds = [page.id, ...descendantIds];
+
 	const now = Math.floor(Date.now() / 1000);
-	await orm
-		.update(schema.wikiPages)
-		.set({ deletedAt: null, updatedAt: now, updatedById: ctx.userId })
-		.where(eq(schema.wikiPages.id, page.id));
+	await inChunks(allIds, async (chunk) => {
+		await orm
+			.update(schema.wikiPages)
+			.set({ deletedAt: null, updatedAt: now, updatedById: ctx.userId })
+			.where(inArray(schema.wikiPages.id, chunk));
+		return [];
+	});
 
 	// PROJ-496: recorded as "updated" (not a new activity/notification action) so it
 	// slots into the existing typed action union (recordActivity, WikiChangeEvent,
@@ -1998,7 +2049,13 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 		entityType: "wiki_page",
 		entityId: page.id,
 		action: "updated",
-		diff: { restored: true, slug: page.slug, title: page.title, projectId: page.projectId },
+		diff: {
+			restored: true,
+			slug: page.slug,
+			title: page.title,
+			projectId: page.projectId,
+			restoredCount: allIds.length,
+		},
 	});
 	if (!page.isTemplate) {
 		await notifyWikiWatchers(ctx, {
@@ -2010,7 +2067,13 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 		});
 	}
 
-	return { ok: true, id: page.id, slug: page.slug, url: wikiPagePath(page.slug) };
+	return {
+		ok: true,
+		id: page.id,
+		slug: page.slug,
+		url: wikiPagePath(page.slug),
+		restoredCount: allIds.length,
+	};
 }
 
 // PROJ-496 (R14): trash listing, scoped the same way listWikiPages is — a project-scoped
@@ -2069,13 +2132,14 @@ export async function listWikiTrash(ctx: ServiceCtx, input: unknown) {
 }
 
 // PROJ-496 (R14): permanently removes every page in this workspace that's been trashed
-// for at least WIKI_TRASH_RETENTION_SECONDS — R2 attachment objects, wiki_links,
-// wiki_watchers, wiki_drafts, wiki_fts rows, and wiki_redirects that were left in place
-// at (soft) delete time. Owner/admin only, same as backfill_wiki_links — this is a
-// maintenance action over the whole workspace, not scoped to a single project's grants.
-// No scheduled/cron trigger exists in this codebase (checked — nothing under
-// apps/api/src wires a Workers Cron Trigger), so this is manually triggerable via
-// REST/MCP only; see the PR description for that call.
+// for at least WIKI_TRASH_RETENTION_SECONDS — R2 attachment objects, wiki_revisions,
+// wiki_links, wiki_watchers, wiki_drafts, wiki_fts rows, and wiki_redirects that were
+// left in place at (soft) delete time, plus a re-parent fixup for any live child left
+// pointing at a page in this batch. Owner/admin only, same as backfill_wiki_links —
+// this is a maintenance action over the whole workspace, not scoped to a single
+// project's grants. Also reachable via a daily Workers Cron Trigger (see the
+// `scheduled` handler in index.ts, which iterates every workspace) in addition to the
+// manual REST/MCP call.
 export async function purgeExpiredWikiPages(
 	ctx: ServiceCtx
 ): Promise<{ purgedCount: number; purgedIds: string[] }> {
@@ -2084,7 +2148,7 @@ export async function purgeExpiredWikiPages(
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = Math.floor(Date.now() / 1000) - WIKI_TRASH_RETENTION_SECONDS;
 	const expired = await orm
-		.select({ id: schema.wikiPages.id })
+		.select({ id: schema.wikiPages.id, parentId: schema.wikiPages.parentId })
 		.from(schema.wikiPages)
 		.where(
 			and(
@@ -2096,8 +2160,36 @@ export async function purgeExpiredWikiPages(
 	const ids = expired.map((p) => p.id);
 	if (ids.length === 0) return { purgedCount: 0, purgedIds: [] };
 
+	// PROJ-238/PROJ-496: a live child can end up pointing at a page that's about to be
+	// purged — e.g. it was cascade-trashed alongside its parent, then undeleted on its
+	// own while the parent stayed in the trash. parent_id has no FK, so without this
+	// fixup a purge would leave it dangling. Walk each purged page's parent chain past
+	// any other page that's ALSO being purged in this batch, mirroring deleteWikiPage's
+	// re-parent-to-nearest-surviving-ancestor behavior.
+	const expiredSet = new Set(ids);
+	const parentById = new Map(expired.map((p) => [p.id, p.parentId]));
+	const resolveReparentTarget = (id: string): string | null => {
+		let current = parentById.get(id) ?? null;
+		const seen = new Set<string>();
+		while (current !== null && expiredSet.has(current) && !seen.has(current)) {
+			seen.add(current);
+			current = parentById.get(current) ?? null;
+		}
+		return current;
+	};
+	for (const id of ids) {
+		await orm
+			.update(schema.wikiPages)
+			.set({ parentId: resolveReparentTarget(id) })
+			.where(and(eq(schema.wikiPages.parentId, id), isNull(schema.wikiPages.deletedAt)));
+	}
+
 	await inChunks(ids, async (chunk) => {
 		await deleteWikiPageAttachments(ctx, orm, chunk);
+		return [];
+	});
+	await inChunks(ids, async (chunk) => {
+		await orm.delete(schema.wikiRevisions).where(inArray(schema.wikiRevisions.pageId, chunk));
 		return [];
 	});
 	await inChunks(ids, async (chunk) => {

@@ -705,10 +705,11 @@ export const wikiTools: MCPTool[] = [
 		name: "purge_wiki_trash",
 		description:
 			"Permanently remove every wiki page in the workspace that's been trashed for at " +
-			"least 30 days — deletes R2 attachment objects, revisions' wiki_links/wiki_watchers/" +
-			"wiki_drafts/wiki_redirects rows, and the page row itself. Irreversible. Owner/admin " +
-			"only. No scheduled trigger exists yet (see the PROJ-496 PR description) — call this " +
-			"manually or wire up your own periodic trigger.",
+			"least 30 days — deletes R2 attachment objects, wiki_revisions/wiki_links/" +
+			"wiki_watchers/wiki_drafts/wiki_redirects rows, and the page row itself, re-parenting " +
+			"any live child left pointing at a purged page. Irreversible. Owner/admin only. Also " +
+			"runs automatically once daily via a Workers Cron Trigger — call this manually only " +
+			"to force an off-cycle purge.",
 		inputSchema: { type: "object", properties: {} },
 		async handler(_input, ctx) {
 			return wikiService.purgeExpiredWikiPages(ctx as ServiceCtx);

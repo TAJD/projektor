@@ -38,6 +38,8 @@ import { seedDefaultCustomFields } from "./services/custom-fields";
 import { listAllProjects } from "./services/projects";
 import { seedDefaultTaskStatuses } from "./services/task-statuses";
 import { seedDefaultTaskTypes } from "./services/task-types";
+import type { ServiceCtx } from "./services/types";
+import { purgeExpiredWikiPages } from "./services/wiki";
 import { createWorkspace, listUserWorkspaces } from "./services/workspaces";
 
 const app = new Hono<HonoEnv>();
@@ -370,5 +372,40 @@ async function sha256hex(s: string): Promise<string> {
 		.join("");
 }
 
+// PROJ-496: daily Workers Cron Trigger (see [triggers].crons in wrangler.toml) for the
+// 30-day wiki trash purge. purgeExpiredWikiPages is workspace-scoped and requires an
+// admin/owner role, so this iterates every workspace and runs it as a synthetic owner
+// ctx — there's no authenticated user in a cron invocation, so userId is a placeholder
+// (purgeExpiredWikiPages never reads it). A failure purging one workspace is logged and
+// does not stop the sweep over the rest.
+export async function scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+	ctx.waitUntil(purgeAllWorkspacesExpiredWikiPages(env));
+}
+
+export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void> {
+	const { results } = await env.DB.prepare("SELECT id FROM workspaces").all<{ id: string }>();
+	for (const { id } of results ?? []) {
+		const serviceCtx: ServiceCtx = {
+			db: env.DB,
+			kv: env.KV,
+			r2: env.R2,
+			workspaceId: id,
+			userId: "cron",
+			role: "owner",
+		};
+		try {
+			await purgeExpiredWikiPages(serviceCtx);
+		} catch (err) {
+			console.error("scheduled wiki trash purge failed", {
+				workspaceId: id,
+				err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+			});
+		}
+	}
+}
+
 // cofferdam-ignore: Design.OrphanExport: Cloudflare Workers entry point — loaded by the runtime, not a JS import
-export default app;
+export default {
+	fetch: app.fetch,
+	scheduled,
+};

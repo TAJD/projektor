@@ -5350,4 +5350,175 @@ describe("Wiki trash (PROJ-496)", () => {
 			await env.DB.prepare("SELECT id FROM wiki_pages WHERE id = ?").bind(otherPage.id).first()
 		).not.toBeNull();
 	});
+
+	it("trash list/undelete/purge never reach across workspaces", async () => {
+		const other = await seedFixture({ role: "admin" });
+		const createOtherRes = await req("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(other.token, other.workspace.slug),
+			body: JSON.stringify({ title: "Cross Workspace Trash Page", content: "content" }),
+		});
+		const otherPage = (await createOtherRes.json()) as { id: string; slug: string };
+		await req(`http://localhost/api/wiki/${otherPage.slug}`, {
+			method: "DELETE",
+			headers: authHeaders(other.token, other.workspace.slug),
+		});
+
+		const listRes = await req("http://localhost/api/wiki/trash", {
+			headers: authHeaders(token, slug),
+		});
+		const listed = (await listRes.json()) as Array<{ id: string }>;
+		expect(listed.some((r) => r.id === otherPage.id)).toBe(false);
+
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${otherPage.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(404);
+	});
+
+	it("undeleting a cascade-trashed root also restores descendants sharing the same batch", async () => {
+		const parent = await createPage("Cascade Undelete Parent", "content");
+		const child = await createPage("Cascade Undelete Child", "content", { parentId: parent.id });
+		const grandchild = await createPage("Cascade Undelete Grandchild", "content", {
+			parentId: child.id,
+		});
+
+		await trashPage(parent.slug, true);
+
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${parent.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(200);
+		expect(await undeleteRes.json()).toMatchObject({ ok: true, restoredCount: 3 });
+
+		for (const p of [parent, child, grandchild]) {
+			const row = await env.DB.prepare("SELECT deleted_at FROM wiki_pages WHERE id = ?")
+				.bind(p.id)
+				.first<{ deleted_at: number | null }>();
+			expect(row?.deleted_at).toBeNull();
+
+			const res = await req(`http://localhost/api/wiki/${p.slug}`, {
+				headers: authHeaders(token, slug),
+			});
+			expect(res.status).toBe(200);
+		}
+	});
+
+	it("undeleting a cascade-trashed root does NOT restore a descendant that was independently trashed earlier", async () => {
+		const parent = await createPage("Cascade Undelete Mixed Parent", "content");
+		const child = await createPage("Cascade Undelete Mixed Child", "content", {
+			parentId: parent.id,
+		});
+		await trashPage(child.slug);
+		// Force the independent trash timestamp to differ from the batch stamp the cascade
+		// delete below will apply — same-second test execution would otherwise give both
+		// operations an identical `deleted_at` and defeat the point of this test.
+		await env.DB.prepare("UPDATE wiki_pages SET deleted_at = ? WHERE id = ?")
+			.bind(Math.floor(Date.now() / 1000) - 3600, child.id)
+			.run();
+
+		await trashPage(parent.slug, true);
+
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${parent.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(200);
+		expect(await undeleteRes.json()).toMatchObject({ ok: true, restoredCount: 1 });
+
+		const childRow = await env.DB.prepare("SELECT deleted_at FROM wiki_pages WHERE id = ?")
+			.bind(child.id)
+			.first<{ deleted_at: number | null }>();
+		expect(childRow?.deleted_at).not.toBeNull();
+	});
+
+	it("non-cascade trash leaves an already-trashed child's parent_id untouched, and undelete restores it under the original parent", async () => {
+		const parent = await createPage("Noncascade Reparent Parent", "content");
+		const child = await createPage("Noncascade Reparent Child", "content", {
+			parentId: parent.id,
+		});
+		await trashPage(child.slug);
+
+		await trashPage(parent.slug, false);
+
+		const childRow = await env.DB.prepare("SELECT parent_id FROM wiki_pages WHERE id = ?")
+			.bind(child.id)
+			.first<{ parent_id: string | null }>();
+		expect(childRow?.parent_id).toBe(parent.id);
+
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${child.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(200);
+
+		const restoredRow = await env.DB.prepare("SELECT parent_id FROM wiki_pages WHERE id = ?")
+			.bind(child.id)
+			.first<{ parent_id: string | null }>();
+		expect(restoredRow?.parent_id).toBe(parent.id);
+	});
+
+	it("purge re-parents a live child left pointing at a page that gets purged", async () => {
+		const grandparent = await createPage("Purge Reparent Grandparent", "content");
+		const parent = await createPage("Purge Reparent Parent", "content", {
+			parentId: grandparent.id,
+		});
+		const child = await createPage("Purge Reparent Child", "content", { parentId: parent.id });
+
+		// Cascade-trash grandparent -> parent -> child as one batch, then undelete just the
+		// child on its own — it's now live again with parent_id still pointing at the
+		// still-trashed `parent`.
+		await trashPage(grandparent.slug, true);
+		const undeleteRes = await req(`http://localhost/api/wiki/trash/${child.id}/undelete`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(undeleteRes.status).toBe(200);
+
+		await backdateTrash();
+
+		const purgeRes = await req("http://localhost/api/wiki/purge-trash", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(purgeRes.status).toBe(200);
+		const purged = (await purgeRes.json()) as { purgedIds: string[] };
+		expect(purged.purgedIds).toEqual(expect.arrayContaining([grandparent.id, parent.id]));
+
+		const childRow = await env.DB.prepare("SELECT parent_id FROM wiki_pages WHERE id = ?")
+			.bind(child.id)
+			.first<{ parent_id: string | null }>();
+		// parent_id must not dangle — it either got nulled or repointed at a surviving
+		// ancestor, never left pointing at grandparent/parent (both now purged).
+		expect(childRow?.parent_id === null || childRow?.parent_id === undefined).toBe(true);
+	});
+
+	it("purge deletes wiki_revisions rows for purged pages", async () => {
+		const page = await createPage("Purge Revisions Page", "v1");
+		await req(`http://localhost/api/wiki/${page.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ content: "v2" }),
+		});
+		const revisionsBefore = await env.DB.prepare("SELECT id FROM wiki_revisions WHERE page_id = ?")
+			.bind(page.id)
+			.all<{ id: string }>();
+		expect(revisionsBefore.results.length).toBeGreaterThan(0);
+
+		await trashPage(page.slug);
+		await backdateTrash();
+
+		const purgeRes = await req("http://localhost/api/wiki/purge-trash", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(purgeRes.status).toBe(200);
+
+		const revisionsAfter = await env.DB.prepare("SELECT id FROM wiki_revisions WHERE page_id = ?")
+			.bind(page.id)
+			.all<{ id: string }>();
+		expect(revisionsAfter.results.length).toBe(0);
+	});
 });

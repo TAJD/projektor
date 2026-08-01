@@ -87,13 +87,13 @@ async function fetchActivityRows(
 				        'wiki_page' AS entity_type, wp.id AS entity_id,
 				        wp.slug AS entity_ref, wp.title AS summary, wp.created_at
 				 FROM wiki_pages wp
-				 WHERE wp.project_id = ? AND wp.workspace_id = ? ${sinceFilter("wp.created_at")}
+				 WHERE wp.project_id = ? AND wp.workspace_id = ? AND wp.deleted_at IS NULL ${sinceFilter("wp.created_at")}
 				 UNION ALL
 				 SELECT 'wiki_page_edited' AS type, wp.updated_by_id AS actor,
 				        'wiki_page' AS entity_type, wp.id AS entity_id,
 				        wp.slug AS entity_ref, wp.title AS summary, wp.updated_at AS created_at
 				 FROM wiki_pages wp
-				 WHERE wp.project_id = ? AND wp.workspace_id = ?
+				 WHERE wp.project_id = ? AND wp.workspace_id = ? AND wp.deleted_at IS NULL
 				   AND wp.updated_at != wp.created_at ${sinceFilter("wp.updated_at")}
 				 ORDER BY created_at DESC LIMIT ?`
 			)
