@@ -1,5 +1,5 @@
 import type { RefObject } from "preact";
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
@@ -89,6 +89,28 @@ const WIKI_TYPE_FILTER_OPTIONS: SelectOption[] = [
 	{ value: "spec", label: "Spec" },
 	{ value: "note", label: "Note" },
 ];
+
+const WIKI_WELL_KNOWN_TYPES = new Set(WIKI_TYPE_FILTER_OPTIONS.map((o) => o.value).filter(Boolean));
+
+// PROJ-514: frontmatter `type` is freeform (PROJ-513) — merge in any other distinct
+// types actually present in the workspace so pages using e.g. `type: whitepaper` stay
+// discoverable, without losing the well-known values' friendly labels/ordering. Dedupe
+// case-insensitively (frontmatter `type` is never case-normalized) so e.g. `Runbook`
+// doesn't produce a second, visually-indistinguishable entry alongside the well-known
+// lowercase `runbook`.
+function buildTypeFilterOptions(discoveredTypes: string[]): SelectOption[] {
+	const seen = new Set(Array.from(WIKI_WELL_KNOWN_TYPES).map((t) => t.toLowerCase()));
+	const extras: string[] = [];
+	for (const t of discoveredTypes) {
+		if (!t) continue;
+		const key = t.toLowerCase();
+		if (seen.has(key)) continue;
+		seen.add(key);
+		extras.push(t);
+	}
+	extras.sort((a, b) => a.localeCompare(b));
+	return [...WIKI_TYPE_FILTER_OPTIONS, ...extras.map((t) => ({ value: t, label: t }))];
+}
 
 const WIKI_STATUS_FILTER_OPTIONS: SelectOption[] = [
 	{ value: "", label: "All statuses" },
@@ -231,6 +253,7 @@ interface TreeNode {
 	id: string;
 	slug: string;
 	title: string;
+	type: string | null;
 	children: TreeNode[];
 }
 
@@ -281,6 +304,17 @@ function formatBytes(bytes: number): string {
 	if (bytes < 1024) return `${bytes} B`;
 	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// PROJ-514: walks the tree already fetched by useWikiTree to discover distinct `type`
+// values for the sidebar filter dropdown, instead of issuing a second unfiltered fetch.
+function collectTreeTypes(nodes: TreeNode[]): string[] {
+	const types: string[] = [];
+	for (const node of nodes) {
+		if (node.type) types.push(node.type);
+		types.push(...collectTreeTypes(node.children));
+	}
+	return types;
 }
 
 function flattenTree(nodes: TreeNode[], parentId: string | null = null): Record<string, FlatEntry> {
@@ -571,6 +605,7 @@ function ScopeControl({
 function WikiFilterBar({
 	filterType,
 	onFilterTypeChange,
+	typeOptions,
 	filterStatus,
 	onFilterStatusChange,
 	filterTags,
@@ -578,6 +613,7 @@ function WikiFilterBar({
 }: {
 	filterType: string;
 	onFilterTypeChange: (v: string) => void;
+	typeOptions: SelectOption[];
 	filterStatus: string;
 	onFilterStatusChange: (v: string) => void;
 	filterTags: string;
@@ -587,7 +623,7 @@ function WikiFilterBar({
 		<div class="mb-3 flex flex-col gap-1.5">
 			<Select
 				value={filterType}
-				options={WIKI_TYPE_FILTER_OPTIONS}
+				options={typeOptions}
 				ariaLabel="Filter wiki pages by type"
 				onChange={onFilterTypeChange}
 			/>
@@ -623,6 +659,7 @@ function WikiSidebar({
 	onCreate,
 	filterType,
 	onFilterTypeChange,
+	typeOptions,
 	filterStatus,
 	onFilterStatusChange,
 	filterTags,
@@ -648,6 +685,7 @@ function WikiSidebar({
 	onCreate: () => void;
 	filterType: string;
 	onFilterTypeChange: (v: string) => void;
+	typeOptions: SelectOption[];
 	filterStatus: string;
 	onFilterStatusChange: (v: string) => void;
 	filterTags: string;
@@ -685,6 +723,7 @@ function WikiSidebar({
 			<WikiFilterBar
 				filterType={filterType}
 				onFilterTypeChange={onFilterTypeChange}
+				typeOptions={typeOptions}
 				filterStatus={filterStatus}
 				onFilterStatusChange={onFilterStatusChange}
 				filterTags={filterTags}
@@ -1779,7 +1818,11 @@ function useWikiStalePages(workspaceSlug: string | undefined, projectId: string)
 // PROJ-488: type/status/tags filters shared between the sidebar's filtered browse view
 // (no search query — a flat list from listWikiPages) and text search below (combined
 // with the FTS query via search_wiki's own type/status/tags params).
-function useWikiFilters(workspaceSlug: string | undefined, projectId: string) {
+function useWikiFilters(
+	workspaceSlug: string | undefined,
+	projectId: string,
+	pageTree: TreeNode[]
+) {
 	const [filterType, setFilterType] = useState("");
 	const [filterStatus, setFilterStatus] = useState("");
 	const [filterTags, setFilterTags] = useState("");
@@ -1787,6 +1830,11 @@ function useWikiFilters(workspaceSlug: string | undefined, projectId: string) {
 	const [filteredLoading, setFilteredLoading] = useState(false);
 
 	const hasActiveFilters = Boolean(filterType || filterStatus || filterTags.trim());
+
+	// PROJ-514: discover any non-well-known `type` values present in the workspace so
+	// the sidebar dropdown can offer them, derived from the tree useWikiTree already
+	// fetched (getWikiTree now selects `type`) instead of a second, unfiltered fetch.
+	const typeOptions = useMemo(() => buildTypeFilterOptions(collectTreeTypes(pageTree)), [pageTree]);
 
 	useEffect(() => {
 		if (!hasActiveFilters) {
@@ -1822,6 +1870,7 @@ function useWikiFilters(workspaceSlug: string | undefined, projectId: string) {
 		filteredResults,
 		filteredLoading,
 		hasActiveFilters,
+		typeOptions,
 	};
 }
 
@@ -2779,6 +2828,7 @@ function WikiPageShell(props: {
 				onCreate={props.onCreate}
 				filterType={props.filters.filterType}
 				onFilterTypeChange={props.filters.setFilterType}
+				typeOptions={props.filters.typeOptions}
 				filterStatus={props.filters.filterStatus}
 				onFilterStatusChange={props.filters.setFilterStatus}
 				filterTags={props.filters.filterTags}
@@ -2960,7 +3010,7 @@ export default function WikiPage({
 	const gate = useAccessGate(workspaceSlug);
 	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp, slugProp);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
-	const filters = useWikiFilters(workspaceSlug, projectId);
+	const filters = useWikiFilters(workspaceSlug, projectId, pageTree);
 	const stale = useWikiStalePages(workspaceSlug, projectId);
 	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(
 		workspaceSlug,

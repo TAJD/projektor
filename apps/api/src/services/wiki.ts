@@ -48,7 +48,14 @@ import {
 	notifyWikiWatchers,
 } from "./wiki-watchers";
 
-type TreeNode = { id: string; slug: string; title: string; url: string; children: TreeNode[] };
+type TreeNode = {
+	id: string;
+	slug: string;
+	title: string;
+	url: string;
+	type: string | null;
+	children: TreeNode[];
+};
 
 // PROJ-311: a wiki page is either workspace-level (projectId null — every member
 // sees it) or project-scoped (visible only when the project is granted). Writes to
@@ -1883,6 +1890,9 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 			title: schema.wikiPages.title,
 			parentId: schema.wikiPages.parentId,
 			projectId: schema.wikiPages.projectId,
+			// PROJ-514: so the sidebar's type filter dropdown can derive its options from
+			// this same tree fetch instead of issuing a second, unfiltered listWikiPages call.
+			type: schema.wikiPages.type,
 		})
 		.from(schema.wikiPages)
 		.where(and(...conditions))
@@ -1895,6 +1905,7 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 			slug: p.slug,
 			title: p.title,
 			url: wikiPagePath(p.slug),
+			type: p.type,
 			children: [],
 		});
 	}

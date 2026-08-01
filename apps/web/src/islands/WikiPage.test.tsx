@@ -800,6 +800,83 @@ describe("WikiPage frontmatter metadata (PROJ-488)", () => {
 	});
 });
 
+describe("WikiPage sidebar type filter — freeform types (PROJ-514)", () => {
+	it("offers a workspace-discovered type alongside the well-known ones, and filters by it", async () => {
+		// PROJ-514: type discovery now comes from the tree fetch (getWikiTree selects
+		// `type`), not a second unfiltered listWikiPages call — see WikiPage.tsx buildTypeFilterOptions.
+		const TREE = [
+			{ id: "w1", slug: "my-page", title: "My Page Tree Node", type: null, children: [] },
+			{ id: "w9", slug: "product-brief", title: "Product Brief", type: "whitepaper", children: [] },
+		];
+		const FILTERED_RESULT = [
+			{
+				id: "w9",
+				slug: "product-brief",
+				title: "Product Brief",
+				type: "whitepaper",
+				status: null,
+				tags: [],
+			},
+		];
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(TREE) });
+			}
+			if (u.includes("/api/wiki?") && u.includes("type=whitepaper")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(FILTERED_RESULT) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(await screen.findByRole("combobox", { name: "Filter wiki pages by type" }));
+		fireEvent.click(await screen.findByRole("option", { name: "whitepaper" }));
+
+		expect(await screen.findByText("Product Brief")).toBeTruthy();
+		await waitFor(() => {
+			expect(fetchMock.mock.calls.some(([u]) => String(u).includes("type=whitepaper"))).toBe(true);
+		});
+	});
+
+	it("still offers the well-known types when the workspace has no other distinct types", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(await screen.findByRole("combobox", { name: "Filter wiki pages by type" }));
+		expect(screen.getByRole("option", { name: "Runbook" })).toBeTruthy();
+		expect(screen.getByRole("option", { name: "ADR" })).toBeTruthy();
+	});
+
+	it("dedupes a case-variant freeform type against its well-known match instead of listing both", async () => {
+		const TREE = [
+			{ id: "w1", slug: "my-page", title: "My Page Tree Node", type: "Runbook", children: [] },
+		];
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = String(url);
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(TREE) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(await screen.findByRole("combobox", { name: "Filter wiki pages by type" }));
+		expect(screen.getAllByRole("option", { name: "Runbook" })).toHaveLength(1);
+	});
+});
+
 // PROJ-489 (R7): Verify button + computed staleness badge in the metadata header card.
 describe("WikiPage freshness model (PROJ-489)", () => {
 	const STALE_PAGE: WikiPageData = {

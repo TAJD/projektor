@@ -59,6 +59,18 @@ export function stripFrontmatter(markdown: string): string {
 	return markdown.replace(FRONTMATTER_RE, "");
 }
 
+// PROJ-519 (accepted gap, see PROJ-482 PRD "Known gaps"): resolves by matching the
+// literal `[[Title]]` text against the *current* titles of the client-fetched page
+// list — not by id, even though the source-of-truth link graph (wiki_links,
+// get_backlinks, R3) is id-backed and survives renames. The raw markdown only ever
+// stores the title text typed at authoring time, never a page id, so matching an old
+// [[Title]] against a renamed page's *current* title would need the server to expose
+// this page's resolved wiki_links targets (id -> current slug/title) for the client to
+// consult instead of doing its own title lookup — real new API surface, not a rename
+// here. Net effect: renaming a page breaks its *rendered* backlinks (shown as broken,
+// with a create-page affordance) even though get_backlinks still correctly reports the
+// relationship by id. Deferred rather than fixed given this is a medium-priority item
+// in an otherwise-low-priority backlog.
 function resolveWikilinks(
 	markdown: string,
 	pages: ReadonlyArray<{ title: string; slug: string }>
