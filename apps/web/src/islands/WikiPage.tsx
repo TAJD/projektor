@@ -90,6 +90,20 @@ const WIKI_TYPE_FILTER_OPTIONS: SelectOption[] = [
 	{ value: "note", label: "Note" },
 ];
 
+const WIKI_WELL_KNOWN_TYPES = new Set(
+	WIKI_TYPE_FILTER_OPTIONS.map((o) => o.value).filter(Boolean)
+);
+
+// PROJ-514: frontmatter `type` is freeform (PROJ-513) — merge in any other distinct
+// types actually present in the workspace so pages using e.g. `type: whitepaper` stay
+// discoverable, without losing the well-known values' friendly labels/ordering.
+function buildTypeFilterOptions(discoveredTypes: string[]): SelectOption[] {
+	const extras = Array.from(
+		new Set(discoveredTypes.filter((t): t is string => Boolean(t) && !WIKI_WELL_KNOWN_TYPES.has(t)))
+	).sort((a, b) => a.localeCompare(b));
+	return [...WIKI_TYPE_FILTER_OPTIONS, ...extras.map((t) => ({ value: t, label: t }))];
+}
+
 const WIKI_STATUS_FILTER_OPTIONS: SelectOption[] = [
 	{ value: "", label: "All statuses" },
 	{ value: "draft", label: "Draft" },
@@ -571,6 +585,7 @@ function ScopeControl({
 function WikiFilterBar({
 	filterType,
 	onFilterTypeChange,
+	typeOptions,
 	filterStatus,
 	onFilterStatusChange,
 	filterTags,
@@ -578,6 +593,7 @@ function WikiFilterBar({
 }: {
 	filterType: string;
 	onFilterTypeChange: (v: string) => void;
+	typeOptions: SelectOption[];
 	filterStatus: string;
 	onFilterStatusChange: (v: string) => void;
 	filterTags: string;
@@ -587,7 +603,7 @@ function WikiFilterBar({
 		<div class="mb-3 flex flex-col gap-1.5">
 			<Select
 				value={filterType}
-				options={WIKI_TYPE_FILTER_OPTIONS}
+				options={typeOptions}
 				ariaLabel="Filter wiki pages by type"
 				onChange={onFilterTypeChange}
 			/>
@@ -623,6 +639,7 @@ function WikiSidebar({
 	onCreate,
 	filterType,
 	onFilterTypeChange,
+	typeOptions,
 	filterStatus,
 	onFilterStatusChange,
 	filterTags,
@@ -648,6 +665,7 @@ function WikiSidebar({
 	onCreate: () => void;
 	filterType: string;
 	onFilterTypeChange: (v: string) => void;
+	typeOptions: SelectOption[];
 	filterStatus: string;
 	onFilterStatusChange: (v: string) => void;
 	filterTags: string;
@@ -685,6 +703,7 @@ function WikiSidebar({
 			<WikiFilterBar
 				filterType={filterType}
 				onFilterTypeChange={onFilterTypeChange}
+				typeOptions={typeOptions}
 				filterStatus={filterStatus}
 				onFilterStatusChange={onFilterStatusChange}
 				filterTags={filterTags}
@@ -1785,8 +1804,30 @@ function useWikiFilters(workspaceSlug: string | undefined, projectId: string) {
 	const [filterTags, setFilterTags] = useState("");
 	const [filteredResults, setFilteredResults] = useState<WikiListItem[]>([]);
 	const [filteredLoading, setFilteredLoading] = useState(false);
+	const [typeOptions, setTypeOptions] = useState<SelectOption[]>(WIKI_TYPE_FILTER_OPTIONS);
 
 	const hasActiveFilters = Boolean(filterType || filterStatus || filterTags.trim());
+
+	// PROJ-514: discover any non-well-known `type` values present in the workspace so
+	// the sidebar dropdown can offer them, reusing the same unfiltered listWikiPages
+	// call the filtered browse view already makes (no new endpoint).
+	useEffect(() => {
+		let cancelled = false;
+		(async () => {
+			try {
+				const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+				const data = await apiFetch<WikiListItem[]>(`/api/wiki${qs}`, { workspaceSlug });
+				if (cancelled) return;
+				const items = Array.isArray(data) ? data : [];
+				setTypeOptions(buildTypeFilterOptions(items.map((i) => i.type ?? "")));
+			} catch {
+				// non-fatal — fall back to the well-known options
+			}
+		})();
+		return () => {
+			cancelled = true;
+		};
+	}, [workspaceSlug, projectId]);
 
 	useEffect(() => {
 		if (!hasActiveFilters) {
@@ -1822,6 +1863,7 @@ function useWikiFilters(workspaceSlug: string | undefined, projectId: string) {
 		filteredResults,
 		filteredLoading,
 		hasActiveFilters,
+		typeOptions,
 	};
 }
 
@@ -2779,6 +2821,7 @@ function WikiPageShell(props: {
 				onCreate={props.onCreate}
 				filterType={props.filters.filterType}
 				onFilterTypeChange={props.filters.setFilterType}
+				typeOptions={props.filters.typeOptions}
 				filterStatus={props.filters.filterStatus}
 				onFilterStatusChange={props.filters.setFilterStatus}
 				filterTags={props.filters.filterTags}
