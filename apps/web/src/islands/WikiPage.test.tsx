@@ -251,6 +251,18 @@ describe("WikiPage — path-based routing (PROJ-487)", () => {
 		await screen.findByText("My Page");
 		expect(replace).not.toHaveBeenCalled();
 	});
+
+	// PROJ-512: a malformed percent-escape in the pathname (e.g. a bare "%" not followed
+	// by two hex digits) made decodeURIComponent throw inside slugFromPathname, crashing
+	// the island instead of falling back to "no slug".
+	it("does not crash on a malformed percent-escape in the URL path", async () => {
+		history.replaceState(null, "", "/wiki/100%");
+		mockFetchWiki(PAGE);
+		render(<WikiPage />);
+		await waitFor(() => {
+			expect(screen.getByText(/Select a page from the sidebar/i)).toBeTruthy();
+		});
+	});
 });
 
 describe("WikiPage — project scope control (PROJ-352)", () => {

@@ -72,3 +72,26 @@ describe("SPA catch-all (ASSETS absent in test env)", () => {
 		expect(res.status).toBe(404);
 	});
 });
+
+// PROJ-517 finding 4: index.ts's SSR wikiSlugMatch regex must stay anchored the same
+// way as apps/web/src/islands/WikiPage.tsx's slugFromPathname, or a request like
+// /wiki/roadmap/anything would match server-side (injecting Roadmap's real SSR
+// metadata) while the client renders empty — a server/client routing disagreement.
+// The full route (index.ts's `app.get("*", ...)`) isn't reachable in this test env
+// (ASSETS is absent, see the describe block above), so this asserts the regex itself
+// directly — kept in sync with the literal in index.ts.
+describe("SSR wiki-path regex (index.ts wikiSlugMatch, PROJ-517 finding 4)", () => {
+	const wikiSlugMatch = /^\/wiki\/([^/]+)\/?$/;
+
+	it("matches a bare single-segment slug", () => {
+		expect(wikiSlugMatch.exec("/wiki/roadmap")?.[1]).toBe("roadmap");
+	});
+
+	it("matches a single-segment slug with a trailing slash", () => {
+		expect(wikiSlugMatch.exec("/wiki/roadmap/")?.[1]).toBe("roadmap");
+	});
+
+	it("does not match extra path segments after the slug", () => {
+		expect(wikiSlugMatch.exec("/wiki/roadmap/anything/at/all")).toBeNull();
+	});
+});

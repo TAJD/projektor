@@ -1,6 +1,7 @@
 import type { RefObject } from "preact";
 import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
+import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
 import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
@@ -1718,7 +1719,8 @@ function WikiMainContent(props: {
 // convention IssueDetail already uses for /projects/:key/issues/:n/*.
 function slugFromPathname(pathname: string): string {
 	const match = /^\/wiki\/([^/]+)\/?$/.exec(pathname);
-	return match ? decodeURIComponent(match[1]) : "";
+	if (!match) return "";
+	return safeDecodeURIComponent(match[1]);
 }
 
 function useWikiUrlState(projectIdProp: string | undefined, slugProp: string | undefined) {

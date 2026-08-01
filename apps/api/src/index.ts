@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { serviceErrToResponse } from "./http/error-adapter";
+import { safeDecodeURIComponent } from "./lib/urls";
 import { injectWikiMetadata, resolveWikiPageForSsr } from "./lib/wiki-ssr";
 import { authMiddleware } from "./middleware/auth";
 import { etagMiddleware } from "./middleware/etag";
@@ -333,7 +334,7 @@ app.get("/wiki", async (c) => {
 app.get("*", async (c) => {
 	if (!c.env.ASSETS) return c.notFound();
 	const { pathname } = new URL(c.req.url);
-	const wikiSlugMatch = /^\/wiki\/([^/]+)/.exec(pathname);
+	const wikiSlugMatch = /^\/wiki\/([^/]+)\/?$/.exec(pathname);
 	const fallbackPath = /^\/projects\/[^/]+\/issues\/\d+\//.test(pathname)
 		? "/issues/view/index.html"
 		: /^\/projects\/view\/[^/]+/.test(pathname)
@@ -351,8 +352,12 @@ app.get("*", async (c) => {
 	// Astro SSR adapter, and why it's scoped to authenticated requests only (the wiki
 	// has no public/unauthenticated share path — see the PRD's public-wiki-sharing
 	// non-goal, PROJ-482). Any failure here just serves the unmodified static shell.
+	// PROJ-512: a malformed percent-escape (e.g. `/wiki/100%`) makes decodeURIComponent
+	// throw — treat that as "can't resolve a slug" rather than letting it 500 past this
+	// point, since `response` (the static shell) is already fetched and ready to serve.
 	if (wikiSlugMatch) {
-		const page = await resolveWikiPageForSsr(c, decodeURIComponent(wikiSlugMatch[1]));
+		const decodedSlug = safeDecodeURIComponent(wikiSlugMatch[1]);
+		const page = decodedSlug ? await resolveWikiPageForSsr(c, decodedSlug) : null;
 		if (page) return injectWikiMetadata(response, page, new URL(pathname, c.req.url).toString());
 	}
 	return response;

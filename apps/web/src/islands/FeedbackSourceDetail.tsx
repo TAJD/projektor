@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { safeDecodeURIComponent } from "../lib/urls";
 import { apiFetch } from "../utils/api-client";
 import FeedbackList from "./FeedbackList";
 import FeedbackSourceSettings, { type FeedbackSource } from "./FeedbackSourceSettings";
@@ -57,7 +58,10 @@ export default function FeedbackSourceDetail({
 			return;
 		}
 		const m = window.location.pathname.match(/^\/feedback\/([^/]+)/);
-		if (m) setSourceId(decodeURIComponent(m[1]));
+		if (m) {
+			const decoded = safeDecodeURIComponent(m[1]);
+			if (decoded) setSourceId(decoded);
+		}
 	}, [sourceIdProp]);
 
 	const [sources, setSources] = useState<FeedbackSource[]>([]);

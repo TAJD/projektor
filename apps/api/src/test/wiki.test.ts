@@ -1031,12 +1031,14 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
+	let userId: string;
 
 	beforeEach(async () => {
 		const fixture = await seedFixture();
 		token = fixture.token;
 		slug = fixture.workspace.slug;
 		workspaceId = fixture.workspace.id;
+		userId = fixture.user.id;
 	});
 
 	it("POST /api/wiki rejects a title that slugifies to an existing page's slug (409)", async () => {
@@ -1092,6 +1094,141 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 			body: JSON.stringify({ slug: "view" }),
 		});
 		expect(res.status).toBe(400);
+	});
+
+	it("POST /api/wiki rejects a slug containing '/' (PROJ-517, 400)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Nested", content: "v1", slug: "a/b" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("PUT /api/wiki/:slug rejects renaming to a slug containing '/' (PROJ-517, 400)", async () => {
+		await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Delta", content: "d" }),
+		});
+
+		const res = await SELF.fetch("http://localhost/api/wiki/delta", {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: "a/b" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("POST /api/wiki falls back to an opaque slug for a symbol-only/non-Latin title whose derived slug would be empty (PROJ-517/512 finding 5)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "測試", content: "v1" }),
+		});
+		expect(res.status).toBe(201);
+		const page = (await res.json()) as { slug: string; id: string };
+		expect(page.slug).toMatch(/^page-[0-9a-f]{8}$/);
+
+		const getRes = await SELF.fetch(`http://localhost/api/wiki/${page.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		const fetched = (await getRes.json()) as { title: string };
+		expect(fetched.title).toBe("測試");
+	});
+
+	it("POST /api/wiki falls back to an opaque slug for a title whose derived slug would exceed SlugSchema's 200-char max (PROJ-517/512 finding 5)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "a".repeat(300), content: "v1" }),
+		});
+		expect(res.status).toBe(201);
+		const page = (await res.json()) as { slug: string };
+		expect(page.slug).toMatch(/^page-[0-9a-f]{8}$/);
+	});
+
+	it("MCP create_wiki_page rejects a slug containing '/' (PROJ-517, REST/MCP parity)", async () => {
+		const res = await mcpCall(
+			workspaceId,
+			"create_wiki_page",
+			{ title: "Nested", content: "v1", slug: "a/b" },
+			authHeaders(token, slug)
+		);
+		expect(isMcpError(res)).toBe(true);
+		if (isMcpError(res)) expect(res.error.code).toBe(-32602);
+	});
+
+	it("MCP update_wiki_page rejects renaming to a slug containing '/' (PROJ-517, REST/MCP parity)", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcpCall(
+				workspaceId,
+				"create_wiki_page",
+				{ title: "Delta MCP", content: "d" },
+				authHeaders(token, slug)
+			)
+		);
+
+		const res = await mcpCall(
+			workspaceId,
+			"update_wiki_page",
+			{ slug: created.slug, newSlug: "a/b" },
+			authHeaders(token, slug)
+		);
+		expect(isMcpError(res)).toBe(true);
+	});
+
+	it("a slashy slug rewritten by the PROJ-517 backfill migration still resolves, and the old slug redirects (finding 1)", async () => {
+		// Simulate a pre-PROJ-517 row that predates SlugSchema's no-slash rule by
+		// inserting directly (SlugSchema would now reject this via the service layer).
+		const pageId = crypto.randomUUID();
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, parent_id, created_by_id, updated_by_id, created_at, updated_at)
+			 VALUES (?, ?, NULL, ?, ?, ?, NULL, ?, ?, ?, ?)`
+		)
+			.bind(
+				pageId,
+				workspaceId,
+				"operations/admin-allow-list",
+				"Admin Allow List",
+				"content",
+				userId,
+				userId,
+				now,
+				now
+			)
+			.run();
+
+		// Apply the same rewrite migration 0050 performs, since the fixture DB's
+		// migrations already ran in beforeAll before this row existed.
+		const redirectId = crypto.randomUUID();
+		await env.DB.prepare(
+			`INSERT INTO wiki_redirects (id, workspace_id, old_slug, page_id, created_at) VALUES (?, ?, ?, ?, ?)`
+		)
+			.bind(redirectId, workspaceId, "operations/admin-allow-list", pageId, now)
+			.run();
+		await env.DB.prepare(`UPDATE wiki_pages SET slug = ? WHERE id = ?`)
+			.bind("operations-admin-allow-list", pageId)
+			.run();
+
+		const newRes = await SELF.fetch("http://localhost/api/wiki/operations-admin-allow-list", {
+			headers: authHeaders(token, slug),
+		});
+		expect(newRes.status).toBe(200);
+
+		// Resolve via MCP's get_wiki_page, passing the old slug as a plain argument
+		// (not a URL path segment) — sidesteps any router-level handling of an
+		// encoded "/" and tests the redirect-fallback resolution itself.
+		const oldPage = mcpData<{ slug: string }>(
+			await mcpCall(
+				workspaceId,
+				"get_wiki_page",
+				{ slug: "operations/admin-allow-list" },
+				authHeaders(token, slug)
+			)
+		);
+		expect(oldPage.slug).toBe("operations-admin-allow-list");
 	});
 
 	it("POST /api/wiki rejects the reserved slug 'index' (PROJ-487, 400)", async () => {
@@ -3117,6 +3254,17 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 		});
 		const backlinks = (await res.json()) as Array<{ slug: string }>;
 		expect(backlinks.map((b) => b.slug)).toEqual(["gamma"]);
+	});
+
+	it("PROJ-517/512: a multi-segment /wiki/ URL is never indexed against the first segment's page", async () => {
+		const operations = await createPage("Operations", "contents");
+		await createPage("Runbook", `[Runbook](/wiki/${operations.slug}/admin-allow-list)`);
+
+		const res = await SELF.fetch(`http://localhost/api/wiki/${operations.slug}/backlinks`, {
+			headers: authHeaders(token, slug),
+		});
+		const backlinks = (await res.json()) as Array<{ slug: string }>;
+		expect(backlinks).toEqual([]);
 	});
 
 	it("an absolute cross-host URL is never indexed as a same-workspace link", async () => {

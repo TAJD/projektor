@@ -1,11 +1,14 @@
 import { z } from "zod";
 import { BooleanQueryParam } from "./common";
 
-const SlugSchema = z
+// PROJ-517: no "/" — path-based wiki routing (PROJ-487) assumes single-segment
+// slugs everywhere except this schema; forbidding "/" here keeps it that way rather
+// than making every matcher (index.ts, WikiPage.tsx, wiki-links.ts) multi-segment.
+export const SlugSchema = z
 	.string()
 	.min(1)
 	.max(200)
-	.regex(/^[a-z0-9-/]+$/);
+	.regex(/^[a-z0-9-]+$/);
 
 export const CreatePageSchema = z
 	.object({
