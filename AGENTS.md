@@ -195,21 +195,21 @@ as that user (a member of the seeded `projektor` workspace), and the islands loa
 
 ## Git hooks (lefthook)
 
-`pnpm install` runs `prepare`, which calls `lefthook install` and wires two hooks:
+`pnpm install` runs `prepare`, which calls `lefthook install` and wires one hook:
 
 - **pre-commit** - `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages), `pnpm biome check --changed --no-errors-on-unmatched` (lint, changed files only), and the island API convention check.
-- **pre-push** - `pnpm biome check .` (full-repo lint), `pnpm --filter @projektor/api test`, and `pnpm --filter @projektor/web test` (too slow for every commit but catches the failures that most often break CI).
 
-CI (`.github/workflows/ci.yml`) runs a superset of these: the generated-docs freshness check, `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, coverage-enforced test runs for `@projektor/api` and `@projektor/web`, both the web and docs builds, and `node scripts/check-island-api.mjs`. New contributors get the hooks automatically after `pnpm install`.
+There is deliberately no `pre-push` hook - CI (`.github/workflows/ci.yml`) is the authoritative gate before merge (main is PR-protected; direct pushes are rejected), so a local pre-push copy of the same checks was pure redundant overhead. It was also a source of real bugs: under concurrent local load its test step could fail while a backgrounded `git push` still reported exit code 0, masking a rejected push. It was removed for these reasons; don't re-add one without addressing both.
 
-**Bypass for WIP commits/pushes:** pass `--no-verify` (or `-n`) to git:
+CI runs a superset of the pre-commit checks: the generated-docs freshness check, `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, coverage-enforced test runs for `@projektor/api` and `@projektor/web`, both the web and docs builds, and `node scripts/check-island-api.mjs`. New contributors get the pre-commit hook automatically after `pnpm install`. See **Before opening a PR** above for the full local command set to run before pushing.
+
+**Bypass for WIP commits:** pass `--no-verify` (or `-n`) to git:
 
 ```bash
 git commit --no-verify -m "wip: …"
-git push --no-verify
 ```
 
-Agent workers should also use `--no-verify` for intermediate commits; run the full checks before opening a PR. To manually re-run a hook without committing: `pnpm lefthook run pre-push`.
+Agent workers should also use `--no-verify` for intermediate commits; run the full checks (listed under "Before opening a PR" above) before opening a PR.
 
 ## Fleet coordination protocol
 
