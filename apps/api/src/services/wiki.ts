@@ -688,14 +688,11 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		// PROJ-517: slugify's charset can't produce "/", but a symbol-only or non-Latin
 		// title can still derive an empty or over-length slug — run it through the same
 		// SlugSchema the custom-slug path is validated against rather than trusting it.
+		// A title that fails this (CJK, emoji-only, etc.) still gets a usable page: fall
+		// back to a short opaque slug rather than hard-failing creation, since the title
+		// itself (unconstrained by SlugSchema) remains the actual display name.
 		const derivedSlug = SlugSchema.safeParse(slugify(title));
-		if (!derivedSlug.success) {
-			throw new ValidationError({
-				formErrors: derivedSlug.error.issues.map((i) => i.message),
-				fieldErrors: {},
-			});
-		}
-		slug = derivedSlug.data;
+		slug = derivedSlug.success ? derivedSlug.data : `page-${crypto.randomUUID().slice(0, 8)}`;
 	}
 	await assertSlugAvailable(orm, ctx.workspaceId, slug);
 	const id = crypto.randomUUID();
