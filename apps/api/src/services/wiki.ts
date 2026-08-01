@@ -872,7 +872,11 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 
 	await writeCreateWikiPageBatch(
 		ctx,
-		[insertStatement, buildFtsInsertStatement(ctx, id, title, content ?? "", meta.tags), ...linkStatements],
+		[
+			insertStatement,
+			buildFtsInsertStatement(ctx, id, title, content ?? "", meta.tags),
+			...linkStatements,
+		],
 		slug
 	);
 	await finalizeWikiPageCreate(ctx, { id, parentId: parentId ?? null, slug, title, meta });
@@ -1762,12 +1766,7 @@ async function assertNoSectionPatchConflict(
 ): Promise<void> {
 	const currentRevisionId = await getLatestRevisionId(ctx.db, pageId);
 	if (currentRevisionId === data.baseRevisionId) return;
-	const baseContent = await resolveBaseContent(
-		ctx.db,
-		pageId,
-		data.baseRevisionId,
-		currentContent
-	);
+	const baseContent = await resolveBaseContent(ctx.db, pageId, data.baseRevisionId, currentContent);
 	// A heading that was absent — or ambiguous — at base but resolves uniquely now means
 	// the section itself changed shape underneath the caller, so the empty base text
 	// below (correctly) trips the conflict check.
