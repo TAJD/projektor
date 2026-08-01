@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Componentize `apps/web`'s existing `.btn`/`.badge`/`.select-*`/popover CSS primitives into real `islands/ui/` components, migrate every call site to them (88 `.btn`/`.badge` occurrences across 15 files, plus 2 popover call sites, plus 10 files with raw color literals), and add a `plugins/design-system` cofferdam plugin that fails the build on future drift.
+**Goal:** Componentize `apps/web`'s existing `.btn`/`.badge`/`.select-*`/popover CSS primitives into real `islands/ui/` components, migrate every call site to them (~85 `.btn`/`.badge` occurrences across 14–15 files, plus 4 popover call sites — corrected from 2 after an Opus review found `GlossaryHelp.tsx` and `SavedViewsControl.tsx` were missed — plus raw color literals across the remaining islands, `apps/web/src/pages/share/view.astro` excluded as an intentional standalone token-definition source), and add a `plugins/design-system` cofferdam plugin that fails the build on future drift. Exact counts are directional — every migration task's own grep-based verification step is the source of truth, not the numbers stated here.
 
 **Architecture:** Four new Preact components (`Button`, `Badge`, `Popover`, `Select`) in `apps/web/src/islands/ui/`, each a thin wrapper around CSS classes/tokens already defined in `apps/web/src/layouts/Base.astro` — no new visual design. Every current call site of the underlying classes migrates to import the component instead. A new `plugins/design-system` cofferdam plugin (TypeScript, `@cofferdam/check-sdk`, following the existing `plugins/island-api` pattern exactly) enforces the convention going forward with four line-scan rules.
 
@@ -29,7 +29,8 @@ import type { JSX, ComponentChildren } from "preact";
 export interface ButtonProps {
 	variant?: "primary" | "outline" | "danger";
 	size?: "sm";
-	as?: "button" | "span";
+	as?: "button" | "span" | "a";
+	href?: string;
 	class?: string;
 	style?: JSX.CSSProperties;
 	type?: "button" | "submit";
@@ -45,12 +46,15 @@ export interface ButtonProps {
  * buttons that layer their own utility classes on top via `class`.
  * `as="span"` renders a non-interactive `.btn`-styled label (e.g. a file
  * upload trigger wrapped in a `<label>`), matching existing hand-rolled
- * `<span class="btn ...">` usage.
+ * `<span class="btn ...">` usage. `as="a"` renders a `.btn`-styled link
+ * (requires `href`), matching existing `<a class="btn ...">` usage (e.g.
+ * SprintManager.tsx's "start sprint" link).
  */
 export function Button({
 	variant,
 	size,
 	as = "button",
+	href,
 	class: extraClass,
 	style,
 	type = "button",
@@ -73,6 +77,15 @@ export function Button({
 			<span class={classes} style={style} {...rest}>
 				{children}
 			</span>
+		);
+	}
+
+	if (as === "a") {
+		if (!href) throw new Error("Button: `href` is required when as='a'");
+		return (
+			<a href={href} class={classes} style={style} {...rest}>
+				{children}
+			</a>
 		);
 	}
 
@@ -116,60 +129,89 @@ import { createPortal } from "preact/compat";
 
 export interface PopoverProps {
 	id?: string;
-	role?: "dialog" | "menu";
+	/** Root element tag. Defaults to "div". "ul" is needed for a listbox
+	 * popover (e.g. SavedViewsControl's saved-views menu) where the
+	 * popover element itself must carry `role="listbox"`, not wrap one. */
+	as?: "div" | "ul";
+	/** Omit both `role`/`ariaLabel` to render no ARIA attributes at all —
+	 * needed when the caller's own children already declare the
+	 * accessible role/name (e.g. AccountMenu's inner `role="menu"` div),
+	 * so the popover wrapper doesn't create a second, conflicting
+	 * landmark with the same accessible name. */
+	role?: "dialog" | "menu" | "listbox";
 	ariaLabel?: string;
-	/** Extra class(es) carrying usage-specific radius/padding/font-size —
-	 * `.popover` alone only sets the properties genuinely shared across
-	 * every current popover (background, border, shadow, z-index). */
+	/** Extra class(es) carrying usage-specific radius/padding/font-size/
+	 * position — `.popover` alone only sets the properties genuinely
+	 * shared across every current popover (background, border, shadow,
+	 * z-index). */
 	class?: string;
 	/**
 	 * "anchored" renders in place, positioned by the parent's own
-	 * `position: relative` + the modifier class's own `top`/`left` rule
-	 * (matches `.metric-help-popover`'s existing CSS). "portal-fixed"
-	 * portals to `document.body` with caller-computed fixed coordinates
-	 * (matches `AccountMenu`'s existing pattern, needed to escape the
-	 * topbar's scroll-hide `transform`).
+	 * `position: relative` + the modifier class's own `position:
+	 * absolute; top/left` rule (matches `.metric-help-popover`'s existing
+	 * CSS — `MetricHelp.tsx`'s own usage). "portal-fixed" portals to
+	 * `document.body` with caller-computed fixed coordinates (matches
+	 * `AccountMenu.tsx`/`GlossaryHelp.tsx`'s existing pattern, needed to
+	 * escape an ancestor's `transform`, e.g. the topbar's scroll-hide).
+	 * "fixed-inline" renders in place (no portal) but with caller-computed
+	 * `position: fixed` coordinates via inline style — matches
+	 * `SavedViewsControl.tsx`'s existing saved-views menu, which needs
+	 * fixed positioning (to escape a scrollable toolbar) but was never
+	 * portaled. Inline `style` always wins over the modifier class's own
+	 * `position`/`top`/`left` (inline styles beat class selectors
+	 * regardless of specificity), so sharing a modifier class between an
+	 * "anchored" call site and a "portal-fixed"/"fixed-inline" call site
+	 * for the same visual style is safe.
 	 */
-	strategy: "anchored" | "portal-fixed";
-	/** Required when strategy === "portal-fixed". */
-	position?: { top: number; left?: number; right?: number };
+	strategy: "anchored" | "portal-fixed" | "fixed-inline";
+	/** Required when strategy is "portal-fixed" or "fixed-inline". */
+	position?: { top: number; left?: number; right?: number; width?: number };
 	children: ComponentChildren;
 }
 
-export function Popover({ id, role = "dialog", ariaLabel, class: extraClass, strategy, position, children }: PopoverProps) {
+export function Popover({
+	id,
+	as = "div",
+	role,
+	ariaLabel,
+	class: extraClass,
+	strategy,
+	position,
+	children,
+}: PopoverProps) {
 	const classes = extraClass ? `popover ${extraClass}` : "popover";
+	const Tag = as;
+	const a11yProps = role ? { role, "aria-label": ariaLabel } : {};
 
 	if (strategy === "anchored") {
 		return (
-			<div id={id} role={role} aria-modal="false" aria-label={ariaLabel} class={classes}>
+			<Tag id={id} class={classes} {...a11yProps}>
 				{children}
-			</div>
+			</Tag>
 		);
 	}
 
-	if (!position) throw new Error("Popover: `position` is required when strategy is 'portal-fixed'");
+	if (!position) throw new Error(`Popover: \`position\` is required when strategy is '${strategy}'`);
 
-	return createPortal(
-		<div
-			id={id}
-			role={role}
-			aria-label={ariaLabel}
-			class={classes}
-			style={{
-				position: "fixed",
-				top: `${position.top}px`,
-				...(position.left !== undefined ? { left: `${position.left}px` } : {}),
-				...(position.right !== undefined ? { right: `${position.right}px` } : {}),
-			}}
-		>
+	const style = {
+		position: "fixed" as const,
+		top: `${position.top}px`,
+		...(position.left !== undefined ? { left: `${position.left}px` } : {}),
+		...(position.right !== undefined ? { right: `${position.right}px` } : {}),
+		...(position.width !== undefined ? { minWidth: `${position.width}px` } : {}),
+	};
+
+	const el = (
+		<Tag id={id} class={classes} style={style} {...a11yProps}>
 			{children}
-		</div>,
-		document.body
+		</Tag>
 	);
+
+	return strategy === "portal-fixed" ? createPortal(el, document.body) : el;
 }
 ```
 
-New shared `.popover` base CSS class (added to `Base.astro`, not a new file — see Task 4): `background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm); z-index: 200;` — pulled out of the three duplicated blocks. Each caller keeps a small modifier class for its own radius/padding/font-size so visual output is unchanged (`.popover-metric-help`, `.popover-account-menu`).
+New shared `.popover` base CSS class (added to `Base.astro`, not a new file — see Task 4): `background: var(--bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm); z-index: 200;` — pulled out of the three duplicated blocks. Each caller keeps a small modifier class for its own radius/padding/font-size **and position** (where the original class carried `position`/`top`/`left`, e.g. `.metric-help-popover`) so visual output is unchanged: `.popover-metric-help`, `.popover-account-menu`, `.popover-select-menu` (new, for `SavedViewsControl`/Task 5b — carries `.select-menu`'s existing `border-radius: 6px; padding: 0.25rem;`, no position rule since `fixed-inline`/`portal-fixed` always set position via inline style).
 
 ### `Select` — moved as-is from `apps/web/src/islands/Select.tsx` to `apps/web/src/islands/ui/Select.tsx` (Task 5). No behavior/API change; import path changes only.
 
@@ -184,6 +226,7 @@ New shared `.popover` base CSS class (added to `Base.astro`, not a new file — 
 | `<button ... class="btn btn-danger">` / `btn-danger btn-sm` | `<Button variant="danger">` / `<Button variant="danger" size="sm">` |
 | `<button ... class="btn btn-sm <extra tailwind utility classes>">` (icon-reset buttons, no variant) | `<Button size="sm" class="<extra tailwind utility classes>">` |
 | `<span class="btn btn-outline btn-sm ...">` (non-interactive label, e.g. file-upload trigger) | `<Button as="span" variant="outline" size="sm" class="...">` |
+| `<a href={...} class="btn btn-outline btn-sm">` (link styled as a button, e.g. SprintManager's "start sprint" link) | `<Button as="a" href={...} variant="outline" size="sm">` |
 | `class="btn btn-primary btn-sm${cond ? " opacity-60" : ""}"` (template literal with conditional extra class) | `<Button variant="primary" size="sm" class={cond ? "opacity-60" : undefined}>` |
 | Any `class="btn ..."` combo not covered above | Same pattern: `variant` from `btn-primary`/`btn-outline`/`btn-danger` (or omit), `size="sm"` if `btn-sm` present, everything else becomes the `class` passthrough |
 | `<span class="badge" style={{...}}>` | `<Badge style={{...}}>` |
@@ -256,6 +299,17 @@ describe("Button", () => {
 	it("respects disabled", () => {
 		render(<Button disabled>Nope</Button>);
 		expect(screen.getByRole("button", { name: "Nope" })).toBeDisabled();
+	});
+
+	it("renders as a link when as='a'", () => {
+		render(
+			<Button as="a" href="/sprints/1/start" variant="outline" size="sm">
+				Start
+			</Button>
+		);
+		const el = screen.getByRole("link", { name: "Start" });
+		expect(el.getAttribute("href")).toBe("/sprints/1/start");
+		expect(el.className).toBe("btn btn-outline btn-sm");
 	});
 });
 ```
@@ -348,7 +402,7 @@ git commit -m "feat(design-system): add Badge component wrapping .badge primitiv
 
 **Interfaces:**
 - Consumes: none (self-contained).
-- Produces: `Popover` (named export), `PopoverProps` — used by Task 6 (`MetricHelp.tsx`) and Task 6b (`AccountMenu.tsx`).
+- Produces: `Popover` (named export), `PopoverProps` — used by Task 5 (`MetricHelp.tsx`/`AccountMenu.tsx`) and Task 5b (`GlossaryHelp.tsx`/`SavedViewsControl.tsx`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -380,6 +434,30 @@ describe("Popover", () => {
 		expect(el.style.position).toBe("fixed");
 		expect(el.style.top).toBe("60px");
 		expect(el.style.right).toBe("8px");
+	});
+
+	it("renders fixed-inline in place (no portal) with computed position", () => {
+		render(
+			<Popover as="ul" strategy="fixed-inline" class="popover-select-menu" role="listbox" ariaLabel="Saved views" position={{ top: 40, left: 4, width: 200 }}>
+				<li>view</li>
+			</Popover>
+		);
+		const el = screen.getByRole("listbox", { name: "Saved views" });
+		expect(el.tagName).toBe("UL");
+		expect(el.parentElement).not.toBe(document.body);
+		expect(el.style.position).toBe("fixed");
+		expect(el.style.minWidth).toBe("200px");
+	});
+
+	it("renders with no ARIA attributes when role is omitted", () => {
+		render(
+			<Popover strategy="portal-fixed" class="popover-account-menu" position={{ top: 60, right: 8 }}>
+				<div role="menu" aria-label="Account">
+					menu
+				</div>
+			</Popover>
+		);
+		expect(screen.getAllByRole("menu", { name: "Account" })).toHaveLength(1);
 	});
 
 	it("throws when portal-fixed is used without position", () => {
@@ -421,6 +499,9 @@ In `apps/web/src/layouts/Base.astro`, in the `<style is:global>` block, immediat
         z-index: 200;
       }
       .popover-metric-help {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
         width: 16rem;
         max-width: min(16rem, 80vw);
         padding: 0.625rem 0.75rem;
@@ -436,15 +517,25 @@ In `apps/web/src/layouts/Base.astro`, in the `<style is:global>` block, immediat
         padding: 0.375rem;
         font-size: 0.875rem;
       }
+      .popover-select-menu {
+        border-radius: 6px;
+        padding: 0.25rem;
+      }
 ```
 
-Then remove `background`, `border`, `box-shadow`, `z-index` from the existing `.metric-help-popover` and `.account-menu-popover` rules (they now come from `.popover`) — leave the rest of each rule (`position`, `top`, `left`, `width`, etc. for `.metric-help-popover`) untouched.
+`.popover-metric-help` keeps `position: absolute; top: calc(100% + 4px); left: 0;` from the old `.metric-help-popover` rule — this class is shared by both `MetricHelp.tsx` (anchored, relies on this CSS-driven positioning) and `GlossaryHelp.tsx` (portal-fixed, Task 5b — its inline `style="position: fixed; ..."` overrides these three properties, since inline styles always win over a class selector regardless of specificity, so sharing the class between both usages is safe). `.popover-account-menu` and `.popover-select-menu` carry no `position` rule — their only two current usages (`AccountMenu.tsx`, `SavedViewsControl.tsx` via Task 5b) both set `position: fixed` inline.
 
-- [ ] **Step 6: Manually diff the computed CSS is unchanged**
+Then remove `background`, `border`, `box-shadow`, `z-index` from the existing `.metric-help-popover` and `.account-menu-popover` rules (they now come from `.popover`), and remove `position`, `top`, `left` from `.metric-help-popover` (now on `.popover-metric-help` above) — leave `.select-menu`'s own rule untouched for now (still used directly by `islands/ui/Select.tsx`'s internal menu, which stays out of scope per the spec's deferral).
 
-Run: `pnpm --filter web build` then grep the built CSS for `.popover-metric-help` and `.metric-help-popover` to confirm both class names' combined declarations match the pre-change `.metric-help-popover` block exactly (background/border/shadow/z-index/radius/padding/font all present, no duplicates, no drops).
+- [ ] **Step 6: Fix the topbar scroll-hide script's `.account-menu-popover` selector**
 
-- [ ] **Step 7: Commit**
+`apps/web/src/layouts/Base.astro` has an inline script (~line 839) that keeps the topbar visible while the account menu is open: `document.querySelector('.account-menu-popover')`. Once `AccountMenu.tsx` (Task 5) renders `class="popover popover-account-menu"` instead of `class="account-menu-popover"`, this selector returns `null` and the topbar can hide itself while the menu is still open. Update the selector to `document.querySelector('.popover-account-menu')`.
+
+- [ ] **Step 7: Manually diff the computed CSS is unchanged**
+
+Run: `pnpm --filter web build` then grep the built CSS for `.popover-metric-help` and confirm its combined declarations (via `.popover` + `.popover-metric-help`) match the pre-change `.metric-help-popover` block exactly (background/border/shadow/z-index/position/top/left/radius/padding/font all present, no duplicates, no drops). Repeat for `.popover-account-menu` against the pre-change `.account-menu-popover` block.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add apps/web/src/islands/ui/Popover.tsx apps/web/src/islands/ui/Popover.test.tsx apps/web/src/layouts/Base.astro
@@ -516,6 +607,8 @@ git commit -m "refactor(design-system): move Select into islands/ui/"
 **Interfaces:**
 - Consumes: `Popover` from `./ui/Popover` (both files are directly under `islands/`).
 
+**Scope correction (post-Opus-review, 2026-08-01):** the spec/original plan said there are two `.metric-help-popover`/`.account-menu-popover` call sites total. There are actually **three** — `apps/web/src/islands/GlossaryHelp.tsx:95-108` also renders a portal-fixed `.metric-help-popover`, and it was missed by the original file survey. It's migrated in Task 5b below (kept separate from this task since it's a distinct file with its own test file, not because it's lower priority).
+
 - [ ] **Step 1: Migrate `MetricHelp.tsx`**
 
 Add the import: `import { Popover } from "./ui/Popover";`
@@ -556,14 +649,7 @@ Replace (current lines 140–177, the `open && popoverPos && createPortal(...)` 
 
 ```tsx
 				{open && popoverPos && (
-					<Popover
-						id={menuId}
-						strategy="portal-fixed"
-						class="popover-account-menu"
-						role="menu"
-						ariaLabel="Account"
-						position={popoverPos}
-					>
+					<Popover id={menuId} strategy="portal-fixed" class="popover-account-menu" position={popoverPos}>
 						<div class="account-menu-identity">
 							<div class="account-menu-identity-name">{user.name}</div>
 							<div class="account-menu-identity-email">{user.email}</div>
@@ -589,6 +675,8 @@ Replace (current lines 140–177, the `open && popoverPos && createPortal(...)` 
 				)}
 ```
 
+`Popover` is deliberately given no `role`/`ariaLabel` here (unlike `MetricHelp`'s usage below) — the original markup's outer `<div class="account-menu-popover">` had no ARIA role of its own; the accessible menu role/name live on the *inner* `<div role="menu" aria-label="Account">`, which is preserved unchanged in the children above. Passing `role="menu" ariaLabel="Account"` to `Popover` too would create a second, outer element with the same accessible role and name, breaking any `getByRole("menu", { name: "Account" })` query (multiple matches) — this is exactly why `Popover`'s `role`/`ariaLabel` props are optional and only rendered when both are supplied (see Task 3).
+
 Note the `ref={popoverRef}` from the original `<div>` is dropped — `popoverRef` is only read inside `isInside()` to decide whether an outside click is really outside. Since `Popover`'s rendered DOM still has the same `id`/`role`/class structure, replace `popoverRef.current?.contains(node)` in `isInside()` with a lookup via `document.getElementById(menuId)?.contains(node)` instead of a ref, since `Popover` doesn't expose a ref passthrough. Update:
 
 ```tsx
@@ -612,6 +700,121 @@ Expected: PASS, same assertions as before (tests query by role/aria-label, which
 ```bash
 git add apps/web/src/islands/MetricHelp.tsx apps/web/src/islands/AccountMenu.tsx
 git commit -m "refactor(design-system): migrate MetricHelp and AccountMenu popovers to islands/ui/Popover"
+```
+
+---
+
+## Task 5b: Migrate `GlossaryHelp.tsx` and `SavedViewsControl.tsx` to `Popover`
+
+**Files:**
+- Modify: `apps/web/src/islands/GlossaryHelp.tsx`
+- Modify: `apps/web/src/islands/issue-list/SavedViewsControl.tsx`
+
+**Interfaces:**
+- Consumes: `Popover` from `./ui/Popover` (`GlossaryHelp.tsx`, directly under `islands/`) or `../ui/Popover` (`SavedViewsControl.tsx`, under `islands/issue-list/`).
+
+Added post-Opus-review (2026-08-01): both files were missed by the original spec's call-site survey. `GlossaryHelp.tsx` reimplements the same `.metric-help-popover` visual style as `MetricHelp.tsx` (portal-fixed, not anchored). `SavedViewsControl.tsx` reimplements `Select`'s trigger+listbox shape (`.select-button`/`.select-menu`/`.select-caret`) as a non-portaled, `position: fixed` dropdown of saved views — structurally closer to `Popover`'s new `"fixed-inline"` strategy than to a value-driven `Select`, so only its popover markup migrates here; its trigger button keeps its own `.select-button` styling (not `Button`, which is visually a different primitive) and stays out of scope for the `Button`/`Badge` migration tasks below.
+
+- [ ] **Step 1: Migrate `GlossaryHelp.tsx`**
+
+Add the import: `import { Popover } from "./ui/Popover";`
+
+Replace (current lines ~92–107, the `createPortal(<div ... class="metric-help-popover" ...>, document.body)` block):
+
+```tsx
+			{open &&
+				popoverPos &&
+				createPortal(
+					<div
+						id={popoverId}
+						ref={popoverRef}
+						role="dialog"
+						aria-modal="false"
+						aria-label={`${term.label} definition`}
+						class="metric-help-popover"
+						style={{ position: "fixed", top: `${popoverPos.top}px`, left: `${popoverPos.left}px` }}
+					>
+						<p class="m-0 text-[0.8rem] text-text-base">{term.definition}</p>
+					</div>,
+					document.body
+				)}
+```
+
+with:
+
+```tsx
+			{open && popoverPos && (
+				<Popover
+					id={popoverId}
+					strategy="portal-fixed"
+					class="popover-metric-help"
+					ariaLabel={`${term.label} definition`}
+					position={popoverPos}
+				>
+					<p class="m-0 text-[0.8rem] text-text-base">{term.definition}</p>
+				</Popover>
+			)}
+```
+
+`ref={popoverRef}` is dropped the same way as in `AccountMenu.tsx` (Task 5) — if the surrounding code uses `popoverRef` for outside-click detection, replace `popoverRef.current?.contains(node)` with `document.getElementById(popoverId)?.contains(node)`, matching Task 5's `isInside()` fix. Read the file first to confirm whether this applies here (it does in `AccountMenu.tsx`; confirm the same pattern before assuming).
+
+- [ ] **Step 2: Migrate `SavedViewsControl.tsx`'s menu**
+
+Add the import: `import { Popover } from "../ui/Popover";`
+
+Replace (current lines ~107–115, the `<ul ref={viewsMenuRef} class="select-menu" ...>` element — read the file first for the exact full JSX, including its children, since only the opening tag is shown in the grep excerpt below):
+
+```tsx
+				<ul
+					ref={viewsMenuRef}
+					class="select-menu"
+					aria-label="Saved views"
+					style={{
+						position: "fixed",
+						top: `${viewsMenuPos.current.top}px`,
+						left: `${viewsMenuPos.current.left}px`,
+						minWidth: `${viewsMenuPos.current.width}px`,
+					}}
+				>
+					{/* ... existing children, unchanged ... */}
+				</ul>
+```
+
+with:
+
+```tsx
+				<Popover
+					as="ul"
+					strategy="fixed-inline"
+					class="popover-select-menu"
+					role="listbox"
+					ariaLabel="Saved views"
+					position={viewsMenuPos.current}
+				>
+					{/* ... existing children, unchanged ... */}
+				</Popover>
+```
+
+`ref={viewsMenuRef}` is dropped (`Popover` doesn't expose a ref passthrough) — if `viewsMenuRef` is read elsewhere in the file (e.g. for outside-click detection alongside `viewsContainerRef`), replace it with a DOM query or an `id` + `document.getElementById` lookup the same way as Task 5/Step 1 above. Read the full file first to confirm how `viewsMenuRef` is used before making this change.
+
+The trigger `<button class="select-button" ...>` above it is **not** migrated — it stays exactly as-is, since `Button` doesn't model the `.select-button` visual style and this task's scope is the popover only (see the task-level note above). Since this file's popover markup now imports `Popover` but not `Select`, rule 2 (Task 16) would still flag the trigger's `class="select-button"` (it belongs to the `select-*` family, gated on a `Select` import). Add an inline escape-hatch comment on that line, matching the convention `plugins/island-api` already uses:
+
+```tsx
+				class="select-button" // cofferdam-ignore: DesignSystemConvention — reuses Select's trigger visual style for a non-value-driven menu; full Select reuse would need Select's option renderer extended for per-item actions (rename/delete), out of scope for PROJ-527. Tracked as a fast-follow.
+```
+
+This rule requires `plugins/design-system`'s `src/index.ts` to honor the same `cofferdam-ignore` comment convention `island-api` relies on — that's a built-in cofferdam engine feature (comment-based suppression applies to any check by id), not something the plugin itself needs to implement.
+
+- [ ] **Step 3: Run tests**
+
+Run: `pnpm --filter web exec vitest run src/islands/GlossaryHelp.test.tsx src/islands/issue-list/SavedViewsControl.test.tsx` (confirm both test files exist first with `ls`; if a file has no dedicated test, skip it for that file only).
+Expected: PASS, unchanged assertion count.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add apps/web/src/islands/GlossaryHelp.tsx apps/web/src/islands/issue-list/SavedViewsControl.tsx
+git commit -m "refactor(design-system): migrate GlossaryHelp and SavedViewsControl popovers to islands/ui/Popover"
 ```
 
 ---
@@ -694,7 +897,7 @@ git commit -m "refactor(design-system): migrate CreateIssueModal, NewSourceModal
 **Files:**
 - Modify: `apps/web/src/islands/ProjectLanding.tsx` (2 occurrences)
 - Modify: `apps/web/src/islands/ProjectList.tsx` (3 occurrences)
-- Modify: `apps/web/src/islands/issue-list/SprintBannerSection.tsx` (2 occurrences, plus raw-hex fixes)
+- Modify: `apps/web/src/islands/issue-list/SprintBannerSection.tsx` (2 `.btn` occurrences, plus 4 raw-hex/rgb literals — count verified by Opus review, 2026-08-01)
 - Modify: `apps/web/src/islands/issue-list/Toolbar.tsx` (1 occurrence)
 
 - [ ] **Step 1: Migrate imports + call sites** (per mapping table). `ProjectLanding.tsx`/`ProjectList.tsx`: `import { Button } from "./ui/Button";`. `issue-list/SprintBannerSection.tsx`/`issue-list/Toolbar.tsx`: `import { Button } from "../ui/Button";`.
@@ -819,7 +1022,7 @@ function statusBadge(status: Sprint["status"]) {
 }
 ```
 
-Then migrate the remaining 6 `.btn`-classed elements in the file (lines ~536, 789, 796, 829, 839, 845, 890) using the mapping table.
+Then migrate the remaining 6 `.btn`-classed elements in the file (lines ~536, 789, 796, 829, 839, 845) using the mapping table, plus one `<a href=... class="btn btn-outline btn-sm">` at line ~890 — this one is a link, not a button; migrate it to `<Button as="a" href={...} variant="outline" size="sm">` (see Task 1's `as="a"` support) rather than the default `<Button>` mapping.
 
 - [ ] **Step 3: Add the two new tokens to `Base.astro`**
 
@@ -881,7 +1084,7 @@ git commit -m "refactor(design-system): migrate TokenManager to Button"
 ## Task 11: Migrate `WikiPage.tsx` (`.btn` + raw hex)
 
 **Files:**
-- Modify: `apps/web/src/islands/WikiPage.tsx` (21 `.btn` occurrences)
+- Modify: `apps/web/src/islands/WikiPage.tsx` (21 `.btn` occurrences, 2 raw-hex/rgb literals — count verified by Opus review, 2026-08-01)
 
 - [ ] **Step 1: Add `import { Button } from "./ui/Button";`** (note: `Select` import already updated to `./ui/Select` in Task 4)
 - [ ] **Step 2: Migrate all 21 `.btn`-classed elements** using the mapping table — includes two `<span class="btn btn-outline btn-sm">` file-upload-trigger labels (lines 961, 1328) that use `as="span"`.
@@ -907,7 +1110,7 @@ git commit -m "refactor(design-system): migrate WikiPage to Button; fix raw hex"
 ## Task 12: Migrate `IssueDetailParts.tsx` (`.btn` + raw hex)
 
 **Files:**
-- Modify: `apps/web/src/islands/IssueDetailParts.tsx` (21 `.btn` occurrences, largest single file — its own task)
+- Modify: `apps/web/src/islands/IssueDetailParts.tsx` (21 `.btn` occurrences, largest single file for that reason — its own task; only 1 raw-hex/rgb literal — count verified by Opus review, 2026-08-01, smaller than the plan originally implied)
 
 - [ ] **Step 1: Add `import { Button } from "./ui/Button";`** (note: `Select` import already updated to `./ui/Select` in Task 4)
 - [ ] **Step 2: Migrate all 21 `.btn`-classed elements** using the mapping table.
@@ -935,10 +1138,10 @@ git commit -m "refactor(design-system): migrate IssueDetailParts to Button; fix 
 **Files:**
 - Modify: `apps/web/src/islands/IssueDetail.tsx`
 - Modify: `apps/web/src/islands/issue-list/BoardView.tsx`
-- Modify: `apps/web/src/islands/issue-list/FiltersPopover.tsx`
+- Modify: `apps/web/src/islands/issue-list/FiltersPopover.tsx` (6 raw-hex/rgb literals — the largest concentration of the four, count verified by Opus review, 2026-08-01)
 - Modify: `apps/web/src/islands/ApiHealth.tsx`
 
-None of these four files have `.btn`/`.badge` classes to migrate (confirmed by the Task 6–12 grep list not including them) — only raw color literals.
+None of these four files have `.btn`/`.badge` classes to migrate (confirmed by the Task 6–12 grep list not including them) — only raw color literals. `SprintManager.tsx` (Task 9) also carries a larger-than-implied 7 raw-hex/rgb literals beyond the two `statusBadge` ones already handled in Task 9 Step 2 — re-run the Step 4 grep there carefully; don't assume Task 9's two are the only ones in that file.
 
 - [ ] **Step 1: For each file, find and fix raw hex/rgb literals**
 
@@ -994,7 +1197,7 @@ git commit -m "fix(design-system): replace raw hex/rgb literals with tokens in r
     "test": "node scripts/check-fixture.mjs"
   },
   "dependencies": {
-    "@cofferdam/check-sdk": "^0.3.7"
+    "@cofferdam/check-sdk": "^0.3.13"
   },
   "devDependencies": {
     "typescript": "^5.5.0"
@@ -1004,6 +1207,24 @@ git commit -m "fix(design-system): replace raw hex/rgb literals with tokens in r
   }
 }
 ```
+
+**Why `^0.3.13`, not `^0.3.7` (which `plugins/island-api` uses):** Rule 2 (Task 16) needs `JSXElement`/`JSXAttribute` AST nodes. Verified directly against the installed package: `node_modules/.pnpm/@cofferdam+check-sdk@0.3.7/.../dist/ast.d.ts` exposes only `Program | CallExpression | ImportDeclaration | Function | ArrowFunctionExpression | Class | ObjectExpression | MemberExpression | IdentifierReference` — no JSX kinds at all (this is what `island-api`'s own doc comment refers to). JSX/Import-specifier AST support (`JSXElement`, `JSXAttribute`, `JSXExpressionContainer`, plus `VariableDeclaration`, `Document`/`Element`/HTML kinds) was added later (CD-80/CD-84) and is present in `@cofferdam/check-sdk@0.3.13`, confirmed by downloading and inspecting the published npm tarball directly (`npm pack @cofferdam/check-sdk@0.3.13`). 0.3.13 is the latest published version as of 2026-08-01.
+
+- [ ] **Step 1b: Bump the lockfile**
+
+Since `plugins/island-api` still declares `^0.3.7` and pnpm's dedup will need to reconcile both ranges (`^0.3.7` and `^0.3.13` both resolve within `<0.4.0`, so a single 0.3.13 install satisfies both — no need to touch `island-api`'s own `package.json`), run from the repo root after adding this `package.json`:
+
+```bash
+pnpm install
+```
+
+Expected: lockfile updates, `@cofferdam/check-sdk` resolves to `0.3.13` repo-wide. Then run `plugins/island-api`'s own fixture test to confirm the bump didn't regress it (it only uses `CallExpression`/line-scanning, none of the removed-in-0.3.7-added-later kinds, so this should be a no-op):
+
+```bash
+cd plugins/island-api && npm run test
+```
+
+Expected: PASS, unchanged output.
 
 - [ ] **Step 2: `tsconfig.json`** (identical to `plugins/island-api/tsconfig.json`)
 
@@ -1065,7 +1286,7 @@ severity = "high"
 // (filled in Task 18)
 ```
 
-- [ ] **Step 5: Placeholder fixture ui component**
+- [ ] **Step 5: Placeholder fixture ui components**
 
 Create `plugins/design-system/fixtures/apps/web/src/islands/ui/Button.tsx`:
 
@@ -1073,6 +1294,17 @@ Create `plugins/design-system/fixtures/apps/web/src/islands/ui/Button.tsx`:
 // Stand-in for the real islands/ui/Button.tsx, so a fixture case that
 // imports "./ui/Button" (Rule 2's negative case) resolves to something.
 export function Button() {
+	return null;
+}
+```
+
+Create `plugins/design-system/fixtures/apps/web/src/islands/ui/Select.tsx`:
+
+```tsx
+// Stand-in for the real islands/ui/Select.tsx (default export, matching
+// the real component's convention — see Task 4), so Rule 2's regression
+// fixture (a file that imports Select but still hand-rolls .btn) resolves.
+export default function Select() {
 	return null;
 }
 ```
@@ -1159,9 +1391,14 @@ git commit -m "chore(design-system): scaffold plugins/design-system cofferdam pl
 // components and Base.astro's CSS tokens instead of hand-rolled
 // primitives / raw color literals (PROJ-527).
 //
-// Four rules in one check, each a line-text scan (matching island-api's
-// precedent: the check-sdk v0 AST surface has no JSX node kinds, so a
-// className-based or CSS-selector-based rule can't be AST-driven anyway).
+// Rules 1, 3, 4 are line-text scans (a CSS-selector or inline-style-value
+// rule has no natural AST target). Rule 2 (hand-rolled primitive markup)
+// is AST-based — it needs per-element className + per-file import
+// tracking, which a line scan can't do reliably — using
+// `file.ast.findAll("JSXElement"/"ImportDeclaration")` from
+// @cofferdam/check-sdk@0.3.13 (bumped from island-api's ^0.3.7: that
+// version's AST surface has no JSX node kinds at all — see Task 14's
+// package.json note for how this was confirmed).
 // None of the rules skip LineView.isStringLiteral lines — a
 // `class="btn ..."` or `color: "#fff"` literal IS a string literal, so
 // skipping those lines would make every rule blind to its own target.
@@ -1169,6 +1406,15 @@ git commit -m "chore(design-system): scaffold plugins/design-system cofferdam pl
 import { Category, defineCheck, Severity } from "@cofferdam/check-sdk";
 
 const RAW_COLOR_PATTERN = /#[0-9a-fA-F]{3,8}\b|rgba?\(/g;
+// A bare hex-shaped token isn't necessarily a color — `href="#add"` or
+// `id="#deed"` are valid CSS hex-digit strings but not colors. `rgb(`/
+// `rgba(` are unambiguous on their own; a bare `#xxx` only counts as a
+// finding when the line also has a color-ish keyword nearby (property
+// names every real color usage in this codebase is attached to: `color`,
+// `background`, `border`, `shadow`, `fill`, `stroke`) or is inside a
+// `style=`/CSS-property-colon context. Confirmed necessary by review
+// (2026-08-01): the naive pattern alone false-positives on anchor hrefs.
+const COLOR_CONTEXT_PATTERN = /(color|background|border|shadow|fill|stroke)/i;
 
 // cofferdam-ignore: Design.OrphanExport: loaded dynamically via cofferdam.toml's `plugins = ["./plugins/design-system"]`, not a static import
 export default defineCheck({
@@ -1184,11 +1430,26 @@ export default defineCheck({
   files: {
     extensions: ["tsx", "astro"],
     pathPatterns: ["apps/web/src/**/*"],
-    excludePatterns: ["apps/web/src/layouts/Base.astro", "apps/web/src/islands/ui/**/*"],
+    // apps/web/src/pages/share/view.astro is a standalone, unauthenticated
+    // page (public issue-share link) that intentionally does NOT render
+    // through Base.astro/the app shell — it ships its own minimal
+    // :root/dark-media/[data-theme] token block plus a `.badge` rule,
+    // exactly the same "token-definition source, not consumer" role
+    // Base.astro plays for the rest of the app. Confirmed 2026-08-01
+    // (Opus review, PROJ-527): 28 raw-hex matches here are all inside
+    // that self-contained token block, not drift.
+    excludePatterns: [
+      "apps/web/src/layouts/Base.astro",
+      "apps/web/src/islands/ui/**/*",
+      "apps/web/src/pages/share/view.astro",
+    ],
   },
   run(file, ctx) {
     for (const ln of file.lines()) {
+      if (ln.isComment) continue;
       for (const m of ln.text.matchAll(RAW_COLOR_PATTERN)) {
+        const isUnambiguousRgb = m[0].startsWith("rgb");
+        if (!isUnambiguousRgb && !COLOR_CONTEXT_PATTERN.test(ln.text)) continue;
         ctx.report({
           message: `Raw color literal "${m[0]}" — use a var(--*) token from Base.astro instead.`,
           span: ln.spanFor(m.index, m.index + m[0].length),
@@ -1215,6 +1476,10 @@ export function RawColorPositiveRgba() {
 
 export function RawColorNegative() {
 	return <div style={{ color: "var(--text)" }}>ok, token</div>; // OK — token, not a literal
+}
+
+export function RawColorNegativeHrefNotAColor() {
+	return <a href="#add">ok, hex-shaped fragment id, no color keyword nearby</a>; // OK — not flagged
 }
 ```
 
@@ -1249,37 +1514,56 @@ git commit -m "feat(design-system): implement DesignSystemConvention rule 1 (raw
 - Modify: `plugins/design-system/fixtures/apps/web/src/islands/fixture.tsx`
 - Modify: `plugins/design-system/expected.json`
 
+**Design correction (post-Opus-review, 2026-08-01):** the original design for this rule used a whole-file "does this file import anything from islands/ui?" gate. That's wrong — once Task 4 updates 9 files' `Select` import to `./ui/Select`, a single file-level gate goes permanently blind to *every* primitive-class finding in those 9 files, including unrelated future `.btn`/`.badge` drift that has nothing to do with `Select`. `@cofferdam/check-sdk` actually ships `JSXElementNode`/`JSXAttributeNode`/`ImportDeclarationNode` in its AST surface (confirmed by reading `packages/check-sdk/src/ast.ts` directly — newer than the `island-api` plugin's line-scan-only precedent, which predates this AST coverage), so this rule is AST-based and checks import-per-primitive-family, not import-of-anything.
+
+**Interfaces:**
+- Consumes: `file.ast` (`AstView`, from `SourceFile`), specifically `findAll("ImportDeclaration")` and `findAll("JSXElement")`.
+
 - [ ] **Step 1: Add the rule-2 constants and logic to `src/index.ts`**
 
-Add near the top, after `RAW_COLOR_PATTERN`:
+Add near the top, after `COLOR_CONTEXT_PATTERN`:
 
 ```ts
-const PRIMITIVE_CLASS_TOKENS = [
-  "btn",
-  "badge",
-  "select-button",
-  "select-menu",
-  "account-menu-popover",
-  "metric-help-popover",
+import type { AstNode } from "@cofferdam/check-sdk";
+
+// Maps each primitive's class-name family to the local names its
+// islands/ui component is legitimately imported under. A file that uses
+// e.g. `class="btn ..."` only avoids a finding if it imports Button
+// specifically — importing Select (or nothing) doesn't excuse it.
+const PRIMITIVE_FAMILIES: { pattern: RegExp; importedFrom: string; label: string }[] = [
+  { pattern: /\bbtn\b/, importedFrom: "Button", label: "btn" },
+  { pattern: /\bbadge\b/, importedFrom: "Badge", label: "badge" },
+  { pattern: /\bselect-(button|menu|caret|option)\b/, importedFrom: "Select", label: "select-*" },
+  {
+    pattern: /\b(account-menu-popover|metric-help-popover|popover-account-menu|popover-metric-help|popover-select-menu)\b/,
+    importedFrom: "Popover",
+    label: "popover",
+  },
 ];
-const PRIMITIVE_CLASS_PATTERN = new RegExp(
-  `class(?:Name)?=["'{][^"'}]*\\b(${PRIMITIVE_CLASS_TOKENS.join("|")})\\b`
-);
-const UI_IMPORT_PATTERN = /from\s+["'][.\/]*islands\/ui\/|from\s+["']\.\.?\/ui\//;
 ```
 
 Inside `run(file, ctx)`, after the rule-1 loop, add:
 
 ```ts
-    const importsUi = UI_IMPORT_PATTERN.test(file.text);
-    if (!importsUi) {
-      for (const ln of file.lines()) {
-        const m = PRIMITIVE_CLASS_PATTERN.exec(ln.text);
-        if (!m) continue;
-        ctx.report({
-          message: `Hand-rolled primitive class "${m[1]}" without an islands/ui import — use the shared component instead.`,
-          span: ln.spanFor(m.index, m.index + m[0].length),
-        });
+    if (file.ast) {
+      const importedNames = new Set<string>();
+      for (const imp of file.ast.findAll("ImportDeclaration")) {
+        if (!/\/ui\/(Button|Badge|Select|Popover)$/.test(imp.source)) continue;
+        for (const spec of imp.specifiers) importedNames.add(spec.imported ?? spec.localName);
+      }
+
+      for (const el of file.ast.findAll("JSXElement")) {
+        const classAttr = el.attributes.find((a) => a.name === "class" || a.name === "className");
+        if (!classAttr || classAttr.value === undefined) continue; // skip dynamic/expression class values — can't statically read them
+
+        for (const family of PRIMITIVE_FAMILIES) {
+          if (!family.pattern.test(classAttr.value)) continue;
+          if (importedNames.has(family.importedFrom)) continue;
+          ctx.report({
+            message: `Hand-rolled "${family.label}" markup — import ${family.importedFrom} from islands/ui instead of using the raw class.`,
+            span: classAttr.span,
+          });
+        }
       }
     }
 ```
@@ -1292,35 +1576,54 @@ Replace the `// ---- Rule 2 ----` section with:
 // ---- Rule 2: hand-rolled primitive markup (import boundary) -----------
 export function HandRolledPositive() {
 	return (
-		<button type="button" class="btn btn-primary"> {/* FLAG hand-rolled primitive class "btn" — no ui import in this file */}
+		<button type="button" class="btn btn-primary"> {/* FLAG hand-rolled "btn" markup — no Button import in this file */}
 			No import
 		</button>
 	);
 }
-```
 
-(Deliberately no negative case importing `islands/ui/Button` in this fixture file — adding one here would make `UI_IMPORT_PATTERN.test(file.text)` true for the *whole file*, silencing rule 2 for `HandRolledPositive` above and breaking the positive case. The negative case — a file that imports the component and correctly avoids raw `.btn` markup — is exercised implicitly by every real `islands/ui/*.tsx` file itself, which is path-excluded, and by the real migrated call sites from Tasks 6–13 all passing `cofferdam check` with zero findings at Task 19.)
+import Select from "./ui/Select";
+
+export function HandRolledStillFlaggedDespiteUnrelatedImport() {
+	// Regression case for the file-level-gate bug this rule replaces: importing
+	// Select must NOT silence a hand-rolled .btn finding elsewhere in the file.
+	return (
+		<>
+			<Select value="a" options={[]} onChange={() => {}} ariaLabel="x" />
+			<button type="button" class="btn btn-outline"> {/* FLAG hand-rolled "btn" markup — Select import doesn't cover Button */}
+				Still flagged
+			</button>
+		</>
+	);
+}
+
+import { Button } from "./ui/Button";
+
+export function HandRolledNegative() {
+	return <Button variant="primary">Imported correctly, not flagged</Button>; // OK
+}
+```
 
 - [ ] **Step 3: Rebuild, run against the fixture, observe output**
 
 Run: `npm run build && npx --no-install cofferdam check fixtures/apps/web/src/islands/fixture.tsx --config ./cofferdam.toml --format json`
 
-Expect 3 findings total now (2 from rule 1, 1 new from rule 2). Copy the new finding's exact `line`/`column`/`start_byte`/`end_byte`.
+Expect 4 findings total now (2 from rule 1, 2 new from rule 2 — `HandRolledPositive` and the `.btn` inside `HandRolledStillFlaggedDespiteUnrelatedImport`). Copy each new finding's exact `line`/`column`/`start_byte`/`end_byte` from the real output.
 
-- [ ] **Step 4: Append the new finding to `expected.json`**
+- [ ] **Step 4: Append the new findings to `expected.json`**
 
-Add the observed rule-2 finding object to the `findings` array (keep the 2 rule-1 entries from Task 15 unchanged — re-verify their line numbers haven't shifted from the fixture edit; update if they have).
+Add the 2 observed rule-2 finding objects to the `findings` array (keep the 2 rule-1 entries from Task 15 unchanged — re-verify their line numbers haven't shifted from the fixture edit; update if they have).
 
 - [ ] **Step 5: Run the fixture-check script**
 
 Run: `npm test`
-Expected: `OK — 3 DesignSystemConvention finding(s) match expected.json`
+Expected: `OK — 4 DesignSystemConvention finding(s) match expected.json`
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add plugins/design-system/src/index.ts plugins/design-system/fixtures plugins/design-system/expected.json
-git commit -m "feat(design-system): implement DesignSystemConvention rule 2 (import-boundary)"
+git commit -m "feat(design-system): implement DesignSystemConvention rule 2 (AST-based per-primitive import boundary)"
 ```
 
 ---
@@ -1372,11 +1675,11 @@ const styleBlock = `
 
 Run: `npm run build && npx --no-install cofferdam check fixtures/apps/web/src/islands/fixture.tsx --config ./cofferdam.toml --format json`
 
-Expect 4 findings total. Copy the new one's exact location fields.
+Expect 5 findings total (2 rule 1 + 2 rule 2 + 1 new rule 3). Copy the new one's exact location fields.
 
 - [ ] **Step 4: Append to `expected.json`**, re-verifying prior entries' line numbers.
 
-- [ ] **Step 5: Run `npm test`** — expect `OK — 4 DesignSystemConvention finding(s) match expected.json`
+- [ ] **Step 5: Run `npm test`** — expect `OK — 5 DesignSystemConvention finding(s) match expected.json`
 
 - [ ] **Step 6: Commit**
 
@@ -1394,12 +1697,21 @@ git commit -m "feat(design-system): implement DesignSystemConvention rule 3 (new
 - Modify: `plugins/design-system/fixtures/apps/web/src/islands/fixture.tsx`
 - Modify: `plugins/design-system/expected.json`
 
+**Design correction (post-Opus-review, 2026-08-01):** the original regex (`border-radius:\s*4px`) only matches CSS-text-form style strings. Every real `style={{...}}` usage found across this codebase (`ShareView.tsx`, `SprintManager.tsx`, `HeaderRow.tsx`, etc.) is a Preact **JS object literal with camelCase keys** (`style={{ borderRadius: "4px" }}`), which never contains the literal substring `border-radius:` — the original rule would have matched effectively nothing in real code. The pattern below matches both the camelCase JS-object form (primary, since that's what this codebase actually writes) and the CSS-text-string form (for completeness/future-proofing), and allows either single or double quotes around the value.
+
 - [ ] **Step 1: Add the rule-4 constant and logic to `src/index.ts`**
 
 Add near the other constants — the exact dimension values are `.btn`'s `border-radius: 4px` / `padding: 0.375rem 0.75rem`, `.badge`'s `border-radius: 4px` / `padding: 0.125rem 0.5rem`, `.popover-metric-help`'s `border-radius: 6px`, `.popover-account-menu`'s `border-radius: 8px` (from Base.astro / Task 3):
 
 ```ts
 const TOKEN_SHAPED_STYLE_VALUES = [
+  // camelCase JS-object form (what this codebase actually writes): borderRadius: "4px" / borderRadius: '4px'
+  "borderRadius:\\s*[\"']4px[\"']",
+  "borderRadius:\\s*[\"']6px[\"']",
+  "borderRadius:\\s*[\"']8px[\"']",
+  "padding:\\s*[\"']0\\.375rem 0\\.75rem[\"']",
+  "padding:\\s*[\"']0\\.125rem 0\\.5rem[\"']",
+  // CSS-text-string form, for completeness
   "border-radius:\\s*4px",
   "border-radius:\\s*6px",
   "border-radius:\\s*8px",
@@ -1424,6 +1736,8 @@ Inside `run(file, ctx)`, after the rule-3 block, add:
     }
 ```
 
+Note: `INLINE_STYLE_LINE_PATTERN`/`TOKEN_SHAPED_VALUE_PATTERN` operate per-line — a multi-line `style={{\n  borderRadius: "4px",\n  ...\n}}` object still matches on whichever physical line the `borderRadius:` property sits on, since `INLINE_STYLE_LINE_PATTERN` only needs to match `style={{` on the opening line and `TOKEN_SHAPED_VALUE_PATTERN` is checked independently per line below — **correction**: as written, both patterns are checked against the *same* `ln.text`, so a property on a different physical line than `style={{` would be missed. Since every real `style={{...}}` usage found in this codebase during Task 6–13's migration is single-line (confirmed by the grep excerpts pulled for `ShareView.tsx`/`SprintManager.tsx` — property lists fit on one line under this repo's Prettier config), this is an accepted, documented limitation rather than a blocking gap — multi-line style objects are rare enough here that scope was deliberately kept to the common case.
+
 - [ ] **Step 2: Add rule-4 fixture cases**
 
 Replace the `// ---- Rule 4 ----` section with:
@@ -1432,7 +1746,7 @@ Replace the `// ---- Rule 4 ----` section with:
 // ---- Rule 4: inline style with token-shaped values ---------------------
 export function InlineStylePositive() {
 	return (
-		<div style={{ borderRadius: "4px", padding: "0.375rem 0.75rem" }}> {/* FLAG inline style value "border-radius: 4px" (borderRadius normalizes; regex targets literal CSS-text usage — see note below) */}
+		<div style={{ borderRadius: "4px", padding: "0.375rem 0.75rem" }}> {/* FLAG inline style value matching borderRadius: "4px" */}
 			reimplemented button shape
 		</div>
 	);
@@ -1443,23 +1757,11 @@ export function InlineStyleNegative() {
 }
 ```
 
-Note: Preact's `style={{ borderRadius: ... }}` (camelCase JS object key) does not literally contain the text `border-radius:` — the regex targets the *string-form* CSS text (`style="border-radius: 4px"` or a template-literal style string), matching how `HeaderRow.tsx`-style overrides and any CSS-in-JS in this codebase are actually written. Adjust the fixture's positive case to use the string form so the rule under test actually fires:
-
-```tsx
-export function InlineStylePositive() {
-	return (
-		<div style="border-radius: 4px; padding: 0.375rem 0.75rem;"> {/* FLAG inline style value "border-radius: 4px" */}
-			reimplemented button shape
-		</div>
-	);
-}
-```
-
 - [ ] **Step 3: Rebuild, run against the fixture, observe output**
 
 Run: `npm run build && npx --no-install cofferdam check fixtures/apps/web/src/islands/fixture.tsx --config ./cofferdam.toml --format json`
 
-Expect 5 findings total (rule 4 matches once — the `4px` alternative fires first on that line; confirm from actual output whether both `4px` and the padding pattern each fire since both appear on one line, and adjust `expected.json` to match reality exactly, not the assumed count).
+Expect 6 findings total (2 rule 1 + 2 rule 2 + 1 rule 3 + 1 new rule 4 — the `4px` alternative fires first on that line; confirm from actual output whether both the `borderRadius: "4px"` and the padding pattern each fire independently since both appear on the same line, and adjust `expected.json` to match reality exactly, not the assumed count).
 
 - [ ] **Step 4: Append to `expected.json`**, matching the real observed output exactly (this is the authoritative source, not the count guessed in Step 3).
 
