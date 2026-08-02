@@ -465,7 +465,13 @@ function SearchResultMetaLine({ r }: { r: SearchResult }) {
 	);
 }
 
-function SearchResultButton({ r, onSelect }: { r: SearchResult; onSelect: (slug: string) => void }) {
+function SearchResultButton({
+	r,
+	onSelect,
+}: {
+	r: SearchResult;
+	onSelect: (slug: string) => void;
+}) {
 	return (
 		<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
 			<span class="font-medium">{r.title}</span>

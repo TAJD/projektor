@@ -530,7 +530,8 @@ async function toWikiChangeEvent(
 	canSeeProject: (id: string) => Promise<boolean>
 ): Promise<WikiChangeEvent | null> {
 	const action = r.action as "created" | "updated" | "deleted";
-	if (action !== "deleted" && r.pageDeletedAt !== null && r.pageDeletedAt !== undefined) return null;
+	if (action !== "deleted" && r.pageDeletedAt !== null && r.pageDeletedAt !== undefined)
+		return null;
 
 	const { slug, title, eventProjectId, deleted } = eventFieldsFor(action, r);
 	if (!(await isEventVisible(projectId, eventProjectId, canSeeProject))) return null;

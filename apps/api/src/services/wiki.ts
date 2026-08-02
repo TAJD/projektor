@@ -903,7 +903,11 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 
 	await writeCreateWikiPageBatch(
 		ctx,
-		[insertStatement, buildFtsInsertStatement(ctx, id, title, content, meta.tags), ...linkStatements],
+		[
+			insertStatement,
+			buildFtsInsertStatement(ctx, id, title, content, meta.tags),
+			...linkStatements,
+		],
 		slug
 	);
 	await finalizeWikiPageCreate(ctx, { id, parentId, slug, title, meta });
