@@ -47,20 +47,6 @@ describe("Issue leases API (PROJ-184)", () => {
 			.run();
 	}
 
-	// Under a WIP cap of 1: registers an agent, seeds two issues, and asserts the first
-	// claim succeeds while the second is rejected as over-cap.
-	async function expectWipCapBlocksSecondClaim() {
-		const agent = await registerAgent("worker");
-		const [first, second] = await Promise.all([
-			seedIssue(workspaceId, projectId, userId, { title: "First" }),
-			seedIssue(workspaceId, projectId, userId, { title: "Second" }),
-		]);
-
-		expect((await claim(first.id, agent)).status).toBe(201);
-		const res = await claim(second.id, agent);
-		expect(res.status).toBe(409);
-	}
-
 	it("claims an unleased issue", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Claim me" });
 		const agent = await registerAgent("a1");
