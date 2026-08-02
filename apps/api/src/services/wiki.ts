@@ -388,36 +388,25 @@ function staleWikiPageCondition(now: number) {
 	)`;
 }
 
-export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
-	const parsed = ListPagesInputSchema.safeParse(input);
-	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-
-	const orm = drizzle(ctx.db, { schema });
+function buildListWikiPagesConditions(
+	ctx: ServiceCtx,
+	data: ReturnType<typeof ListPagesInputSchema.parse>
+) {
 	const conditions = [
 		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
 		// PROJ-496: trashed pages never appear in the normal listing.
 		isNull(schema.wikiPages.deletedAt),
 	];
-	if (parsed.data.parentId) {
-		conditions.push(eq(schema.wikiPages.parentId, parsed.data.parentId));
-	}
-	if (parsed.data.projectId) {
-		conditions.push(eq(schema.wikiPages.projectId, parsed.data.projectId));
-	}
-	if (parsed.data.type) {
-		conditions.push(eq(schema.wikiPages.type, parsed.data.type));
-	}
-	if (parsed.data.status) {
-		conditions.push(eq(schema.wikiPages.status, parsed.data.status));
-	}
-	const tagsCond = tagsFilterCondition(parsed.data.tags ?? []);
+	if (data.parentId) conditions.push(eq(schema.wikiPages.parentId, data.parentId));
+	if (data.projectId) conditions.push(eq(schema.wikiPages.projectId, data.projectId));
+	if (data.type) conditions.push(eq(schema.wikiPages.type, data.type));
+	if (data.status) conditions.push(eq(schema.wikiPages.status, data.status));
+	const tagsCond = tagsFilterCondition(data.tags ?? []);
 	if (tagsCond) conditions.push(tagsCond);
 	// PROJ-525: matches search_wiki/listStaleWikiPages's is_template=0 exclusion — a
 	// template shouldn't leak into ordinary type/status/tags browsing (e.g. filtering by
 	// type=runbook alongside "Runbook Template").
-	if (!parsed.data.includeTemplates) {
-		conditions.push(eq(schema.wikiPages.isTemplate, false));
-	}
+	if (!data.includeTemplates) conditions.push(eq(schema.wikiPages.isTemplate, false));
 	// PROJ-311: hide project-scoped pages whose project the user isn't granted
 	// (workspace-level pages, projectId null, stay visible to everyone).
 	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
@@ -425,6 +414,15 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 		const cond = or(isNull(schema.wikiPages.projectId), visible);
 		if (cond) conditions.push(cond);
 	}
+	return conditions;
+}
+
+export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
+	const parsed = ListPagesInputSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+
+	const orm = drizzle(ctx.db, { schema });
+	const conditions = buildListWikiPagesConditions(ctx, parsed.data);
 
 	const rows = await orm
 		.select({
@@ -491,6 +489,38 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 		}
 	}
 
+	const { q, params, now } = buildSearchWikiQuery(ctx, ftsQuery, {
+		projectId,
+		updatedSince,
+		type,
+		status,
+		tags,
+		limit,
+		offset,
+	});
+
+	const { results } = await ctx.db
+		.prepare(q)
+		.bind(...params)
+		.all();
+	return (results as Array<Record<string, unknown>>).map((r) => mapSearchWikiRow(r, now));
+}
+
+type SearchWikiFilters = {
+	projectId: string | undefined;
+	updatedSince: number | undefined;
+	type: string | undefined;
+	status: string | undefined;
+	tags: string[] | undefined;
+	limit: number;
+	offset: number;
+};
+
+function buildSearchWikiQuery(
+	ctx: ServiceCtx,
+	ftsQuery: string,
+	{ projectId, updatedSince, type, status, tags, limit, offset }: SearchWikiFilters
+): { q: string; params: unknown[]; now: number } {
 	let q = `SELECT p.id, p.slug, p.title, p.project_id,
               p.type, p.tags, p.status, p.verified_at, p.verified_by, p.owners, p.verify_interval,
               snippet(wiki_fts, -1, '**', '**', '…', 24) as excerpt,
@@ -553,10 +583,12 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	// maintenance queue is the right place to nag about it). The two conditions were kept
 	// in lockstep by design until this decision; any future change to one should
 	// re-examine whether the other should follow.
-	const now = Math.floor(Date.now() / 1000);
 	// PROJ-486: bm25() alone ties on equal-rank rows, which makes LIMIT/OFFSET
 	// paging non-deterministic (duplicate/skip results across pages) — break
-	// ties by page id for a stable order.
+	// ties by page id for a stable order. `now` is bound once here and reused by the
+	// caller for the freshness computed on each returned row, so the ordering and the
+	// displayed freshness state always agree.
+	const now = Math.floor(Date.now() / 1000);
 	q += ` ORDER BY (CASE WHEN (
 	              p.status IN ('stale', 'deprecated')
 	              OR (
@@ -568,16 +600,16 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	          bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}), p.id LIMIT ? OFFSET ?`;
 	params.push(now, limit, offset);
 
-	const { results } = await ctx.db
-		.prepare(q)
-		.bind(...params)
-		.all();
-	return (results as Array<Record<string, unknown>>).map((r) => ({
+	return { q, params, now };
+}
+
+// PROJ-488: this is a raw D1 query, so the JSON-array columns come back as the stored
+// TEXT rather than as arrays the way drizzle's `{ mode: "json" }` decodes them for
+// listWikiPages/getWikiPage. Decode here so every wiki surface returns tags/owners with
+// the same shape.
+function mapSearchWikiRow(r: Record<string, unknown>, now: number) {
+	return {
 		...r,
-		// PROJ-488: this is a raw D1 query, so the JSON-array columns come back as the
-		// stored TEXT rather than as arrays the way drizzle's `{ mode: "json" }` decodes
-		// them for listWikiPages/getWikiPage. Decode here so every wiki surface returns
-		// tags/owners with the same shape.
 		tags: decodeJsonArrayColumn(r.tags),
 		owners: decodeJsonArrayColumn(r.owners),
 		// PROJ-489 (R7): null when the page has no verify_interval/status signal at all —
@@ -588,7 +620,7 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 			status: r.status as string | null,
 			now,
 		}),
-	}));
+	};
 }
 
 const wikiPageDetailColumns = {
@@ -833,13 +865,12 @@ async function finalizeWikiPageCreate(
 export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	const parsed = CreatePageSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { title, parentId, projectId, slug: customSlug, templateSlug } = parsed.data;
+	const { title, projectId, slug: customSlug, templateSlug } = parsed.data;
+	const parentId = parsed.data.parentId ?? null;
+	const resolvedProjectId = projectId ?? null;
 
-	await requireWikiWrite(ctx, projectId ?? null);
-
-	if (parentId) {
-		await validateNewPageParent(ctx.db, parentId, ctx.workspaceId, projectId);
-	}
+	await requireWikiWrite(ctx, resolvedProjectId);
+	if (parentId) await validateNewPageParent(ctx.db, parentId, ctx.workspaceId, projectId);
 
 	const content = templateSlug
 		? await resolveTemplateContent(ctx, templateSlug)
@@ -852,15 +883,15 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	const now = Math.floor(Date.now() / 1000);
 	// PROJ-488 (R6): parse+validate the optional frontmatter block up front, so an
 	// invalid frontmatter throws before any row is written (never a partial create).
-	const meta = parseWikiFrontmatter(content ?? "");
+	const meta = parseWikiFrontmatter(content);
 
 	const insertStatement = buildCreateWikiPageInsertStatement(ctx, orm, {
 		id,
-		projectId: projectId ?? null,
+		projectId: resolvedProjectId,
 		slug,
 		title,
-		content: content ?? "",
-		parentId: parentId ?? null,
+		content,
+		parentId,
 		now,
 		meta,
 	});
@@ -868,19 +899,15 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	// PROJ-511: resolution (the async reads inside this call) happens before any of these
 	// statements exist, so by the time the batch below runs there's nothing left to throw
 	// mid-write — the content row, its FTS mirror, and its wiki_links all land atomically.
-	const linkStatements = await buildWikiLinksReindexStatements(ctx, orm, id, content ?? "");
+	const linkStatements = await buildWikiLinksReindexStatements(ctx, orm, id, content);
 
 	await writeCreateWikiPageBatch(
 		ctx,
-		[
-			insertStatement,
-			buildFtsInsertStatement(ctx, id, title, content ?? "", meta.tags),
-			...linkStatements,
-		],
+		[insertStatement, buildFtsInsertStatement(ctx, id, title, content, meta.tags), ...linkStatements],
 		slug
 	);
-	await finalizeWikiPageCreate(ctx, { id, parentId: parentId ?? null, slug, title, meta });
-	return { id, slug, projectId: projectId ?? null, url: wikiPagePath(slug), ...meta };
+	await finalizeWikiPageCreate(ctx, { id, parentId, slug, title, meta });
+	return { id, slug, projectId: resolvedProjectId, url: wikiPagePath(slug), ...meta };
 }
 
 // PROJ-484: id of the most recently created revision for a page, or null if the page

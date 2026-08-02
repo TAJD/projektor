@@ -33,16 +33,25 @@ const SECONDS_PER_DAY = 86400;
 // fabricated" convention the pre-R7 placeholder in wiki.test.ts established for the
 // `freshness` response field, which this function's return value now serializes into
 // directly (`freshness: computeFreshness(...)`).
+function computeDueAt(verifiedAt: number | null, verifyInterval: number | null): number | null {
+	if (verifyInterval === null || verifiedAt === null) return null;
+	return verifiedAt + verifyInterval * SECONDS_PER_DAY;
+}
+
+// A verify_interval/verifiedAt due date reached-or-passed, once there's no explicit
+// status override (see computeFreshness) and the page has been verified at least once.
+function computeTimeBasedFreshness(dueAt: number | null, now: number): WikiFreshness {
+	if (dueAt !== null && dueAt <= now) return { state: "stale", staleSince: dueAt };
+	return { state: "fresh", staleSince: null };
+}
+
 export function computeFreshness(input: ComputeFreshnessInput): WikiFreshness | null {
 	const { verifiedAt, verifyInterval, status } = input;
 	const hasSignal = status !== null || verifyInterval !== null;
 	if (!hasSignal) return null;
 
 	const now = input.now ?? Math.floor(Date.now() / 1000);
-	const dueAt =
-		verifyInterval !== null && verifiedAt !== null
-			? verifiedAt + verifyInterval * SECONDS_PER_DAY
-			: null;
+	const dueAt = computeDueAt(verifiedAt, verifyInterval);
 
 	// PRD R7: "status: stale/deprecated" is an independent, explicit staleness signal —
 	// it wins outright regardless of whether a verify_interval due date has technically
@@ -58,9 +67,5 @@ export function computeFreshness(input: ComputeFreshnessInput): WikiFreshness | 
 		return { state: "unverified", staleSince: null };
 	}
 
-	if (dueAt !== null && dueAt <= now) {
-		return { state: "stale", staleSince: dueAt };
-	}
-
-	return { state: "fresh", staleSince: null };
+	return computeTimeBasedFreshness(dueAt, now);
 }
