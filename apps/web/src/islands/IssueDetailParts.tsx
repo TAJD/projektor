@@ -349,17 +349,12 @@ export function TitleSection({
 	);
 }
 
-export function BodySection({
-	issue,
-	issueId,
-	workspaceSlug,
-	fetchIssue,
-}: {
-	issue: IssueData;
-	issueId: string;
-	workspaceSlug?: string;
-	fetchIssue: () => Promise<void>;
-}) {
+function useBodyEditor(
+	issue: IssueData,
+	issueId: string,
+	workspaceSlug: string | undefined,
+	fetchIssue: () => Promise<void>
+) {
 	const [editingBody, setEditingBody] = useState(false);
 	const [editBody, setEditBody] = useState("");
 	const [savingBody, setSavingBody] = useState(false);
@@ -426,6 +421,79 @@ export function BodySection({
 		}
 	}
 
+	return {
+		editingBody,
+		editBody,
+		savingBody,
+		saveBodyError,
+		hasDraft,
+		bodyRef,
+		startEditBody,
+		updateBody,
+		cancelEditBody,
+		saveBody,
+	};
+}
+
+function BodyEditForm({
+	editBody,
+	updateBody,
+	saveBody,
+	cancelEditBody,
+	savingBody,
+}: {
+	editBody: string;
+	updateBody: (value: string) => void;
+	saveBody: () => void;
+	cancelEditBody: () => void;
+	savingBody: boolean;
+}) {
+	return (
+		<div>
+			<div class="mb-2">
+				<MarkdownEditor value={editBody} onChange={updateBody} minHeight="240px" />
+			</div>
+			<div class="flex gap-2">
+				<button type="button" onClick={saveBody} disabled={savingBody} class="btn btn-primary">
+					{savingBody ? "Saving…" : "Save"}
+				</button>
+				<button
+					type="button"
+					onClick={cancelEditBody}
+					disabled={savingBody}
+					class="btn btn-outline"
+				>
+					Cancel
+				</button>
+			</div>
+		</div>
+	);
+}
+
+export function BodySection({
+	issue,
+	issueId,
+	workspaceSlug,
+	fetchIssue,
+}: {
+	issue: IssueData;
+	issueId: string;
+	workspaceSlug?: string;
+	fetchIssue: () => Promise<void>;
+}) {
+	const {
+		editingBody,
+		editBody,
+		savingBody,
+		saveBodyError,
+		hasDraft,
+		bodyRef,
+		startEditBody,
+		updateBody,
+		cancelEditBody,
+		saveBody,
+	} = useBodyEditor(issue, issueId, workspaceSlug, fetchIssue);
+
 	return (
 		<section class="mb-8">
 			<div class="flex items-center gap-3 mb-4">
@@ -465,24 +533,13 @@ export function BodySection({
 			)}
 
 			{editingBody ? (
-				<div>
-					<div class="mb-2">
-						<MarkdownEditor value={editBody} onChange={updateBody} minHeight="240px" />
-					</div>
-					<div class="flex gap-2">
-						<button type="button" onClick={saveBody} disabled={savingBody} class="btn btn-primary">
-							{savingBody ? "Saving…" : "Save"}
-						</button>
-						<button
-							type="button"
-							onClick={cancelEditBody}
-							disabled={savingBody}
-							class="btn btn-outline"
-						>
-							Cancel
-						</button>
-					</div>
-				</div>
+				<BodyEditForm
+					editBody={editBody}
+					updateBody={updateBody}
+					saveBody={saveBody}
+					cancelEditBody={cancelEditBody}
+					savingBody={savingBody}
+				/>
 			) : issue.body ? (
 				<div
 					ref={bodyRef}
@@ -1178,35 +1235,19 @@ function UrlLinkForm({
 
 type AttachMode = "none" | "file" | "wiki" | "url";
 
-export function AttachmentsSection({
-	issueId,
-	workspaceSlug,
-	attachments,
-	fetchAttachments,
-}: {
-	issueId: string;
-	workspaceSlug?: string;
-	attachments: Attachment[];
-	fetchAttachments: () => Promise<void>;
-}) {
-	const [mode, setMode] = useState<AttachMode>("none");
-
+function useAttachmentUpload(
+	issueId: string,
+	workspaceSlug: string | undefined,
+	onDone: () => void,
+	fetchAttachments: () => Promise<void>
+) {
 	const [uploadFile, setUploadFile] = useState<File | null>(null);
 	const [uploading, setUploading] = useState(false);
 	const [uploadError, setUploadError] = useState<string | null>(null);
 
-	const [linking, setLinking] = useState(false);
-	const [linkError, setLinkError] = useState<string | null>(null);
-	const [urlValue, setUrlValue] = useState("");
-	const [labelValue, setLabelValue] = useState("");
-
-	function resetForms() {
-		setMode("none");
+	function reset() {
 		setUploadFile(null);
 		setUploadError(null);
-		setLinkError(null);
-		setUrlValue("");
-		setLabelValue("");
 	}
 
 	async function uploadAttachment() {
@@ -1219,13 +1260,41 @@ export function AttachmentsSection({
 			form.append("entityType", "issue");
 			form.append("entityId", issueId);
 			await apiFetch("/api/files", { workspaceSlug, method: "POST", body: form });
-			resetForms();
+			onDone();
 			await fetchAttachments();
 		} catch (e) {
 			setUploadError(String(e));
 		} finally {
 			setUploading(false);
 		}
+	}
+
+	return {
+		uploadFile,
+		setUploadFile,
+		uploading,
+		uploadError,
+		setUploadError,
+		uploadAttachment,
+		reset,
+	};
+}
+
+function useAttachmentLinks(
+	issueId: string,
+	workspaceSlug: string | undefined,
+	onDone: () => void,
+	fetchAttachments: () => Promise<void>
+) {
+	const [linking, setLinking] = useState(false);
+	const [linkError, setLinkError] = useState<string | null>(null);
+	const [urlValue, setUrlValue] = useState("");
+	const [labelValue, setLabelValue] = useState("");
+
+	function reset() {
+		setLinkError(null);
+		setUrlValue("");
+		setLabelValue("");
 	}
 
 	async function linkWikiPage(wikiPageId: string) {
@@ -1237,7 +1306,7 @@ export function AttachmentsSection({
 				method: "POST",
 				body: { kind: "wiki_ref", entityType: "issue", entityId: issueId, wikiPageId },
 			});
-			resetForms();
+			onDone();
 			await fetchAttachments();
 		} catch (e) {
 			setLinkError(String(e));
@@ -1262,7 +1331,7 @@ export function AttachmentsSection({
 					label: labelValue.trim() || undefined,
 				},
 			});
-			resetForms();
+			onDone();
 			await fetchAttachments();
 		} catch (e) {
 			setLinkError(String(e));
@@ -1270,6 +1339,36 @@ export function AttachmentsSection({
 			setLinking(false);
 		}
 	}
+
+	return {
+		linking,
+		linkError,
+		setLinkError,
+		urlValue,
+		setUrlValue,
+		labelValue,
+		setLabelValue,
+		linkWikiPage,
+		addUrl,
+		reset,
+	};
+}
+
+function useAttachmentForms(
+	issueId: string,
+	workspaceSlug: string | undefined,
+	fetchAttachments: () => Promise<void>
+) {
+	const [mode, setMode] = useState<AttachMode>("none");
+
+	function resetForms() {
+		setMode("none");
+		upload.reset();
+		links.reset();
+	}
+
+	const upload = useAttachmentUpload(issueId, workspaceSlug, resetForms, fetchAttachments);
+	const links = useAttachmentLinks(issueId, workspaceSlug, resetForms, fetchAttachments);
 
 	async function deleteAttachment(attachmentId: string) {
 		try {
@@ -1279,6 +1378,26 @@ export function AttachmentsSection({
 			// non-fatal
 		}
 	}
+
+	return { mode, setMode, upload, links, resetForms, deleteAttachment };
+}
+
+export function AttachmentsSection({
+	issueId,
+	workspaceSlug,
+	attachments,
+	fetchAttachments,
+}: {
+	issueId: string;
+	workspaceSlug?: string;
+	attachments: Attachment[];
+	fetchAttachments: () => Promise<void>;
+}) {
+	const { mode, setMode, upload, links, resetForms, deleteAttachment } = useAttachmentForms(
+		issueId,
+		workspaceSlug,
+		fetchAttachments
+	);
 
 	return (
 		<section class="mb-8">
@@ -1301,35 +1420,35 @@ export function AttachmentsSection({
 
 			{mode === "file" && (
 				<AttachmentUploadForm
-					uploadFile={uploadFile}
-					setUploadFile={setUploadFile}
-					uploadError={uploadError}
-					setUploadError={setUploadError}
-					uploading={uploading}
-					onUpload={uploadAttachment}
+					uploadFile={upload.uploadFile}
+					setUploadFile={upload.setUploadFile}
+					uploadError={upload.uploadError}
+					setUploadError={upload.setUploadError}
+					uploading={upload.uploading}
+					onUpload={upload.uploadAttachment}
 					onCancel={resetForms}
 				/>
 			)}
 			{mode === "wiki" && (
 				<WikiPageLinkForm
 					workspaceSlug={workspaceSlug}
-					linking={linking}
-					linkError={linkError}
-					setLinkError={setLinkError}
-					onLink={linkWikiPage}
+					linking={links.linking}
+					linkError={links.linkError}
+					setLinkError={links.setLinkError}
+					onLink={links.linkWikiPage}
 					onCancel={resetForms}
 				/>
 			)}
 			{mode === "url" && (
 				<UrlLinkForm
-					urlValue={urlValue}
-					setUrlValue={setUrlValue}
-					labelValue={labelValue}
-					setLabelValue={setLabelValue}
-					linkError={linkError}
-					setLinkError={setLinkError}
-					linking={linking}
-					onAdd={addUrl}
+					urlValue={links.urlValue}
+					setUrlValue={links.setUrlValue}
+					labelValue={links.labelValue}
+					setLabelValue={links.setLabelValue}
+					linkError={links.linkError}
+					setLinkError={links.setLinkError}
+					linking={links.linking}
+					onAdd={links.addUrl}
 					onCancel={resetForms}
 				/>
 			)}

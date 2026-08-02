@@ -171,13 +171,88 @@ function FeedbackMobileCards({
 	);
 }
 
-export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Props) {
+interface FeedbackTableProps {
+	rows: Feedback[];
+	selected: Set<string>;
+	expanded: Set<string>;
+	onToggleSelectAll: () => void;
+	onToggleRow: (id: string) => void;
+	onToggleExpanded: (id: string) => void;
+	onMarkReviewed: (id: string) => void;
+	onConvert: (id: string) => void;
+}
+
+function FeedbackTable({
+	rows,
+	selected,
+	expanded,
+	onToggleSelectAll,
+	onToggleRow,
+	onToggleExpanded,
+	onMarkReviewed,
+	onConvert,
+}: FeedbackTableProps) {
+	return (
+		<div class="overflow-x-auto max-sm:hidden">
+			<table class="w-full border-collapse text-[0.9rem]">
+				<thead>
+					<tr>
+						<th class={TH}>
+							<input
+								type="checkbox"
+								aria-label="select all"
+								checked={rows.length > 0 && selected.size === rows.length}
+								onChange={onToggleSelectAll}
+							/>
+						</th>
+						<th class={TH}>Rating</th>
+						<th class={TH}>Feedback</th>
+						<th class={TH}>Status</th>
+						<th class={TH}>Received</th>
+						<th class={TH}></th>
+					</tr>
+				</thead>
+				<tbody>
+					{rows.map((r) => (
+						<tr key={r.id}>
+							<td class={TD}>
+								<input
+									type="checkbox"
+									aria-label={`select row ${r.id}`}
+									checked={selected.has(r.id)}
+									onChange={() => onToggleRow(r.id)}
+								/>
+							</td>
+							<td class={TD}>{ratingDisplay(r.rating, r.ratingScale)}</td>
+							<td class={`${TD} text-text-base`}>
+								<div>{r.body ?? "—"}</div>
+								{r.submitterLabel && (
+									<div class="text-[0.75rem] text-text-muted mt-1">{r.submitterLabel}</div>
+								)}
+								<FeedbackContext
+									row={r}
+									expanded={expanded.has(r.id)}
+									onToggle={() => onToggleExpanded(r.id)}
+								/>
+							</td>
+							<td class={`${TD} text-text-muted`}>{r.status}</td>
+							<td class={`${TD} text-text-muted`}>{formatDate(r.createdAt)}</td>
+							<td class={`${TD} whitespace-nowrap`}>
+								<FeedbackRowActions row={r} onMarkReviewed={onMarkReviewed} onConvert={onConvert} />
+							</td>
+						</tr>
+					))}
+				</tbody>
+			</table>
+		</div>
+	);
+}
+
+function useFeedbackRows(workspaceSlug: string | undefined, projectId: string, sourceId: string) {
 	const [rows, setRows] = useState<Feedback[]>([]);
 	const [status, setStatus] = useState("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [selected, setSelected] = useState<Set<string>>(new Set());
-	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
 	const fetchRows = useCallback(async () => {
 		if (!projectId || !sourceId) return;
@@ -202,6 +277,16 @@ export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Pro
 		fetchRows();
 	}, [fetchRows]);
 
+	return { rows, status, setStatus, loading, error, setError, fetchRows };
+}
+
+function useFeedbackActions(
+	workspaceSlug: string | undefined,
+	projectId: string,
+	setError: (e: string | null) => void,
+	fetchRows: () => Promise<void>,
+	setSelected: (s: Set<string>) => void
+) {
 	async function convert(id: string) {
 		try {
 			await apiFetch(`/api/projects/${projectId}/feedback/${id}/convert-to-issue`, {
@@ -227,7 +312,7 @@ export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Pro
 		}
 	}
 
-	async function bulkMarkReviewed() {
+	async function bulkMarkReviewed(selected: Set<string>) {
 		try {
 			await apiFetch(`/api/projects/${projectId}/feedback/bulk-mark-reviewed`, {
 				method: "POST",
@@ -241,7 +326,7 @@ export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Pro
 		}
 	}
 
-	async function bulkConvertToIssue() {
+	async function bulkConvertToIssue(selected: Set<string>) {
 		try {
 			await apiFetch(`/api/projects/${projectId}/feedback/bulk-convert-to-issue`, {
 				method: "POST",
@@ -255,26 +340,40 @@ export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Pro
 		}
 	}
 
+	return { convert, markReviewed, bulkMarkReviewed, bulkConvertToIssue };
+}
+
+function useToggleSet() {
+	const [set, setSet] = useState<Set<string>>(new Set());
+	function toggle(id: string) {
+		setSet((prev) => {
+			const next = new Set(prev);
+			if (next.has(id)) next.delete(id);
+			else next.add(id);
+			return next;
+		});
+	}
+	return [set, toggle, setSet] as const;
+}
+
+export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Props) {
+	const { rows, status, setStatus, loading, error, setError, fetchRows } = useFeedbackRows(
+		workspaceSlug,
+		projectId,
+		sourceId
+	);
+	const [selected, toggleRow, setSelected] = useToggleSet();
+	const [expanded, toggleExpanded] = useToggleSet();
+	const { convert, markReviewed, bulkMarkReviewed, bulkConvertToIssue } = useFeedbackActions(
+		workspaceSlug,
+		projectId,
+		setError,
+		fetchRows,
+		setSelected
+	);
+
 	function toggleSelectAll() {
 		setSelected((prev) => (prev.size === rows.length ? new Set() : new Set(rows.map((r) => r.id))));
-	}
-
-	function toggleRow(id: string) {
-		setSelected((prev) => {
-			const next = new Set(prev);
-			if (next.has(id)) next.delete(id);
-			else next.add(id);
-			return next;
-		});
-	}
-
-	function toggleExpanded(id: string) {
-		setExpanded((prev) => {
-			const next = new Set(prev);
-			if (next.has(id)) next.delete(id);
-			else next.add(id);
-			return next;
-		});
 	}
 
 	return (
@@ -302,10 +401,18 @@ export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Pro
 			{selected.size > 0 && (
 				<div class="flex gap-2 items-center mb-3 p-2 bg-surface border border-border rounded">
 					<span class="text-[0.85rem] text-text-muted">{selected.size} selected</span>
-					<button type="button" class="btn btn-outline btn-sm" onClick={bulkMarkReviewed}>
+					<button
+						type="button"
+						class="btn btn-outline btn-sm"
+						onClick={() => bulkMarkReviewed(selected)}
+					>
 						Mark all reviewed
 					</button>
-					<button type="button" class="btn btn-outline btn-sm" onClick={bulkConvertToIssue}>
+					<button
+						type="button"
+						class="btn btn-outline btn-sm"
+						onClick={() => bulkConvertToIssue(selected)}
+					>
 						Convert all to issue
 					</button>
 				</div>
@@ -318,62 +425,16 @@ export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Pro
 				</div>
 			) : (
 				<>
-					<div class="overflow-x-auto max-sm:hidden">
-						<table class="w-full border-collapse text-[0.9rem]">
-							<thead>
-								<tr>
-									<th class={TH}>
-										<input
-											type="checkbox"
-											aria-label="select all"
-											checked={rows.length > 0 && selected.size === rows.length}
-											onChange={toggleSelectAll}
-										/>
-									</th>
-									<th class={TH}>Rating</th>
-									<th class={TH}>Feedback</th>
-									<th class={TH}>Status</th>
-									<th class={TH}>Received</th>
-									<th class={TH}></th>
-								</tr>
-							</thead>
-							<tbody>
-								{rows.map((r) => (
-									<tr key={r.id}>
-										<td class={TD}>
-											<input
-												type="checkbox"
-												aria-label={`select row ${r.id}`}
-												checked={selected.has(r.id)}
-												onChange={() => toggleRow(r.id)}
-											/>
-										</td>
-										<td class={TD}>{ratingDisplay(r.rating, r.ratingScale)}</td>
-										<td class={`${TD} text-text-base`}>
-											<div>{r.body ?? "—"}</div>
-											{r.submitterLabel && (
-												<div class="text-[0.75rem] text-text-muted mt-1">{r.submitterLabel}</div>
-											)}
-											<FeedbackContext
-												row={r}
-												expanded={expanded.has(r.id)}
-												onToggle={() => toggleExpanded(r.id)}
-											/>
-										</td>
-										<td class={`${TD} text-text-muted`}>{r.status}</td>
-										<td class={`${TD} text-text-muted`}>{formatDate(r.createdAt)}</td>
-										<td class={`${TD} whitespace-nowrap`}>
-											<FeedbackRowActions
-												row={r}
-												onMarkReviewed={markReviewed}
-												onConvert={convert}
-											/>
-										</td>
-									</tr>
-								))}
-							</tbody>
-						</table>
-					</div>
+					<FeedbackTable
+						rows={rows}
+						selected={selected}
+						expanded={expanded}
+						onToggleSelectAll={toggleSelectAll}
+						onToggleRow={toggleRow}
+						onToggleExpanded={toggleExpanded}
+						onMarkReviewed={markReviewed}
+						onConvert={convert}
+					/>
 					<FeedbackMobileCards
 						rows={rows}
 						selected={selected}

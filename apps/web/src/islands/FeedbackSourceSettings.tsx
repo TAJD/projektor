@@ -32,6 +32,66 @@ function formatDate(ts: number): string {
 	return new Date(ts * 1000).toLocaleDateString();
 }
 
+function NewTokenReveal({ token, onDismiss }: { token: string; onDismiss: () => void }) {
+	return (
+		<div class="bg-surface border border-border rounded-md p-4">
+			<p class="text-[var(--danger-text)] text-[0.8rem] my-1">
+				⚠ Copy this token now — you won't be able to see it again.
+			</p>
+			<code class="block font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded break-all">
+				{token}
+			</code>
+			<button type="button" class="btn btn-outline btn-sm mt-2" onClick={onDismiss}>
+				Done
+			</button>
+		</div>
+	);
+}
+
+function DangerZone({
+	rotating,
+	onRotateStart,
+	onRotateCancel,
+	onRotateConfirm,
+	onRevoke,
+}: {
+	rotating: boolean;
+	onRotateStart: () => void;
+	onRotateCancel: () => void;
+	onRotateConfirm: () => void;
+	onRevoke: () => void;
+}) {
+	return (
+		<div class="flex flex-col gap-2">
+			<span class="text-[0.8rem] font-semibold text-text-muted">Danger zone</span>
+			{rotating ? (
+				<span class="inline-flex gap-[0.375rem] items-center flex-wrap">
+					<span class="text-[0.8rem] text-text-muted">Rotate? Old token dies.</span>
+					<button type="button" class="btn btn-danger btn-sm" onClick={onRotateConfirm}>
+						Yes
+					</button>
+					<button type="button" class="btn btn-outline btn-sm" onClick={onRotateCancel}>
+						No
+					</button>
+				</span>
+			) : (
+				<span class="inline-flex gap-[0.375rem]">
+					<button type="button" class="btn btn-outline btn-sm" onClick={onRotateStart}>
+						Rotate token
+					</button>
+					<button
+						type="button"
+						class="btn btn-outline btn-sm text-[var(--danger-text)] border-[var(--danger-border)]"
+						onClick={onRevoke}
+					>
+						Revoke source
+					</button>
+				</span>
+			)}
+		</div>
+	);
+}
+
 export default function FeedbackSourceSettings({
 	source,
 	projectId,
@@ -89,23 +149,7 @@ export default function FeedbackSourceSettings({
 				</p>
 			)}
 
-			{newToken && (
-				<div class="bg-surface border border-border rounded-md p-4">
-					<p class="text-[var(--danger-text)] text-[0.8rem] my-1">
-						⚠ Copy this token now — you won't be able to see it again.
-					</p>
-					<code class="block font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded break-all">
-						{newToken}
-					</code>
-					<button
-						type="button"
-						class="btn btn-outline btn-sm mt-2"
-						onClick={() => setNewToken(null)}
-					>
-						Done
-					</button>
-				</div>
-			)}
+			{newToken && <NewTokenReveal token={newToken} onDismiss={() => setNewToken(null)} />}
 
 			<div class="flex flex-col gap-1">
 				<span class="text-[0.8rem] font-semibold text-text-muted">Token</span>
@@ -124,33 +168,13 @@ export default function FeedbackSourceSettings({
 				<span class="text-[0.875rem] text-text-base">{formatDate(source.createdAt)}</span>
 			</div>
 
-			<div class="flex flex-col gap-2">
-				<span class="text-[0.8rem] font-semibold text-text-muted">Danger zone</span>
-				{rotating ? (
-					<span class="inline-flex gap-[0.375rem] items-center flex-wrap">
-						<span class="text-[0.8rem] text-text-muted">Rotate? Old token dies.</span>
-						<button type="button" class="btn btn-danger btn-sm" onClick={confirmRotate}>
-							Yes
-						</button>
-						<button type="button" class="btn btn-outline btn-sm" onClick={() => setRotating(false)}>
-							No
-						</button>
-					</span>
-				) : (
-					<span class="inline-flex gap-[0.375rem]">
-						<button type="button" class="btn btn-outline btn-sm" onClick={() => setRotating(true)}>
-							Rotate token
-						</button>
-						<button
-							type="button"
-							class="btn btn-outline btn-sm text-[var(--danger-text)] border-[var(--danger-border)]"
-							onClick={revoke}
-						>
-							Revoke source
-						</button>
-					</span>
-				)}
-			</div>
+			<DangerZone
+				rotating={rotating}
+				onRotateStart={() => setRotating(true)}
+				onRotateCancel={() => setRotating(false)}
+				onRotateConfirm={confirmRotate}
+				onRevoke={revoke}
+			/>
 		</section>
 	);
 }

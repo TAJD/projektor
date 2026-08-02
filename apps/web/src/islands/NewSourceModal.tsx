@@ -25,6 +25,96 @@ const INPUT_CLASS =
 	"w-full px-[0.625rem] py-[0.4rem] border border-border rounded text-[0.875rem] bg-bg text-text-base " +
 	"font-[inherit] focus:outline-[2px] focus:outline-accent focus:outline-offset-1";
 
+function NewSourceForm({
+	name,
+	setName,
+	description,
+	setDescription,
+	origins,
+	setOrigins,
+	creating,
+	error,
+	onSubmit,
+	onCancel,
+}: {
+	name: string;
+	setName: (v: string) => void;
+	description: string;
+	setDescription: (v: string) => void;
+	origins: string;
+	setOrigins: (v: string) => void;
+	creating: boolean;
+	error: string | null;
+	onSubmit: (e: Event) => void;
+	onCancel: () => void;
+}) {
+	return (
+		<form onSubmit={onSubmit}>
+			{error && (
+				<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
+					{error}
+				</p>
+			)}
+			<div class="mb-[0.875rem]">
+				<label
+					class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
+					for="fs-name"
+				>
+					Name *
+				</label>
+				<input
+					id="fs-name"
+					class={INPUT_CLASS}
+					value={name}
+					onInput={(e) => setName((e.target as HTMLInputElement).value)}
+					required
+					maxLength={100}
+					// biome-ignore lint/a11y/noAutofocus: intentional — modal opens on user action
+					autoFocus
+				/>
+			</div>
+			<div class="mb-[0.875rem]">
+				<label
+					class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
+					for="fs-desc"
+				>
+					Description
+				</label>
+				<input
+					id="fs-desc"
+					class={INPUT_CLASS}
+					value={description}
+					onInput={(e) => setDescription((e.target as HTMLInputElement).value)}
+					maxLength={500}
+				/>
+			</div>
+			<div class="mb-[0.875rem]">
+				<label
+					class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
+					for="fs-origins"
+				>
+					Allowed origins (one per line, optional)
+				</label>
+				<textarea
+					id="fs-origins"
+					class={INPUT_CLASS}
+					rows={2}
+					value={origins}
+					onInput={(e) => setOrigins((e.target as HTMLTextAreaElement).value)}
+				/>
+			</div>
+			<div class="flex gap-2">
+				<button type="submit" class="btn btn-primary btn-sm" disabled={creating || !name.trim()}>
+					{creating ? "Creating…" : "Create source"}
+				</button>
+				<button type="button" class="btn btn-outline btn-sm" onClick={onCancel} disabled={creating}>
+					Cancel
+				</button>
+			</div>
+		</form>
+	);
+}
+
 export default function NewSourceModal({ projectId, workspaceSlug, onClose, onCreated }: Props) {
 	const [name, setName] = useState("");
 	const [description, setDescription] = useState("");
@@ -89,78 +179,18 @@ export default function NewSourceModal({ projectId, workspaceSlug, onClose, onCr
 						</button>
 					</div>
 				) : (
-					<form onSubmit={handleCreate}>
-						{error && (
-							<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
-								{error}
-							</p>
-						)}
-						<div class="mb-[0.875rem]">
-							<label
-								class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
-								for="fs-name"
-							>
-								Name *
-							</label>
-							<input
-								id="fs-name"
-								class={INPUT_CLASS}
-								value={name}
-								onInput={(e) => setName((e.target as HTMLInputElement).value)}
-								required
-								maxLength={100}
-								// biome-ignore lint/a11y/noAutofocus: intentional — modal opens on user action
-								autoFocus
-							/>
-						</div>
-						<div class="mb-[0.875rem]">
-							<label
-								class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
-								for="fs-desc"
-							>
-								Description
-							</label>
-							<input
-								id="fs-desc"
-								class={INPUT_CLASS}
-								value={description}
-								onInput={(e) => setDescription((e.target as HTMLInputElement).value)}
-								maxLength={500}
-							/>
-						</div>
-						<div class="mb-[0.875rem]">
-							<label
-								class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]"
-								for="fs-origins"
-							>
-								Allowed origins (one per line, optional)
-							</label>
-							<textarea
-								id="fs-origins"
-								class={INPUT_CLASS}
-								rows={2}
-								value={origins}
-								onInput={(e) => setOrigins((e.target as HTMLTextAreaElement).value)}
-							/>
-						</div>
-						<div class="flex gap-2">
-							<button
-								type="submit"
-								class="btn btn-primary btn-sm"
-								disabled={creating || !name.trim()}
-							>
-								{creating ? "Creating…" : "Create source"}
-							</button>
-							<button
-								type="button"
-								class="btn btn-outline btn-sm"
-								onClick={onClose}
-								disabled={creating}
-							>
-								Cancel
-							</button>
-						</div>
-					</form>
+					<NewSourceForm
+						name={name}
+						setName={setName}
+						description={description}
+						setDescription={setDescription}
+						origins={origins}
+						setOrigins={setOrigins}
+						creating={creating}
+						error={error}
+						onSubmit={handleCreate}
+						onCancel={onClose}
+					/>
 				)}
 			</div>
 		</div>

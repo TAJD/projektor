@@ -342,97 +342,27 @@ interface DetailProps {
 	onClose: () => void;
 }
 
-function GroupDetailEditor(props: DetailProps) {
-	const { slug, groupId } = props;
-	const [detail, setDetail] = useState<GroupDetail | null>(null);
-	const [err, setErr] = useState<string | null>(null);
-	const [busy, setBusy] = useState(false);
-	const [nameDraft, setNameDraft] = useState("");
-	const [addUserId, setAddUserId] = useState("");
-	const [grantProjectId, setGrantProjectId] = useState("");
-	const [grantRole, setGrantRole] = useState<GrantRole>("member");
-
-	const refetch = useCallback(async () => {
-		try {
-			const d = await apiFetch<GroupDetail>(`/api/workspaces/${slug}/groups/${groupId}`, {
-				workspaceSlug: slug,
-			});
-			setDetail(d);
-			setNameDraft(d.name);
-		} catch (e) {
-			setErr(String(e));
-		}
-	}, [slug, groupId]);
-
-	useEffect(() => {
-		void refetch();
-	}, [refetch]);
-
-	async function run(fn: () => Promise<void>) {
-		setBusy(true);
-		setErr(null);
-		try {
-			await fn();
-			await refetch();
-			await props.onChanged();
-		} catch (e) {
-			setErr(String(e));
-		} finally {
-			setBusy(false);
-		}
-	}
-
-	if (!detail) {
-		return (
-			<div class={CARD}>
-				{err ? <span class="text-[var(--danger-text)]">{err}</span> : "Loading…"}
-			</div>
-		);
-	}
-
-	const memberIds = new Set(detail.members.map((m) => m.userId));
-	const addable = props.members.filter(
-		(m) => !memberIds.has(m.id) && m.role !== "owner" && m.role !== "admin"
-	);
-	const grantedIds = new Set(detail.grants.map((g) => g.projectId));
-	const grantable = props.projects.filter((p) => !grantedIds.has(p.id));
-	const trimmedName = nameDraft.trim();
-
+function GroupMembersSection({
+	slug,
+	groupId,
+	detail,
+	busy,
+	addUserId,
+	setAddUserId,
+	addable,
+	run,
+}: {
+	slug: string;
+	groupId: string;
+	detail: GroupDetail;
+	busy: boolean;
+	addUserId: string;
+	setAddUserId: (id: string) => void;
+	addable: WsMember[];
+	run: (fn: () => Promise<void>) => Promise<void>;
+}) {
 	return (
-		<section class={CARD}>
-			<div class="flex items-center gap-2 mb-3">
-				<label class="sr-only" for="group-name">
-					Group name
-				</label>
-				<input
-					id="group-name"
-					class={`${INPUT} flex-1 font-semibold`}
-					value={nameDraft}
-					disabled={busy}
-					onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
-				/>
-				<button
-					type="button"
-					class={BTN_PRIMARY}
-					disabled={busy || trimmedName === "" || trimmedName === detail.name}
-					onClick={() =>
-						run(async () => {
-							await apiFetch(`/api/workspaces/${slug}/groups/${groupId}`, {
-								method: "PATCH",
-								workspaceSlug: slug,
-								body: { name: trimmedName },
-							});
-						})
-					}
-				>
-					Rename
-				</button>
-				<button type="button" class={BTN_SECONDARY} onClick={props.onClose}>
-					Close
-				</button>
-			</div>
-			{err && <div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{err}</div>}
-
+		<>
 			<h3 class="text-[0.85rem] font-semibold text-text-base mb-2">Members</h3>
 			<div class="mb-2">
 				{detail.members.length === 0 && (
@@ -492,7 +422,149 @@ function GroupDetailEditor(props: DetailProps) {
 					Add
 				</button>
 			</div>
+		</>
+	);
+}
 
+function GroupGrantListItem({
+	slug,
+	groupId,
+	grant,
+	busy,
+	run,
+}: {
+	slug: string;
+	groupId: string;
+	grant: GroupGrantRow;
+	busy: boolean;
+	run: (fn: () => Promise<void>) => Promise<void>;
+}) {
+	return (
+		<div class="flex items-center gap-2 mb-1">
+			<span class="text-[0.82rem] text-text-base min-w-[9rem]">
+				{grant.projectName} <span class="text-text-muted">({grant.projectKey})</span>
+			</span>
+			<select
+				class={INPUT}
+				value={grant.role}
+				disabled={busy}
+				onChange={(e) =>
+					run(async () => {
+						await apiFetch(`/api/workspaces/${slug}/groups/${groupId}/grants`, {
+							method: "PUT",
+							workspaceSlug: slug,
+							body: { projectId: grant.projectId, role: (e.target as HTMLSelectElement).value },
+						});
+					})
+				}
+			>
+				{GRANT_ROLES.map((r) => (
+					<option key={r} value={r}>
+						{r}
+					</option>
+				))}
+			</select>
+			<button
+				type="button"
+				class={BTN_DANGER}
+				disabled={busy}
+				onClick={() =>
+					run(async () => {
+						await apiFetch(`/api/workspaces/${slug}/groups/${groupId}/grants/${grant.projectId}`, {
+							method: "DELETE",
+							workspaceSlug: slug,
+						});
+					})
+				}
+			>
+				Remove
+			</button>
+		</div>
+	);
+}
+
+function GroupGrantForm({
+	groupId,
+	grantProjectId,
+	setGrantProjectId,
+	grantRole,
+	setGrantRole,
+	grantable,
+	busy,
+	onGrant,
+}: {
+	groupId: string;
+	grantProjectId: string;
+	setGrantProjectId: (id: string) => void;
+	grantRole: GrantRole;
+	setGrantRole: (role: GrantRole) => void;
+	grantable: ProjectLite[];
+	busy: boolean;
+	onGrant: () => void;
+}) {
+	return (
+		<div class="flex items-center gap-2">
+			<select
+				id={`group-grant-project-${groupId}`}
+				class={INPUT}
+				value={grantProjectId}
+				onChange={(e) => setGrantProjectId((e.target as HTMLSelectElement).value)}
+			>
+				<option value="">Grant a project…</option>
+				{grantable.map((p) => (
+					<option key={p.id} value={p.id}>
+						{p.name} ({p.key})
+					</option>
+				))}
+			</select>
+			<select
+				class={INPUT}
+				value={grantRole}
+				onChange={(e) => setGrantRole((e.target as HTMLSelectElement).value as GrantRole)}
+			>
+				{GRANT_ROLES.map((r) => (
+					<option key={r} value={r}>
+						{r}
+					</option>
+				))}
+			</select>
+			<button
+				type="button"
+				class={BTN_PRIMARY}
+				disabled={busy || !grantProjectId}
+				onClick={onGrant}
+			>
+				Grant
+			</button>
+		</div>
+	);
+}
+
+function GroupGrantsSection({
+	slug,
+	groupId,
+	detail,
+	busy,
+	grantProjectId,
+	setGrantProjectId,
+	grantRole,
+	setGrantRole,
+	grantable,
+	run,
+}: {
+	slug: string;
+	groupId: string;
+	detail: GroupDetail;
+	busy: boolean;
+	grantProjectId: string;
+	setGrantProjectId: (id: string) => void;
+	grantRole: GrantRole;
+	setGrantRole: (role: GrantRole) => void;
+	grantable: ProjectLite[];
+	run: (fn: () => Promise<void>) => Promise<void>;
+}) {
+	return (
+		<>
 			<h3 class="text-[0.85rem] font-semibold text-text-base mb-2">Project grants</h3>
 			<div class="mb-2">
 				{detail.grants.length === 0 && (
@@ -501,91 +573,196 @@ function GroupDetailEditor(props: DetailProps) {
 					</div>
 				)}
 				{detail.grants.map((g) => (
-					<div key={g.projectId} class="flex items-center gap-2 mb-1">
-						<span class="text-[0.82rem] text-text-base min-w-[9rem]">
-							{g.projectName} <span class="text-text-muted">({g.projectKey})</span>
-						</span>
-						<select
-							class={INPUT}
-							value={g.role}
-							disabled={busy}
-							onChange={(e) =>
-								run(async () => {
-									await apiFetch(`/api/workspaces/${slug}/groups/${groupId}/grants`, {
-										method: "PUT",
-										workspaceSlug: slug,
-										body: { projectId: g.projectId, role: (e.target as HTMLSelectElement).value },
-									});
-								})
-							}
-						>
-							{GRANT_ROLES.map((r) => (
-								<option key={r} value={r}>
-									{r}
-								</option>
-							))}
-						</select>
-						<button
-							type="button"
-							class={BTN_DANGER}
-							disabled={busy}
-							onClick={() =>
-								run(async () => {
-									await apiFetch(
-										`/api/workspaces/${slug}/groups/${groupId}/grants/${g.projectId}`,
-										{ method: "DELETE", workspaceSlug: slug }
-									);
-								})
-							}
-						>
-							Remove
-						</button>
-					</div>
+					<GroupGrantListItem
+						key={g.projectId}
+						slug={slug}
+						groupId={groupId}
+						grant={g}
+						busy={busy}
+						run={run}
+					/>
 				))}
 			</div>
-			<div class="flex items-center gap-2">
-				<select
-					class={INPUT}
-					value={grantProjectId}
-					onChange={(e) => setGrantProjectId((e.target as HTMLSelectElement).value)}
-				>
-					<option value="">Grant a project…</option>
-					{grantable.map((p) => (
-						<option key={p.id} value={p.id}>
-							{p.name} ({p.key})
-						</option>
-					))}
-				</select>
-				<select
-					class={INPUT}
-					value={grantRole}
-					onChange={(e) => setGrantRole((e.target as HTMLSelectElement).value as GrantRole)}
-				>
-					{GRANT_ROLES.map((r) => (
-						<option key={r} value={r}>
-							{r}
-						</option>
-					))}
-				</select>
-				<button
-					type="button"
-					class={BTN_PRIMARY}
-					disabled={busy || !grantProjectId}
-					onClick={() =>
-						run(async () => {
-							await apiFetch(`/api/workspaces/${slug}/groups/${groupId}/grants`, {
-								method: "PUT",
-								workspaceSlug: slug,
-								body: { projectId: grantProjectId, role: grantRole },
-							});
-							setGrantProjectId("");
-							setGrantRole("member");
-						})
-					}
-				>
-					Grant
-				</button>
+			<GroupGrantForm
+				groupId={groupId}
+				grantProjectId={grantProjectId}
+				setGrantProjectId={setGrantProjectId}
+				grantRole={grantRole}
+				setGrantRole={setGrantRole}
+				grantable={grantable}
+				busy={busy}
+				onGrant={() =>
+					run(async () => {
+						await apiFetch(`/api/workspaces/${slug}/groups/${groupId}/grants`, {
+							method: "PUT",
+							workspaceSlug: slug,
+							body: { projectId: grantProjectId, role: grantRole },
+						});
+						setGrantProjectId("");
+						setGrantRole("member");
+					})
+				}
+			/>
+		</>
+	);
+}
+
+function useGroupDetail(slug: string, groupId: string, onChanged: () => Promise<void>) {
+	const [detail, setDetail] = useState<GroupDetail | null>(null);
+	const [err, setErr] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+	const [nameDraft, setNameDraft] = useState("");
+
+	const refetch = useCallback(async () => {
+		try {
+			const d = await apiFetch<GroupDetail>(`/api/workspaces/${slug}/groups/${groupId}`, {
+				workspaceSlug: slug,
+			});
+			setDetail(d);
+			setNameDraft(d.name);
+		} catch (e) {
+			setErr(String(e));
+		}
+	}, [slug, groupId]);
+
+	useEffect(() => {
+		void refetch();
+	}, [refetch]);
+
+	async function run(fn: () => Promise<void>) {
+		setBusy(true);
+		setErr(null);
+		try {
+			await fn();
+			await refetch();
+			await onChanged();
+		} catch (e) {
+			setErr(String(e));
+		} finally {
+			setBusy(false);
+		}
+	}
+
+	return { detail, err, busy, nameDraft, setNameDraft, run };
+}
+
+function GroupNameHeader({
+	slug,
+	groupId,
+	detail,
+	busy,
+	nameDraft,
+	setNameDraft,
+	run,
+	onClose,
+}: {
+	slug: string;
+	groupId: string;
+	detail: GroupDetail;
+	busy: boolean;
+	nameDraft: string;
+	setNameDraft: (name: string) => void;
+	run: (fn: () => Promise<void>) => Promise<void>;
+	onClose: () => void;
+}) {
+	const trimmedName = nameDraft.trim();
+	return (
+		<div class="flex items-center gap-2 mb-3">
+			<label class="sr-only" for="group-name">
+				Group name
+			</label>
+			<input
+				id="group-name"
+				class={`${INPUT} flex-1 font-semibold`}
+				value={nameDraft}
+				disabled={busy}
+				onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
+			/>
+			<button
+				type="button"
+				class={BTN_PRIMARY}
+				disabled={busy || trimmedName === "" || trimmedName === detail.name}
+				onClick={() =>
+					run(async () => {
+						await apiFetch(`/api/workspaces/${slug}/groups/${groupId}`, {
+							method: "PATCH",
+							workspaceSlug: slug,
+							body: { name: trimmedName },
+						});
+					})
+				}
+			>
+				Rename
+			</button>
+			<button type="button" class={BTN_SECONDARY} onClick={onClose}>
+				Close
+			</button>
+		</div>
+	);
+}
+
+function GroupDetailEditor(props: DetailProps) {
+	const { slug, groupId } = props;
+	const { detail, err, busy, nameDraft, setNameDraft, run } = useGroupDetail(
+		slug,
+		groupId,
+		props.onChanged
+	);
+	const [addUserId, setAddUserId] = useState("");
+	const [grantProjectId, setGrantProjectId] = useState("");
+	const [grantRole, setGrantRole] = useState<GrantRole>("member");
+
+	if (!detail) {
+		return (
+			<div class={CARD}>
+				{err ? <span class="text-[var(--danger-text)]">{err}</span> : "Loading…"}
 			</div>
+		);
+	}
+
+	const memberIds = new Set(detail.members.map((m) => m.userId));
+	const addable = props.members.filter(
+		(m) => !memberIds.has(m.id) && m.role !== "owner" && m.role !== "admin"
+	);
+	const grantedIds = new Set(detail.grants.map((g) => g.projectId));
+	const grantable = props.projects.filter((p) => !grantedIds.has(p.id));
+	return (
+		<section class={CARD}>
+			<GroupNameHeader
+				slug={slug}
+				groupId={groupId}
+				detail={detail}
+				busy={busy}
+				nameDraft={nameDraft}
+				setNameDraft={setNameDraft}
+				run={run}
+				onClose={props.onClose}
+			/>
+			{err && <div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{err}</div>}
+
+			<GroupMembersSection
+				slug={slug}
+				groupId={groupId}
+				detail={detail}
+				busy={busy}
+				addUserId={addUserId}
+				setAddUserId={setAddUserId}
+				addable={addable}
+				run={run}
+			/>
+
+			<GroupGrantsSection
+				slug={slug}
+				groupId={groupId}
+				detail={detail}
+				busy={busy}
+				grantProjectId={grantProjectId}
+				setGrantProjectId={setGrantProjectId}
+				grantRole={grantRole}
+				setGrantRole={setGrantRole}
+				grantable={grantable}
+				run={run}
+			/>
 		</section>
 	);
 }

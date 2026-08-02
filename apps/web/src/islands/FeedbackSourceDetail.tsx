@@ -32,6 +32,119 @@ function statusLabel(s: FeedbackSource): string {
 	return s.isActive ? "Active" : "Inactive";
 }
 
+function FeedbackSourceHeader({
+	source,
+	sources,
+	projectId,
+}: {
+	source: FeedbackSource;
+	sources: FeedbackSource[];
+	projectId: string;
+}) {
+	return (
+		<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+			<div class="flex items-center gap-2">
+				<h1 class="text-xl font-bold text-text-base m-0">{source.name}</h1>
+				<span class="text-[0.7rem] font-medium px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">
+					{statusLabel(source)}
+				</span>
+			</div>
+			{sources.length > 1 && (
+				<Select
+					ariaLabel="Switch feedback source"
+					value={source.id}
+					onChange={(id) => {
+						window.location.href = `/feedback/${id}${projectId ? `?projectId=${projectId}` : ""}`;
+					}}
+					options={sources.map((s) => ({ value: s.id, label: s.name }))}
+				/>
+			)}
+		</div>
+	);
+}
+
+function FeedbackTabPanels({
+	tab,
+	workspaceSlug,
+	projectId,
+	source,
+	onSettingsChanged,
+}: {
+	tab: TabId;
+	workspaceSlug?: string;
+	projectId: string;
+	source: FeedbackSource;
+	onSettingsChanged: () => void;
+}) {
+	return (
+		<>
+			{tab === "items" && (
+				<div role="tabpanel" id="feedback-tabpanel-items" aria-labelledby="feedback-tab-items">
+					<FeedbackList workspaceSlug={workspaceSlug} projectId={projectId} sourceId={source.id} />
+				</div>
+			)}
+			{tab === "summary" && (
+				<div role="tabpanel" id="feedback-tabpanel-summary" aria-labelledby="feedback-tab-summary">
+					<FeedbackSummary
+						workspaceSlug={workspaceSlug}
+						projectId={projectId}
+						sourceId={source.id}
+					/>
+				</div>
+			)}
+			{tab === "settings" && (
+				<div
+					role="tabpanel"
+					id="feedback-tabpanel-settings"
+					aria-labelledby="feedback-tab-settings"
+				>
+					<FeedbackSourceSettings
+						source={source}
+						projectId={projectId}
+						workspaceSlug={workspaceSlug}
+						onChanged={onSettingsChanged}
+					/>
+				</div>
+			)}
+		</>
+	);
+}
+
+function FeedbackTabBar({
+	tab,
+	tabRefs,
+	onTabKeyDown,
+	onTabClick,
+}: {
+	tab: TabId;
+	tabRefs: { current: Partial<Record<TabId, HTMLButtonElement | null>> };
+	onTabKeyDown: (e: KeyboardEvent) => void;
+	onTabClick: (id: TabId) => void;
+}) {
+	return (
+		<div role="tablist" aria-label="Feedback source" class={TAB_LIST} onKeyDown={onTabKeyDown}>
+			{TABS.map((id) => (
+				<button
+					key={id}
+					ref={(el) => {
+						tabRefs.current[id] = el;
+					}}
+					type="button"
+					role="tab"
+					id={`feedback-tab-${id}`}
+					aria-selected={tab === id}
+					aria-controls={`feedback-tabpanel-${id}`}
+					tabIndex={tab === id ? 0 : -1}
+					class={tabBtnClass(tab === id)}
+					onClick={() => onTabClick(id)}
+				>
+					{TAB_LABELS[id]}
+				</button>
+			))}
+		</div>
+	);
+}
+
 export default function FeedbackSourceDetail({
 	workspaceSlug,
 	projectId: projectIdProp,
@@ -127,74 +240,17 @@ export default function FeedbackSourceDetail({
 
 	return (
 		<div>
-			<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-				<div class="flex items-center gap-2">
-					<h1 class="text-xl font-bold text-text-base m-0">{source.name}</h1>
-					<span class="text-[0.7rem] font-medium px-1.5 py-0.5 rounded bg-surface border border-border text-text-muted">
-						{statusLabel(source)}
-					</span>
-				</div>
-				{sources.length > 1 && (
-					<Select
-						ariaLabel="Switch feedback source"
-						value={source.id}
-						onChange={(id) => {
-							window.location.href = `/feedback/${id}${projectId ? `?projectId=${projectId}` : ""}`;
-						}}
-						options={sources.map((s) => ({ value: s.id, label: s.name }))}
-					/>
-				)}
-			</div>
+			<FeedbackSourceHeader source={source} sources={sources} projectId={projectId} />
 
-			<div role="tablist" aria-label="Feedback source" class={TAB_LIST} onKeyDown={onTabKeyDown}>
-				{TABS.map((id) => (
-					<button
-						key={id}
-						ref={(el) => {
-							tabRefs.current[id] = el;
-						}}
-						type="button"
-						role="tab"
-						id={`feedback-tab-${id}`}
-						aria-selected={tab === id}
-						aria-controls={`feedback-tabpanel-${id}`}
-						tabIndex={tab === id ? 0 : -1}
-						class={tabBtnClass(tab === id)}
-						onClick={() => setTab(id)}
-					>
-						{TAB_LABELS[id]}
-					</button>
-				))}
-			</div>
+			<FeedbackTabBar tab={tab} tabRefs={tabRefs} onTabKeyDown={onTabKeyDown} onTabClick={setTab} />
 
-			{tab === "items" && (
-				<div role="tabpanel" id="feedback-tabpanel-items" aria-labelledby="feedback-tab-items">
-					<FeedbackList workspaceSlug={workspaceSlug} projectId={projectId} sourceId={source.id} />
-				</div>
-			)}
-			{tab === "summary" && (
-				<div role="tabpanel" id="feedback-tabpanel-summary" aria-labelledby="feedback-tab-summary">
-					<FeedbackSummary
-						workspaceSlug={workspaceSlug}
-						projectId={projectId}
-						sourceId={source.id}
-					/>
-				</div>
-			)}
-			{tab === "settings" && (
-				<div
-					role="tabpanel"
-					id="feedback-tabpanel-settings"
-					aria-labelledby="feedback-tab-settings"
-				>
-					<FeedbackSourceSettings
-						source={source}
-						projectId={projectId}
-						workspaceSlug={workspaceSlug}
-						onChanged={fetchSources}
-					/>
-				</div>
-			)}
+			<FeedbackTabPanels
+				tab={tab}
+				workspaceSlug={workspaceSlug}
+				projectId={projectId}
+				source={source}
+				onSettingsChanged={fetchSources}
+			/>
 		</div>
 	);
 }
