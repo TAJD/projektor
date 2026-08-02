@@ -606,6 +606,13 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         padding: 0.25rem;
       }
       .metric-help-popover {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 200;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-sm);
         width: 16rem;
         max-width: min(16rem, 80vw);
         padding: 0.625rem 0.75rem;
@@ -667,6 +674,10 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
       }
       .account-menu-login:hover { color: var(--text); }
       .account-menu-popover {
+        z-index: 200;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-sm);
         width: 14rem;
         max-width: min(14rem, 85vw);
         border-radius: 8px;
@@ -855,7 +866,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
 
         function shouldStayVisible() {
           var shell = document.querySelector('.app-shell');
-          var menuOpen = document.querySelector('.popover-account-menu');
+          var menuOpen = document.querySelector('.account-menu-popover, .popover-account-menu');
           return !!(shell && shell.classList.contains('drawer-open')) || !!menuOpen;
         }
 
