@@ -6,6 +6,7 @@ import { PRIORITY_OPTIONS } from "../utils/issue-utils";
 import {
 	CATEGORY_COLORS,
 	type Issue,
+	type ProjectLookup as ProjectMeta,
 	type SortKey,
 	sortIssues,
 	type TaskStatus,
@@ -17,12 +18,6 @@ import Select from "./Select";
 
 interface Props {
 	workspaceSlug?: string;
-}
-
-interface ProjectMeta {
-	id: string;
-	key: string;
-	name: string;
 }
 
 type EpicRollup = { done: number; remaining: number; total: number };

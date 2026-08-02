@@ -1,17 +1,6 @@
-export interface TaskStatus {
-	id: string;
-	key: string;
-	name: string;
-	category: string;
-	color: string | null;
-}
+import type { CustomFieldValue, TaskStatus } from "./board-utils";
 
-export interface CustomFieldValue {
-	key: string;
-	label: string;
-	type: string;
-	value: string;
-}
+export type { CustomFieldValue, TaskStatus };
 
 export interface IssueLink {
 	id: string;

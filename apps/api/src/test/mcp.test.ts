@@ -2,6 +2,8 @@ import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
+	type JsonRpcError,
+	type JsonRpcResult,
 	seedCustomFieldDef,
 	seedCustomFieldValue,
 	seedFixture,
@@ -11,13 +13,6 @@ import {
 	seedProject,
 	seedUser,
 } from "./helpers";
-
-type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
-type JsonRpcError = {
-	jsonrpc: "2.0";
-	id: unknown;
-	error: { code: number; message: string; data?: unknown };
-};
 
 async function mcpFetch(
 	workspaceId: string,

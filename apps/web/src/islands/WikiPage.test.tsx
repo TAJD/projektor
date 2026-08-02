@@ -8,29 +8,7 @@
 // vi.stubGlobal, then await findBy* for the async state update.
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import WikiPage from "./WikiPage";
-
-interface WikiFreshness {
-	state: "fresh" | "stale" | "unverified";
-	staleSince: number | null;
-}
-
-interface WikiPageData {
-	id: string;
-	slug: string;
-	title: string;
-	content: string;
-	parent_id: string | null;
-	updated_at: number;
-	type: string | null;
-	tags: string[];
-	status: string | null;
-	verified_at: number | null;
-	verified_by: string | null;
-	owners: string[];
-	verify_interval: number | null;
-	freshness: WikiFreshness | null;
-}
+import WikiPage, { type ServerDraft, type WikiPageData } from "./WikiPage";
 
 const PAGE: WikiPageData = {
 	id: "w1",
@@ -317,13 +295,6 @@ describe("WikiPage — project scope control (PROJ-352)", () => {
 		});
 	});
 });
-
-interface ServerDraft {
-	title: string;
-	content: string;
-	baseRevisionId: string | null;
-	updatedAt: number;
-}
 
 // PROJ-495: mock fetch backing a fake server-side wiki_drafts row — GET/PUT/DELETE
 // .../wiki/:slug/draft, plus the usual tree/revisions/page fixtures. `draftCalls`

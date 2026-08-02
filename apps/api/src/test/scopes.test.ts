@@ -16,7 +16,15 @@ import {
 	parseScopes,
 	tokenAllows,
 } from "../auth/scopes";
-import { authHeaders, seedProject, seedToken, seedUser, seedWorkspace } from "./helpers";
+import {
+	authHeaders,
+	type JsonRpcError,
+	type JsonRpcResult,
+	seedProject,
+	seedToken,
+	seedUser,
+	seedWorkspace,
+} from "./helpers";
 
 /** Seed a workspace + owner + a project in it, for scope-enforcement tests. */
 async function seedScopeFixture() {
@@ -159,9 +167,6 @@ describe("PROJ-17: REST scope enforcement", () => {
 // ---------------------------------------------------------------------------
 // MCP enforcement
 // ---------------------------------------------------------------------------
-
-type JsonRpcResult = { jsonrpc: "2.0"; id: unknown; result: unknown };
-type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
 
 async function mcpCall(
 	workspaceId: string,

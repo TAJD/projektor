@@ -1,12 +1,6 @@
 import type { ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
-
-interface Props {
-	value: string;
-	onChange: (value: string) => void;
-	minHeight?: string;
-	onImageFile?: (file: File) => Promise<string | null>;
-}
+import type { Props } from "./MarkdownEditor";
 
 // PROJ-431: MarkdownEditor pulls in CodeMirror — 486 KiB raw / 168 KiB gzip, 76% of
 // the JS on /issues/view and /wiki. As a static import every *reader* of an issue paid

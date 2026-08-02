@@ -6,7 +6,7 @@ import { NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
-interface Distribution {
+export interface Distribution {
 	count: number;
 	avg: number | null;
 	p50: number | null;

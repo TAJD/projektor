@@ -6,14 +6,9 @@ import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
 import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
 import AccessPending from "./AccessPending";
+import type { ProjectLookup as ProjectOption } from "./board-utils";
 import MarkdownEditor from "./LazyMarkdownEditor";
 import Select, { type SelectOption } from "./Select";
-
-interface ProjectOption {
-	id: string;
-	key: string;
-	name: string;
-}
 
 // PROJ-491 (R9): the create-form's template picker draws from list_wiki_templates.
 interface TemplateOption {
@@ -44,7 +39,7 @@ interface SearchResult {
 	freshness: WikiFreshness | null;
 }
 
-interface WikiPageData {
+export interface WikiPageData {
 	id: string;
 	slug: string;
 	title: string;
@@ -335,7 +330,7 @@ interface Props {
 }
 
 // PROJ-495 (R13): shape of a saved server-side draft (services/wiki-drafts.ts#getWikiDraft).
-interface ServerDraft {
+export interface ServerDraft {
 	title: string;
 	content: string;
 	baseRevisionId: string | null;

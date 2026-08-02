@@ -13,6 +13,12 @@ export interface CustomFieldValue {
 	value: string;
 }
 
+export interface ProjectLookup {
+	id: string;
+	key: string;
+	name: string;
+}
+
 export interface Issue {
 	id: string;
 	number: number;
