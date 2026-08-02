@@ -83,27 +83,21 @@ function normalizeFrontmatterRecord(raw: object): Record<string, unknown> {
 // round-tripping through create/update/revisions/diff exactly as before this feature.
 // Invalid YAML or a frontmatter value that fails schema validation throws a
 // ValidationError — this is intentionally never silently ignored or coerced.
-export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
-	const match = FRONTMATTER_RE.exec(content);
-	if (!match) return EMPTY_WIKI_FRONTMATTER;
-
-	const raw = parseFrontmatterYaml(match[1]);
-
-	// An empty `---\n---\n` block parses to null/undefined — treat as "no frontmatter"
-	// rather than an error, since it's an easy no-op state to end up in when editing.
-	if (raw === null || raw === undefined) return EMPTY_WIKI_FRONTMATTER;
+// An empty `---\n---\n` block parses to null/undefined — treat as "no frontmatter"
+// rather than an error, since it's an easy no-op state to end up in when editing.
+// Anything else that isn't a plain mapping (a list, a scalar) is a genuine error.
+function requireFrontmatterMapping(raw: unknown): Record<string, unknown> | null {
+	if (raw === null || raw === undefined) return null;
 	if (typeof raw !== "object" || Array.isArray(raw)) {
 		throw new ValidationError({
 			formErrors: ["Frontmatter must be a YAML mapping (key: value pairs), not a list or scalar"],
 			fieldErrors: {},
 		});
 	}
+	return raw as Record<string, unknown>;
+}
 
-	const normalized = normalizeFrontmatterRecord(raw);
-	const parsed = WikiFrontmatterSchema.safeParse(normalized);
-	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-
-	const d = parsed.data;
+function toFrontmatterMeta(d: ReturnType<typeof WikiFrontmatterSchema.parse>): WikiFrontmatterMeta {
 	return {
 		type: d.type ?? null,
 		tags: d.tags ?? [],
@@ -114,6 +108,20 @@ export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
 		verifyInterval: d.verify_interval ?? null,
 		isTemplate: d.template ?? false,
 	};
+}
+
+export function parseWikiFrontmatter(content: string): WikiFrontmatterMeta {
+	const match = FRONTMATTER_RE.exec(content);
+	if (!match) return EMPTY_WIKI_FRONTMATTER;
+
+	const raw = requireFrontmatterMapping(parseFrontmatterYaml(match[1]));
+	if (raw === null) return EMPTY_WIKI_FRONTMATTER;
+
+	const normalized = normalizeFrontmatterRecord(raw);
+	const parsed = WikiFrontmatterSchema.safeParse(normalized);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+
+	return toFrontmatterMeta(parsed.data);
 }
 
 // PROJ-491 (R9): strips the `template: true` frontmatter key when seeding a new page's

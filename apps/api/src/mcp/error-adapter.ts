@@ -63,24 +63,42 @@ function hasIssues(issues: ZodFlattenOutput): boolean {
 	);
 }
 
-export function toMcpError(err: unknown): { code: number; message: string; data?: unknown } {
-	if (err instanceof ValidationError) {
-		// PROJ-508/PROJ-523: surface the Zod issue detail (formErrors/fieldErrors) via
-		// the JSON-RPC 2.0 `error.data` member instead of dropping it. This covers
-		// ordinary schema-validation failures and hand-thrown ValidationErrors alike
-		// (e.g. patch_wiki_page's ambiguous-heading case), so an MCP agent can always
-		// read back *why* its params were rejected, not just that they were. A bounded
-		// summary is also folded into `message` — same fallback as NotFoundError/
-		// ConflictError below — for MCP hosts that don't surface `data`.
-		if (hasIssues(err.issues)) {
-			return {
-				code: -32602,
-				message: `Invalid params (${summarizeIssues(err.issues)})`,
-				data: err.issues,
-			};
-		}
+// PROJ-508/PROJ-523: surface the Zod issue detail (formErrors/fieldErrors) via the
+// JSON-RPC 2.0 `error.data` member instead of dropping it. This covers ordinary
+// schema-validation failures and hand-thrown ValidationErrors alike (e.g.
+// patch_wiki_page's ambiguous-heading case), so an MCP agent can always read back
+// *why* its params were rejected, not just that they were. A bounded summary is also
+// folded into `message` — same fallback as NotFoundError/ConflictError below — for MCP
+// hosts that don't surface `data`.
+function toMcpValidationError(err: ValidationError): {
+	code: number;
+	message: string;
+	data?: unknown;
+} {
+	if (!hasIssues(err.issues)) {
 		return { code: -32602, message: "Invalid params", data: err.issues };
 	}
+	return {
+		code: -32602,
+		message: `Invalid params (${summarizeIssues(err.issues)})`,
+		data: err.issues,
+	};
+}
+
+// PROJ-490 / PROJ-508 / PROJ-484: structured details (e.g. patch_wiki_page's
+// currentHeadings, or wiki's currentRevisionId + diff) travel in `data` — the proper
+// JSON-RPC 2.0 channel — rather than JSON-encoded into `message`. A bounded summary is
+// also folded into `message` as a fallback for MCP hosts that don't surface `data`.
+function toMcpServiceErrorWithDetails(
+	message: string,
+	details: Record<string, unknown> | undefined
+): { code: number; message: string; data?: unknown } {
+	if (!hasDetails(details)) return { code: -32000, message };
+	return { code: -32000, message: `${message} (${summarizeDetails(details)})`, data: details };
+}
+
+export function toMcpError(err: unknown): { code: number; message: string; data?: unknown } {
+	if (err instanceof ValidationError) return toMcpValidationError(err);
 	if (err instanceof ServiceError) {
 		// Only the kinds whose messages are deliberately client-facing are
 		// surfaced (audited 2026-06-30: not_found / forbidden / conflict messages
@@ -90,33 +108,17 @@ export function toMcpError(err: unknown): { code: number; message: string; data?
 		// leak its message to clients by default. (PROJ-204)
 		switch (err.kind) {
 			case "not_found":
-				// PROJ-490 / PROJ-508: structured not-found details (e.g. patch_wiki_page's
-				// currentHeadings) now travel in `data` — the proper JSON-RPC 2.0 channel —
-				// rather than JSON-encoded into `message`. A bounded summary is also folded
-				// into `message` as a fallback for MCP hosts that don't surface `data`.
-				if (err instanceof NotFoundError && hasDetails(err.details)) {
-					return {
-						code: -32000,
-						message: `${err.message} (${summarizeDetails(err.details)})`,
-						data: err.details,
-					};
-				}
-				return { code: -32000, message: err.message };
+				return toMcpServiceErrorWithDetails(
+					err.message,
+					err instanceof NotFoundError ? err.details : undefined
+				);
 			case "forbidden":
 				return { code: -32000, message: err.message };
 			case "conflict":
-				// PROJ-484 / PROJ-508: a structured conflict (e.g. wiki's currentRevisionId +
-				// diff) now travels in `data` instead of being JSON-encoded into `message`.
-				// A bounded summary is also folded into `message` as a fallback for MCP
-				// hosts that don't surface `data`.
-				if (err instanceof ConflictError && hasDetails(err.details)) {
-					return {
-						code: -32000,
-						message: `${err.message} (${summarizeDetails(err.details)})`,
-						data: err.details,
-					};
-				}
-				return { code: -32000, message: err.message };
+				return toMcpServiceErrorWithDetails(
+					err.message,
+					err instanceof ConflictError ? err.details : undefined
+				);
 			default:
 				console.error("[mcp] unhandled ServiceError kind in tools/call:", err.kind, err);
 				return { code: -32000, message: "Internal error" };

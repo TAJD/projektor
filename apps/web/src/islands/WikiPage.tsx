@@ -192,6 +192,67 @@ function TagChips({ tags }: { tags: string[] | undefined | null }) {
 // PROJ-489 (R7): the Verify button/freshness badge only render when the page has opted
 // into verification tracking (a verify_interval or a status set) — a page with neither
 // has freshness: null and nothing meaningful to verify against.
+function WikiMetadataBadges({ page }: { page: WikiPageData }) {
+	return (
+		<>
+			{page.type && (
+				<span
+					class={
+						"inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold " +
+						"uppercase tracking-wide bg-bg border border-border text-text-muted"
+					}
+				>
+					{page.type}
+				</span>
+			)}
+			{page.status && <WikiStatusPill status={page.status} />}
+			{page.freshness && page.freshness.state !== "fresh" && (
+				<WikiFreshnessBadge state={page.freshness.state} />
+			)}
+			<TagChips tags={page.tags} />
+			{page.owners.length > 0 && <span>Owners: {page.owners.join(", ")}</span>}
+			{page.verified_at && (
+				<span>
+					Verified {new Date(page.verified_at * 1000).toLocaleDateString()}
+					{page.verified_by ? ` by ${page.verified_by}` : ""}
+				</span>
+			)}
+		</>
+	);
+}
+
+function WikiVerifyControls({
+	hasVerificationSignal,
+	onVerify,
+	verifying,
+	verifyError,
+}: {
+	hasVerificationSignal: boolean;
+	onVerify: () => void;
+	verifying: boolean;
+	verifyError: string | null;
+}) {
+	return (
+		<>
+			{hasVerificationSignal && (
+				<button
+					type="button"
+					class="btn btn-outline btn-sm"
+					onClick={onVerify}
+					disabled={verifying}
+				>
+					{verifying ? "Verifying…" : "Verify"}
+				</button>
+			)}
+			{verifyError && (
+				<span role="alert" class="text-[var(--danger-text)]">
+					{verifyError}
+				</span>
+			)}
+		</>
+	);
+}
+
 function WikiMetadataCard({
 	page,
 	onVerify,
@@ -219,43 +280,13 @@ function WikiMetadataCard({
 				"bg-surface text-[0.8rem] text-text-muted"
 			}
 		>
-			{page.type && (
-				<span
-					class={
-						"inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold " +
-						"uppercase tracking-wide bg-bg border border-border text-text-muted"
-					}
-				>
-					{page.type}
-				</span>
-			)}
-			{page.status && <WikiStatusPill status={page.status} />}
-			{page.freshness && page.freshness.state !== "fresh" && (
-				<WikiFreshnessBadge state={page.freshness.state} />
-			)}
-			<TagChips tags={page.tags} />
-			{page.owners.length > 0 && <span>Owners: {page.owners.join(", ")}</span>}
-			{page.verified_at && (
-				<span>
-					Verified {new Date(page.verified_at * 1000).toLocaleDateString()}
-					{page.verified_by ? ` by ${page.verified_by}` : ""}
-				</span>
-			)}
-			{hasVerificationSignal && (
-				<button
-					type="button"
-					class="btn btn-outline btn-sm"
-					onClick={onVerify}
-					disabled={verifying}
-				>
-					{verifying ? "Verifying…" : "Verify"}
-				</button>
-			)}
-			{verifyError && (
-				<span role="alert" class="text-[var(--danger-text)]">
-					{verifyError}
-				</span>
-			)}
+			<WikiMetadataBadges page={page} />
+			<WikiVerifyControls
+				hasVerificationSignal={hasVerificationSignal}
+				onVerify={onVerify}
+				verifying={verifying}
+				verifyError={verifyError}
+			/>
 		</div>
 	);
 }
@@ -421,6 +452,39 @@ const SEARCH_RESULT_BUTTON_CLASS = [
 	"focus-visible:outline-accent focus-visible:outline-offset-2",
 ].join(" ");
 
+function SearchResultMetaLine({ r }: { r: SearchResult }) {
+	const isStale = r.freshness && r.freshness.state !== "fresh";
+	const show = r.type || r.status || (r.tags?.length ?? 0) > 0 || isStale;
+	if (!show) return null;
+	return (
+		<span class="block mt-[0.15rem]">
+			{r.status && <WikiStatusPill status={r.status} />}
+			{isStale && r.freshness && <WikiFreshnessBadge state={r.freshness.state} />}
+			<TagChips tags={r.tags} />
+		</span>
+	);
+}
+
+function SearchResultButton({
+	r,
+	onSelect,
+}: {
+	r: SearchResult;
+	onSelect: (slug: string) => void;
+}) {
+	return (
+		<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
+			<span class="font-medium">{r.title}</span>
+			<SearchResultMetaLine r={r} />
+			{r.excerpt && (
+				<span class="block text-[0.75rem] text-text-muted truncate">
+					{renderHighlightedExcerpt(r.excerpt)}
+				</span>
+			)}
+		</button>
+	);
+}
+
 function SearchResultsList({
 	loading,
 	results,
@@ -436,26 +500,7 @@ function SearchResultsList({
 		<ul class="list-none m-0 p-0">
 			{results.map((r) => (
 				<li key={r.id}>
-					<button type="button" class={SEARCH_RESULT_BUTTON_CLASS} onClick={() => onSelect(r.slug)}>
-						<span class="font-medium">{r.title}</span>
-						{(r.type ||
-							r.status ||
-							(r.tags?.length ?? 0) > 0 ||
-							(r.freshness && r.freshness.state !== "fresh")) && (
-							<span class="block mt-[0.15rem]">
-								{r.status && <WikiStatusPill status={r.status} />}
-								{r.freshness && r.freshness.state !== "fresh" && (
-									<WikiFreshnessBadge state={r.freshness.state} />
-								)}
-								<TagChips tags={r.tags} />
-							</span>
-						)}
-						{r.excerpt && (
-							<span class="block text-[0.75rem] text-text-muted truncate">
-								{renderHighlightedExcerpt(r.excerpt)}
-							</span>
-						)}
-					</button>
+					<SearchResultButton r={r} onSelect={onSelect} />
 				</li>
 			))}
 		</ul>

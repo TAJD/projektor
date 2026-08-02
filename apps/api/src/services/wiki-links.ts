@@ -146,17 +146,14 @@ async function resolveSlugTarget(
 
 type ResolvedLink = { targetPageId: string | null; targetTitle: string };
 
-async function resolveLinkTargets(
+// Title-kind targets resolve in one batched query instead of one round trip per link (a
+// page with N distinct title-links previously made N sequential queries).
+async function resolveTitleLinks(
 	orm: Orm,
 	workspaceId: string,
-	targets: readonly ParsedLinkTarget[]
-): Promise<ResolvedLink[]> {
-	// Dedupe by resolved page id (or the raw unresolved key) so a page linking to the
-	// same target multiple times only gets one wiki_links row.
-	const resolved = new Map<string, ResolvedLink>();
-
-	// Title-kind targets resolve in one batched query instead of one round trip per
-	// link (a page with N distinct title-links previously made N sequential queries).
+	targets: readonly ParsedLinkTarget[],
+	resolved: Map<string, ResolvedLink>
+): Promise<void> {
 	const titleTargets = targets.filter(
 		(t): t is Extract<ParsedLinkTarget, { kind: "title" }> => t.kind === "title"
 	);
@@ -170,9 +167,16 @@ async function resolveLinkTargets(
 		const key = targetPageId ?? `title:${t.title.toLowerCase()}`;
 		if (!resolved.has(key)) resolved.set(key, { targetPageId, targetTitle: t.title });
 	}
+}
 
-	// Slug-kind targets (from same-workspace wiki URLs) each need a redirect-fallback
-	// lookup, so they stay sequential rather than batched.
+// Slug-kind targets (from same-workspace wiki URLs) each need a redirect-fallback lookup,
+// so they stay sequential rather than batched.
+async function resolveSlugLinks(
+	orm: Orm,
+	workspaceId: string,
+	targets: readonly ParsedLinkTarget[],
+	resolved: Map<string, ResolvedLink>
+): Promise<void> {
 	for (const t of targets) {
 		if (t.kind !== "slug") continue;
 		const found = await resolveSlugTarget(orm, workspaceId, t.slug);
@@ -181,6 +185,18 @@ async function resolveLinkTargets(
 			resolved.set(key, { targetPageId: found?.id ?? null, targetTitle: found?.title ?? t.slug });
 		}
 	}
+}
+
+async function resolveLinkTargets(
+	orm: Orm,
+	workspaceId: string,
+	targets: readonly ParsedLinkTarget[]
+): Promise<ResolvedLink[]> {
+	// Dedupe by resolved page id (or the raw unresolved key) so a page linking to the
+	// same target multiple times only gets one wiki_links row.
+	const resolved = new Map<string, ResolvedLink>();
+	await resolveTitleLinks(orm, workspaceId, targets, resolved);
+	await resolveSlugLinks(orm, workspaceId, targets, resolved);
 	return [...resolved.values()];
 }
 

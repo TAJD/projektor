@@ -476,6 +476,80 @@ function extractDeletedPageInfo(diff: Record<string, unknown> | null): {
 	};
 }
 
+type WikiActivityRow = {
+	id: string;
+	action: string;
+	entityId: string;
+	actorId: string | null;
+	diff: Record<string, unknown> | null;
+	createdAt: number;
+	pageSlug: string | null;
+	pageTitle: string | null;
+	pageProjectId: string | null;
+	pageDeletedAt: number | null;
+};
+
+// PROJ-496: a "created"/"updated" event for a page that's now trashed is stale — the page
+// itself is excluded from every other read path, so the delta feed drops it too rather
+// than pointing an agent at a page get_wiki_page will 404 on. The "deleted" event for that
+// same trash action is NOT dropped: it's the one event that's supposed to report the page
+// went away.
+function eventFieldsFor(
+	action: "created" | "updated" | "deleted",
+	r: WikiActivityRow
+): {
+	slug: string | null;
+	title: string | null;
+	eventProjectId: string | null;
+	deleted: ReturnType<typeof extractDeletedPageInfo> | null;
+} {
+	const deleted = action === "deleted" ? extractDeletedPageInfo(r.diff) : null;
+	return {
+		slug: deleted ? deleted.slug : r.pageSlug,
+		title: deleted ? deleted.title : r.pageTitle,
+		eventProjectId: deleted ? deleted.projectId : r.pageProjectId,
+		deleted,
+	};
+}
+
+async function isEventVisible(
+	projectId: string | undefined,
+	eventProjectId: string | null,
+	canSeeProject: (id: string) => Promise<boolean>
+): Promise<boolean> {
+	if (projectId) return eventProjectId === projectId;
+	if (eventProjectId === null) return true;
+	return canSeeProject(eventProjectId);
+}
+
+// Resolves one activity row to an event, or null if it should be dropped (stale
+// trash-shadowed row, wrong project, or not visible to the caller).
+async function toWikiChangeEvent(
+	r: WikiActivityRow,
+	projectId: string | undefined,
+	canSeeProject: (id: string) => Promise<boolean>
+): Promise<WikiChangeEvent | null> {
+	const action = r.action as "created" | "updated" | "deleted";
+	if (action !== "deleted" && r.pageDeletedAt !== null && r.pageDeletedAt !== undefined)
+		return null;
+
+	const { slug, title, eventProjectId, deleted } = eventFieldsFor(action, r);
+	if (!(await isEventVisible(projectId, eventProjectId, canSeeProject))) return null;
+
+	return {
+		id: r.id,
+		action,
+		pageId: r.entityId,
+		slug,
+		title,
+		projectId: eventProjectId,
+		actorId: r.actorId,
+		createdAt: r.createdAt,
+		deletedPageIds: deleted?.deletedPageIds ?? null,
+		deletedPageIdsTruncated: deleted?.deletedPageIdsTruncated ?? false,
+	};
+}
+
 // PROJ-493: resolves the (pageId -> is-watched) set for the caller, for list_wiki_changes'
 // watchedOnly filter. Mirrors notifyWikiWatchers' match rule (direct watch, or a
 // subtree watch on a proper ancestor) but walks the CURRENT tree — a page reparented out
@@ -561,6 +635,21 @@ async function watchedPageIds(
 	return matched;
 }
 
+// `since` is second-granular and exclusive, so a batch cut off mid-second by `limit` would
+// strand the rest of that second: the caller polls with nextSince = that second and `gt`
+// skips them forever. Drop the trailing partial second instead, so the next poll picks it
+// up whole. (If the WHOLE batch is one second there's nothing to trim — that needs `limit`
+// changes inside a single second, and the alternative is a poll that can never advance.)
+function trimTrailingPartialSecond<T extends { createdAt: number }>(
+	rows: readonly T[],
+	limit: number
+): readonly T[] {
+	if (rows.length !== limit || rows.length === 0) return rows;
+	const maxTs = rows[rows.length - 1].createdAt;
+	if (rows[0].createdAt === maxTs) return rows;
+	return rows.filter((r) => r.createdAt < maxTs);
+}
+
 // PROJ-493 (R11): cheap delta feed — piggybacks entirely on the `activity` table every
 // wiki_page write already populates (services/activity.ts#recordActivity, called from
 // every create/update/patch/delete path in services/wiki.ts) rather than a separate
@@ -615,17 +704,7 @@ export async function listWikiChanges(
 		.orderBy(schema.activity.createdAt)
 		.limit(limit);
 
-	// `since` is second-granular and exclusive, so a batch cut off mid-second by `limit`
-	// would strand the rest of that second: the caller polls with nextSince = that second
-	// and `gt` skips them forever. Drop the trailing partial second instead, so the next
-	// poll picks it up whole. (If the WHOLE batch is one second there's nothing to trim —
-	// that needs `limit` changes inside a single second, and the alternative is a poll
-	// that can never advance.)
-	let batch = rows;
-	if (rows.length === limit && rows.length > 0) {
-		const maxTs = rows[rows.length - 1].createdAt;
-		if (rows[0].createdAt !== maxTs) batch = rows.filter((r) => r.createdAt < maxTs);
-	}
+	const batch = trimTrailingPartialSecond(rows, limit);
 
 	// One role lookup per distinct project in the batch, not per event.
 	const roleCache = new Map<string, boolean>();
@@ -638,46 +717,11 @@ export async function listWikiChanges(
 		return visible;
 	};
 
-	// Resolves one activity row to an event, or null if it should be dropped (stale
-	// trash-shadowed row, wrong project, or not visible to the caller). Extracted from
-	// the loop below to keep listWikiChanges's own complexity/length down.
-	const toEvent = async (r: (typeof batch)[number]): Promise<WikiChangeEvent | null> => {
-		const action = r.action as "created" | "updated" | "deleted";
-		// PROJ-496: a "created"/"updated" event for a page that's now trashed is stale —
-		// the page itself is excluded from every other read path, so the delta feed drops
-		// it too rather than pointing an agent at a page get_wiki_page will 404 on. The
-		// "deleted" event for that same trash action is NOT dropped (below): it's the one
-		// event that's supposed to report the page went away.
-		if (action !== "deleted" && r.pageDeletedAt !== null && r.pageDeletedAt !== undefined)
-			return null;
-		const deleted = action === "deleted" ? extractDeletedPageInfo(r.diff) : null;
-		const slug = deleted ? deleted.slug : r.pageSlug;
-		const title = deleted ? deleted.title : r.pageTitle;
-		const eventProjectId = deleted ? deleted.projectId : r.pageProjectId;
-
-		if (projectId && eventProjectId !== projectId) return null;
-		if (!projectId && eventProjectId !== null && !(await canSeeProject(eventProjectId)))
-			return null;
-
-		return {
-			id: r.id,
-			action,
-			pageId: r.entityId,
-			slug,
-			title,
-			projectId: eventProjectId,
-			actorId: r.actorId,
-			createdAt: r.createdAt,
-			deletedPageIds: deleted?.deletedPageIds ?? null,
-			deletedPageIdsTruncated: deleted?.deletedPageIdsTruncated ?? false,
-		};
-	};
-
 	let nextSince = since;
 	const events: WikiChangeEvent[] = [];
 	for (const r of batch) {
 		if (r.createdAt > nextSince) nextSince = r.createdAt;
-		const event = await toEvent(r);
+		const event = await toWikiChangeEvent(r, projectId, canSeeProject);
 		if (event) events.push(event);
 	}
 
