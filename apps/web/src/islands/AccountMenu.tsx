@@ -23,19 +23,56 @@ function initials(name: string, email: string): string {
 	return source.slice(0, 2).toUpperCase();
 }
 
-// PROJ-428: replaces the old unlabeled Log in/Log out emoji links. The app is
-// entirely behind Cloudflare Access, so there's no true logged-out state to
-// render here — "Refresh session" and "Log out" are manual escape hatches for
-// re-challenging or ending the CF Access session (see apps/api/src/routes/auth.ts).
-export function AccountMenu({ workspaceSlug }: Props) {
+function AccountMenuPopover({
+	menuId,
+	popoverRef,
+	pos,
+	user,
+	redirectTarget,
+}: {
+	menuId: string;
+	popoverRef: { current: HTMLDivElement | null };
+	pos: { top: number; right: number };
+	user: { email: string; name: string };
+	redirectTarget: string;
+}) {
+	return createPortal(
+		<div
+			id={menuId}
+			ref={popoverRef}
+			class="account-menu-popover"
+			style={{ position: "fixed", top: `${pos.top}px`, right: `${pos.right}px` }}
+		>
+			<div class="account-menu-identity">
+				<div class="account-menu-identity-name">{user.name}</div>
+				<div class="account-menu-identity-email">{user.email}</div>
+			</div>
+			<div role="menu" aria-label="Account">
+				<a
+					role="menuitem"
+					class="account-menu-item"
+					href={`/auth/login?redirect_url=${encodeURIComponent(redirectTarget)}`}
+				>
+					Refresh session
+				</a>
+				<a
+					role="menuitem"
+					class="account-menu-item"
+					href="/cdn-cgi/access/logout"
+					// PROJ-431: don't leave one user's unsent drafts on a shared device.
+					onClick={() => clearAllDrafts()}
+				>
+					Log out
+				</a>
+			</div>
+		</div>,
+		document.body
+	);
+}
+
+function useAccountUser(workspaceSlug: string | undefined) {
 	const [user, setUser] = useState<{ email: string; name: string } | null>(null);
 	const [failed, setFailed] = useState(false);
-	const [open, setOpen] = useState(false);
-	const [popoverPos, setPopoverPos] = useState<{ top: number; right: number } | null>(null);
-	const rootRef = useRef<HTMLDivElement>(null);
-	const triggerRef = useRef<HTMLButtonElement>(null);
-	const popoverRef = useRef<HTMLDivElement>(null);
-	const menuId = useId();
 
 	useEffect(() => {
 		let cancelled = false;
@@ -59,6 +96,50 @@ export function AccountMenu({ workspaceSlug }: Props) {
 		};
 	}, [workspaceSlug]);
 
+	return { user, failed };
+}
+
+// PROJ-419-style portal: the top bar this menu lives in gets a CSS
+// `transform` when hidden on scroll (see Base.astro's .topbar-hidden),
+// which would otherwise become the containing block for a `position:
+// fixed` popover and break its positioning. Portalling to document.body
+// sidesteps that, same as GlossaryHelp's popover.
+function useCloseOnOutsideOrEscape(
+	open: boolean,
+	isInside: (node: Node) => boolean,
+	onOutsideClick: () => void,
+	onEscape: () => void
+) {
+	useEffect(() => {
+		if (!open) return;
+		function onPointerDown(e: MouseEvent) {
+			if (!(e.target instanceof Node) || !isInside(e.target)) onOutsideClick();
+		}
+		function onKeyDown(e: KeyboardEvent) {
+			if (e.key === "Escape") onEscape();
+		}
+		document.addEventListener("mousedown", onPointerDown);
+		document.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.removeEventListener("mousedown", onPointerDown);
+			document.removeEventListener("keydown", onKeyDown);
+		};
+	}, [open]);
+}
+
+// PROJ-428: replaces the old unlabeled Log in/Log out emoji links. The app is
+// entirely behind Cloudflare Access, so there's no true logged-out state to
+// render here — "Refresh session" and "Log out" are manual escape hatches for
+// re-challenging or ending the CF Access session (see apps/api/src/routes/auth.ts).
+export function AccountMenu({ workspaceSlug }: Props) {
+	const { user, failed } = useAccountUser(workspaceSlug);
+	const [open, setOpen] = useState(false);
+	const [popoverPos, setPopoverPos] = useState<{ top: number; right: number } | null>(null);
+	const rootRef = useRef<HTMLDivElement>(null);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const popoverRef = useRef<HTMLDivElement>(null);
+	const menuId = useId();
+
 	function isInside(node: Node) {
 		return !!(rootRef.current?.contains(node) || popoverRef.current?.contains(node));
 	}
@@ -74,29 +155,15 @@ export function AccountMenu({ workspaceSlug }: Props) {
 		setOpen(true);
 	}
 
-	// PROJ-419-style portal: the top bar this menu lives in gets a CSS
-	// `transform` when hidden on scroll (see Base.astro's .topbar-hidden),
-	// which would otherwise become the containing block for a `position:
-	// fixed` popover and break its positioning. Portalling to document.body
-	// sidesteps that, same as GlossaryHelp's popover.
-	useEffect(() => {
-		if (!open) return;
-		function onPointerDown(e: MouseEvent) {
-			if (!(e.target instanceof Node) || !isInside(e.target)) setOpen(false);
+	useCloseOnOutsideOrEscape(
+		open,
+		isInside,
+		() => setOpen(false),
+		() => {
+			setOpen(false);
+			triggerRef.current?.focus();
 		}
-		function onKeyDown(e: KeyboardEvent) {
-			if (e.key === "Escape") {
-				setOpen(false);
-				triggerRef.current?.focus();
-			}
-		}
-		document.addEventListener("mousedown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("mousedown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [open]);
+	);
 
 	if (failed) {
 		return (
@@ -138,44 +205,15 @@ export function AccountMenu({ workspaceSlug }: Props) {
 					▾
 				</span>
 			</button>
-			{open &&
-				popoverPos &&
-				createPortal(
-					<div
-						id={menuId}
-						ref={popoverRef}
-						class="account-menu-popover"
-						style={{
-							position: "fixed",
-							top: `${popoverPos.top}px`,
-							right: `${popoverPos.right}px`,
-						}}
-					>
-						<div class="account-menu-identity">
-							<div class="account-menu-identity-name">{user.name}</div>
-							<div class="account-menu-identity-email">{user.email}</div>
-						</div>
-						<div role="menu" aria-label="Account">
-							<a
-								role="menuitem"
-								class="account-menu-item"
-								href={`/auth/login?redirect_url=${encodeURIComponent(redirectTarget)}`}
-							>
-								Refresh session
-							</a>
-							<a
-								role="menuitem"
-								class="account-menu-item"
-								href="/cdn-cgi/access/logout"
-								// PROJ-431: don't leave one user's unsent drafts on a shared device.
-								onClick={() => clearAllDrafts()}
-							>
-								Log out
-							</a>
-						</div>
-					</div>,
-					document.body
-				)}
+			{open && popoverPos && (
+				<AccountMenuPopover
+					menuId={menuId}
+					popoverRef={popoverRef}
+					pos={popoverPos}
+					user={user}
+					redirectTarget={redirectTarget}
+				/>
+			)}
 		</div>
 	);
 }

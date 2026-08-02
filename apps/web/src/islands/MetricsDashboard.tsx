@@ -691,6 +691,143 @@ function SectionBand({ title, children }: { title?: string; children: ComponentC
 	);
 }
 
+function FlowBand({ metrics }: { metrics: FlowMetrics }) {
+	return (
+		<SectionBand title="Flow">
+			<DistributionTiles metricId="lead-time" dist={metrics.leadTime} />
+			<DistributionTiles metricId="cycle-time" dist={metrics.cycleTime} />
+
+			<div class="mb-8">
+				<SectionHeading metricId="throughput" />
+				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+					<ThroughputChart data={metrics.throughputOverTime} />
+				</div>
+			</div>
+
+			<div class="mb-8">
+				<SectionHeading
+					metricId="bug-share"
+					caption="Bugs as a share of completed throughput — a rising trend is a quality signal, not just a volume one"
+				/>
+				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+					<BugShareChart data={metrics.bugShareOverTime} bugTypeTracked={metrics.bugTypeTracked} />
+				</div>
+			</div>
+
+			<div class="mb-8">
+				<SectionHeading metricId="wip" />
+				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+					<WipChart data={metrics.wipOverTime} />
+				</div>
+			</div>
+
+			<div class="mb-8">
+				<SectionHeading
+					metricId="aging-wip"
+					caption={
+						"Age since claim for every currently open issue, against this window's cycle-time " +
+						"p50/p90 — stuck items show up before they finish and skew the percentiles"
+					}
+				/>
+				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+					<AgingWipScatter
+						data={metrics.agingWip}
+						p50={metrics.cycleTime.p50}
+						p90={metrics.cycleTime.p90}
+					/>
+				</div>
+			</div>
+
+			<div class="mb-8">
+				<SectionHeading
+					metricId="cumulative-flow"
+					caption="Issue counts per status category over time — a widening band is where the factory is choking"
+				/>
+				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
+					<CfdChart data={metrics.cfdOverTime} />
+				</div>
+				{/* PROJ-392: Review latency isn't a second 4-tile group — pairing a dense
+				    4-tile card with a near-empty one in a two-column grid read as a
+				    visual bug (implying parity where there isn't any). Time-in-progress
+				    now takes the full row; the caption below points to the canonical
+				    Review-latency breakdown instead. */}
+				<DistributionTiles
+					metricId="time-in-progress"
+					caption="Review latency has its own breakdown in Efficiency & collaboration, below"
+					dist={metrics.timeInProgress}
+				/>
+			</div>
+
+			<div class="mb-8">
+				<SectionHeading
+					metricId="arrival-vs-completion"
+					caption="Issues created vs completed per bucket, with the net — is the backlog growing or burning?"
+				/>
+				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
+					<ArrivalVsCompletionChart data={metrics.arrivalVsCompletionOverTime} />
+				</div>
+			</div>
+		</SectionBand>
+	);
+}
+
+function EfficiencyBand({ metrics }: { metrics: FlowMetrics }) {
+	return (
+		<SectionBand title="Efficiency & collaboration">
+			<DistributionTiles
+				metricId="flow-efficiency"
+				caption="Lease-held time ÷ lead time — how much of the wait, not just the work, was agent-driven"
+				dist={metrics.flowEfficiency}
+				format={formatPercent}
+			/>
+
+			<DistributionTiles
+				metricId="autonomy-ratio"
+				dist={metrics.autonomyRatio}
+				format={formatPercent}
+			/>
+
+			<div class="mb-8">
+				<SectionHeading metricId="review-latency" />
+				<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
+					<ReviewLatencyChart data={metrics.reviewLatencyOverTime} />
+				</div>
+				<DistributionTiles
+					metricId="review-latency"
+					dist={metrics.reviewLatency}
+					showHeading={false}
+				/>
+			</div>
+
+			<DistributionTiles
+				metricId="human-interventions"
+				title="Human interventions per issue"
+				dist={metrics.humanInterventions}
+				format={formatCount}
+			/>
+		</SectionBand>
+	);
+}
+
+function FactoryHealthBand({ factoryHealth }: { factoryHealth: FlowMetrics["factoryHealth"] }) {
+	return (
+		<SectionBand title="Factory health">
+			<div class="mb-8">
+				<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
+					Fault signals for the factory itself, for the selected window — a low background rate is
+					normal; watch the trend, not any single nonzero tile
+				</p>
+				<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+					<HealthTile metricId="lease-expiries" value={factoryHealth.leaseExpiries} />
+					<HealthTile metricId="abandoned-claims" value={factoryHealth.abandonedClaims} />
+					<HealthTile metricId="gate-rejections" value={factoryHealth.gateRejections} />
+					<HealthTile metricId="wip-cap-pressure" value={factoryHealth.wipCapPressure} />
+				</div>
+			</div>
+		</SectionBand>
+	);
+}
+
 export default function MetricsDashboard({ workspaceSlug }: Props) {
 	const [range, setRange] = useRangeUrlSync();
 	const { projectId, metrics, loading, error } = useFlowMetrics(workspaceSlug, range);
@@ -713,118 +850,8 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 			)}
 			{!loading && !error && metrics && (
 				<>
-					<SectionBand title="Flow">
-						<DistributionTiles metricId="lead-time" dist={metrics.leadTime} />
-						<DistributionTiles metricId="cycle-time" dist={metrics.cycleTime} />
-
-						<div class="mb-8">
-							<SectionHeading metricId="throughput" />
-							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-								<ThroughputChart data={metrics.throughputOverTime} />
-							</div>
-						</div>
-
-						<div class="mb-8">
-							<SectionHeading
-								metricId="bug-share"
-								caption="Bugs as a share of completed throughput — a rising trend is a quality signal, not just a volume one"
-							/>
-							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-								<BugShareChart
-									data={metrics.bugShareOverTime}
-									bugTypeTracked={metrics.bugTypeTracked}
-								/>
-							</div>
-						</div>
-
-						<div class="mb-8">
-							<SectionHeading metricId="wip" />
-							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-								<WipChart data={metrics.wipOverTime} />
-							</div>
-						</div>
-
-						<div class="mb-8">
-							<SectionHeading
-								metricId="aging-wip"
-								caption={
-									"Age since claim for every currently open issue, against this window's cycle-time " +
-									"p50/p90 — stuck items show up before they finish and skew the percentiles"
-								}
-							/>
-							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-								<AgingWipScatter
-									data={metrics.agingWip}
-									p50={metrics.cycleTime.p50}
-									p90={metrics.cycleTime.p90}
-								/>
-							</div>
-						</div>
-
-						<div class="mb-8">
-							<SectionHeading
-								metricId="cumulative-flow"
-								caption="Issue counts per status category over time — a widening band is where the factory is choking"
-							/>
-							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
-								<CfdChart data={metrics.cfdOverTime} />
-							</div>
-							{/* PROJ-392: Review latency isn't a second 4-tile group — pairing a dense
-							    4-tile card with a near-empty one in a two-column grid read as a
-							    visual bug (implying parity where there isn't any). Time-in-progress
-							    now takes the full row; the caption below points to the canonical
-							    Review-latency breakdown instead. */}
-							<DistributionTiles
-								metricId="time-in-progress"
-								caption="Review latency has its own breakdown in Efficiency & collaboration, below"
-								dist={metrics.timeInProgress}
-							/>
-						</div>
-
-						<div class="mb-8">
-							<SectionHeading
-								metricId="arrival-vs-completion"
-								caption="Issues created vs completed per bucket, with the net — is the backlog growing or burning?"
-							/>
-							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto">
-								<ArrivalVsCompletionChart data={metrics.arrivalVsCompletionOverTime} />
-							</div>
-						</div>
-					</SectionBand>
-
-					<SectionBand title="Efficiency & collaboration">
-						<DistributionTiles
-							metricId="flow-efficiency"
-							caption="Lease-held time ÷ lead time — how much of the wait, not just the work, was agent-driven"
-							dist={metrics.flowEfficiency}
-							format={formatPercent}
-						/>
-
-						<DistributionTiles
-							metricId="autonomy-ratio"
-							dist={metrics.autonomyRatio}
-							format={formatPercent}
-						/>
-
-						<div class="mb-8">
-							<SectionHeading metricId="review-latency" />
-							<div class="p-4 bg-surface border border-border rounded-lg overflow-x-auto mb-3">
-								<ReviewLatencyChart data={metrics.reviewLatencyOverTime} />
-							</div>
-							<DistributionTiles
-								metricId="review-latency"
-								dist={metrics.reviewLatency}
-								showHeading={false}
-							/>
-						</div>
-
-						<DistributionTiles
-							metricId="human-interventions"
-							title="Human interventions per issue"
-							dist={metrics.humanInterventions}
-							format={formatCount}
-						/>
-					</SectionBand>
+					<FlowBand metrics={metrics} />
+					<EfficiencyBand metrics={metrics} />
 
 					<SectionBand>
 						{projectId && (
@@ -837,29 +864,7 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 						)}
 					</SectionBand>
 
-					<SectionBand title="Factory health">
-						<div class="mb-8">
-							<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
-								Fault signals for the factory itself, for the selected window — a low background
-								rate is normal; watch the trend, not any single nonzero tile
-							</p>
-							<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-								<HealthTile metricId="lease-expiries" value={metrics.factoryHealth.leaseExpiries} />
-								<HealthTile
-									metricId="abandoned-claims"
-									value={metrics.factoryHealth.abandonedClaims}
-								/>
-								<HealthTile
-									metricId="gate-rejections"
-									value={metrics.factoryHealth.gateRejections}
-								/>
-								<HealthTile
-									metricId="wip-cap-pressure"
-									value={metrics.factoryHealth.wipCapPressure}
-								/>
-							</div>
-						</div>
-					</SectionBand>
+					<FactoryHealthBand factoryHealth={metrics.factoryHealth} />
 				</>
 			)}
 		</div>

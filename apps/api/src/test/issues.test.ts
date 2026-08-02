@@ -1446,7 +1446,6 @@ describe("Issues API — includeRollups/includeBody/assignee=me (perf sweep)", (
 	});
 });
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issues MCP — typeId", () => {
 	let token: string;
 	let slug: string;

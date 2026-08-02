@@ -1959,6 +1959,74 @@ export async function listWikiTemplates(ctx: ServiceCtx, input: unknown) {
 	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug) }));
 }
 
+const DEFAULT_WIKI_TEMPLATES: Array<{ slug: string; title: string; type: string; body: string }> = [
+	{
+		slug: "templates-runbook",
+		title: "Runbook Template",
+		type: "runbook",
+		body: [
+			"# Runbook: [Title]",
+			"",
+			"## Purpose",
+			"",
+			"What this runbook is for and when to use it.",
+			"",
+			"## Preconditions",
+			"",
+			"-",
+			"",
+			"## Steps",
+			"",
+			"1.",
+			"2.",
+			"3.",
+			"",
+			"## Rollback",
+			"",
+			"## Verification",
+			"",
+		].join("\n"),
+	},
+	{
+		slug: "templates-adr",
+		title: "ADR Template",
+		type: "adr",
+		body: [
+			"# ADR NNNN: [Title]",
+			"",
+			"## Status",
+			"",
+			"Proposed",
+			"",
+			"## Context",
+			"",
+			"## Decision",
+			"",
+			"## Consequences",
+			"",
+		].join("\n"),
+	},
+	{
+		slug: "templates-spec",
+		title: "Spec Template",
+		type: "spec",
+		body: [
+			"# [Feature] Spec",
+			"",
+			"## Problem",
+			"",
+			"## Goals",
+			"",
+			"## Non-goals",
+			"",
+			"## Design",
+			"",
+			"## Open questions",
+			"",
+		].join("\n"),
+	},
+];
+
 // PROJ-491 (R9): seeds the built-in templates (runbook, adr, spec) for a newly created
 // workspace, under a "Templates" parent page (slugged "page-templates" — see
 // RESERVED_WIKI_SLUGS) — same content the 0047 migration backfills
@@ -1997,75 +2065,7 @@ export async function seedDefaultWikiTemplates(
 		.bind(parentId, workspaceId, "Templates", "", "")
 		.run();
 
-	const templates: Array<{ slug: string; title: string; type: string; body: string }> = [
-		{
-			slug: "templates-runbook",
-			title: "Runbook Template",
-			type: "runbook",
-			body: [
-				"# Runbook: [Title]",
-				"",
-				"## Purpose",
-				"",
-				"What this runbook is for and when to use it.",
-				"",
-				"## Preconditions",
-				"",
-				"-",
-				"",
-				"## Steps",
-				"",
-				"1.",
-				"2.",
-				"3.",
-				"",
-				"## Rollback",
-				"",
-				"## Verification",
-				"",
-			].join("\n"),
-		},
-		{
-			slug: "templates-adr",
-			title: "ADR Template",
-			type: "adr",
-			body: [
-				"# ADR NNNN: [Title]",
-				"",
-				"## Status",
-				"",
-				"Proposed",
-				"",
-				"## Context",
-				"",
-				"## Decision",
-				"",
-				"## Consequences",
-				"",
-			].join("\n"),
-		},
-		{
-			slug: "templates-spec",
-			title: "Spec Template",
-			type: "spec",
-			body: [
-				"# [Feature] Spec",
-				"",
-				"## Problem",
-				"",
-				"## Goals",
-				"",
-				"## Non-goals",
-				"",
-				"## Design",
-				"",
-				"## Open questions",
-				"",
-			].join("\n"),
-		},
-	];
-
-	for (const t of templates) {
+	for (const t of DEFAULT_WIKI_TEMPLATES) {
 		const content = `---\ntype: ${t.type}\nstatus: draft\ntemplate: true\n---\n${t.body}`;
 		await orm.insert(schema.wikiPages).values({
 			id: crypto.randomUUID(),

@@ -2339,6 +2339,49 @@ function useServerDraftAutosave(options: UseServerDraftAutosaveOptions) {
 	return skipLeaveFlushRef;
 }
 
+async function saveWikiPageEdit(params: {
+	workspaceSlug: string | undefined;
+	page: WikiPageData;
+	editTitle: string;
+	editContent: string;
+	baseRevisionId: string | null | undefined;
+	fetchPage: (s: string) => Promise<void>;
+	fetchRevisions: (s: string) => Promise<void>;
+}): Promise<void> {
+	const { workspaceSlug, page, editTitle, editContent, baseRevisionId, fetchPage, fetchRevisions } =
+		params;
+	await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
+		method: "PUT",
+		workspaceSlug,
+		body: { title: editTitle, content: editContent, baseRevisionId },
+	});
+	try {
+		await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}/draft`, {
+			method: "DELETE",
+			workspaceSlug,
+		});
+	} catch {
+		// non-fatal
+	}
+	await fetchPage(page.slug);
+	await fetchRevisions(page.slug);
+}
+
+// PROJ-507: a 409 means someone else saved this page after we loaded it (PROJ-484's
+// optimistic lock rejected our stale baseRevisionId) — surface that distinctly rather
+// than the generic failure message, so the user knows to reload instead of retrying the
+// same save. Match the tail of apiFetch's message, not a bare "409" — the request path is
+// part of it, and slugs like "proj-409-notes" would otherwise read as conflicts.
+function wikiSaveErrorMessage(e: unknown): string {
+	if (String(e).endsWith("failed: 409")) {
+		return (
+			"This page was changed by someone else since you loaded it. Reload the page before " +
+			"saving to avoid overwriting their changes."
+		);
+	}
+	return `Save failed: ${String(e)}`;
+}
+
 function useWikiEditing(
 	workspaceSlug: string | undefined,
 	page: WikiPageData | null,
@@ -2440,38 +2483,19 @@ function useWikiEditing(
 		setSaving(true);
 		setSaveError(null);
 		try {
-			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
-				method: "PUT",
+			await saveWikiPageEdit({
 				workspaceSlug,
-				body: { title: editTitle, content: editContent, baseRevisionId },
+				page,
+				editTitle,
+				editContent,
+				baseRevisionId,
+				fetchPage,
+				fetchRevisions,
 			});
-			try {
-				await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}/draft`, {
-					method: "DELETE",
-					workspaceSlug,
-				});
-			} catch {
-				// non-fatal
-			}
-			await fetchPage(page.slug);
-			await fetchRevisions(page.slug);
 			skipLeaveFlushRef.current = true;
 			setEditing(false);
 		} catch (e) {
-			// PROJ-507: a 409 means someone else saved this page after we loaded it
-			// (PROJ-484's optimistic lock rejected our stale baseRevisionId) — surface
-			// that distinctly rather than the generic failure message, so the user
-			// knows to reload instead of retrying the same save.
-			// Match the tail of apiFetch's message, not a bare "409" — the request path is
-			// part of it, and slugs like "proj-409-notes" would otherwise read as conflicts.
-			if (String(e).endsWith("failed: 409")) {
-				setSaveError(
-					"This page was changed by someone else since you loaded it. Reload the page before " +
-						"saving to avoid overwriting their changes."
-				);
-			} else {
-				setSaveError(`Save failed: ${String(e)}`);
-			}
+			setSaveError(wikiSaveErrorMessage(e));
 		} finally {
 			setSaving(false);
 		}
@@ -3087,11 +3111,11 @@ function buildArticleProps(
 	};
 }
 
-export default function WikiPage({
-	workspaceSlug,
-	projectId: projectIdProp,
-	slug: slugProp,
-}: Props) {
+function useWikiPageState(
+	workspaceSlug: string | undefined,
+	projectIdProp: string | undefined,
+	slugProp: string | undefined
+) {
 	const gate = useAccessGate(workspaceSlug);
 	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp, slugProp);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
@@ -3130,6 +3154,53 @@ export default function WikiPage({
 		pageData.fetchPage,
 		pageData.fetchRevisions
 	);
+
+	return {
+		gate,
+		slug,
+		setSlug,
+		projectId,
+		pageTree,
+		pageMap,
+		treeLoading,
+		fetchTree,
+		filters,
+		stale,
+		searchQuery,
+		setSearchQuery,
+		searchResults,
+		searchLoading,
+		pageData,
+		toc,
+		setToc,
+		activeHeadingId,
+		attach,
+		editState,
+		createForm,
+		wikiTemplates,
+		move,
+		verify,
+		restoreState,
+	};
+}
+
+function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, workspaceSlug?: string) {
+	const {
+		setSlug,
+		pageMap,
+		fetchTree,
+		pageData,
+		toc,
+		setToc,
+		activeHeadingId,
+		attach,
+		editState,
+		createForm,
+		wikiTemplates,
+		move,
+		verify,
+		restoreState,
+	} = state;
 
 	const { navigateTo, startCreate, submitCreate, deletePage } = createWikiActions({
 		workspaceSlug,
@@ -3208,6 +3279,35 @@ export default function WikiPage({
 		move,
 		moveOptions,
 	});
+
+	return { navigateTo, startCreate, createProps, articleProps };
+}
+
+export default function WikiPage({
+	workspaceSlug,
+	projectId: projectIdProp,
+	slug: slugProp,
+}: Props) {
+	const state = useWikiPageState(workspaceSlug, projectIdProp, slugProp);
+	const {
+		gate,
+		slug,
+		projectId,
+		pageTree,
+		treeLoading,
+		filters,
+		stale,
+		searchQuery,
+		setSearchQuery,
+		searchResults,
+		searchLoading,
+		pageData,
+		createForm,
+	} = state;
+	const { navigateTo, startCreate, createProps, articleProps } = assembleWikiPageProps(
+		state,
+		workspaceSlug
+	);
 
 	if (gate.pending) return <AccessPending />;
 

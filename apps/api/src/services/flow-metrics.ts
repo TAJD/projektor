@@ -330,6 +330,36 @@ async function fetchLeaseHeldSeconds(
 	return held;
 }
 
+function computeCoreDistributions(
+	issues: readonly FlowIssueRow[],
+	inWindow: (t: number) => boolean
+): {
+	leadTimes: number[];
+	cycleTimes: number[];
+	reviewLatencies: number[];
+	timeInProgress: number[];
+} {
+	const leadTimes = issues
+		.filter((i) => i.readyAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		// biome-ignore lint/style/noNonNullAssertion: filtered above
+		.map((i) => i.doneAt! - i.readyAt!);
+	const cycleTimes = issues
+		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		// biome-ignore lint/style/noNonNullAssertion: filtered above
+		.map((i) => i.doneAt! - i.claimedAt!);
+	const reviewLatencies = issues
+		.filter((i) => i.inReviewAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		// biome-ignore lint/style/noNonNullAssertion: filtered above
+		.map((i) => i.doneAt! - i.inReviewAt!);
+	// PROJ-329: time in in_progress = claimed -> the issue's next recorded stage
+	// (entering review, or done directly for issues that skipped review).
+	const timeInProgress = issues
+		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		// biome-ignore lint/style/noNonNullAssertion: filtered above
+		.map((i) => (i.inReviewAt ?? i.doneAt!) - i.claimedAt!);
+	return { leadTimes, cycleTimes, reviewLatencies, timeInProgress };
+}
+
 // PROJ-328: human interventions per completed issue = human comments + status bounces
 // out of review. The primary "how much human attention did this take" signal.
 function computeHumanInterventions(
@@ -519,24 +549,10 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	const inWindow = (t: number) =>
 		(since === undefined || t >= since) && (until === undefined || t <= until);
 
-	const leadTimes = issues
-		.filter((i) => i.readyAt !== null && i.doneAt !== null && inWindow(i.doneAt))
-		// biome-ignore lint/style/noNonNullAssertion: filtered above
-		.map((i) => i.doneAt! - i.readyAt!);
-	const cycleTimes = issues
-		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
-		// biome-ignore lint/style/noNonNullAssertion: filtered above
-		.map((i) => i.doneAt! - i.claimedAt!);
-	const reviewLatencies = issues
-		.filter((i) => i.inReviewAt !== null && i.doneAt !== null && inWindow(i.doneAt))
-		// biome-ignore lint/style/noNonNullAssertion: filtered above
-		.map((i) => i.doneAt! - i.inReviewAt!);
-	// PROJ-329: time in in_progress = claimed -> the issue's next recorded stage
-	// (entering review, or done directly for issues that skipped review).
-	const timeInProgress = issues
-		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
-		// biome-ignore lint/style/noNonNullAssertion: filtered above
-		.map((i) => (i.inReviewAt ?? i.doneAt!) - i.claimedAt!);
+	const { leadTimes, cycleTimes, reviewLatencies, timeInProgress } = computeCoreDistributions(
+		issues,
+		inWindow
+	);
 
 	const issueIds = issues.map((i) => i.id);
 
