@@ -830,13 +830,15 @@ type ExistingIssue = {
 // biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
 type SetValues = Record<string, any>;
 
-function applySimpleFields(setValues: SetValues, data: UpdateIssueData): void {
+function buildSimpleFields(data: UpdateIssueData): SetValues {
+	const setValues: SetValues = {};
 	if (data.title !== undefined) setValues.title = data.title;
 	if (data.body !== undefined) setValues.body = data.body;
 	if (data.priority !== undefined) setValues.priority = data.priority;
 	if ("assigneeId" in data) setValues.assigneeId = data.assigneeId ?? null;
 	if (data.labels !== undefined) setValues.labels = data.labels;
 	if ("parentId" in data) setValues.parentId = data.parentId ?? null;
+	return setValues;
 }
 
 async function fetchStatusCategory(
@@ -857,16 +859,16 @@ async function fetchStatusCategory(
 // the issue was already done and is merely re-saved. Done is detected from
 // either the configured status category or the legacy `status` enum, so it
 // works whether or not the workspace uses custom task statuses.
-function applyCompletedAtTransition(
-	setValues: SetValues,
+function buildCompletedAtTransition(
 	existing: ExistingIssue,
 	resolvedStatusKey: string,
 	newStatusCategory: string | undefined
-): void {
+): SetValues {
 	const wasDone = existing.statusCategory === "done" || existing.status === "done";
 	const isDone = newStatusCategory === "done" || resolvedStatusKey === "done";
-	if (isDone && !wasDone) setValues.completedAt = now();
-	else if (!isDone && wasDone) setValues.completedAt = null;
+	if (isDone && !wasDone) return { completedAt: now() };
+	if (!isDone && wasDone) return { completedAt: null };
+	return {};
 }
 
 // PROJ-252 flow metrics: stamp ready_at/claimed_at/done_at the first time an issue
@@ -886,12 +888,13 @@ function isDoneState(category: string | null | undefined, key: string | null | u
 	return category === "done" || key === "done";
 }
 
-function applyFlowTimestampTransitions(
-	setValues: SetValues,
+function buildFlowTimestampTransitions(
 	existing: ExistingIssue,
 	resolvedStatusKey: string,
 	newStatusCategory: string | undefined
-): void {
+): SetValues {
+	const setValues: SetValues = {};
+
 	const wasReady = existing.status !== "backlog";
 	if (resolvedStatusKey !== "backlog" && !wasReady && existing.readyAt == null) {
 		setValues.readyAt = now();
@@ -904,6 +907,8 @@ function applyFlowTimestampTransitions(
 	const wasDone = isDoneState(existing.statusCategory, existing.status);
 	const isDone = isDoneState(newStatusCategory, resolvedStatusKey);
 	if (isDone && !wasDone && existing.doneAt == null) setValues.doneAt = now();
+
+	return setValues;
 }
 
 // PROJ-328 (collaboration-shape metrics): stamp in_review_at the first time an issue
@@ -919,8 +924,7 @@ function applyFlowTimestampTransitions(
 // signal the ticket names ("in_review -> in_progress bounces"), not "left review for any
 // reason", so review -> cancelled (the issue was killed, not sent back for more work)
 // must not count here even though it still increments the aggregate.
-function applyReviewTransitions(
-	setValues: SetValues,
+function buildReviewTransitions(
 	existing: ExistingIssue,
 	transition: Readonly<{
 		resolvedStatusKey: string;
@@ -928,8 +932,9 @@ function applyReviewTransitions(
 		enteringInReview: boolean;
 		enteringDone: boolean;
 	}>
-): boolean {
+): { setValues: SetValues; isGateRejection: boolean } {
 	const { resolvedStatusKey, newStatusCategory, enteringInReview, enteringDone } = transition;
+	const setValues: SetValues = {};
 	if (enteringInReview && existing.inReviewAt == null) setValues.inReviewAt = now();
 
 	const wasInReview = isReviewStatusKey(existing.status);
@@ -937,10 +942,10 @@ function applyReviewTransitions(
 		wasInReview && !isReviewStatusKey(resolvedStatusKey) && !enteringDone;
 	if (leavingReviewNotDone) setValues.reviewBounceCount = existing.reviewBounceCount + 1;
 
-	return (
+	const isGateRejection =
 		leavingReviewNotDone &&
-		(newStatusCategory === "in_progress" || resolvedStatusKey === "in_progress")
-	);
+		(newStatusCategory === "in_progress" || resolvedStatusKey === "in_progress");
+	return { setValues, isGateRejection };
 }
 
 function assertCompletionReportPresent(data: UpdateIssueData): void {
@@ -1032,11 +1037,12 @@ async function computeNeedsAudit(ctx: ServiceCtx, data: UpdateIssueData): Promis
 async function applyStatusFields(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
-	setValues: SetValues,
 	data: UpdateIssueData,
 	existing: ExistingIssue
-): Promise<boolean> {
-	if (data.status === undefined && !("statusId" in data)) return false;
+): Promise<{ setValues: SetValues; reviewOrDoneTransition: boolean }> {
+	if (data.status === undefined && !("statusId" in data)) {
+		return { setValues: {}, reviewOrDoneTransition: false };
+	}
 
 	const { id: resolvedStatusId, key: resolvedStatusKey } = await resolveStatus(
 		ctx,
@@ -1048,22 +1054,30 @@ async function applyStatusFields(
 	const transition = classifyStatusTransition(existing, resolvedStatusKey, newStatusCategory);
 	await assertReviewGate(ctx, data, existing, transition);
 
+	const setValues: SetValues = {
+		status: resolvedStatusKey,
+		statusId: resolvedStatusId,
+		statusCategory: sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${resolvedStatusId}), '')`,
+	};
 	if (transition.enteringDone) {
 		setValues.needsAudit = await computeNeedsAudit(ctx, data);
 	}
 
-	setValues.status = resolvedStatusKey;
-	setValues.statusId = resolvedStatusId;
-	setValues.statusCategory = sql`COALESCE((SELECT category FROM task_statuses WHERE id = ${resolvedStatusId}), '')`;
-
-	applyCompletedAtTransition(setValues, existing, resolvedStatusKey, newStatusCategory);
-	applyFlowTimestampTransitions(setValues, existing, resolvedStatusKey, newStatusCategory);
-	const isGateRejection = applyReviewTransitions(setValues, existing, {
+	Object.assign(
+		setValues,
+		buildCompletedAtTransition(existing, resolvedStatusKey, newStatusCategory)
+	);
+	Object.assign(
+		setValues,
+		buildFlowTimestampTransitions(existing, resolvedStatusKey, newStatusCategory)
+	);
+	const { setValues: reviewSetValues, isGateRejection } = buildReviewTransitions(existing, {
 		resolvedStatusKey,
 		newStatusCategory,
 		enteringInReview: transition.enteringInReview,
 		enteringDone: transition.enteringDone,
 	});
+	Object.assign(setValues, reviewSetValues);
 	// PROJ-334: recorded as its own event (not batched into the setValues UPDATE below)
 	// so it carries its own occurred_at, the same reasoning file-claims.ts insertClaims
 	// uses for D1's lack of interactive transactions — a stray extra row on a later
@@ -1077,7 +1091,10 @@ async function applyStatusFields(
 			.run();
 	}
 
-	return transition.enteringInReview || transition.enteringDone;
+	return {
+		setValues,
+		reviewOrDoneTransition: transition.enteringInReview || transition.enteringDone,
+	};
 }
 
 function now(): number {
@@ -1108,9 +1125,10 @@ async function buildUpdateSetValues(
 	data: UpdateIssueData,
 	existing: ExistingIssue
 ): Promise<{ setValues: SetValues; recordCompletionReport: boolean }> {
-	const setValues: SetValues = { updatedAt: now() };
-	applySimpleFields(setValues, data);
-	const reviewOrDoneTransition = await applyStatusFields(ctx, orm, setValues, data, existing);
+	const setValues: SetValues = { updatedAt: now(), ...buildSimpleFields(data) };
+	const statusFields = await applyStatusFields(ctx, orm, data, existing);
+	Object.assign(setValues, statusFields.setValues);
+	const reviewOrDoneTransition = statusFields.reviewOrDoneTransition;
 	if ("typeId" in data) {
 		setValues.typeId = await resolveTypeId(ctx, data.typeId);
 	}
