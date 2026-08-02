@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { inChunks } from "../services/sql";
+import { inChunks, sanitizeFtsQuery } from "../services/sql";
+
+describe("sanitizeFtsQuery (PROJ-518)", () => {
+	it("wraps each whitespace-separated token in double quotes", () => {
+		expect(sanitizeFtsQuery("hello world")).toBe('"hello" "world"');
+	});
+
+	it("neutralizes FTS5 query syntax by treating it as literal text", () => {
+		expect(sanitizeFtsQuery("foo AND bar OR NOT baz*")).toBe('"foo" "AND" "bar" "OR" "NOT" "baz*"');
+	});
+
+	it("escapes embedded double quotes so they can't break out of the phrase", () => {
+		expect(sanitizeFtsQuery('say "hi"')).toBe('"say" """hi"""');
+	});
+
+	it("drops tokens with no word characters", () => {
+		expect(sanitizeFtsQuery("--- ??? hello")).toBe('"hello"');
+	});
+
+	it("returns an empty string for blank input", () => {
+		expect(sanitizeFtsQuery("   ")).toBe("");
+	});
+});
 
 describe("inChunks", () => {
 	it("returns an empty array without calling op for an empty input", async () => {
