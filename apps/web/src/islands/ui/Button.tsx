@@ -9,6 +9,7 @@ export interface ButtonProps {
 	style?: JSX.CSSProperties;
 	type?: "button" | "submit";
 	disabled?: boolean;
+	title?: string;
 	onClick?: (e: MouseEvent) => void;
 	children: ComponentChildren;
 	[key: `aria-${string}`]: string | boolean | undefined;
@@ -33,6 +34,7 @@ export function Button({
 	style,
 	type = "button",
 	disabled,
+	title,
 	onClick,
 	children,
 	...rest
@@ -43,7 +45,7 @@ export function Button({
 
 	if (as === "span") {
 		return (
-			<span class={classes} style={style} {...rest}>
+			<span class={classes} style={style} title={title} {...rest}>
 				{children}
 			</span>
 		);
@@ -52,7 +54,7 @@ export function Button({
 	if (as === "a") {
 		if (!href) throw new Error("Button: `href` is required when as='a'");
 		return (
-			<a href={href} class={classes} style={style} {...rest}>
+			<a href={href} class={classes} style={style} title={title} {...rest}>
 				{children}
 			</a>
 		);
@@ -64,6 +66,7 @@ export function Button({
 			class={classes}
 			style={style}
 			disabled={disabled}
+			title={title}
 			onClick={onClick}
 			{...rest}
 		>

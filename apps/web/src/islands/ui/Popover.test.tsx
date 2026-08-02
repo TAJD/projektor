@@ -56,4 +56,60 @@ describe("Popover", () => {
 		expect(() => render(<Popover strategy="portal-fixed">No position</Popover>)).toThrow();
 		expect(() => render(<Popover strategy="fixed-inline">No position</Popover>)).toThrow();
 	});
+
+	it("resolves elementRef to the rendered DOM element when anchored", () => {
+		const elementRef = { current: null as HTMLElement | null };
+		render(
+			<Popover strategy="anchored" elementRef={elementRef}>
+				<span>Ref content</span>
+			</Popover>
+		);
+		const el = screen.getByText("Ref content").parentElement as HTMLElement;
+		expect(elementRef.current).toBe(el);
+	});
+
+	it("resolves elementRef to the portaled DOM node under document.body when portal-fixed", () => {
+		const elementRef = { current: null as HTMLElement | null };
+		render(
+			<Popover strategy="portal-fixed" position={{ top: 10 }} elementRef={elementRef}>
+				<span>Portal ref content</span>
+			</Popover>
+		);
+		const el = screen.getByText("Portal ref content").parentElement as HTMLElement;
+		expect(document.body.contains(el)).toBe(true);
+		expect(elementRef.current).toBe(el);
+	});
+
+	it('round-trips aria-modal="false" when ariaModal={false} and role are both passed', () => {
+		render(
+			<Popover strategy="anchored" role="dialog" ariaModal={false}>
+				<span>Dialog content</span>
+			</Popover>
+		);
+		const el = screen.getByText("Dialog content").parentElement as HTMLElement;
+		expect(el.getAttribute("aria-modal")).toBe("false");
+		expect(el.getAttribute("role")).toBe("dialog");
+	});
+
+	it("renders ariaLabel even when role is omitted", () => {
+		render(
+			<Popover strategy="anchored" ariaLabel="Definition">
+				<span>Label-only content</span>
+			</Popover>
+		);
+		const el = screen.getByText("Label-only content").parentElement as HTMLElement;
+		expect(el.getAttribute("aria-label")).toBe("Definition");
+		expect(el.hasAttribute("role")).toBe(false);
+	});
+
+	it("renders role even when ariaLabel is omitted", () => {
+		render(
+			<Popover strategy="anchored" role="menu">
+				<span>Role-only content</span>
+			</Popover>
+		);
+		const el = screen.getByText("Role-only content").parentElement as HTMLElement;
+		expect(el.getAttribute("role")).toBe("menu");
+		expect(el.hasAttribute("aria-label")).toBe(false);
+	});
 });
