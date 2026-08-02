@@ -46,7 +46,7 @@ function mockFetchWiki(page: WikiPageData | null, ok = true, status = 404) {
 	);
 }
 
-function mockFetchMovePage(revisions: unknown[] = []) {
+function mockFetchMovePage(revisions: readonly unknown[] = []) {
 	const otherPageNode = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
 	return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
 		const u = String(url);

@@ -2339,15 +2339,17 @@ function useServerDraftAutosave(options: UseServerDraftAutosaveOptions) {
 	return skipLeaveFlushRef;
 }
 
-async function saveWikiPageEdit(params: {
-	workspaceSlug: string | undefined;
-	page: WikiPageData;
-	editTitle: string;
-	editContent: string;
-	baseRevisionId: string | null | undefined;
-	fetchPage: (s: string) => Promise<void>;
-	fetchRevisions: (s: string) => Promise<void>;
-}): Promise<void> {
+async function saveWikiPageEdit(
+	params: Readonly<{
+		workspaceSlug: string | undefined;
+		page: WikiPageData;
+		editTitle: string;
+		editContent: string;
+		baseRevisionId: string | null | undefined;
+		fetchPage: (s: string) => Promise<void>;
+		fetchRevisions: (s: string) => Promise<void>;
+	}>
+): Promise<void> {
 	const { workspaceSlug, page, editTitle, editContent, baseRevisionId, fetchPage, fetchRevisions } =
 		params;
 	await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
