@@ -277,6 +277,7 @@ function useFeedbackRows(workspaceSlug: string | undefined, projectId: string, s
 		fetchRows();
 	}, [fetchRows]);
 
+	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { rows, status, setStatus, loading, error, setError, fetchRows };
 }
 

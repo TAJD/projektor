@@ -51,7 +51,6 @@ function extractWikiSlugFromUrl(url: string): string | null {
 	return safeDecodeURIComponent(raw);
 }
 
-// cofferdam-ignore: Design.OrphanExport: part of the service API; used internally for parsing wiki link targets
 export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
 	const targets: ParsedLinkTarget[] = [];
 	for (const m of content.matchAll(WIKILINK_RE)) {
