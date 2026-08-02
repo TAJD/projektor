@@ -18,7 +18,7 @@
     "@biomejs/biome": "^2.5.1",
     "@biomejs/cli-win32-x64": "2.5.1",
     "@cloudflare/workers-types": "^4.20250620.0",
-    "@cofferdam/cofferdam": "^0.3.13",
+    "@cofferdam/cofferdam": "^0.4.0",
     "lefthook": "^1.11.0",
     "tsx": "^4.19.0",
     "turbo": "^2.3.0",
