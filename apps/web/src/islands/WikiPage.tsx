@@ -8,7 +8,7 @@ import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "
 import AccessPending from "./AccessPending";
 import type { ProjectLookup as ProjectOption } from "./board-utils";
 import MarkdownEditor from "./LazyMarkdownEditor";
-import Select, { type SelectOption } from "./Select";
+import Select, { type SelectOption } from "./ui/Select";
 
 // PROJ-491 (R9): the create-form's template picker draws from list_wiki_templates.
 interface TemplateOption {

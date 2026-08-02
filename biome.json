@@ -69,7 +69,7 @@
 			}
 		},
 		{
-			"includes": ["apps/web/src/islands/Select.tsx"],
+			"includes": ["apps/web/src/islands/ui/Select.tsx"],
 			"linter": {
 				"rules": {
 					"a11y": {

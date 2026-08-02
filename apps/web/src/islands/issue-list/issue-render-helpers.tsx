@@ -2,7 +2,7 @@ import { formatIssueRef } from "../../lib/issue-ref";
 import { statusDisplayName } from "../../lib/status";
 import { PRIORITY_OPTIONS } from "../../utils/issue-utils";
 import { categoryColor, type Issue, type SortKey, type TaskStatus } from "../board-utils";
-import Select from "../Select";
+import Select from "../ui/Select";
 
 export function getStoryPoints(issue: Issue): string | null {
 	const field = (issue.customFields ?? []).find((f) => f.key === "story_points");
