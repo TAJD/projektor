@@ -1063,7 +1063,10 @@ async function applyStatusFields(
 		setValues.needsAudit = await computeNeedsAudit(ctx, data);
 	}
 
-	Object.assign(setValues, buildCompletedAtTransition(existing, resolvedStatusKey, newStatusCategory));
+	Object.assign(
+		setValues,
+		buildCompletedAtTransition(existing, resolvedStatusKey, newStatusCategory)
+	);
 	Object.assign(
 		setValues,
 		buildFlowTimestampTransitions(existing, resolvedStatusKey, newStatusCategory)
