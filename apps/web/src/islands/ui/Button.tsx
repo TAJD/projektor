@@ -1,4 +1,4 @@
-import type { JSX, ComponentChildren } from "preact";
+import type { ComponentChildren, JSX } from "preact";
 
 export interface ButtonProps {
 	variant?: "primary" | "outline" | "danger";
@@ -37,12 +37,7 @@ export function Button({
 	children,
 	...rest
 }: ButtonProps) {
-	const classes = [
-		"btn",
-		variant && `btn-${variant}`,
-		size === "sm" && "btn-sm",
-		extraClass,
-	]
+	const classes = ["btn", variant && `btn-${variant}`, size === "sm" && "btn-sm", extraClass]
 		.filter(Boolean)
 		.join(" ");
 
@@ -64,7 +59,14 @@ export function Button({
 	}
 
 	return (
-		<button type={type} class={classes} style={style} disabled={disabled} onClick={onClick} {...rest}>
+		<button
+			type={type}
+			class={classes}
+			style={style}
+			disabled={disabled}
+			onClick={onClick}
+			{...rest}
+		>
 			{children}
 		</button>
 	);

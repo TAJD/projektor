@@ -54,8 +54,6 @@ describe("Button", () => {
 		const link = screen.getByRole("link", { name: "Start sprint" }) as HTMLAnchorElement;
 		expect(link.getAttribute("href")).toBe("/sprints/1/start");
 
-		expect(() =>
-			render(<Button as="a">No href</Button>)
-		).toThrow();
+		expect(() => render(<Button as="a">No href</Button>)).toThrow();
 	});
 });
