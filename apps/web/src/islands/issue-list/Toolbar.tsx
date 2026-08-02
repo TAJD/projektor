@@ -1,7 +1,7 @@
 import type { RefObject } from "preact";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import type { Issue, SortKey, TaskStatus } from "../board-utils";
-import Select from "../Select";
+import Select from "../ui/Select";
 import type { DateField } from "./FiltersPopover";
 import FiltersPopover from "./FiltersPopover";
 import SavedViewsControl from "./SavedViewsControl";

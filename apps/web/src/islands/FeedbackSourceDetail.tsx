@@ -4,7 +4,7 @@ import { apiFetch } from "../utils/api-client";
 import FeedbackList from "./FeedbackList";
 import FeedbackSourceSettings, { type FeedbackSource } from "./FeedbackSourceSettings";
 import FeedbackSummary from "./FeedbackSummary";
-import Select from "./Select";
+import Select from "./ui/Select";
 
 interface Props {
 	workspaceSlug?: string;

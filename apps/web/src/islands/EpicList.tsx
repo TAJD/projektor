@@ -14,7 +14,7 @@ import {
 import { applyDateRangeParams } from "./IssueList-helpers";
 import type { DateField } from "./issue-list/FiltersPopover";
 import FiltersPopover from "./issue-list/FiltersPopover";
-import Select from "./Select";
+import Select from "./ui/Select";
 
 interface Props {
 	workspaceSlug?: string;

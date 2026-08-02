@@ -24,7 +24,7 @@ import {
 	relativeTime,
 } from "./issue-detail-helpers";
 import MarkdownEditor from "./LazyMarkdownEditor";
-import Select from "./Select";
+import Select from "./ui/Select";
 
 // Minimal duplicate of the mermaid rules in WikiPage.tsx's WIKI_PAGE_STYLES
 // (~line 1749) — issue/comment prose uses Tailwind's typography .prose, not

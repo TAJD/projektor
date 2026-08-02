@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
-import Select from "./Select";
+import Select from "./ui/Select";
 
 interface Feedback {
 	id: string;

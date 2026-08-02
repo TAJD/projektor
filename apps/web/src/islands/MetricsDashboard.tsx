@@ -16,7 +16,7 @@ import {
 	ThroughputChart,
 	tickIndices,
 } from "./metrics/flow-charts";
-import Select, { type SelectOption } from "./Select";
+import Select, { type SelectOption } from "./ui/Select";
 
 interface Distribution {
 	count: number;
