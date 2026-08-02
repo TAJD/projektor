@@ -5,7 +5,7 @@ import { EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { renderMarkdown } from "../utils/markdown";
 
-interface Props {
+export interface Props {
 	value: string;
 	onChange: (value: string) => void;
 	minHeight?: string;

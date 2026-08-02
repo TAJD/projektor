@@ -6,18 +6,7 @@
 // The pattern: set the URL, override the stub, await findBy*.
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import SprintManager from "./SprintManager";
-
-interface Sprint {
-	id: string;
-	name: string;
-	goal: string | null;
-	status: "planned" | "active" | "completed";
-	startDate: string | null;
-	endDate: string | null;
-	projectId: string;
-	createdAt: number;
-}
+import SprintManager, { type Sprint } from "./SprintManager";
 
 const PROJECT = { id: "p1", name: "Projektor", key: "PROJ" };
 

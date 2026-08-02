@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { resolveWorkspaceSlug } from "../utils/workspace";
+import type { ProjectLookup as ProjectLite } from "./board-utils";
 
 type GrantRole = "viewer" | "member" | "admin";
 
@@ -40,12 +41,6 @@ interface WsMember {
 interface MemberGroupsRow {
 	userId: string;
 	groups: Array<{ id: string; name: string }>;
-}
-
-interface ProjectLite {
-	id: string;
-	name: string;
-	key: string;
 }
 
 interface Props {

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
+import type { CustomFieldValue, ProjectLookup as Project } from "./board-utils";
 
-interface Sprint {
+export interface Sprint {
 	id: string;
 	name: string;
 	goal: string | null;
@@ -11,19 +12,6 @@ interface Sprint {
 	endDate: string | null;
 	projectId: string;
 	createdAt: number;
-}
-
-interface Project {
-	id: string;
-	name: string;
-	key: string;
-}
-
-interface CustomFieldValue {
-	key: string;
-	label: string;
-	type: string;
-	value: string;
 }
 
 interface Issue {

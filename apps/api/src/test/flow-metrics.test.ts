@@ -1,15 +1,14 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedComment, seedIssue, seedProjectFixture, seedTaskType } from "./helpers";
-
-type JsonRpcResult<T> = { jsonrpc: "2.0"; id: unknown; result: T };
-
-interface Distribution {
-	count: number;
-	avg: number | null;
-	p50: number | null;
-	p90: number | null;
-}
+import type { Distribution } from "../services/flow-metrics";
+import {
+	authHeaders,
+	type JsonRpcResult,
+	seedComment,
+	seedIssue,
+	seedProjectFixture,
+	seedTaskType,
+} from "./helpers";
 
 interface FlowMetrics {
 	leadTime: Distribution;

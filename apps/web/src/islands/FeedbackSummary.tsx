@@ -1,20 +1,12 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
-
-interface VersionSummary {
-	appVersion: string | null;
-	totalCount: number;
-	withCommentCount: number;
-	thumbsUpPct: number | null;
-	avgFiveStar: number | null;
-	lastSeenAt: number;
-}
+import type { FeedbackVersionSummary } from "./FeedbackSourceSettings";
 
 interface SourceSummary {
 	sourceId: string;
 	sourceName: string | null;
 	totalCount: number;
-	versions: VersionSummary[];
+	versions: FeedbackVersionSummary[];
 }
 
 interface Props {
@@ -23,7 +15,7 @@ interface Props {
 	sourceId: string;
 }
 
-function versionMetric(v: VersionSummary): string {
+function versionMetric(v: FeedbackVersionSummary): string {
 	const parts: string[] = [];
 	if (v.thumbsUpPct !== null) parts.push(`👍 ${v.thumbsUpPct}%`);
 	if (v.avgFiveStar !== null) parts.push(`${v.avgFiveStar.toFixed(1)}★ avg`);

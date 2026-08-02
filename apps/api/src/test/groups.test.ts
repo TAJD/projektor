@@ -1,9 +1,13 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedProject, seedUser, seedWorkspaceRoles } from "./helpers";
-
-type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
-type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
+import {
+	authHeaders,
+	type JsonRpcError,
+	type JsonRpcResult,
+	seedProject,
+	seedUser,
+	seedWorkspaceRoles,
+} from "./helpers";
 
 async function mcpCall<T>(
 	workspaceId: string,

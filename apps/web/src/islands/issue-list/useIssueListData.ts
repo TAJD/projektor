@@ -1,20 +1,10 @@
+import type { FilterQueryFilters } from "../IssueList-helpers";
 import type { ViewMode } from "./types-view";
 import { useIssueFetching } from "./useIssueFetching";
 import { useIssueLookups } from "./useIssueLookups";
 import { useIssueMutations } from "./useIssueMutations";
 
-interface FilterInputs {
-	filterStatuses: string[];
-	filterPriorities: string[];
-	filterProject: string;
-	filterType: string;
-	filterEpicId: string;
-	filterSprintId: string;
-	hideEpics: boolean;
-	filterDateField: "" | "completed" | "updated";
-	filterDateFrom: string;
-	filterDateTo: string;
-}
+type FilterInputs = FilterQueryFilters;
 
 /**
  * Owns all server-backed data for the issue list: the paginated issue set,

@@ -1,8 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture } from "./helpers";
-
-type JsonRpcResult<T> = { jsonrpc: "2.0"; id: unknown; result: T };
+import { authHeaders, type JsonRpcResult, seedFixture } from "./helpers";
 
 describe("Workflow spec", () => {
 	let token: string;

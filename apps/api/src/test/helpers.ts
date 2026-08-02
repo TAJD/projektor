@@ -1,5 +1,12 @@
 import { env } from "cloudflare:test";
 
+export type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
+export type JsonRpcError = {
+	jsonrpc: "2.0";
+	id: unknown;
+	error: { code: number; message: string; data?: unknown };
+};
+
 export async function hashToken(token: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
 	return Array.from(new Uint8Array(buf))

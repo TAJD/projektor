@@ -1,32 +1,13 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import type { FeedbackSource, FeedbackVersionSummary } from "./FeedbackSourceSettings";
 import NewSourceModal from "./NewSourceModal";
-
-interface FeedbackSource {
-	id: string;
-	name: string;
-	description: string | null;
-	isActive: boolean;
-	allowedOrigins: string[] | null;
-	tokenPreview: string;
-	createdAt: number;
-	revokedAt: number | null;
-}
-
-interface SourceVersionSummary {
-	appVersion: string | null;
-	totalCount: number;
-	withCommentCount: number;
-	thumbsUpPct: number | null;
-	avgFiveStar: number | null;
-	lastSeenAt: number;
-}
 
 interface SourceSummary {
 	sourceId: string;
 	sourceName: string | null;
 	totalCount: number;
-	versions: SourceVersionSummary[];
+	versions: FeedbackVersionSummary[];
 }
 
 interface Props {

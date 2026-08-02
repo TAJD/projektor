@@ -1,22 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../../utils/api-client";
 import type { Issue } from "../board-utils";
-import { buildFilterQueryParams } from "../IssueList-helpers";
+import { buildFilterQueryParams, type FilterQueryFilters } from "../IssueList-helpers";
 import type { ProjectMeta } from "./types";
 import type { ViewMode } from "./types-view";
 
-interface FilterInputs {
-	filterStatuses: string[];
-	filterPriorities: string[];
-	filterProject: string;
-	filterType: string;
-	filterEpicId: string;
-	filterSprintId: string;
-	hideEpics: boolean;
-	filterDateField: "" | "completed" | "updated";
-	filterDateFrom: string;
-	filterDateTo: string;
-}
+type FilterInputs = FilterQueryFilters;
 
 /** Owns the paginated issue set: fetching, "Load more", and loading/error state (PROJ-201/211). */
 export function useIssueFetching(

@@ -1,27 +1,12 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { CodeHeatmapEntry, ContentionHeatmapEntry } from "../services/code-heatmap";
 import { authHeaders, seedIssue, seedProjectFixture } from "./helpers";
-
-interface CodeHeatmapEntry {
-	path: string;
-	segment: string;
-	isLeaf: boolean;
-	distinctIssueCount: number;
-	claimCount: number;
-}
 
 interface CodeHeatmapResponse {
 	prefix: string;
 	totalDistinctIssues: number;
 	entries: CodeHeatmapEntry[];
-}
-
-interface ContentionHeatmapEntry {
-	path: string;
-	segment: string;
-	isLeaf: boolean;
-	distinctRejectedIssueCount: number;
-	conflictCount: number;
 }
 
 interface ContentionHeatmapResponse {

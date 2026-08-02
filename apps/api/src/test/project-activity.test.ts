@@ -1,9 +1,15 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedComment, seedIssue, seedProject, seedProjectFixture } from "./helpers";
+import {
+	authHeaders,
+	type JsonRpcError,
+	type JsonRpcResult,
+	seedComment,
+	seedIssue,
+	seedProject,
+	seedProjectFixture,
+} from "./helpers";
 
-type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
-type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
 type McpContent = { content: Array<{ text: string }> };
 
 async function mcpCall<T>(

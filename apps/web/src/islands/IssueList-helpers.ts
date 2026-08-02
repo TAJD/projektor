@@ -1,4 +1,4 @@
-import type { Issue } from "./board-utils";
+import type { Issue, ProjectLookup, TaskStatus } from "./board-utils";
 
 export interface FilterQueryFilters {
 	filterStatuses: string[];
@@ -88,16 +88,17 @@ export function buildFilterQueryParams(
 	return qs;
 }
 
-export interface UrlSyncFilters {
-	filterStatuses: string[];
-	filterPriorities: string[];
-	filterEpicId: string;
-	filterSprintId: string;
-	hideEpics: boolean;
-	filterDateField: "" | "completed" | "updated";
-	filterDateFrom: string;
-	filterDateTo: string;
-}
+export type UrlSyncFilters = Pick<
+	FilterQueryFilters,
+	| "filterStatuses"
+	| "filterPriorities"
+	| "filterEpicId"
+	| "filterSprintId"
+	| "hideEpics"
+	| "filterDateField"
+	| "filterDateFrom"
+	| "filterDateTo"
+>;
 
 const URL_SYNC_KEYS = [
 	[
@@ -160,18 +161,7 @@ export function buildCreateIssuePayload(input: CreateIssueInput): Record<string,
 	};
 }
 
-interface ProjectLookup {
-	id: string;
-	key: string;
-	name: string;
-}
-
-interface StatusLookup {
-	id: string;
-	key: string;
-	name: string;
-	category: string;
-}
+type StatusLookup = Omit<TaskStatus, "color">;
 
 interface TaskTypeLookup {
 	id: string;

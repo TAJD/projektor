@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { hashFeedbackToken } from "../services/feedback";
 import {
 	authHeaders,
+	type JsonRpcError,
+	type JsonRpcResult,
 	seedGroupGrant,
 	seedProject,
 	seedProjectFixture,
@@ -459,9 +461,6 @@ describe("Feedback triage read/patch", () => {
 		expect(res.status).toBe(400);
 	});
 });
-
-type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
-type JsonRpcError = { jsonrpc: "2.0"; id: unknown; error: { code: number; message: string } };
 
 async function mcpCall<T>(
 	workspaceId: string,

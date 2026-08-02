@@ -12,6 +12,15 @@ export interface FeedbackSource {
 	revokedAt: number | null;
 }
 
+export interface FeedbackVersionSummary {
+	appVersion: string | null;
+	totalCount: number;
+	withCommentCount: number;
+	thumbsUpPct: number | null;
+	avgFiveStar: number | null;
+	lastSeenAt: number;
+}
+
 interface Props {
 	source: FeedbackSource;
 	projectId: string;
