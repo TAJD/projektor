@@ -575,18 +575,41 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
       }
       .metric-help-trigger:hover { color: var(--text); }
       .metric-help-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-      .metric-help-popover {
-        position: absolute;
+      /* ── Shared popover primitive (islands/ui/Popover) ────────────────── */
+      .popover {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-sm);
         z-index: 200;
+      }
+      .popover-metric-help {
+        position: absolute;
         top: calc(100% + 4px);
         left: 0;
         width: 16rem;
         max-width: min(16rem, 80vw);
         padding: 0.625rem 0.75rem;
-        background: var(--bg);
-        border: 1px solid var(--border);
         border-radius: 6px;
-        box-shadow: var(--shadow-sm);
+        font-weight: normal;
+        text-transform: none;
+        letter-spacing: normal;
+      }
+      .popover-account-menu {
+        width: 14rem;
+        max-width: min(14rem, 85vw);
+        border-radius: 8px;
+        padding: 0.375rem;
+        font-size: 0.875rem;
+      }
+      .popover-select-menu {
+        border-radius: 6px;
+        padding: 0.25rem;
+      }
+      .metric-help-popover {
+        width: 16rem;
+        max-width: min(16rem, 80vw);
+        padding: 0.625rem 0.75rem;
+        border-radius: 6px;
         font-weight: normal;
         text-transform: none;
         letter-spacing: normal;
@@ -644,13 +667,9 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
       }
       .account-menu-login:hover { color: var(--text); }
       .account-menu-popover {
-        z-index: 200;
         width: 14rem;
         max-width: min(14rem, 85vw);
-        background: var(--bg);
-        border: 1px solid var(--border);
         border-radius: 8px;
-        box-shadow: var(--shadow-sm);
         padding: 0.375rem;
         font-size: 0.875rem;
       }
@@ -836,7 +855,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
 
         function shouldStayVisible() {
           var shell = document.querySelector('.app-shell');
-          var menuOpen = document.querySelector('.account-menu-popover');
+          var menuOpen = document.querySelector('.popover-account-menu');
           return !!(shell && shell.classList.contains('drawer-open')) || !!menuOpen;
         }
 
