@@ -30,6 +30,18 @@ interface ContentionHeatmapResponse {
 	entries: ContentionHeatmapEntry[];
 }
 
+async function expectHeatmapOk(res: Response): Promise<CodeHeatmapResponse> {
+	expect(res.status).toBe(200);
+	return (await res.json()) as CodeHeatmapResponse;
+}
+
+function expectAppsGroup<E extends { path: string; isLeaf: boolean }>(entries: E[]): E {
+	const apps = entries.find((e) => e.path === "apps");
+	expect(apps).toBeDefined();
+	expect(apps?.isLeaf).toBe(false);
+	return apps as E;
+}
+
 // cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
 describe("Code heatmap (PROJ-332)", () => {
 	let token: string;
@@ -103,17 +115,14 @@ describe("Code heatmap (PROJ-332)", () => {
 		await seedClaim(oldIssue.id, "apps/api/src/routes/old.ts", now - 10 * 86400);
 
 		const res = await getHeatmap({ since: String(now - 3600), until: String(now) });
-		expect(res.status).toBe(200);
-		const body = (await res.json()) as CodeHeatmapResponse;
+		const body = await expectHeatmapOk(res);
 
 		expect(body.prefix).toBe("");
 		expect(body.totalDistinctIssues).toBe(3);
 
-		const apps = body.entries.find((e) => e.path === "apps");
-		expect(apps).toBeDefined();
-		expect(apps?.isLeaf).toBe(false);
-		expect(apps?.distinctIssueCount).toBe(3);
-		expect(apps?.claimCount).toBe(4);
+		const apps = expectAppsGroup(body.entries);
+		expect(apps.distinctIssueCount).toBe(3);
+		expect(apps.claimCount).toBe(4);
 	});
 
 	it("drills down via prefix, one segment at a time", async () => {
@@ -130,8 +139,7 @@ describe("Code heatmap (PROJ-332)", () => {
 			until: String(now),
 			prefix: "apps/api/src/services",
 		});
-		expect(apiRes.status).toBe(200);
-		const apiBody = (await apiRes.json()) as CodeHeatmapResponse;
+		const apiBody = await expectHeatmapOk(apiRes);
 		expect(apiBody.prefix).toBe("apps/api/src/services");
 		const paths = apiBody.entries.map((e) => e.path).sort();
 		expect(paths).toEqual([
@@ -264,11 +272,9 @@ describe("Code heatmap (PROJ-332)", () => {
 			expect(body.prefix).toBe("");
 			expect(body.totalDistinctIssues).toBe(3);
 
-			const apps = body.entries.find((e) => e.path === "apps");
-			expect(apps).toBeDefined();
-			expect(apps?.isLeaf).toBe(false);
-			expect(apps?.distinctRejectedIssueCount).toBe(3);
-			expect(apps?.conflictCount).toBe(4);
+			const apps = expectAppsGroup(body.entries);
+			expect(apps.distinctRejectedIssueCount).toBe(3);
+			expect(apps.conflictCount).toBe(4);
 		});
 
 		it("drills down via prefix, one segment at a time", async () => {

@@ -14,6 +14,7 @@ import {
 	readChartSeqColors,
 	readThemeColor,
 	ThroughputChart,
+	tickIndices,
 } from "./metrics/flow-charts";
 import Select, { type SelectOption } from "./Select";
 
@@ -378,16 +379,7 @@ function BugShareChart({
 					{
 						stroke: textMuted,
 						grid: { stroke: border },
-						splits: (u) => {
-							const n = labels.length;
-							const maxTicks = Math.max(2, Math.floor(u.width / 70));
-							const stride = Math.max(1, Math.ceil(n / maxTicks));
-							const idxs: number[] = [];
-							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map
-							for (let i = 0; i < n; i += stride) idxs.push(i);
-							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
-							return idxs;
-						},
+						splits: (u) => tickIndices(u.width, labels),
 						values: (_u, splits) => splits.map((s) => formatShortDate(labels[s] ?? "")),
 					},
 					{
@@ -446,16 +438,7 @@ function ReviewLatencyChart({ data }: { data: FlowMetrics["reviewLatencyOverTime
 					{
 						stroke: textMuted,
 						grid: { stroke: border },
-						splits: (u) => {
-							const n = labels.length;
-							const maxTicks = Math.max(2, Math.floor(u.width / 70));
-							const stride = Math.max(1, Math.ceil(n / maxTicks));
-							const idxs: number[] = [];
-							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map
-							for (let i = 0; i < n; i += stride) idxs.push(i);
-							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
-							return idxs;
-						},
+						splits: (u) => tickIndices(u.width, labels),
 						values: (_u, splits) => splits.map((s) => formatShortDate(labels[s] ?? "")),
 					},
 					{
@@ -575,16 +558,7 @@ function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsComple
 					{
 						stroke: textMuted,
 						grid: { stroke: border },
-						splits: (u) => {
-							const n = labels.length;
-							const maxTicks = Math.max(2, Math.floor(u.width / 70));
-							const stride = Math.max(1, Math.ceil(n / maxTicks));
-							const idxs: number[] = [];
-							// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map
-							for (let i = 0; i < n; i += stride) idxs.push(i);
-							if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
-							return idxs;
-						},
+						splits: (u) => tickIndices(u.width, labels),
 						values: (_u, splits) => splits.map((s) => formatShortDate(labels[s] ?? "")),
 					},
 					{ stroke: textMuted, grid: { stroke: border } },

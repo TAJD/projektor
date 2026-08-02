@@ -64,7 +64,7 @@ export function EmptyChartState({ message }: { message: string }) {
 	);
 }
 
-function tickIndices(width: number, labels: readonly string[]): number[] {
+export function tickIndices(width: number, labels: readonly string[]): number[] {
 	const n = labels.length;
 	const maxTicks = Math.max(2, Math.floor(width / 70));
 	const stride = Math.max(1, Math.ceil(n / maxTicks));

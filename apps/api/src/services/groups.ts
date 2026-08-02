@@ -28,6 +28,14 @@ async function loadGroup(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, group
 	return group;
 }
 
+/** Requires workspace-admin, then loads the group (or throws NotFound). */
+async function requireAdminGroup(ctx: ServiceCtx, groupId: string) {
+	requireAdmin(ctx);
+	const orm = drizzle(ctx.db, { schema });
+	const group = await loadGroup(orm, ctx, groupId);
+	return { orm, group };
+}
+
 /**
  * List groups. Owner/admin see every group in the workspace; a plain member sees
  * only the groups they belong to (ticket: "members see only their own groups").
@@ -237,9 +245,7 @@ export async function updateGroup(ctx: ServiceCtx, groupId: string, input: unkno
 }
 
 export async function deleteGroup(ctx: ServiceCtx, groupId: string) {
-	requireAdmin(ctx);
-	const orm = drizzle(ctx.db, { schema });
-	await loadGroup(orm, ctx, groupId);
+	const { orm } = await requireAdminGroup(ctx, groupId);
 
 	// Members and grants cascade via the FK ON DELETE CASCADE.
 	await orm
@@ -291,9 +297,7 @@ export async function addGroupMember(ctx: ServiceCtx, groupId: string, input: un
 }
 
 export async function removeGroupMember(ctx: ServiceCtx, groupId: string, userId: string) {
-	requireAdmin(ctx);
-	const orm = drizzle(ctx.db, { schema });
-	await loadGroup(orm, ctx, groupId);
+	const { orm } = await requireAdminGroup(ctx, groupId);
 
 	await orm
 		.delete(schema.userGroupMembers)

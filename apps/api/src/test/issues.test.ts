@@ -17,6 +17,36 @@ import {
 	seedWorkspaceRoles,
 } from "./helpers";
 
+async function callMcpTool(
+	workspaceId: string,
+	token: string,
+	slug: string,
+	params: unknown
+): Promise<{ result?: { content: Array<{ text: string }> }; error?: { message: string } }> {
+	const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+		method: "POST",
+		headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }),
+	});
+	return res.json();
+}
+
+async function seedOwnerProjectFixture(): Promise<{
+	token: string;
+	slug: string;
+	workspaceId: string;
+	projectId: string;
+}> {
+	const fixture = await seedFixture({ role: "owner" });
+	const project = await seedProject(fixture.workspace.id);
+	return {
+		token: fixture.token,
+		slug: fixture.workspace.slug,
+		workspaceId: fixture.workspace.id,
+		projectId: project.id,
+	};
+}
+
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issues API", () => {
 	let token: string;
@@ -1424,24 +1454,11 @@ describe("Issues MCP — typeId", () => {
 	let projectId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, projectId } = await seedOwnerProjectFixture());
 	});
 
 	async function mcpCall(params: unknown) {
-		const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
-			method: "POST",
-			headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
-			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }),
-		});
-		return res.json() as Promise<{
-			result?: { content: Array<{ text: string }> };
-			error?: { message: string };
-		}>;
+		return callMcpTool(workspaceId, token, slug, params);
 	}
 
 	it("MCP create_issue with typeId persists the type", async () => {
@@ -1550,30 +1567,14 @@ describe("Issues MCP — typeId", () => {
 });
 
 describe("Issues MCP — list_issues filter parity (PROJ-243)", () => {
-	let token: string;
-	let slug: string;
-	let workspaceId: string;
-	let projectId: string;
+	let token: string, slug: string, workspaceId: string, projectId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture({ role: "owner" });
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
-		const project = await seedProject(workspaceId);
-		projectId = project.id;
+		({ token, slug, workspaceId, projectId } = await seedOwnerProjectFixture());
 	});
 
 	async function mcpCall(params: unknown) {
-		const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
-			method: "POST",
-			headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
-			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }),
-		});
-		return res.json() as Promise<{
-			result?: { content: Array<{ text: string }> };
-			error?: { message: string };
-		}>;
+		return callMcpTool(workspaceId, token, slug, params);
 	}
 
 	it("advertises all ListIssuesSchema optional filter keys in its inputSchema", async () => {

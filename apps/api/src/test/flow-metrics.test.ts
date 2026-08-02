@@ -99,6 +99,14 @@ describe("Flow metrics (PROJ-252)", () => {
 		});
 	}
 
+	async function getFlowMetrics(): Promise<FlowMetrics> {
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		return (await res.json()) as FlowMetrics;
+	}
+
 	it("computes lead/cycle time", async () => {
 		const now = Math.floor(Date.now() / 1000);
 
@@ -118,11 +126,7 @@ describe("Flow metrics (PROJ-252)", () => {
 			doneAt: now,
 		});
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.leadTime.count).toBe(2);
 		expect(metrics.leadTime.avg).toBeCloseTo((500 + 250) / 2, 0);
@@ -200,11 +204,7 @@ describe("Flow metrics (PROJ-252)", () => {
 			doneAt: now - 50,
 		});
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.leadTime.count).toBe(1);
 		expect(metrics.cycleTime.count).toBe(1);
@@ -359,11 +359,7 @@ describe("Flow metrics (PROJ-252)", () => {
 			doneAt: now,
 		});
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		const total = metrics.throughputOverTime.reduce((sum, b) => sum + b.count, 0);
 		expect(total).toBe(1);
@@ -380,22 +376,14 @@ describe("Flow metrics (PROJ-252)", () => {
 	});
 
 	it("returns an empty throughput series for a project with no completed issues", async () => {
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(Array.isArray(metrics.throughputOverTime)).toBe(true);
 		expect(metrics.throughputOverTime.every((b) => b.count === 0)).toBe(true);
 	});
 
 	it("returns null (not NaN/throw) percentiles for a project with zero issues (PROJ-301)", async () => {
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		for (const dist of [metrics.leadTime, metrics.cycleTime, metrics.reviewLatency]) {
 			expect(dist.count).toBe(0);
@@ -422,11 +410,7 @@ describe("Flow metrics (PROJ-252)", () => {
 			doneAt: now,
 		});
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		// The legacy issue contributes nothing — only the modern issue is counted.
 		expect(metrics.leadTime.count).toBe(1);
@@ -471,11 +455,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
 		await stampReviewFields(issue.id, { inReviewAt: now - 100 });
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.reviewLatency.count).toBe(1);
 		expect(metrics.reviewLatency.avg).toBeCloseTo(100, 0);
@@ -491,11 +471,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		await seedComment(issue.id, userId, "wip update", "agent");
 		await seedComment(issue.id, userId, "legacy comment, no authorKind");
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.humanInterventions.count).toBe(1);
 		// 1 human comment + 2 review bounces; the agent comment and the authorKind-less
@@ -509,11 +485,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
 		await stampLease(crypto.randomUUID(), issue.id, now - 400, now - 200);
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.autonomyRatio.count).toBe(1);
 		expect(metrics.autonomyRatio.avg).toBeCloseTo(0.5, 1);
@@ -526,11 +498,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		// Lease still held past doneAt (released_at NULL) — counts through doneAt, not "now".
 		await stampLease(crypto.randomUUID(), issue.id, now - 400, null);
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.autonomyRatio.avg).toBeLessThanOrEqual(1);
 		expect(metrics.autonomyRatio.avg).toBeCloseTo(1, 1);
@@ -642,11 +610,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
 		await stampReviewFields(issue.id, { inReviewAt: now - 100 });
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.timeInProgress.count).toBe(1);
 		expect(metrics.timeInProgress.avg).toBeCloseTo(300, 0); // claimed -400 -> in_review -100
@@ -699,11 +663,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 300, doneAt: now });
 		await stampLease(crypto.randomUUID(), issue.id, now - 300, now - 150); // 150s held
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.flowEfficiency.count).toBe(1);
 		expect(metrics.flowEfficiency.avg).toBeCloseTo(150 / 500, 1); // held / lead time
@@ -732,11 +692,7 @@ describe("Flow metrics (PROJ-252)", () => {
 		// Backlog issue must not appear in the scatter (not currently in progress/review).
 		await seedIssue(workspaceId, projectId, userId, { title: "Still backlog" });
 
-		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/flow-metrics`, {
-			headers: authHeaders(token, slug),
-		});
-		expect(res.status).toBe(200);
-		const metrics = (await res.json()) as FlowMetrics;
+		const metrics = await getFlowMetrics();
 
 		expect(metrics.agingWip.length).toBe(2);
 		const stuck = metrics.agingWip.find((a) => a.id === oldInProgress.id);

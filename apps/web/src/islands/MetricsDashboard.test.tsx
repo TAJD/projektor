@@ -193,17 +193,21 @@ describe("MetricsDashboard", () => {
 		expect(screen.getByText(/claim_files/i)).toBeTruthy();
 	});
 
+	// Both ThroughputChart and BugShareChart render the same empty-state message.
+	async function expectEmptyChartStates() {
+		expect(await screen.findByText("Throughput")).toBeTruthy();
+		expect(screen.getAllByText(/No completed issues yet/i)).toHaveLength(2);
+		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
+		expect(screen.getByText(/No arrivals or completions yet/i)).toBeTruthy();
+		expect(screen.getByText(/No issues currently in progress or review/i)).toBeTruthy();
+	}
+
 	it("does not crash on an empty-metrics response", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		mockFetchMetrics(EMPTY_METRICS);
 		render(<MetricsDashboard />);
 
-		expect(await screen.findByText("Throughput")).toBeTruthy();
-		// Both ThroughputChart and BugShareChart render the same empty-state message.
-		expect(screen.getAllByText(/No completed issues yet/i)).toHaveLength(2);
-		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
-		expect(screen.getByText(/No arrivals or completions yet/i)).toBeTruthy();
-		expect(screen.getByText(/No issues currently in progress or review/i)).toBeTruthy();
+		await expectEmptyChartStates();
 	});
 
 	it("shows empty-chart states for a fixed-size all-zero bucket window (real API shape)", async () => {
@@ -211,11 +215,7 @@ describe("MetricsDashboard", () => {
 		mockFetchMetrics(ZERO_BUCKET_METRICS);
 		render(<MetricsDashboard />);
 
-		expect(await screen.findByText("Throughput")).toBeTruthy();
-		expect(screen.getAllByText(/No completed issues yet/i)).toHaveLength(2);
-		expect(screen.getByText(/No WIP data yet/i)).toBeTruthy();
-		expect(screen.getByText(/No arrivals or completions yet/i)).toBeTruthy();
-		expect(screen.getByText(/No issues currently in progress or review/i)).toBeTruthy();
+		await expectEmptyChartStates();
 	});
 
 	it("shows a message when no project is specified", async () => {

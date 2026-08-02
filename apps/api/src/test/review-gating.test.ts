@@ -58,6 +58,29 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 
 	const report = { summary: "Did the thing", verification: "pnpm test" };
 
+	async function seedFlaggedAndCleanDoneIssues() {
+		const flagged = await seedIssue(workspaceId, projectId, userId, { title: "Flagged" });
+		const clean = await seedIssue(workspaceId, projectId, userId, { title: "Clean" });
+		const { agentSessionId: flaggedAgent } = await seedAgentLease(workspaceId, flagged.id);
+		const { agentSessionId: cleanAgent } = await seedAgentLease(workspaceId, clean.id);
+
+		await patch(flagged.id, {
+			status: "done",
+			agentSessionId: flaggedAgent,
+			completionReport: report,
+		});
+		await patch(clean.id, {
+			status: "done",
+			agentSessionId: cleanAgent,
+			completionReport: {
+				summary: "Did the thing",
+				verification: "https://github.com/TAJD/projektor/pull/93",
+			},
+		});
+
+		return { flagged, clean };
+	}
+
 	// --- Agent path (live agent lease present) ---
 
 	it("rejects an agent (live lease) entering in_review without a completion report", async () => {
@@ -210,24 +233,7 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 	// --- Audit query filter (PROJ-375) ---
 
 	it("list_issues({ needsAudit: true }) surfaces flagged closures only", async () => {
-		const flagged = await seedIssue(workspaceId, projectId, userId, { title: "Flagged" });
-		const clean = await seedIssue(workspaceId, projectId, userId, { title: "Clean" });
-		const { agentSessionId: flaggedAgent } = await seedAgentLease(workspaceId, flagged.id);
-		const { agentSessionId: cleanAgent } = await seedAgentLease(workspaceId, clean.id);
-
-		await patch(flagged.id, {
-			status: "done",
-			agentSessionId: flaggedAgent,
-			completionReport: report,
-		});
-		await patch(clean.id, {
-			status: "done",
-			agentSessionId: cleanAgent,
-			completionReport: {
-				summary: "Did the thing",
-				verification: "https://github.com/TAJD/projektor/pull/93",
-			},
-		});
+		const { flagged, clean } = await seedFlaggedAndCleanDoneIssues();
 
 		const res = await SELF.fetch(
 			`http://localhost/api/issues?projectId=${projectId}&needsAudit=true`,
@@ -240,24 +246,7 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 	});
 
 	it("list_issues({ needsAudit: false }) surfaces unflagged closures only (PROJ-449)", async () => {
-		const flagged = await seedIssue(workspaceId, projectId, userId, { title: "Flagged" });
-		const clean = await seedIssue(workspaceId, projectId, userId, { title: "Clean" });
-		const { agentSessionId: flaggedAgent } = await seedAgentLease(workspaceId, flagged.id);
-		const { agentSessionId: cleanAgent } = await seedAgentLease(workspaceId, clean.id);
-
-		await patch(flagged.id, {
-			status: "done",
-			agentSessionId: flaggedAgent,
-			completionReport: report,
-		});
-		await patch(clean.id, {
-			status: "done",
-			agentSessionId: cleanAgent,
-			completionReport: {
-				summary: "Did the thing",
-				verification: "https://github.com/TAJD/projektor/pull/93",
-			},
-		});
+		const { flagged, clean } = await seedFlaggedAndCleanDoneIssues();
 
 		// z.coerce.boolean() would coerce the string "false" to true, silently
 		// inverting this filter. Guards against regressing to that.
