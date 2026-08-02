@@ -1,4 +1,4 @@
-import type { ComponentChildren } from "preact";
+import type { ComponentChildren, Ref } from "preact";
 import { createPortal } from "preact/compat";
 
 export interface PopoverProps {
@@ -14,6 +14,15 @@ export interface PopoverProps {
 	 * landmark with the same accessible name. */
 	role?: "dialog" | "menu" | "listbox";
 	ariaLabel?: string;
+	/** Only emitted when defined, independently of `role`/`ariaLabel` — needed
+	 * by the non-modal toggletip contract (MetricHelp/GlossaryHelp render
+	 * `role="dialog" aria-modal="false"`). */
+	ariaModal?: boolean;
+	/** Forwarded as `ref` on the rendered root element, in every strategy
+	 * branch — needed by callers (AccountMenu, GlossaryHelp) that use it for
+	 * outside-click-dismissal logic (a click inside the popover's own
+	 * content must not count as "outside"). */
+	elementRef?: Ref<HTMLElement>;
 	/** Extra class(es) carrying usage-specific radius/padding/font-size/
 	 * position — `.popover` alone only sets the properties genuinely
 	 * shared across every current popover (background, border, shadow,
@@ -48,6 +57,8 @@ export function Popover({
 	as = "div",
 	role,
 	ariaLabel,
+	ariaModal,
+	elementRef,
 	class: extraClass,
 	strategy,
 	position,
@@ -55,11 +66,19 @@ export function Popover({
 }: PopoverProps) {
 	const classes = extraClass ? `popover ${extraClass}` : "popover";
 	const Tag = as;
-	const a11yProps = role ? { role, "aria-label": ariaLabel } : {};
+	const a11yProps = {
+		...(role !== undefined ? { role } : {}),
+		...(ariaLabel !== undefined ? { "aria-label": ariaLabel } : {}),
+		...(ariaModal !== undefined
+			? { "aria-modal": (ariaModal ? "true" : "false") as "true" | "false" }
+			: {}),
+	};
+	// biome-ignore lint/suspicious/noExplicitAny: dynamic `Tag = as` ("div" | "ul") makes JSX infer an unsatisfiable intersection ref type across both element kinds.
+	const refProp = { ref: elementRef as any };
 
 	if (strategy === "anchored") {
 		return (
-			<Tag id={id} class={classes} {...a11yProps}>
+			<Tag id={id} class={classes} {...a11yProps} {...refProp}>
 				{children}
 			</Tag>
 		);
@@ -77,7 +96,7 @@ export function Popover({
 	};
 
 	const el = (
-		<Tag id={id} class={classes} style={style} {...a11yProps}>
+		<Tag id={id} class={classes} style={style} {...a11yProps} {...refProp}>
 			{children}
 		</Tag>
 	);

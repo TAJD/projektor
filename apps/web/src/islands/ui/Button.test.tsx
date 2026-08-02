@@ -56,4 +56,10 @@ describe("Button", () => {
 
 		expect(() => render(<Button as="a">No href</Button>)).toThrow();
 	});
+
+	it("passes title through to the rendered element", () => {
+		render(<Button title="Copy link">Copy</Button>);
+		const button = screen.getByRole("button", { name: "Copy" });
+		expect(button.getAttribute("title")).toBe("Copy link");
+	});
 });
