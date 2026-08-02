@@ -42,86 +42,95 @@ export interface ContentionHeatmapEntry {
 	conflictCount: number;
 }
 
-// PROJ-332: group claims one path segment below `prefix` — the natural "list this
-// directory's children" step a file explorer takes, so the caller drills down by
-// re-requesting with `prefix` set to the entry clicked.
+// Resolves the path segment one level below `prefix` that `itemPath` falls under, or null
+// if `itemPath` IS `prefix` (nothing left to drill into).
+function resolveNextSegment(
+	itemPath: string,
+	prefix: string,
+	prefixWithSlash: string
+): { path: string; isLeaf: boolean } | null {
+	const rest = itemPath.slice(prefixWithSlash.length);
+	if (!rest) return null;
+	const slashIdx = rest.indexOf("/");
+	const isLeaf = slashIdx === -1;
+	const segment = isLeaf ? rest : rest.slice(0, slashIdx);
+	const path = prefix ? `${prefix}/${segment}` : segment;
+	return { path, isLeaf };
+}
+
+type SegmentGroup = { ids: Set<string>; count: number; isLeaf: boolean };
+
+// PROJ-332/338: group items (claims or conflicts) one path segment below `prefix` — the
+// natural "list this directory's children" step a file explorer takes, so the caller
+// drills down by re-requesting with `prefix` set to the entry clicked. Shared by
+// groupClaimsByNextSegment and groupConflictsByNextSegment (below), which differ only in
+// how they extract the distinct id to count per group.
+function groupItemsByNextSegment<T extends { path: string }>(
+	items: ReadonlyArray<T>,
+	prefix: string,
+	prefixWithSlash: string,
+	getId: (item: T) => string
+): Map<string, SegmentGroup> {
+	const groups = new Map<string, SegmentGroup>();
+
+	for (const item of items) {
+		if (prefix && !item.path.startsWith(prefixWithSlash)) continue;
+		const resolved = resolveNextSegment(item.path, prefix, prefixWithSlash);
+		if (!resolved) continue;
+		const { path, isLeaf } = resolved;
+
+		let group = groups.get(path);
+		if (!group) {
+			group = { ids: new Set(), count: 0, isLeaf };
+			groups.set(path, group);
+		}
+		// A path claimed as both a file and a directory (e.g. `docs` and `docs/x.md`) is a
+		// directory: keep it drillable rather than freezing isLeaf on the first item seen.
+		if (!isLeaf) group.isLeaf = false;
+		group.ids.add(getId(item));
+		group.count++;
+	}
+
+	return groups;
+}
+
 function groupClaimsByNextSegment(
 	claims: ReadonlyArray<{ path: string; issueId: string }>,
 	prefix: string
 ): CodeHeatmapEntry[] {
 	const prefixWithSlash = prefix ? `${prefix}/` : "";
-	const groups = new Map<string, { issueIds: Set<string>; claimCount: number; isLeaf: boolean }>();
-
-	for (const claim of claims) {
-		if (prefix && !claim.path.startsWith(prefixWithSlash)) continue;
-		const rest = claim.path.slice(prefixWithSlash.length);
-		if (!rest) continue;
-		const slashIdx = rest.indexOf("/");
-		const isLeaf = slashIdx === -1;
-		const segment = isLeaf ? rest : rest.slice(0, slashIdx);
-		const path = prefix ? `${prefix}/${segment}` : segment;
-
-		let group = groups.get(path);
-		if (!group) {
-			group = { issueIds: new Set(), claimCount: 0, isLeaf };
-			groups.set(path, group);
-		}
-		// A path claimed as both a file and a directory (e.g. `docs` and `docs/x.md`) is a
-		// directory: keep it drillable rather than freezing isLeaf on the first claim seen.
-		if (!isLeaf) group.isLeaf = false;
-		group.issueIds.add(claim.issueId);
-		group.claimCount++;
-	}
+	const groups = groupItemsByNextSegment(claims, prefix, prefixWithSlash, (c) => c.issueId);
 
 	return [...groups.entries()]
 		.map(([path, group]) => ({
 			path,
 			segment: path.slice(prefixWithSlash.length),
 			isLeaf: group.isLeaf,
-			distinctIssueCount: group.issueIds.size,
-			claimCount: group.claimCount,
+			distinctIssueCount: group.ids.size,
+			claimCount: group.count,
 		}))
 		.sort((a, b) => b.distinctIssueCount - a.distinctIssueCount || a.path.localeCompare(b.path));
 }
 
-// PROJ-338: contention counterpart to groupClaimsByNextSegment — same segment-splitting
-// and isLeaf-freeze behavior, but tracks rejected-issue ids and raw conflict rows.
 function groupConflictsByNextSegment(
 	conflicts: ReadonlyArray<{ path: string; rejectedIssueId: string }>,
 	prefix: string
 ): ContentionHeatmapEntry[] {
 	const prefixWithSlash = prefix ? `${prefix}/` : "";
-	const groups = new Map<
-		string,
-		{ rejectedIssueIds: Set<string>; conflictCount: number; isLeaf: boolean }
-	>();
-
-	for (const conflict of conflicts) {
-		if (prefix && !conflict.path.startsWith(prefixWithSlash)) continue;
-		const rest = conflict.path.slice(prefixWithSlash.length);
-		if (!rest) continue;
-		const slashIdx = rest.indexOf("/");
-		const isLeaf = slashIdx === -1;
-		const segment = isLeaf ? rest : rest.slice(0, slashIdx);
-		const path = prefix ? `${prefix}/${segment}` : segment;
-
-		let group = groups.get(path);
-		if (!group) {
-			group = { rejectedIssueIds: new Set(), conflictCount: 0, isLeaf };
-			groups.set(path, group);
-		}
-		if (!isLeaf) group.isLeaf = false;
-		group.rejectedIssueIds.add(conflict.rejectedIssueId);
-		group.conflictCount++;
-	}
+	const groups = groupItemsByNextSegment(
+		conflicts,
+		prefix,
+		prefixWithSlash,
+		(c) => c.rejectedIssueId
+	);
 
 	return [...groups.entries()]
 		.map(([path, group]) => ({
 			path,
 			segment: path.slice(prefixWithSlash.length),
 			isLeaf: group.isLeaf,
-			distinctRejectedIssueCount: group.rejectedIssueIds.size,
-			conflictCount: group.conflictCount,
+			distinctRejectedIssueCount: group.ids.size,
+			conflictCount: group.count,
 		}))
 		.sort(
 			(a, b) =>

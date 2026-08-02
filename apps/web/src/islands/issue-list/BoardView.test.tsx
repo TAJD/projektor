@@ -50,18 +50,26 @@ function fakeDataTransfer() {
 	};
 }
 
+function dragStartCard() {
+	const card = screen.getByText("Move me").closest("a") as HTMLElement;
+	const dataTransfer = fakeDataTransfer();
+	fireEvent.dragStart(card, { dataTransfer });
+	return dataTransfer;
+}
+
+function dropOnInProgress(dataTransfer: ReturnType<typeof fakeDataTransfer>) {
+	const inProgressColumn = screen.getByRole("region", { name: "In Progress column" });
+	fireEvent.drop(inProgressColumn, { dataTransfer });
+}
+
 describe("BoardView — mobile viewport", () => {
 	it("blocks drag-and-drop status changes below 640px", () => {
 		const changeStatus = vi.fn();
 		setViewportWidth(MOBILE_WIDTH);
 		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
 
-		const card = screen.getByText("Move me").closest("a") as HTMLElement;
-		const dataTransfer = fakeDataTransfer();
-		fireEvent.dragStart(card, { dataTransfer });
-
-		const inProgressColumn = screen.getByRole("region", { name: "In Progress column" });
-		fireEvent.drop(inProgressColumn, { dataTransfer });
+		const dataTransfer = dragStartCard();
+		dropOnInProgress(dataTransfer);
 
 		expect(changeStatus).not.toHaveBeenCalled();
 	});
@@ -71,12 +79,8 @@ describe("BoardView — mobile viewport", () => {
 		setViewportWidth(1024);
 		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
 
-		const card = screen.getByText("Move me").closest("a") as HTMLElement;
-		const dataTransfer = fakeDataTransfer();
-		fireEvent.dragStart(card, { dataTransfer });
-
-		const inProgressColumn = screen.getByRole("region", { name: "In Progress column" });
-		fireEvent.drop(inProgressColumn, { dataTransfer });
+		const dataTransfer = dragStartCard();
+		dropOnInProgress(dataTransfer);
 
 		expect(changeStatus).toHaveBeenCalledWith("i1", "st-in-progress");
 	});
@@ -90,13 +94,10 @@ describe("BoardView — mobile viewport", () => {
 		setViewportWidth(1024);
 		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={changeStatus} />);
 
-		const card = screen.getByText("Move me").closest("a") as HTMLElement;
-		const dataTransfer = fakeDataTransfer();
-		fireEvent.dragStart(card, { dataTransfer });
+		const dataTransfer = dragStartCard();
 
 		setViewportWidth(MOBILE_WIDTH);
-		const inProgressColumn = screen.getByRole("region", { name: "In Progress column" });
-		fireEvent.drop(inProgressColumn, { dataTransfer });
+		dropOnInProgress(dataTransfer);
 
 		expect(changeStatus).not.toHaveBeenCalled();
 	});

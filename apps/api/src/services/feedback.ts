@@ -11,6 +11,12 @@ import { createIssue } from "./issues";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
+async function requireProjectWriteAccess(ctx: ServiceCtx, projectId: string): Promise<void> {
+	await requireProjectInWorkspace(ctx, projectId);
+	const role = await requireProjectAccess(ctx, projectId);
+	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+}
+
 export async function hashFeedbackToken(token: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
 	return Array.from(new Uint8Array(buf))
@@ -185,9 +191,7 @@ export async function updateFeedbackStatus(ctx: ServiceCtx, input: unknown): Pro
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { projectId, feedbackId, status } = parsed.data;
 
-	await requireProjectInWorkspace(ctx, projectId);
-	const role = await requireProjectAccess(ctx, projectId);
-	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+	await requireProjectWriteAccess(ctx, projectId);
 
 	const row = await ctx.db
 		.prepare("SELECT id FROM feedback WHERE id = ? AND project_id = ? AND workspace_id = ?")
@@ -226,9 +230,7 @@ export async function convertFeedbackToIssue(
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { projectId, feedbackId } = parsed.data;
 
-	await requireProjectInWorkspace(ctx, projectId);
-	const role = await requireProjectAccess(ctx, projectId);
-	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+	await requireProjectWriteAccess(ctx, projectId);
 
 	const fb = await ctx.db
 		.prepare(
@@ -274,9 +276,7 @@ export async function bulkMarkReviewed(
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { projectId, feedbackIds } = parsed.data;
 
-	await requireProjectInWorkspace(ctx, projectId);
-	const role = await requireProjectAccess(ctx, projectId);
-	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+	await requireProjectWriteAccess(ctx, projectId);
 
 	let updated = 0;
 	await inChunks(feedbackIds, async (chunk) => {
@@ -312,9 +312,7 @@ export async function bulkConvertToIssue(
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { projectId, feedbackIds } = parsed.data;
 
-	await requireProjectInWorkspace(ctx, projectId);
-	const role = await requireProjectAccess(ctx, projectId);
-	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+	await requireProjectWriteAccess(ctx, projectId);
 
 	const rows = await inChunks(feedbackIds, (chunk) => {
 		const placeholders = chunk.map(() => "?").join(", ");

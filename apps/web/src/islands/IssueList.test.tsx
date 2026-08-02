@@ -477,6 +477,11 @@ function makeFetch(overrideIssues = ISSUES) {
 	);
 }
 
+function requestHeadersList(mockFetch: ReturnType<typeof vi.fn>): Record<string, string>[] {
+	const calls = mockFetch.mock.calls as [string, RequestInit][];
+	return calls.map(([, init]) => (init?.headers as Record<string, string>) ?? {});
+}
+
 describe("workspace-slug header contract (PROJ-98)", () => {
 	it("includes X-Workspace-Slug header when workspaceSlug prop is passed", async () => {
 		const mockFetch = makeFetch();
@@ -499,9 +504,7 @@ describe("workspace-slug header contract (PROJ-98)", () => {
 		render(<IssueList />);
 		await waitForLoaded();
 
-		const calls = mockFetch.mock.calls as [string, RequestInit][];
-		for (const [, init] of calls) {
-			const headers = (init?.headers as Record<string, string>) ?? {};
+		for (const headers of requestHeadersList(mockFetch)) {
 			expect(headers["X-Workspace-Slug"]).toBeUndefined();
 		}
 	});
@@ -516,9 +519,7 @@ describe("workspace-slug header contract (PROJ-98)", () => {
 		render(<IssueList workspaceSlug="real-slug" />);
 		await waitForLoaded();
 
-		const calls = mockFetch.mock.calls as [string, RequestInit][];
-		for (const [, init] of calls) {
-			const headers = (init?.headers as Record<string, string>) ?? {};
+		for (const headers of requestHeadersList(mockFetch)) {
 			// The stale localStorage value must never reach the wire
 			expect(headers["X-Workspace-Slug"]).not.toBe("stale-slug");
 			// When the header is present it must be the prop value

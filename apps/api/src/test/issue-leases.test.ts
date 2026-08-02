@@ -241,6 +241,20 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		});
 	}
 
+	// Under a WIP cap of 1: registers an agent, seeds two issues, and asserts the first
+	// claim succeeds while the second is rejected as over-cap.
+	async function expectWipCapBlocksSecondClaim() {
+		const agent = await registerAgent("worker");
+		const [first, second] = await Promise.all([
+			seedIssue(workspaceId, projectId, userId, { title: "First" }),
+			seedIssue(workspaceId, projectId, userId, { title: "Second" }),
+		]);
+
+		expect((await claim(first.id, agent)).status).toBe(201);
+		const res = await claim(second.id, agent);
+		expect(res.status).toBe(409);
+	}
+
 	it("blocks the 4th concurrent agent-held lease at the default cap of 3", async () => {
 		const agent = await registerAgent("worker");
 		const issues = await Promise.all(
@@ -316,15 +330,7 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		});
 		expect(patchRes.status).toBe(200);
 
-		const agent = await registerAgent("worker");
-		const [first, second] = await Promise.all([
-			seedIssue(workspaceId, projectId, userId, { title: "First" }),
-			seedIssue(workspaceId, projectId, userId, { title: "Second" }),
-		]);
-
-		expect((await claim(first.id, agent)).status).toBe(201);
-		const res = await claim(second.id, agent);
-		expect(res.status).toBe(409);
+		await expectWipCapBlocksSecondClaim();
 	});
 
 	// --- REST/MCP parity (PROJ-301) ---
@@ -342,15 +348,7 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		});
 		expect(mcpRes.status).toBe(200);
 
-		const agent = await registerAgent("worker");
-		const [first, second] = await Promise.all([
-			seedIssue(workspaceId, projectId, userId, { title: "First" }),
-			seedIssue(workspaceId, projectId, userId, { title: "Second" }),
-		]);
-
-		expect((await claim(first.id, agent)).status).toBe(201);
-		const res = await claim(second.id, agent);
-		expect(res.status).toBe(409);
+		await expectWipCapBlocksSecondClaim();
 	});
 
 	it("MCP parity: create_project sets agent_wip_limit the same as REST create", async () => {

@@ -47,6 +47,34 @@ function mcpData<T>(r: JsonRpcResult<{ content: Array<{ text: string }> }> | Jso
 	return JSON.parse(r.result.content[0].text) as T;
 }
 
+// PROJ-238: the test env's RATE_LIMIT_API_MAX is 5 req/window (wrangler.test.toml), and
+// many describe blocks below fire more than that against one token — reset the counter
+// before every request.
+async function resetRateLimitAndFetch(url: string, opts?: RequestInit) {
+	await env.DB.prepare("DELETE FROM rate_limit").run();
+	return SELF.fetch(url, opts);
+}
+
+async function resetRateLimitAndMcpCall<T>(
+	workspaceId: string,
+	token: string,
+	slug: string,
+	name: string,
+	args: unknown
+) {
+	await env.DB.prepare("DELETE FROM rate_limit").run();
+	return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+}
+
+async function seedWorkspaceFixture(): Promise<{
+	token: string;
+	slug: string;
+	workspaceId: string;
+}> {
+	const fixture = await seedFixture();
+	return { token: fixture.token, slug: fixture.workspace.slug, workspaceId: fixture.workspace.id };
+}
+
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Wiki API", () => {
 	let token: string;
@@ -1471,15 +1499,10 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 // write, plus type/tags/status filtering on listWikiPages/searchWiki. REST/MCP parity
 // throughout — each behavior is exercised via both surfaces.
 describe("Wiki frontmatter metadata (PROJ-488)", () => {
-	let token: string;
-	let slug: string;
-	let workspaceId: string;
+	let token: string, slug: string, workspaceId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
+		({ token, slug, workspaceId } = await seedWorkspaceFixture());
 	});
 
 	const RUNBOOK_CONTENT = [
@@ -1958,15 +1981,10 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 // point, not just get_wiki_page (PROJ-484's optimistic-locking workflow fetches
 // baseRevisionId via list_wiki_revisions using whatever reference the caller holds).
 describe("Wiki revisions/delete resolve by old slug after rename (PROJ-509)", () => {
-	let token: string;
-	let slug: string;
-	let workspaceId: string;
+	let token: string, slug: string, workspaceId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
+		({ token, slug, workspaceId } = await seedWorkspaceFixture());
 	});
 
 	it("REST: GET /:slug/revisions resolves via an old (pre-rename) slug", async () => {
@@ -2117,28 +2135,21 @@ describe("Wiki revisions/delete resolve by old slug after rename (PROJ-509)", ()
 
 // PROJ-484: optimistic locking (baseRevisionId + conflict diff) on wiki writes
 describe("Wiki optimistic locking (PROJ-484)", () => {
-	let token: string;
-	let slug: string;
-	let workspaceId: string;
+	let token: string, slug: string, workspaceId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
+		({ token, slug, workspaceId } = await seedWorkspaceFixture());
 	});
 
 	// The test env's RATE_LIMIT_API_MAX is 5 req/window (wrangler.test.toml), and these
 	// tests each fire more than that against one token — reset the counter before every
 	// request (same escape hatch as PROJ-238's nesting-depth test above).
 	async function req(url: string, opts?: RequestInit) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return SELF.fetch(url, opts);
+		return resetRateLimitAndFetch(url, opts);
 	}
 
 	async function mcp<T>(name: string, args: unknown) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+		return resetRateLimitAndMcpCall<T>(workspaceId, token, slug, name, args);
 	}
 
 	async function getRevisions(pageSlug: string) {
@@ -2343,25 +2354,18 @@ describe("Wiki optimistic locking (PROJ-484)", () => {
 // baseRevisionId, so it gets normal optimistic-locking/frontmatter/FTS/link-reindex
 // treatment for free (see PR description for the design rationale).
 describe("Wiki revision diff (PROJ-492)", () => {
-	let token: string;
-	let slug: string;
-	let workspaceId: string;
+	let token: string, slug: string, workspaceId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
+		({ token, slug, workspaceId } = await seedWorkspaceFixture());
 	});
 
 	async function req(url: string, opts?: RequestInit) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return SELF.fetch(url, opts);
+		return resetRateLimitAndFetch(url, opts);
 	}
 
 	async function mcp<T>(name: string, args: unknown) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+		return resetRateLimitAndMcpCall<T>(workspaceId, token, slug, name, args);
 	}
 
 	async function getRevisions(pageSlug: string) {
@@ -2632,26 +2636,19 @@ describe("Wiki revision diff (PROJ-492)", () => {
 // never conflict — that's the headline behavior a naive whole-page baseRevisionId
 // check would break.
 describe("Wiki patch operations (PROJ-490)", () => {
-	let token: string;
-	let slug: string;
-	let workspaceId: string;
+	let token: string, slug: string, workspaceId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
+		({ token, slug, workspaceId } = await seedWorkspaceFixture());
 	});
 
 	// Same rate-limit escape hatch as the PROJ-484 describe block above.
 	async function req(url: string, opts?: RequestInit) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return SELF.fetch(url, opts);
+		return resetRateLimitAndFetch(url, opts);
 	}
 
 	async function mcp<T>(name: string, args: unknown) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
+		return resetRateLimitAndMcpCall<T>(workspaceId, token, slug, name, args);
 	}
 
 	async function createPage(pageSlug: string, title: string, content: string) {
@@ -4148,15 +4145,10 @@ describe("Wiki freshness model (PROJ-489)", () => {
 // create_wiki_page's templateSlug, and the list_wiki_templates picker. REST/MCP parity
 // throughout, same as the other frontmatter-driven features above.
 describe("Wiki page templates (PROJ-491)", () => {
-	let token: string;
-	let slug: string;
-	let workspaceId: string;
+	let token: string, slug: string, workspaceId: string;
 
 	beforeEach(async () => {
-		const fixture = await seedFixture();
-		token = fixture.token;
-		slug = fixture.workspace.slug;
-		workspaceId = fixture.workspace.id;
+		({ token, slug, workspaceId } = await seedWorkspaceFixture());
 	});
 
 	const TEMPLATE_CONTENT = [
@@ -4466,8 +4458,7 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 	});
 
 	async function req(url: string, opts?: RequestInit) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return SELF.fetch(url, opts);
+		return resetRateLimitAndFetch(url, opts);
 	}
 
 	async function createPage(pageSlug: string, title: string, content = "") {
@@ -5003,8 +4994,7 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 	});
 
 	async function req(url: string, opts?: RequestInit) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return SELF.fetch(url, opts);
+		return resetRateLimitAndFetch(url, opts);
 	}
 
 	async function createPage(pageSlug: string, title: string, content = "") {
@@ -5288,8 +5278,7 @@ describe("Wiki trash (PROJ-496)", () => {
 	});
 
 	async function req(url: string, opts?: RequestInit) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
-		return SELF.fetch(url, opts);
+		return resetRateLimitAndFetch(url, opts);
 	}
 
 	async function createPage(title: string, content: string, opts?: Record<string, unknown>) {

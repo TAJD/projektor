@@ -68,6 +68,35 @@ function mockFetchWiki(page: WikiPageData | null, ok = true, status = 404) {
 	);
 }
 
+function mockFetchMovePage(revisions: unknown[] = []) {
+	const otherPageNode = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
+	return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+		const u = String(url);
+		if (u.includes("/revisions")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(revisions) });
+		}
+		if (u.includes("/tree")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve([otherPageNode]) });
+		}
+		if (init?.method === "PUT") {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+		}
+		return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+	});
+}
+
+async function movePageToOther(fetchMock: ReturnType<typeof mockFetchMovePage>) {
+	vi.stubGlobal("fetch", fetchMock);
+	render(<WikiPage slug="my-page" />);
+	await screen.findByText("My Page");
+
+	fireEvent.click(screen.getByRole("button", { name: "Move" }));
+	fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
+	fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
+	const moveButtons = screen.getAllByRole("button", { name: "Move" });
+	fireEvent.click(moveButtons[moveButtons.length - 1]);
+}
+
 beforeEach(() => {
 	history.replaceState(null, "", "/");
 });
@@ -132,29 +161,8 @@ describe("WikiPage", () => {
 	});
 
 	it("moves a page to a new parent via PUT and refetches tree/page", async () => {
-		const OTHER_PAGE_NODE = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
-		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-			const u = String(url);
-			if (u.includes("/revisions")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			}
-			if (u.includes("/tree")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve([OTHER_PAGE_NODE]) });
-			}
-			if (init?.method === "PUT") {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
-			}
-			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
-		});
-		vi.stubGlobal("fetch", fetchMock);
-		render(<WikiPage slug="my-page" />);
-		await screen.findByText("My Page");
-
-		fireEvent.click(screen.getByRole("button", { name: "Move" }));
-		fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
-		fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
-		const moveButtons = screen.getAllByRole("button", { name: "Move" });
-		fireEvent.click(moveButtons[moveButtons.length - 1]);
+		const fetchMock = mockFetchMovePage();
+		await movePageToOther(fetchMock);
 
 		await waitFor(() => {
 			const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
@@ -664,29 +672,8 @@ describe("optimistic locking (PROJ-507)", () => {
 	// A move refetches the page; the revision list must survive that, or the next save
 	// looks like an unrevised page and gets rejected as a conflict.
 	it("still sends baseRevisionId after a move has refreshed the page", async () => {
-		const OTHER_PAGE_NODE = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
-		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-			const u = String(url);
-			if (u.includes("/revisions")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve([REVISION]) });
-			}
-			if (u.includes("/tree")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve([OTHER_PAGE_NODE]) });
-			}
-			if (init?.method === "PUT") {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
-			}
-			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
-		});
-		vi.stubGlobal("fetch", fetchMock);
-		render(<WikiPage slug="my-page" />);
-		await screen.findByText("My Page");
-
-		fireEvent.click(screen.getByRole("button", { name: "Move" }));
-		fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
-		fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
-		const moveButtons = screen.getAllByRole("button", { name: "Move" });
-		fireEvent.click(moveButtons[moveButtons.length - 1]);
+		const fetchMock = mockFetchMovePage([REVISION]);
+		await movePageToOther(fetchMock);
 		// The move's page refetch is what used to wipe the revision list — wait for it to
 		// land before editing, or the test races past the bug.
 		await waitFor(() => {

@@ -1883,6 +1883,21 @@ function useWikiStalePages(workspaceSlug: string | undefined, projectId: string)
 	return { staleOpen, setStaleOpen, stalePages, staleLoading };
 }
 
+function appendWikiFilterParams(
+	qs: URLSearchParams,
+	{
+		projectId,
+		filterType,
+		filterStatus,
+		filterTags,
+	}: { projectId: string; filterType: string; filterStatus: string; filterTags: string }
+) {
+	if (projectId) qs.set("projectId", projectId);
+	if (filterType) qs.set("type", filterType);
+	if (filterStatus) qs.set("status", filterStatus);
+	if (filterTags.trim()) qs.set("tags", filterTags);
+}
+
 // PROJ-488: type/status/tags filters shared between the sidebar's filtered browse view
 // (no search query — a flat list from listWikiPages) and text search below (combined
 // with the FTS query via search_wiki's own type/status/tags params).
@@ -1913,10 +1928,7 @@ function useWikiFilters(
 		const timer = setTimeout(async () => {
 			try {
 				const qs = new URLSearchParams();
-				if (projectId) qs.set("projectId", projectId);
-				if (filterType) qs.set("type", filterType);
-				if (filterStatus) qs.set("status", filterStatus);
-				if (filterTags.trim()) qs.set("tags", filterTags);
+				appendWikiFilterParams(qs, { projectId, filterType, filterStatus, filterTags });
 				const data = await apiFetch<WikiListItem[]>(`/api/wiki?${qs}`, { workspaceSlug });
 				setFilteredResults(Array.isArray(data) ? data : []);
 			} catch {
@@ -1961,10 +1973,7 @@ function useWikiSearch(
 		const timer = setTimeout(async () => {
 			try {
 				const qs = new URLSearchParams({ q: searchQuery });
-				if (projectId) qs.set("projectId", projectId);
-				if (filterType) qs.set("type", filterType);
-				if (filterStatus) qs.set("status", filterStatus);
-				if (filterTags.trim()) qs.set("tags", filterTags);
+				appendWikiFilterParams(qs, { projectId, filterType, filterStatus, filterTags });
 				const data = await apiFetch<SearchResult[]>(`/api/wiki/search?${qs}`, { workspaceSlug });
 				setSearchResults(Array.isArray(data) ? data : []);
 			} catch {

@@ -298,7 +298,7 @@ describe("Sprints role guards", () => {
 		expect(res.status).toBe(403);
 	});
 
-	it("viewer cannot update a sprint (403)", async () => {
+	async function seedMemberSprintWithViewer(sprintName: string) {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
 		await seedGroupGrant(roles.workspace.id, roles.member.user.id, project.id, "member");
@@ -307,9 +307,15 @@ describe("Sprints role guards", () => {
 		const createRes = await SELF.fetch("http://localhost/api/sprints", {
 			method: "POST",
 			headers: authHeaders(roles.member.token, roles.workspace.slug),
-			body: JSON.stringify({ projectId: project.id, name: "Member Sprint" }),
+			body: JSON.stringify({ projectId: project.id, name: sprintName }),
 		});
 		const { id } = (await createRes.json()) as { id: string };
+
+		return { roles, id };
+	}
+
+	it("viewer cannot update a sprint (403)", async () => {
+		const { roles, id } = await seedMemberSprintWithViewer("Member Sprint");
 
 		const patchRes = await SELF.fetch(`http://localhost/api/sprints/${id}`, {
 			method: "PATCH",
@@ -320,17 +326,7 @@ describe("Sprints role guards", () => {
 	});
 
 	it("viewer cannot delete a sprint (403)", async () => {
-		const roles = await seedWorkspaceRoles();
-		const project = await seedProject(roles.workspace.id);
-		await seedGroupGrant(roles.workspace.id, roles.member.user.id, project.id, "member");
-		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
-
-		const createRes = await SELF.fetch("http://localhost/api/sprints", {
-			method: "POST",
-			headers: authHeaders(roles.member.token, roles.workspace.slug),
-			body: JSON.stringify({ projectId: project.id, name: "Member Sprint" }),
-		});
-		const { id } = (await createRes.json()) as { id: string };
+		const { roles, id } = await seedMemberSprintWithViewer("Member Sprint");
 
 		const deleteRes = await SELF.fetch(`http://localhost/api/sprints/${id}`, {
 			method: "DELETE",
@@ -340,17 +336,7 @@ describe("Sprints role guards", () => {
 	});
 
 	it("viewer cannot complete a sprint (403)", async () => {
-		const roles = await seedWorkspaceRoles();
-		const project = await seedProject(roles.workspace.id);
-		await seedGroupGrant(roles.workspace.id, roles.member.user.id, project.id, "member");
-		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
-
-		const createRes = await SELF.fetch("http://localhost/api/sprints", {
-			method: "POST",
-			headers: authHeaders(roles.member.token, roles.workspace.slug),
-			body: JSON.stringify({ projectId: project.id, name: "Sprint" }),
-		});
-		const { id } = (await createRes.json()) as { id: string };
+		const { roles, id } = await seedMemberSprintWithViewer("Sprint");
 		await SELF.fetch(`http://localhost/api/sprints/${id}`, {
 			method: "PATCH",
 			headers: authHeaders(roles.member.token, roles.workspace.slug),
