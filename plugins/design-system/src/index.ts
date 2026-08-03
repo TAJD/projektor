@@ -8,6 +8,22 @@
 
 import { Category, defineCheck, Severity } from "@cofferdam/check-sdk";
 
+// Rule 2 is deliberately AST-based and per-primitive-family (NOT a
+// whole-file "does this file import anything from islands/ui" gate) — a
+// file-level gate goes permanently blind to every OTHER primitive family's
+// findings once any one islands/ui import exists in that file. Confirmed
+// by review.
+const PRIMITIVE_FAMILIES: { pattern: RegExp; importedFrom: string; label: string }[] = [
+  { pattern: /\bbtn\b/, importedFrom: "Button", label: "btn" },
+  { pattern: /\bbadge\b/, importedFrom: "Badge", label: "badge" },
+  { pattern: /\bselect-(button|menu|caret|option)\b/, importedFrom: "Select", label: "select-*" },
+  {
+    pattern: /\b(account-menu-popover|metric-help-popover|popover-account-menu|popover-metric-help|popover-select-menu)\b/,
+    importedFrom: "Popover",
+    label: "popover",
+  },
+];
+
 const RAW_COLOR_PATTERN = /#[0-9a-fA-F]{3,8}\b|rgba?\(/g;
 // A bare hex-shaped token isn't necessarily a color — href="#add" or
 // id="#deed" are valid hex-digit strings but not colors. rgb(/rgba( are
@@ -52,6 +68,26 @@ export default defineCheck({
           message: `Raw color literal "${m[0]}" — use a var(--*) token from Base.astro instead.`,
           span: ln.spanFor(m.index, m.index + m[0].length),
         });
+      }
+    }
+
+    if (file.ast) {
+      const importedNames = new Set<string>();
+      for (const imp of file.ast.findAll("ImportDeclaration")) {
+        if (!/\/ui\/(Button|Badge|Select|Popover)$/.test(imp.source)) continue;
+        for (const spec of imp.specifiers) importedNames.add(spec.imported ?? spec.localName);
+      }
+      for (const el of file.ast.findAll("JSXElement")) {
+        const classAttr = el.attributes.find((a) => a.name === "class" || a.name === "className");
+        if (!classAttr || classAttr.value === undefined) continue; // skip dynamic/expression class values
+        for (const family of PRIMITIVE_FAMILIES) {
+          if (!family.pattern.test(classAttr.value)) continue;
+          if (importedNames.has(family.importedFrom)) continue;
+          ctx.report({
+            message: `Hand-rolled "${family.label}" markup — import ${family.importedFrom} from islands/ui instead of using the raw class.`,
+            span: classAttr.span,
+          });
+        }
       }
     }
   },

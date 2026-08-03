@@ -25,6 +25,32 @@
       "end_byte": 369,
       "message": "Raw color literal \"rgba(\" — use a var(--*) token from Base.astro instead.",
       "baselined": false
+    },
+    {
+      "id": "Warning.DesignSystemConvention",
+      "category": "warning",
+      "priority": 15,
+      "severity": "high",
+      "file": "fixtures/apps/web/src/islands/fixture.tsx",
+      "line": 19,
+      "column": 34,
+      "start_byte": 660,
+      "end_byte": 671,
+      "message": "Hand-rolled \"btn\" markup — import Button from islands/ui instead of using the raw class.",
+      "baselined": false
+    },
+    {
+      "id": "Warning.DesignSystemConvention",
+      "category": "warning",
+      "priority": 15,
+      "severity": "high",
+      "file": "fixtures/apps/web/src/islands/fixture.tsx",
+      "line": 29,
+      "column": 15,
+      "start_byte": 1063,
+      "end_byte": 1074,
+      "message": "Hand-rolled \"btn\" markup — import Button from islands/ui instead of using the raw class.",
+      "baselined": false
     }
   ]
 }
