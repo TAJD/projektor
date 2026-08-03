@@ -38,6 +38,10 @@ jobs:
       - run: pnpm --filter @projektor/docs build
       - name: Island API convention
         run: node scripts/check-island-api.mjs
+      - name: Design system convention
+        run: pnpm --filter @projektor/cofferdam-design-system build && node scripts/check-design-system.mjs
+      - name: Design system fixture regression test
+        run: pnpm --filter @projektor/cofferdam-design-system test
 # E2E tests: run manually with 'pnpm --filter @projektor/web test:e2e'
 # Long-running freeze regression tests (PROJ-310): 'pnpm --filter @projektor/web test:e2e:long'
 # Requires: E2E_BASE_URL pointing at a dev deployment with ENVIRONMENT=development and DEV_USER_EMAIL set.
