@@ -108,7 +108,6 @@ function ViewsMenu({ saved }: { saved: Saved }) {
 					as="ul"
 					strategy="fixed-inline"
 					class="popover-select-menu"
-					role="listbox"
 					ariaLabel="Saved views"
 					elementRef={viewsMenuRef}
 					position={viewsMenuPos.current}
