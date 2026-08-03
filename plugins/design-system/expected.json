@@ -1,3 +1,30 @@
 {
-  "findings": []
+  "findings": [
+    {
+      "id": "Warning.DesignSystemConvention",
+      "category": "warning",
+      "priority": 15,
+      "severity": "high",
+      "file": "fixtures/apps/web/src/islands/fixture.tsx",
+      "line": 8,
+      "column": 26,
+      "start_byte": 320,
+      "end_byte": 324,
+      "message": "Raw color literal \"#fff\" — use a var(--*) token from Base.astro instead.",
+      "baselined": false
+    },
+    {
+      "id": "Warning.DesignSystemConvention",
+      "category": "warning",
+      "priority": 15,
+      "severity": "high",
+      "file": "fixtures/apps/web/src/islands/fixture.tsx",
+      "line": 9,
+      "column": 36,
+      "start_byte": 364,
+      "end_byte": 369,
+      "message": "Raw color literal \"rgba(\" — use a var(--*) token from Base.astro instead.",
+      "baselined": false
+    }
+  ]
 }
