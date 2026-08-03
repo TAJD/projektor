@@ -45,4 +45,20 @@ function UsesButtonCorrectly() {
 
 // Rule 3: new primitive-shaped CSS class
 
+// Positive: hand-rolled CSS-in-JS-shaped rule for a new dropdown/menu class
+// — matches both the "dropdown" and "menu-" alternatives — flagged.
+const dropdownStyles = `
+.my-custom-dropdown-menu {
+  position: absolute;
+}
+`;
+
+// Negative: a CSS-in-JS-shaped rule for an unrelated class name — doesn't
+// match any of the primitive-name alternatives, so it's never flagged.
+const widgetStyles = `
+.my-widget {
+  display: flex;
+}
+`;
+
 // Rule 4: inline token-shaped style

@@ -32,6 +32,8 @@ const RAW_COLOR_PATTERN = /#[0-9a-fA-F]{3,8}\b|rgba?\(/g;
 // necessary by review: the naive pattern false-positives on anchor hrefs.
 const COLOR_CONTEXT_PATTERN = /(color|background|border|shadow|fill|stroke)/i;
 
+const NEW_PRIMITIVE_CSS_CLASS_PATTERN = /\.[\w-]*(btn|badge|popover|dropdown|menu-)[\w-]*\s*\{/;
+
 // cofferdam-ignore: Design.OrphanExport: loaded dynamically via cofferdam.toml's `plugins = ["./plugins/design-system"]`, not a static import
 export default defineCheck({
   id: "DesignSystemConvention",
@@ -89,6 +91,16 @@ export default defineCheck({
           });
         }
       }
+    }
+
+    for (const ln of file.lines()) {
+      if (ln.isComment) continue;
+      const m = NEW_PRIMITIVE_CSS_CLASS_PATTERN.exec(ln.text);
+      if (!m) continue;
+      ctx.report({
+        message: `New primitive-shaped CSS class "${m[0].trim().replace(/\s*\{$/, "")}" — reuse or extend an existing islands/ui primitive's CSS instead of defining a new one.`,
+        span: ln.spanFor(m.index, m.index + m[0].length),
+      });
     }
   },
 });
