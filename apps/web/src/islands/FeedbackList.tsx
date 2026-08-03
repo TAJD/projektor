@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { Button } from "./ui/Button";
 import Select from "./ui/Select";
 
 interface Feedback {
@@ -101,16 +102,16 @@ function FeedbackRowActions({
 	return (
 		<div class="flex gap-2 flex-wrap">
 			{row.status === "new" && (
-				<button type="button" class="btn btn-outline btn-sm" onClick={() => onMarkReviewed(row.id)}>
+				<Button type="button" variant="outline" size="sm" onClick={() => onMarkReviewed(row.id)}>
 					Mark reviewed
-				</button>
+				</Button>
 			)}
 			{row.linkedIssueId ? (
 				<span class="text-[0.8rem] text-text-muted">Linked</span>
 			) : (
-				<button type="button" class="btn btn-outline btn-sm" onClick={() => onConvert(row.id)}>
+				<Button type="button" variant="outline" size="sm" onClick={() => onConvert(row.id)}>
 					Convert to issue
-				</button>
+				</Button>
 			)}
 		</div>
 	);
@@ -402,20 +403,22 @@ export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Pro
 			{selected.size > 0 && (
 				<div class="flex gap-2 items-center mb-3 p-2 bg-surface border border-border rounded">
 					<span class="text-[0.85rem] text-text-muted">{selected.size} selected</span>
-					<button
+					<Button
 						type="button"
-						class="btn btn-outline btn-sm"
+						variant="outline"
+						size="sm"
 						onClick={() => bulkMarkReviewed(selected)}
 					>
 						Mark all reviewed
-					</button>
-					<button
+					</Button>
+					<Button
 						type="button"
-						class="btn btn-outline btn-sm"
+						variant="outline"
+						size="sm"
 						onClick={() => bulkConvertToIssue(selected)}
 					>
 						Convert all to issue
-					</button>
+					</Button>
 				</div>
 			)}
 			{loading ? (

@@ -2,6 +2,7 @@ import type { Dispatch, StateUpdater } from "preact/hooks";
 import { PRIORITY_OPTIONS } from "../../utils/issue-utils";
 import type { TaskStatus } from "../board-utils";
 import MarkdownEditor from "../LazyMarkdownEditor";
+import { Button } from "../ui/Button";
 import Select from "../ui/Select";
 import type { ProjectMeta } from "./types";
 
@@ -190,16 +191,16 @@ export default function CreateIssueModal(props: CreateIssueModalProps) {
 					<CreateIssueModalFields {...props} />
 
 					<div class="flex gap-2">
-						<button
+						<Button
 							type="submit"
+							variant="primary"
 							disabled={submittingCreate || !createTitle.trim() || !createProjectId}
-							class="btn btn-primary"
 						>
 							{submittingCreate ? "Creating…" : "Create issue"}
-						</button>
-						<button type="button" onClick={() => setShowCreateModal(false)} class="btn btn-outline">
+						</Button>
+						<Button type="button" variant="outline" onClick={() => setShowCreateModal(false)}>
 							Cancel
-						</button>
+						</Button>
 					</div>
 				</form>
 			</div>

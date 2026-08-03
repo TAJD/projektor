@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { Button } from "./ui/Button";
 
 interface Props {
 	projectId: string;
@@ -104,12 +105,12 @@ function NewSourceForm({
 				/>
 			</div>
 			<div class="flex gap-2">
-				<button type="submit" class="btn btn-primary btn-sm" disabled={creating || !name.trim()}>
+				<Button type="submit" variant="primary" size="sm" disabled={creating || !name.trim()}>
 					{creating ? "Creating…" : "Create source"}
-				</button>
-				<button type="button" class="btn btn-outline btn-sm" onClick={onCancel} disabled={creating}>
+				</Button>
+				<Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={creating}>
 					Cancel
-				</button>
+				</Button>
 			</div>
 		</form>
 	);
@@ -174,9 +175,9 @@ export default function NewSourceModal({ projectId, workspaceSlug, onClose, onCr
 						<code class="block font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded break-all">
 							{newToken}
 						</code>
-						<button type="button" class="btn btn-primary btn-sm mt-3" onClick={onClose}>
+						<Button type="button" variant="primary" size="sm" class="mt-3" onClick={onClose}>
 							Done
-						</button>
+						</Button>
 					</div>
 				) : (
 					<NewSourceForm
