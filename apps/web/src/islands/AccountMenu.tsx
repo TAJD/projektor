@@ -1,8 +1,8 @@
-import { createPortal } from "preact/compat";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { clearAllDrafts } from "../utils/drafts";
 import { resolveWorkspaceSlug } from "../utils/workspace";
+import { Popover } from "./ui/Popover";
 
 interface Props {
 	workspaceSlug?: string;
@@ -36,12 +36,13 @@ function AccountMenuPopover({
 	user: { email: string; name: string };
 	redirectTarget: string;
 }) {
-	return createPortal(
-		<div
+	return (
+		<Popover
 			id={menuId}
-			ref={popoverRef}
-			class="account-menu-popover"
-			style={{ position: "fixed", top: `${pos.top}px`, right: `${pos.right}px` }}
+			strategy="portal-fixed"
+			class="popover-account-menu"
+			elementRef={popoverRef}
+			position={pos}
 		>
 			<div class="account-menu-identity">
 				<div class="account-menu-identity-name">{user.name}</div>
@@ -65,8 +66,7 @@ function AccountMenuPopover({
 					Log out
 				</a>
 			</div>
-		</div>,
-		document.body
+		</Popover>
 	);
 }
 
