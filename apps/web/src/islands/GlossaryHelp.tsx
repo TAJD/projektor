@@ -1,6 +1,6 @@
-import { createPortal } from "preact/compat";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { GLOSSARY_TERMS, type GlossaryTermId } from "./glossary-definitions";
+import { Popover } from "./ui/Popover";
 
 // PROJ-395: a toggletip explaining SDLC/PM jargon (Sprint, Epic, Groups, Tokens) inline
 // next to nav labels, for users unfamiliar with this kind of tool. Same interaction
@@ -17,7 +17,7 @@ import { GLOSSARY_TERMS, type GlossaryTermId } from "./glossary-definitions";
 // clipping. Portalling the popover to `document.body` sidesteps both cases
 // (no DOM ancestor to be clipped or transformed by), while the position is
 // still computed from the trigger's rect, same as Select.tsx's dropdown.
-const POPOVER_WIDTH = 256; // 16rem, matches .metric-help-popover's `width`
+const POPOVER_WIDTH = 256; // 16rem, matches .popover-metric-help's `width`
 const POPOVER_MARGIN = 8;
 
 export function GlossaryHelp({ id }: { id: GlossaryTermId }) {
@@ -89,22 +89,20 @@ export function GlossaryHelp({ id }: { id: GlossaryTermId }) {
 			>
 				<span aria-hidden="true">ⓘ</span>
 			</button>
-			{open &&
-				popoverPos &&
-				createPortal(
-					<div
-						id={popoverId}
-						ref={popoverRef}
-						role="dialog"
-						aria-modal="false"
-						aria-label={`${term.label} definition`}
-						class="metric-help-popover"
-						style={{ position: "fixed", top: `${popoverPos.top}px`, left: `${popoverPos.left}px` }}
-					>
-						<p class="m-0 text-[0.8rem] text-text-base">{term.definition}</p>
-					</div>,
-					document.body
-				)}
+			{open && popoverPos && (
+				<Popover
+					id={popoverId}
+					strategy="portal-fixed"
+					class="popover-metric-help"
+					role="dialog"
+					ariaModal={false}
+					ariaLabel={`${term.label} definition`}
+					elementRef={popoverRef}
+					position={popoverPos}
+				>
+					<p class="m-0 text-[0.8rem] text-text-base">{term.definition}</p>
+				</Popover>
+			)}
 		</span>
 	);
 }

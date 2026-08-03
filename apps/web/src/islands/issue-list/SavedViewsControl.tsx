@@ -1,4 +1,5 @@
 import type { SavedView } from "../saved-views";
+import { Popover } from "../ui/Popover";
 import type { useSavedViews } from "./useSavedViews";
 
 type Saved = ReturnType<typeof useSavedViews>;
@@ -78,6 +79,7 @@ function ViewsMenu({ saved }: { saved: Saved }) {
 
 	return (
 		<div class="relative" ref={viewsContainerRef}>
+			{/* cofferdam-ignore: DesignSystemConvention — reuses Select's trigger visual style for a non-value-driven menu; full Select reuse would need Select's option renderer extended for per-item actions (rename/delete), out of scope for PROJ-527. Tracked as a fast-follow. */}
 			<button
 				ref={viewsButtonRef}
 				type="button"
@@ -102,16 +104,14 @@ function ViewsMenu({ saved }: { saved: Saved }) {
 				</span>
 			</button>
 			{showViewsMenu && (
-				<ul
-					ref={viewsMenuRef}
-					class="select-menu"
-					aria-label="Saved views"
-					style={{
-						position: "fixed",
-						top: `${viewsMenuPos.current.top}px`,
-						left: `${viewsMenuPos.current.left}px`,
-						minWidth: `${viewsMenuPos.current.width}px`,
-					}}
+				<Popover
+					as="ul"
+					strategy="fixed-inline"
+					class="popover-select-menu"
+					role="listbox"
+					ariaLabel="Saved views"
+					elementRef={viewsMenuRef}
+					position={viewsMenuPos.current}
 				>
 					{savedViews.map((v) => (
 						<ViewsMenuItem
@@ -122,7 +122,7 @@ function ViewsMenu({ saved }: { saved: Saved }) {
 							deleteView={deleteView}
 						/>
 					))}
-				</ul>
+				</Popover>
 			)}
 		</div>
 	);
