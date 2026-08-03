@@ -2,10 +2,7 @@
 #
 # Self-contained next to the plugin so `cofferdam check
 # fixtures/apps/web/src/islands/fixture.tsx --config ./cofferdam.toml` is
-# reproducible without polluting the repo-root config. This is a scaffold-only
-# config: the check id below has no rule implementation yet (Tasks 15-18 add
-# the logic); `npm run build` currently fails because src/index.ts doesn't
-# exist yet — that's expected for this task.
+# reproducible without polluting the repo-root config.
 
 plugins = ["./"]
 

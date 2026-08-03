@@ -236,7 +236,7 @@ importers:
   plugins/design-system:
     dependencies:
       '@cofferdam/check-sdk':
-        specifier: ^0.3.8
+        specifier: ^0.3.13
         version: 0.3.13
     devDependencies:
       typescript:
