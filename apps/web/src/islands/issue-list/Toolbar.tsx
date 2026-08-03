@@ -1,6 +1,7 @@
 import type { RefObject } from "preact";
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import type { Issue, SortKey, TaskStatus } from "../board-utils";
+import { Button } from "../ui/Button";
 import Select from "../ui/Select";
 import type { DateField } from "./FiltersPopover";
 import FiltersPopover from "./FiltersPopover";
@@ -143,14 +144,15 @@ function SortControls({
 					{ value: "number", label: "Number" },
 				]}
 			/>
-			<button
+			<Button
 				type="button"
+				variant="outline"
+				size="sm"
 				aria-label={sortDir === "asc" ? "Sort descending" : "Sort ascending"}
 				onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-				class="btn btn-outline btn-sm"
 			>
 				{sortDir === "asc" ? "↑" : "↓"}
-			</button>
+			</Button>
 		</span>
 	);
 }

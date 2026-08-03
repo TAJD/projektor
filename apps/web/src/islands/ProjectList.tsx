@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
 import AccessPending from "./AccessPending";
+import { Button } from "./ui/Button";
 
 interface Project {
 	id: string;
@@ -137,22 +138,12 @@ function ProjectCreateForm({
 			)}
 
 			<div class="flex gap-2 justify-end">
-				<button
-					type="button"
-					onClick={onCancel}
-					disabled={submitting}
-					class="btn btn-outline btn-sm"
-				>
+				<Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={submitting}>
 					Cancel
-				</button>
-				<button
-					type="submit"
-					disabled={submitting}
-					class="btn btn-primary btn-sm"
-					style={{ opacity: submitting ? 0.6 : 1 }}
-				>
+				</Button>
+				<Button type="submit" variant="primary" size="sm" disabled={submitting}>
 					{submitting ? "Creating…" : "Create project"}
-				</button>
+				</Button>
 			</div>
 		</form>
 	);
@@ -349,9 +340,9 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 		<>
 			<div class="flex justify-end mb-4">
 				{!createForm.formOpen && (
-					<button type="button" onClick={createForm.open} class="btn btn-primary btn-sm">
+					<Button type="button" variant="primary" size="sm" onClick={createForm.open}>
 						+ New project
-					</button>
+					</Button>
 				)}
 			</div>
 
