@@ -28,19 +28,15 @@ function sprintStatusStyle(status: SprintDetail["status"]): {
 	borderColor: string;
 } {
 	if (status === "active") {
-		// TODO(design-system): no --status-in-progress-bg/border token exists yet;
-		// rgba(37,99,235,*) is blue-600, distinct from --status-in-progress (#4f46e5). Flagged in PROJ-536.
 		return {
-			background: "rgba(37,99,235,0.12)",
+			background: "var(--sprint-active-bg)",
 			color: "var(--status-in-progress)",
 			borderColor: "rgba(37,99,235,0.3)",
 		};
 	}
 	if (status === "completed") {
-		// TODO(design-system): no --status-done-bg/border token exists yet;
-		// rgba(22,163,74,*) matches --status-done (#16a34a) at reduced opacity. Flagged in PROJ-536.
 		return {
-			background: "rgba(22,163,74,0.12)",
+			background: "var(--sprint-completed-bg)",
 			color: "var(--status-done)",
 			borderColor: "rgba(22,163,74,0.3)",
 		};

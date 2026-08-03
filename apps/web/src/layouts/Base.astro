@@ -121,6 +121,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         /* Sprint status badge tokens (light) */
         --sprint-active-bg: rgba(37, 99, 235, 0.12);
         --sprint-completed-bg: rgba(22, 163, 74, 0.12);
+        --status-done-bg: rgba(22, 163, 74, 0.12);
         /* Danger action tokens (light) */
         --danger-text: #dc2626;
         --danger-bg: rgba(220, 38, 38, 0.10);
@@ -167,9 +168,10 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           --status-in-review: #c4b5fd;
           --status-done: #4ade80;
           --status-cancelled: #f87171;
-          /* Sprint status badge tokens (dark) */
-          --sprint-active-bg: rgba(37, 99, 235, 0.12);
-          --sprint-completed-bg: rgba(22, 163, 74, 0.12);
+          /* Sprint status badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
+          --sprint-active-bg: rgba(129, 140, 248, 0.18);
+          --sprint-completed-bg: rgba(74, 222, 128, 0.18);
+          --status-done-bg: rgba(74, 222, 128, 0.18);
           /* Danger action tokens (dark) - brighter red stays readable on near-black */
           --danger-text: #f87171;
           --danger-bg: rgba(248, 113, 113, 0.12);
@@ -211,8 +213,9 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --status-in-review: #c4b5fd;
         --status-done: #4ade80;
         --status-cancelled: #f87171;
-        --sprint-active-bg: rgba(37, 99, 235, 0.12);
-        --sprint-completed-bg: rgba(22, 163, 74, 0.12);
+        --sprint-active-bg: rgba(129, 140, 248, 0.18);
+        --sprint-completed-bg: rgba(74, 222, 128, 0.18);
+        --status-done-bg: rgba(74, 222, 128, 0.18);
         --danger-text: #f87171;
         --danger-bg: rgba(248, 113, 113, 0.12);
         --danger-border: rgba(248, 113, 113, 0.32);
@@ -252,6 +255,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --status-cancelled: #dc2626;
         --sprint-active-bg: rgba(37, 99, 235, 0.12);
         --sprint-completed-bg: rgba(22, 163, 74, 0.12);
+        --status-done-bg: rgba(22, 163, 74, 0.12);
         --danger-text: #dc2626;
         --danger-bg: rgba(220, 38, 38, 0.10);
         --danger-border: rgba(220, 38, 38, 0.30);

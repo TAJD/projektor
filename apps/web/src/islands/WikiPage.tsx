@@ -119,7 +119,7 @@ const WIKI_STATUS_FILTER_OPTIONS: SelectOption[] = [
 
 const WIKI_STATUS_PILL_STYLE: Record<string, { bg: string; color: string }> = {
 	draft: { bg: "var(--priority-low-bg)", color: "var(--priority-low-text)" },
-	current: { bg: "var(--sprint-completed-bg)", color: "var(--status-done)" },
+	current: { bg: "var(--status-done-bg)", color: "var(--status-done)" },
 	stale: { bg: "var(--priority-high-bg)", color: "var(--priority-high-text)" },
 	deprecated: { bg: "var(--danger-bg)", color: "var(--danger-text)" },
 };
@@ -1326,7 +1326,7 @@ function AttachmentEntry({
 				class={REFERENCED_BADGE_CLASS}
 				style={
 					referenced
-						? { background: "var(--sprint-completed-bg)", color: "var(--status-done)" }
+						? { background: "var(--status-done-bg)", color: "var(--status-done)" }
 						: { background: "var(--priority-low-bg)", color: "var(--priority-low-text)" }
 				}
 			>
