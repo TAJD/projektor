@@ -16,7 +16,7 @@ import { Category, defineCheck, Severity } from "@cofferdam/check-sdk";
 const PRIMITIVE_FAMILIES: { pattern: RegExp; importedFrom: string; label: string }[] = [
   { pattern: /\bbtn\b/, importedFrom: "Button", label: "btn" },
   { pattern: /\bbadge\b/, importedFrom: "Badge", label: "badge" },
-  { pattern: /\bselect-(button|menu|caret|option)\b/, importedFrom: "Select", label: "select-*" },
+  { pattern: /(?:^|\s)select-(button|menu|caret|option)\b/, importedFrom: "Select", label: "select-*" },
   {
     pattern: /\b(account-menu-popover|metric-help-popover|popover-account-menu|popover-metric-help|popover-select-menu)\b/,
     importedFrom: "Popover",
