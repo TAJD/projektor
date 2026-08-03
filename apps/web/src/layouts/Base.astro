@@ -105,7 +105,12 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --priority-low-bg: rgba(107, 114, 128, 0.12);
         --priority-none-text: var(--priority-low-text);
         --priority-none-bg: var(--priority-low-bg);
-        /* Priority solid pill tokens (light) - filled swatches (e.g. filter pills), not text-on-surface */
+        /* Priority solid pill tokens - filled swatches (e.g. filter pills) under fixed white
+           (--on-accent) text, not text-on-surface. Intentionally identical across all four
+           theme blocks: unlike the translucent tint tokens above (retuned lighter/higher-alpha
+           for dark mode since they sit under token-colored text), these are opaque brand fills
+           with fixed-color text on top, so lightening them for dark mode would move the fill
+           toward the white text and tank contrast. */
         --priority-urgent-solid: #dc2626;
         --priority-high-solid: #d97706;
         --priority-medium-solid: #2563eb;
@@ -125,7 +130,9 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --status-cancelled: #dc2626;
         /* Sprint status badge tokens (light) */
         --sprint-active-bg: rgba(37, 99, 235, 0.12);
+        --sprint-active-border: rgba(37, 99, 235, 0.3);
         --sprint-completed-bg: rgba(22, 163, 74, 0.12);
+        --sprint-completed-border: rgba(22, 163, 74, 0.3);
         --status-done-bg: rgba(22, 163, 74, 0.12);
         /* Danger action tokens (light) */
         --danger-text: #dc2626;
@@ -173,11 +180,12 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           --priority-medium-bg: rgba(129, 140, 248, 0.18);
           --priority-low-text: #cbd5e1;
           --priority-low-bg: rgba(148, 163, 184, 0.18);
-          /* Priority solid pill tokens (dark) - brighter for contrast on near-black */
-          --priority-urgent-solid: #f87171;
-          --priority-high-solid: #f59e0b;
-          --priority-medium-solid: #60a5fa;
-          --priority-low-solid: #94a3b8;
+          /* Priority solid pill tokens - kept identical to :root (see comment there); not
+             retuned for dark mode since these are opaque fills under fixed white text */
+          --priority-urgent-solid: #dc2626;
+          --priority-high-solid: #d97706;
+          --priority-medium-solid: #2563eb;
+          --priority-low-solid: #6b7280;
           /* Code tokens (dark) - light text on slightly deeper slate bg */
           --code-color: #e2e8f0;
           --code-bg: #141b2b;
@@ -193,7 +201,9 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           --status-cancelled: #f87171;
           /* Sprint status badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
           --sprint-active-bg: rgba(129, 140, 248, 0.18);
+          --sprint-active-border: rgba(129, 140, 248, 0.4);
           --sprint-completed-bg: rgba(74, 222, 128, 0.18);
+          --sprint-completed-border: rgba(74, 222, 128, 0.4);
           --status-done-bg: rgba(74, 222, 128, 0.18);
           /* Danger action tokens (dark) - brighter red stays readable on near-black */
           --danger-text: #f87171;
@@ -239,10 +249,10 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --priority-medium-bg: rgba(129, 140, 248, 0.18);
         --priority-low-text: #cbd5e1;
         --priority-low-bg: rgba(148, 163, 184, 0.18);
-        --priority-urgent-solid: #f87171;
-        --priority-high-solid: #f59e0b;
-        --priority-medium-solid: #60a5fa;
-        --priority-low-solid: #94a3b8;
+        --priority-urgent-solid: #dc2626;
+        --priority-high-solid: #d97706;
+        --priority-medium-solid: #2563eb;
+        --priority-low-solid: #6b7280;
         --code-color: #e2e8f0;
         --code-bg: #141b2b;
         --epic-text: #c4b5fd;
@@ -254,7 +264,9 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --status-done: #4ade80;
         --status-cancelled: #f87171;
         --sprint-active-bg: rgba(129, 140, 248, 0.18);
+        --sprint-active-border: rgba(129, 140, 248, 0.4);
         --sprint-completed-bg: rgba(74, 222, 128, 0.18);
+        --sprint-completed-border: rgba(74, 222, 128, 0.4);
         --status-done-bg: rgba(74, 222, 128, 0.18);
         --danger-text: #f87171;
         --danger-bg: rgba(248, 113, 113, 0.12);
@@ -306,7 +318,9 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --status-done: #16a34a;
         --status-cancelled: #dc2626;
         --sprint-active-bg: rgba(37, 99, 235, 0.12);
+        --sprint-active-border: rgba(37, 99, 235, 0.3);
         --sprint-completed-bg: rgba(22, 163, 74, 0.12);
+        --sprint-completed-border: rgba(22, 163, 74, 0.3);
         --status-done-bg: rgba(22, 163, 74, 0.12);
         --danger-text: #dc2626;
         --danger-bg: rgba(220, 38, 38, 0.10);

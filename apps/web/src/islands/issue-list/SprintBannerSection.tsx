@@ -31,14 +31,14 @@ function sprintStatusStyle(status: SprintDetail["status"]): {
 		return {
 			background: "var(--sprint-active-bg)",
 			color: "var(--status-in-progress)",
-			borderColor: "rgba(37,99,235,0.3)",
+			borderColor: "var(--sprint-active-border)",
 		};
 	}
 	if (status === "completed") {
 		return {
 			background: "var(--sprint-completed-bg)",
 			color: "var(--status-done)",
-			borderColor: "rgba(22,163,74,0.3)",
+			borderColor: "var(--sprint-completed-border)",
 		};
 	}
 	return { background: "var(--surface)", color: "var(--text-muted)", borderColor: "var(--border)" };
