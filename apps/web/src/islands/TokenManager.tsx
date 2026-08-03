@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { resolveWorkspaceSlug } from "../utils/workspace";
+import { Button } from "./ui/Button";
 
 interface ApiToken {
 	id: string;
@@ -247,13 +248,9 @@ function NewTokenPanel({
 			</p>
 			<div class="flex items-center gap-2 my-2">
 				<code class={TOKEN_CODE_CLASS}>{newToken.token}</code>
-				<button
-					type="button"
-					class="btn btn-outline btn-sm"
-					onClick={() => copyToClipboard(newToken.token)}
-				>
+				<Button variant="outline" size="sm" onClick={() => copyToClipboard(newToken.token)}>
 					Copy
-				</button>
+				</Button>
 			</div>
 
 			{(mcpCommandTemplate || mcpUrl) && (
@@ -262,13 +259,9 @@ function NewTokenPanel({
 						Connect to Claude:
 					</p>
 					<div class={MCP_COMMAND_CLASS}>{command}</div>
-					<button
-						type="button"
-						class="btn btn-outline btn-sm mt-2"
-						onClick={() => copyToClipboard(command)}
-					>
+					<Button variant="outline" size="sm" class="mt-2" onClick={() => copyToClipboard(command)}>
 						Copy command
-					</button>
+					</Button>
 					<p class="m-0 mt-[0.375rem] text-xs text-text-muted">
 						Run this command in your terminal to connect Claude Code to this workspace.
 					</p>
@@ -276,9 +269,9 @@ function NewTokenPanel({
 			)}
 
 			<div class="mt-4">
-				<button type="button" class="btn btn-outline btn-sm" onClick={onDone}>
+				<Button variant="outline" size="sm" onClick={onDone}>
 					Done
-				</button>
+				</Button>
 			</div>
 		</div>
 	);
@@ -379,16 +372,12 @@ function CreateTokenForm({
 			)}
 
 			<div class="flex gap-2">
-				<button
-					type="submit"
-					class="btn btn-primary btn-sm"
-					disabled={creating || !createName.trim()}
-				>
+				<Button type="submit" variant="primary" size="sm" disabled={creating || !createName.trim()}>
 					{creating ? "Creating…" : "Create token"}
-				</button>
-				<button type="button" class="btn btn-outline btn-sm" onClick={onCancel} disabled={creating}>
+				</Button>
+				<Button variant="outline" size="sm" onClick={onCancel} disabled={creating}>
 					Cancel
-				</button>
+				</Button>
 			</div>
 		</form>
 	);
@@ -504,34 +493,30 @@ function TokenRevokeControl({
 		return (
 			<span class="inline-flex gap-[0.375rem] items-center flex-wrap">
 				<span class="text-[0.8rem] text-text-muted">Revoke?</span>
-				<button
-					type="button"
-					class="btn btn-danger btn-sm"
+				<Button
+					variant="danger"
+					size="sm"
 					disabled={revoking}
 					onClick={() => onConfirmRevoke(tok.id)}
 				>
 					{revoking ? "…" : "Yes"}
-				</button>
-				<button
-					type="button"
-					class="btn btn-outline btn-sm"
-					disabled={revoking}
-					onClick={onCancelRevoke}
-				>
+				</Button>
+				<Button variant="outline" size="sm" disabled={revoking} onClick={onCancelRevoke}>
 					No
-				</button>
+				</Button>
 				{revokeError && <span class="text-[var(--danger-text)] text-xs">{revokeError}</span>}
 			</span>
 		);
 	}
 	return (
-		<button
-			type="button"
-			class="btn btn-outline btn-sm text-[var(--danger-text)] border-[var(--danger-border)]"
+		<Button
+			variant="outline"
+			size="sm"
+			class="text-[var(--danger-text)] border-[var(--danger-border)]"
 			onClick={() => onSelectRevoke(tok.id)}
 		>
 			Revoke
-		</button>
+		</Button>
 	);
 }
 
@@ -708,9 +693,9 @@ function TokenManagerContent({
 					{tokens.length} token{tokens.length !== 1 ? "s" : ""}
 				</p>
 				{!showCreate && (
-					<button type="button" onClick={openCreate} class="btn btn-primary btn-sm">
+					<Button variant="primary" size="sm" onClick={openCreate}>
 						+ New token
-					</button>
+					</Button>
 				)}
 			</div>
 
