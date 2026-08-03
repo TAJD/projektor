@@ -631,7 +631,7 @@ function LinkItem({ link, onRemove }: { link: IssueLink; onRemove: () => void })
 				<span class="text-text-base">{link.linkedIssueTitle}</span>
 				{link.linkedIssueStatusCategory && (
 					<span
-						class="px-[0.375rem] py-[0.0625rem] rounded-[3px] text-[0.7rem] bg-[rgba(107,114,128,0.12)] font-medium"
+						class="px-[0.375rem] py-[0.0625rem] rounded-[3px] text-[0.7rem] bg-[var(--priority-low-bg)] font-medium"
 						style={{ color: categoryColor(link.linkedIssueStatusCategory) }}
 					>
 						{link.linkedIssueStatusCategory.replace("_", " ")}
