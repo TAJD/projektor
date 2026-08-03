@@ -1,8 +1,51 @@
-import { render, screen } from "@testing-library/preact";
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { cleanup, render, screen } from "@testing-library/preact";
+import { afterEach, describe, expect, it } from "vitest";
 import { Popover } from "./Popover";
 
+afterEach(cleanup);
+
 describe("Popover", () => {
+	// Importing preact/compat anywhere in an island's graph switches Preact to React's
+	// event semantics for that whole island. Popover now sits in the module graph of
+	// AccountMenu (topbar, every page), GlossaryHelp, MetricHelp, and SavedViewsControl —
+	// see LazyMarkdownEditor.test.tsx's PROJ-431 guard and Popover.tsx's PROJ-552 comment.
+	it("does not import preact/compat", () => {
+		const source = readFileSync(join(__dirname, "Popover.tsx"), "utf-8");
+		expect(source).not.toMatch(/^import\s[^;]*"preact\/compat"/m);
+	});
+
+	it("removes the portaled node from document.body when the Popover unmounts", () => {
+		const { rerender } = render(
+			<Popover strategy="portal-fixed" position={{ top: 10 }}>
+				<span>Unmount me</span>
+			</Popover>
+		);
+		const el = screen.getByText("Unmount me").parentElement as HTMLElement;
+		expect(document.body.contains(el)).toBe(true);
+
+		rerender(<div />);
+		expect(document.body.contains(el)).toBe(false);
+	});
+
+	it("updates the portaled content when children change on re-render", () => {
+		const { rerender } = render(
+			<Popover strategy="portal-fixed" position={{ top: 10 }}>
+				<span>First content</span>
+			</Popover>
+		);
+		expect(screen.getByText("First content")).toBeTruthy();
+
+		rerender(
+			<Popover strategy="portal-fixed" position={{ top: 10 }}>
+				<span>Second content</span>
+			</Popover>
+		);
+		expect(screen.queryByText("First content")).toBeNull();
+		expect(screen.getByText("Second content")).toBeTruthy();
+	});
+
 	it("renders in place with no portal and no inline position style when anchored", () => {
 		const { container } = render(
 			<Popover strategy="anchored">
