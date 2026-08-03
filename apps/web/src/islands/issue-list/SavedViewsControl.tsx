@@ -13,6 +13,7 @@ function ViewsMenuItem({
 	return (
 		<li
 			key={view.name}
+			// cofferdam-ignore: Warning.DesignSystemConvention: reuses Select's option visual style for a non-value-driven menu with a per-item delete action; full Select reuse would need Select's option renderer extended for that, out of scope for PROJ-527 (fast-follow)
 			class="select-option"
 			data-selected={view.name === activeViewName || undefined}
 			style={{
@@ -79,10 +80,10 @@ function ViewsMenu({ saved }: { saved: Saved }) {
 
 	return (
 		<div class="relative" ref={viewsContainerRef}>
-			{/* cofferdam-ignore: DesignSystemConvention — reuses Select's trigger visual style for a non-value-driven menu; full Select reuse would need Select's option renderer extended for per-item actions (rename/delete), out of scope for PROJ-527. Tracked as a fast-follow. */}
 			<button
 				ref={viewsButtonRef}
 				type="button"
+				// cofferdam-ignore: Warning.DesignSystemConvention: reuses Select's trigger visual style for a non-value-driven menu; full Select reuse would need Select's option renderer extended for per-item actions (rename/delete), out of scope for PROJ-527 (fast-follow)
 				class="select-button"
 				aria-haspopup="listbox"
 				aria-expanded={showViewsMenu}
@@ -99,6 +100,7 @@ function ViewsMenu({ saved }: { saved: Saved }) {
 				}}
 			>
 				<span>{activeViewName ?? "Views"}</span>
+				{/* cofferdam-ignore: Warning.DesignSystemConvention: reuses Select's caret visual style for a non-value-driven menu, out of scope for PROJ-527 (fast-follow) */}
 				<span class="select-caret" aria-hidden="true">
 					▾
 				</span>
@@ -107,6 +109,7 @@ function ViewsMenu({ saved }: { saved: Saved }) {
 				<Popover
 					as="ul"
 					strategy="fixed-inline"
+					// cofferdam-ignore: Warning.DesignSystemConvention: reuses Select's menu visual style for a non-value-driven per-item-action menu, out of scope for PROJ-527 (fast-follow)
 					class="popover-select-menu"
 					ariaLabel="Saved views"
 					elementRef={viewsMenuRef}
