@@ -8,6 +8,7 @@ import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "
 import AccessPending from "./AccessPending";
 import type { ProjectLookup as ProjectOption } from "./board-utils";
 import MarkdownEditor from "./LazyMarkdownEditor";
+import { Button } from "./ui/Button";
 import Select, { type SelectOption } from "./ui/Select";
 
 // PROJ-491 (R9): the create-form's template picker draws from list_wiki_templates.
@@ -118,7 +119,7 @@ const WIKI_STATUS_FILTER_OPTIONS: SelectOption[] = [
 
 const WIKI_STATUS_PILL_STYLE: Record<string, { bg: string; color: string }> = {
 	draft: { bg: "var(--priority-low-bg)", color: "var(--priority-low-text)" },
-	current: { bg: "rgba(22, 163, 74, 0.12)", color: "var(--status-done)" },
+	current: { bg: "var(--sprint-completed-bg)", color: "var(--status-done)" },
 	stale: { bg: "var(--priority-high-bg)", color: "var(--priority-high-text)" },
 	deprecated: { bg: "var(--danger-bg)", color: "var(--danger-text)" },
 };
@@ -230,14 +231,9 @@ function WikiVerifyControls({
 	return (
 		<>
 			{hasVerificationSignal && (
-				<button
-					type="button"
-					class="btn btn-outline btn-sm"
-					onClick={onVerify}
-					disabled={verifying}
-				>
+				<Button variant="outline" size="sm" onClick={onVerify} disabled={verifying}>
 					{verifying ? "Verifying…" : "Verify"}
-				</button>
+				</Button>
 			)}
 			{verifyError && (
 				<span role="alert" class="text-[var(--danger-text)]">
@@ -759,13 +755,9 @@ function WikiSidebar({
 	return (
 		<aside class={asideClass}>
 			<ScopeControl workspaceSlug={workspaceSlug} projectId={projectId} />
-			<button
-				type="button"
-				onClick={onCreate}
-				class="btn btn-primary w-full mb-4 max-sm:min-h-[44px]"
-			>
+			<Button variant="primary" onClick={onCreate} class="w-full mb-4 max-sm:min-h-[44px]">
 				+ New page
-			</button>
+			</Button>
 			<input
 				type="search"
 				value={searchQuery}
@@ -916,12 +908,12 @@ function CreatePageForm({
 				)}
 			</div>
 			<div class="flex gap-2">
-				<button type="button" onClick={onSubmit} disabled={saving} class="btn btn-primary">
+				<Button variant="primary" onClick={onSubmit} disabled={saving}>
 					{saving ? "Creating…" : "Create page"}
-				</button>
-				<button type="button" onClick={onCancel} disabled={saving} class="btn btn-outline">
+				</Button>
+				<Button variant="outline" onClick={onCancel} disabled={saving}>
 					Cancel
-				</button>
+				</Button>
 			</div>
 		</div>
 	);
@@ -1000,12 +992,12 @@ function MovePageForm({
 				<div class="min-w-[220px]">
 					<Select value={value} options={options} ariaLabel="New parent page" onChange={onChange} />
 				</div>
-				<button type="button" onClick={onSubmit} disabled={saving} class="btn btn-primary btn-sm">
+				<Button variant="primary" size="sm" onClick={onSubmit} disabled={saving}>
 					{saving ? "Moving…" : "Move"}
-				</button>
-				<button type="button" onClick={onCancel} disabled={saving} class="btn btn-outline btn-sm">
+				</Button>
+				<Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
 					Cancel
-				</button>
+				</Button>
 			</div>
 		</div>
 	);
@@ -1091,31 +1083,27 @@ function PageHeader({
 			<div class="flex gap-2 shrink-0">
 				{editing ? (
 					<>
-						<button type="button" onClick={onSave} disabled={saving} class="btn btn-primary">
+						<Button variant="primary" onClick={onSave} disabled={saving}>
 							{saving ? "Saving…" : "Save"}
-						</button>
-						<button type="button" onClick={onCancelEdit} disabled={saving} class="btn btn-outline">
+						</Button>
+						<Button variant="outline" onClick={onCancelEdit} disabled={saving}>
 							Cancel
-						</button>
+						</Button>
 					</>
 				) : (
 					<>
-						<button
-							type="button"
-							onClick={() => onStartCreateChild(pageId)}
-							class="btn btn-outline btn-sm"
-						>
+						<Button variant="outline" size="sm" onClick={() => onStartCreateChild(pageId)}>
 							+ Child page
-						</button>
-						<button type="button" onClick={onStartMove} class="btn btn-outline btn-sm">
+						</Button>
+						<Button variant="outline" size="sm" onClick={onStartMove}>
 							Move
-						</button>
-						<button type="button" onClick={onStartEdit} class="btn btn-outline">
+						</Button>
+						<Button variant="outline" onClick={onStartEdit}>
 							Edit
-						</button>
-						<button type="button" onClick={onDelete} class="btn btn-danger">
+						</Button>
+						<Button variant="danger" onClick={onDelete}>
 							Delete
-						</button>
+						</Button>
 					</>
 				)}
 			</div>
@@ -1142,12 +1130,12 @@ function DraftRestoreBanner({
 		<div class={bannerClass}>
 			<span>Restore unsaved draft from {new Date(updatedAt * 1000).toLocaleString()}?</span>
 			<div class="flex gap-2 shrink-0">
-				<button type="button" onClick={onRestore} class="btn btn-primary btn-sm">
+				<Button variant="primary" size="sm" onClick={onRestore}>
 					Restore
-				</button>
-				<button type="button" onClick={onDiscard} class="btn btn-outline btn-sm">
+				</Button>
+				<Button variant="outline" size="sm" onClick={onDiscard}>
 					Discard
-				</button>
+				</Button>
 			</div>
 		</div>
 	);
@@ -1231,21 +1219,18 @@ function RevisionRow({
 					{" — "}
 					{new Date(revision.created_at * 1000).toLocaleString()}
 				</span>
-				<button
-					type="button"
-					onClick={toggleDiff}
-					class="btn btn-outline btn-sm text-text-muted py-0 px-2"
-				>
+				<Button variant="outline" size="sm" onClick={toggleDiff} class="text-text-muted py-0 px-2">
 					{diffOpen ? "Hide diff" : "Diff vs current"}
-				</button>
-				<button
-					type="button"
+				</Button>
+				<Button
+					variant="outline"
+					size="sm"
 					onClick={() => onRestore(revision)}
 					disabled={restoring}
-					class="btn btn-outline btn-sm text-text-muted py-0 px-2"
+					class="text-text-muted py-0 px-2"
 				>
 					{restoring ? "Restoring…" : "Restore"}
-				</button>
+				</Button>
 			</div>
 			{revision.summary && <p class="mt-1 mb-0 italic">{revision.summary}</p>}
 			{diffOpen &&
@@ -1282,9 +1267,9 @@ function RevisionsHistory({
 	if (revisions.length === 0) return null;
 	return (
 		<div class="mt-8">
-			<button type="button" onClick={onToggle} class="btn btn-outline btn-sm text-text-muted">
+			<Button variant="outline" size="sm" onClick={onToggle} class="text-text-muted">
 				{showHistory ? "▲ Hide history" : "▼ History"} ({revisions.length})
-			</button>
+			</Button>
 			{showHistory && (
 				<ul class="mt-3 list-none p-0">
 					{revisions.map((r) => (
@@ -1341,21 +1326,21 @@ function AttachmentEntry({
 				class={REFERENCED_BADGE_CLASS}
 				style={
 					referenced
-						? { background: "rgba(22, 163, 74, 0.12)", color: "var(--status-done)" }
+						? { background: "var(--sprint-completed-bg)", color: "var(--status-done)" }
 						: { background: "var(--priority-low-bg)", color: "var(--priority-low-text)" }
 				}
 			>
 				{referenced ? "In page" : "Unreferenced"}
 			</span>
 			<span class="text-xs text-text-muted shrink-0">{formatBytes(attachment.size)}</span>
-			<button
-				type="button"
+			<Button
+				size="sm"
 				onClick={() => onDelete(attachment.id)}
 				aria-label={`Delete ${attachment.filename}`}
-				class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
+				class="bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
 			>
 				×
-			</button>
+			</Button>
 		</div>
 	);
 }
@@ -1383,19 +1368,16 @@ function AttachmentUploadForm({
 					class="sr-only"
 					onChange={(e) => onFileChange((e.target as HTMLInputElement).files?.[0] ?? null)}
 				/>
-				<span class="btn btn-outline btn-sm">{uploadFile ? uploadFile.name : "Choose file"}</span>
+				<Button as="span" variant="outline" size="sm">
+					{uploadFile ? uploadFile.name : "Choose file"}
+				</Button>
 			</label>
-			<button
-				type="button"
-				onClick={onUpload}
-				disabled={!uploadFile || uploading}
-				class="btn btn-primary"
-			>
+			<Button variant="primary" onClick={onUpload} disabled={!uploadFile || uploading}>
 				{uploading ? "Uploading…" : "Upload"}
-			</button>
-			<button type="button" onClick={onCancel} class="btn btn-outline">
+			</Button>
+			<Button variant="outline" onClick={onCancel}>
 				Cancel
-			</button>
+			</Button>
 			{uploadError && (
 				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
 					{uploadError}
