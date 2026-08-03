@@ -24,6 +24,7 @@ import {
 	relativeTime,
 } from "./issue-detail-helpers";
 import MarkdownEditor from "./LazyMarkdownEditor";
+import { Button } from "./ui/Button";
 import Select from "./ui/Select";
 
 // Minimal duplicate of the mermaid rules in WikiPage.tsx's WIKI_PAGE_STYLES
@@ -174,15 +175,15 @@ export function ShareButton({
 
 	return (
 		<div class="relative">
-			<button
-				type="button"
+			<Button
 				onClick={createShareLink}
 				disabled={sharingLoading}
-				class="btn btn-outline btn-sm"
+				variant="outline"
+				size="sm"
 				title="Share issue"
 			>
 				{sharingLoading ? "…" : "Share"}
-			</button>
+			</Button>
 			{shareUrl && (
 				<div
 					class="absolute left-0 top-full mt-1 z-50 bg-[var(--bg)] border border-border rounded-md
@@ -196,14 +197,15 @@ export function ShareButton({
 							value={shareUrl}
 							class="flex-1 text-xs bg-surface border border-border rounded px-2 py-1 font-mono truncate"
 						/>
-						<button
-							type="button"
+						<Button
 							onClick={copyShareUrl}
-							class="btn btn-outline btn-sm shrink-0"
+							variant="outline"
+							size="sm"
+							class="shrink-0"
 							title={copiedShare ? "Copied!" : "Copy"}
 						>
 							{copiedShare ? "✓" : "Copy"}
-						</button>
+						</Button>
 					</div>
 				</div>
 			)}
@@ -303,22 +305,12 @@ export function TitleSection({
 						py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
 				/>
 				<div class="flex gap-2">
-					<button
-						type="button"
-						onClick={saveTitle}
-						disabled={savingTitle}
-						class="btn btn-primary btn-sm"
-					>
+					<Button onClick={saveTitle} disabled={savingTitle} variant="primary" size="sm">
 						{savingTitle ? "Saving…" : "Save"}
-					</button>
-					<button
-						type="button"
-						onClick={cancelEditTitle}
-						disabled={savingTitle}
-						class="btn btn-outline btn-sm"
-					>
+					</Button>
+					<Button onClick={cancelEditTitle} disabled={savingTitle} variant="outline" size="sm">
 						Cancel
-					</button>
+					</Button>
 				</div>
 			</div>
 		);
@@ -454,17 +446,12 @@ function BodyEditForm({
 				<MarkdownEditor value={editBody} onChange={updateBody} minHeight="240px" />
 			</div>
 			<div class="flex gap-2">
-				<button type="button" onClick={saveBody} disabled={savingBody} class="btn btn-primary">
+				<Button onClick={saveBody} disabled={savingBody} variant="primary">
 					{savingBody ? "Saving…" : "Save"}
-				</button>
-				<button
-					type="button"
-					onClick={cancelEditBody}
-					disabled={savingBody}
-					class="btn btn-outline"
-				>
+				</Button>
+				<Button onClick={cancelEditBody} disabled={savingBody} variant="outline">
 					Cancel
-				</button>
+				</Button>
 			</div>
 		</div>
 	);
@@ -651,14 +638,14 @@ function LinkItem({ link, onRemove }: { link: IssueLink; onRemove: () => void })
 					</span>
 				)}
 			</a>
-			<button
-				type="button"
+			<Button
 				onClick={onRemove}
 				aria-label={`Remove ${ref} link`}
-				class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
+				size="sm"
+				class="bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
 			>
 				×
-			</button>
+			</Button>
 		</span>
 	);
 }
@@ -708,12 +695,12 @@ function LinkForm({
 				autoFocus
 				class="px-[0.625rem] py-[0.375rem] border border-border rounded text-sm w-28 max-sm:w-full bg-bg text-text-base"
 			/>
-			<button type="button" onClick={onAdd} disabled={addingLink} class="btn btn-primary">
+			<Button onClick={onAdd} disabled={addingLink} variant="primary">
 				{addingLink ? "Adding…" : "Add"}
-			</button>
-			<button type="button" onClick={onCancel} class="btn btn-outline">
+			</Button>
+			<Button onClick={onCancel} variant="outline">
 				Cancel
-			</button>
+			</Button>
 			{linkFormError && (
 				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
 					{linkFormError}
@@ -974,14 +961,14 @@ function AttachmentRow({
 				<span class="text-text-muted text-sm italic flex-1 min-w-0 truncate">{label}</span>
 			)}
 			{meta && <span class="text-xs text-text-muted shrink-0">{meta}</span>}
-			<button
-				type="button"
+			<Button
 				onClick={onDelete}
 				aria-label={`Remove ${label}`}
-				class="btn btn-sm bg-transparent border-none text-text-muted px-[0.125rem] leading-none min-h-[44px] min-w-[44px]"
+				size="sm"
+				class="bg-transparent border-none text-text-muted px-[0.125rem] leading-none min-h-[44px] min-w-[44px]"
 			>
 				×
-			</button>
+			</Button>
 		</div>
 	);
 }
@@ -1015,26 +1002,27 @@ function AttachmentUploadForm({
 						setUploadError(null);
 					}}
 				/>
-				<span class="btn btn-outline btn-sm max-sm:w-full max-sm:min-h-[44px] truncate block text-center">
+				<Button
+					as="span"
+					variant="outline"
+					size="sm"
+					class="max-sm:w-full max-sm:min-h-[44px] truncate block text-center"
+				>
 					{uploadFile ? uploadFile.name : "Choose file"}
-				</span>
+				</Button>
 			</label>
 			<div class="flex gap-2 max-sm:w-full">
-				<button
-					type="button"
+				<Button
 					onClick={onUpload}
 					disabled={!uploadFile || uploading}
-					class="btn btn-primary max-sm:flex-1 max-sm:min-h-[44px]"
+					variant="primary"
+					class="max-sm:flex-1 max-sm:min-h-[44px]"
 				>
 					{uploading ? "Uploading…" : "Upload"}
-				</button>
-				<button
-					type="button"
-					onClick={onCancel}
-					class="btn btn-outline max-sm:flex-1 max-sm:min-h-[44px]"
-				>
+				</Button>
+				<Button onClick={onCancel} variant="outline" class="max-sm:flex-1 max-sm:min-h-[44px]">
 					Cancel
-				</button>
+				</Button>
 			</div>
 			{uploadError && (
 				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
@@ -1134,14 +1122,15 @@ function WikiPageLinkForm({
 				</ul>
 			)}
 			<div class="flex gap-2">
-				<button
-					type="button"
+				<Button
 					onClick={onCancel}
 					disabled={linking}
-					class="btn btn-outline btn-sm max-sm:flex-1 max-sm:min-h-[44px]"
+					variant="outline"
+					size="sm"
+					class="max-sm:flex-1 max-sm:min-h-[44px]"
 				>
 					Cancel
-				</button>
+				</Button>
 			</div>
 			{linkError && (
 				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)]">
@@ -1207,22 +1196,22 @@ function UrlLinkForm({
 					max-sm:w-full bg-bg text-text-base min-h-[44px]"
 			/>
 			<div class="flex gap-2 max-sm:w-full">
-				<button
-					type="button"
+				<Button
 					onClick={onAdd}
 					disabled={linking || !urlValue.trim()}
-					class="btn btn-primary max-sm:flex-1 max-sm:min-h-[44px]"
+					variant="primary"
+					class="max-sm:flex-1 max-sm:min-h-[44px]"
 				>
 					{linking ? "Adding…" : "Add"}
-				</button>
-				<button
-					type="button"
+				</Button>
+				<Button
 					onClick={onCancel}
 					disabled={linking}
-					class="btn btn-outline max-sm:flex-1 max-sm:min-h-[44px]"
+					variant="outline"
+					class="max-sm:flex-1 max-sm:min-h-[44px]"
 				>
 					Cancel
-				</button>
+				</Button>
 			</div>
 			{linkError && (
 				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
@@ -1536,16 +1525,16 @@ function CommentItem({
 					</span>
 					{canModify && !isEditing && (
 						<>
-							<button type="button" onClick={onStartEdit} class="btn btn-outline btn-sm">
+							<Button onClick={onStartEdit} variant="outline" size="sm">
 								Edit
-							</button>
-							<button
-								type="button"
+							</Button>
+							<Button
 								onClick={onDelete}
-								class="btn btn-sm bg-transparent border border-[var(--danger-text)] text-[var(--danger-text)]"
+								size="sm"
+								class="bg-transparent border border-[var(--danger-text)] text-[var(--danger-text)]"
 							>
 								Delete
-							</button>
+							</Button>
 						</>
 					)}
 				</div>
@@ -1564,12 +1553,12 @@ function CommentItem({
 						class="w-full px-3 py-2 border border-border rounded text-sm resize-y box-border mb-2 bg-bg text-text-base"
 					/>
 					<div class="flex gap-2">
-						<button type="button" onClick={onSave} disabled={saving} class="btn btn-primary">
+						<Button onClick={onSave} disabled={saving} variant="primary">
 							{saving ? "Saving…" : "Save"}
-						</button>
-						<button type="button" onClick={onCancelEdit} disabled={saving} class="btn btn-outline">
+						</Button>
+						<Button onClick={onCancelEdit} disabled={saving} variant="outline">
 							Cancel
-						</button>
+						</Button>
 					</div>
 				</div>
 			) : (
@@ -1767,13 +1756,14 @@ export function CommentsSection({
 						"resize-y box-border mb-2 bg-bg text-text-base"
 					}
 				/>
-				<button
+				<Button
 					type="submit"
 					disabled={postingComment || !newComment.trim()}
-					class="btn btn-primary max-sm:w-full min-h-[44px]"
+					variant="primary"
+					class="max-sm:w-full min-h-[44px]"
 				>
 					{postingComment ? "Posting…" : "Comment"}
-				</button>
+				</Button>
 			</form>
 		</section>
 	);
