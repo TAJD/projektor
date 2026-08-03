@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
 import type { CustomFieldValue, ProjectLookup as Project } from "./board-utils";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 
 export interface Sprint {
 	id: string;
@@ -48,17 +50,17 @@ function getStoryPoints(issue: Issue): number {
 function statusBadge(status: Sprint["status"]) {
 	const styles: Record<Sprint["status"], { bg: string; color: string }> = {
 		planned: { bg: "var(--surface)", color: "var(--text-muted)" },
-		active: { bg: "rgba(37,99,235,0.12)", color: "var(--status-in-progress)" },
-		completed: { bg: "rgba(22,163,74,0.12)", color: "var(--status-done)" },
+		active: { bg: "var(--sprint-active-bg)", color: "var(--status-in-progress)" },
+		completed: { bg: "var(--sprint-completed-bg)", color: "var(--status-done)" },
 	};
 	const s = styles[status] ?? styles.planned;
 	return (
-		<span
-			class="badge border border-current font-semibold capitalize"
+		<Badge
+			class="border border-current font-semibold capitalize"
 			style={{ background: s.bg, color: s.color }}
 		>
 			{status}
-		</span>
+		</Badge>
 	);
 }
 
@@ -521,9 +523,9 @@ function SprintManagerContent({
 			<div class="flex justify-between items-center mb-4">
 				<p class="m-0 text-sm text-text-muted">{sprintCountLabel(sprints.length)}</p>
 				{!createForm.showCreate && (
-					<button type="button" class="btn btn-primary btn-sm" onClick={createForm.open}>
+					<Button variant="primary" size="sm" onClick={createForm.open}>
 						+ New sprint
-					</button>
+					</Button>
 				)}
 			</div>
 
@@ -772,21 +774,24 @@ function CreateSprintForm({
 				)}
 
 				<div class="flex gap-2 max-sm:flex-col">
-					<button
+					<Button
 						type="submit"
-						class="btn btn-primary btn-sm max-sm:w-full"
+						variant="primary"
+						size="sm"
+						class="max-sm:w-full"
 						disabled={creating || !createName.trim()}
 					>
 						{creating ? "Creating…" : "Create sprint"}
-					</button>
-					<button
-						type="button"
-						class="btn btn-outline btn-sm max-sm:w-full"
+					</Button>
+					<Button
+						variant="outline"
+						size="sm"
+						class="max-sm:w-full"
 						onClick={onCancel}
 						disabled={creating}
 					>
 						Cancel
-					</button>
+					</Button>
 				</div>
 			</form>
 		</div>
@@ -814,25 +819,20 @@ function SprintCompleteControls({
 }: SprintCompleteControlsProps) {
 	if (!active) {
 		return (
-			<button type="button" class="btn btn-outline btn-sm" onClick={() => onStart(sprintId)}>
+			<Button variant="outline" size="sm" onClick={() => onStart(sprintId)}>
 				Complete sprint
-			</button>
+			</Button>
 		);
 	}
 	return (
 		<span class="inline-flex gap-[0.375rem] items-center">
 			<span class="text-[0.8rem] text-text-muted">Mark complete?</span>
-			<button
-				type="button"
-				class="btn btn-danger btn-sm"
-				disabled={completing}
-				onClick={() => onConfirm(sprintId)}
-			>
+			<Button variant="danger" size="sm" disabled={completing} onClick={() => onConfirm(sprintId)}>
 				{completing ? "…" : "Yes, complete"}
-			</button>
-			<button type="button" class="btn btn-outline btn-sm" disabled={completing} onClick={onCancel}>
+			</Button>
+			<Button variant="outline" size="sm" disabled={completing} onClick={onCancel}>
 				Cancel
-			</button>
+			</Button>
 			{completeError && <span class="text-[var(--danger-text)] text-xs">{completeError}</span>}
 		</span>
 	);
@@ -873,12 +873,14 @@ function SprintRow({
 				</span>
 			</div>
 			<div class="flex gap-2 items-center flex-wrap">
-				<a
+				<Button
+					as="a"
 					href={`/issues?sprintId=${encodeURIComponent(sprint.id)}`}
-					class="btn btn-outline btn-sm"
+					variant="outline"
+					size="sm"
 				>
 					View issues →
-				</a>
+				</Button>
 
 				{sprint.status === "active" && (
 					<SprintCompleteControls

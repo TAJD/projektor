@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { renderMd, renderMermaidDiagrams } from "../utils/markdown";
+import { Badge } from "./ui/Badge";
 
 interface SharedIssue {
 	title: string;
@@ -98,13 +99,12 @@ function IssueHeader({ issue }: { issue: SharedIssue }) {
 				}}
 			>
 				{/* Priority badge */}
-				<span class="badge" style={{ background: priorityStyle.bg, color: priorityStyle.text }}>
+				<Badge style={{ background: priorityStyle.bg, color: priorityStyle.text }}>
 					{PRIORITY_LABELS[issue.priority] ?? issue.priority}
-				</span>
+				</Badge>
 				{/* Status badge */}
 				{issue.status_name && (
-					<span
-						class="badge"
+					<Badge
 						style={{
 							background: "var(--surface)",
 							color: "var(--text-muted)",
@@ -112,7 +112,7 @@ function IssueHeader({ issue }: { issue: SharedIssue }) {
 						}}
 					>
 						{issue.status_name}
-					</span>
+					</Badge>
 				)}
 				{/* Project */}
 				{issue.project_name && (
