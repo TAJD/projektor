@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
 import ProjectFlowCharts from "./ProjectFlowCharts";
+import { Button } from "./ui/Button";
 
 interface Project {
 	id: string;
@@ -224,17 +225,12 @@ function DescriptionEditForm({
 				</p>
 			)}
 			<div class="flex gap-2 mt-2">
-				<button
-					type="button"
-					onClick={onSave}
-					disabled={saving}
-					class={`btn btn-primary btn-sm${saving ? " opacity-60" : ""}`}
-				>
+				<Button type="button" variant="primary" size="sm" onClick={onSave} disabled={saving}>
 					{saving ? "Saving…" : "Save"}
-				</button>
-				<button type="button" onClick={onCancel} disabled={saving} class="btn btn-outline btn-sm">
+				</Button>
+				<Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={saving}>
 					Cancel
-				</button>
+				</Button>
 			</div>
 		</div>
 	);

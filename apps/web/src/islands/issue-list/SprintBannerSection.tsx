@@ -2,6 +2,7 @@ import type { Dispatch, StateUpdater } from "preact/hooks";
 import { useState } from "preact/hooks";
 import { apiFetch } from "../../utils/api-client";
 import type { Issue } from "../board-utils";
+import { Button } from "../ui/Button";
 
 export interface SprintDetail {
 	id: string;
@@ -27,6 +28,8 @@ function sprintStatusStyle(status: SprintDetail["status"]): {
 	borderColor: string;
 } {
 	if (status === "active") {
+		// TODO(design-system): no --status-in-progress-bg/border token exists yet;
+		// rgba(37,99,235,*) is blue-600, distinct from --status-in-progress (#4f46e5). Flagged in PROJ-536.
 		return {
 			background: "rgba(37,99,235,0.12)",
 			color: "var(--status-in-progress)",
@@ -34,6 +37,8 @@ function sprintStatusStyle(status: SprintDetail["status"]): {
 		};
 	}
 	if (status === "completed") {
+		// TODO(design-system): no --status-done-bg/border token exists yet;
+		// rgba(22,163,74,*) matches --status-done (#16a34a) at reduced opacity. Flagged in PROJ-536.
 		return {
 			background: "rgba(22,163,74,0.12)",
 			color: "var(--status-done)",
@@ -223,20 +228,17 @@ function SprintEditForm({
 					</label>
 				</div>
 				<div class="flex gap-2">
-					<button
+					<Button
 						type="submit"
+						variant="primary"
+						size="sm"
 						disabled={sprintEditSaving || !sprintEditName.trim()}
-						class="btn btn-primary btn-sm"
 					>
 						{sprintEditSaving ? "Saving…" : "Save"}
-					</button>
-					<button
-						type="button"
-						onClick={() => setSprintEditing(false)}
-						class="btn btn-outline btn-sm"
-					>
+					</Button>
+					<Button type="button" variant="outline" size="sm" onClick={() => setSprintEditing(false)}>
 						Cancel
-					</button>
+					</Button>
 				</div>
 			</div>
 		</form>
