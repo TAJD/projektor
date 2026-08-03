@@ -1,4 +1,5 @@
 import { getBacklogIssues, type Issue } from "../board-utils";
+import { Button } from "../ui/Button";
 import type { ViewMode } from "./types-view";
 import type { SearchResult } from "./useIssueSearch";
 
@@ -47,9 +48,9 @@ export default function HeaderRow({
 
 			<div class="flex gap-2 items-center max-sm:justify-between">
 				{projectsCount > 0 && (
-					<button type="button" onClick={openCreateModal} class="btn btn-primary btn-sm">
+					<Button variant="primary" size="sm" onClick={openCreateModal}>
 						+ New issue
-					</button>
+					</Button>
 				)}
 
 				{!isSearchActive && (
@@ -69,7 +70,7 @@ export default function HeaderRow({
 									border: "none",
 									borderRight: v !== "backlog" ? "1px solid var(--border)" : "none",
 									background: view === v ? "var(--accent)" : "var(--bg)",
-									color: view === v ? "#fff" : "var(--text-muted)",
+									color: view === v ? "var(--on-accent)" : "var(--text-muted)",
 									cursor: "pointer",
 									fontSize: "0.8rem",
 									fontWeight: view === v ? 600 : 400,

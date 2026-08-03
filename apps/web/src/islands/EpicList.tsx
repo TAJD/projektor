@@ -14,6 +14,7 @@ import {
 import { applyDateRangeParams } from "./IssueList-helpers";
 import type { DateField } from "./issue-list/FiltersPopover";
 import FiltersPopover from "./issue-list/FiltersPopover";
+import { Button } from "./ui/Button";
 import Select from "./ui/Select";
 
 interface Props {
@@ -162,9 +163,9 @@ function EpicListHeader(props: EpicListHeaderProps) {
 				isSearchActive={false}
 			/>
 			{props.epicTypeId && (
-				<button type="button" onClick={props.onOpenCreate} class="btn btn-primary btn-sm">
+				<Button variant="primary" size="sm" onClick={props.onOpenCreate}>
 					+ New Epic
-				</button>
+				</Button>
 			)}
 		</div>
 	);
@@ -754,16 +755,16 @@ function CreateEpicModal({
 					</div>
 
 					<div class="flex gap-2">
-						<button
+						<Button
 							type="submit"
+							variant="primary"
 							disabled={submitting || !createTitle.trim() || !createProjectId}
-							class="btn btn-primary"
 						>
 							{submitting ? "Creating…" : "Create Epic"}
-						</button>
-						<button type="button" onClick={() => setShowCreate(false)} class="btn btn-outline">
+						</Button>
+						<Button variant="outline" onClick={() => setShowCreate(false)}>
 							Cancel
-						</button>
+						</Button>
 					</div>
 				</form>
 			</div>
