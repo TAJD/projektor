@@ -12,23 +12,40 @@ const link = <a href="#add">Add</a>;
 
 // Rule 2: import boundary
 
-import { Select } from "./ui/Select";
+import { Badge } from "./ui/Badge";
 
 // Positive: hand-rolled .btn markup with no Button import anywhere in this
 // file — flagged.
 const handRolledButton = <button class="btn">Click</button>;
 
-// Regression: this section imports Select (an unrelated primitive family)
+// Regression: this section imports Badge (an unrelated primitive family)
 // but still has a raw .btn-classed element — proves per-primitive-family
 // gating isn't silenced by an unrelated islands/ui import. Named for
-// clarity per the task spec.
+// clarity per the task spec. (Select is deliberately NOT imported here —
+// it's reserved for the select-* positive/negative cases below.)
 function HandRolledStillFlaggedDespiteUnrelatedImport() {
   return (
     <div>
-      <Select options={[]} />
+      <Badge>Label</Badge>
       <button class="btn">Still flagged</button>
     </div>
   );
+}
+
+// Positive: hand-rolled .select-menu markup with no Select import anywhere
+// in this file — flagged.
+const handRolledSelectMenu = <div class="select-menu">Menu</div>;
+
+// Negative (PROJ-560 regression): "popover-select-menu" is a genuine
+// Popover primitive class, not a standalone select-* token. The select-*
+// pattern must only match at a real class-token boundary (start of string
+// or preceded by whitespace) — "-" is a non-word char, so a naive \b
+// anchor false-positived inside "popover-select-menu". Popover is
+// imported (not Select), so this must not be flagged under either family.
+import { Popover } from "./ui/Popover";
+
+function PopoverSelectMenuNotFlaggedAsSelect() {
+  return <Popover class="popover-select-menu">Content</Popover>;
 }
 
 // Negative: an element correctly using the Button component — no raw
