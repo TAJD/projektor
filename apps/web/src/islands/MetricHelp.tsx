@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { METRIC_DEFINITIONS, type MetricId } from "./metric-definitions";
+import { Popover } from "./ui/Popover";
 
 // PROJ-335: shared help affordance for every stat/chart, backed by metric-definitions.ts.
 // A toggletip, not a native <dialog>/alert: a button that toggles a popover, dismissed via
@@ -41,16 +42,17 @@ export function MetricHelp({ id }: { id: MetricId }) {
 				<span aria-hidden="true">ⓘ</span>
 			</button>
 			{open && (
-				<div
+				<Popover
 					id={popoverId}
+					strategy="anchored"
+					class="popover-metric-help"
 					role="dialog"
-					aria-modal="false"
-					aria-label={`${def.label} definition`}
-					class="metric-help-popover"
+					ariaModal={false}
+					ariaLabel={`${def.label} definition`}
 				>
 					<p class="m-0 mb-1 text-[0.8rem] text-text-base">{def.definition}</p>
 					<p class="m-0 text-[0.72rem] text-text-muted">{def.computation}</p>
-				</div>
+				</Popover>
 			)}
 		</span>
 	);
