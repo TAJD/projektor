@@ -6,3 +6,5 @@ pre-commit:
       run: pnpm biome check --changed --no-errors-on-unmatched
     island-api:
       run: pnpm --filter @projektor/cofferdam-island-api build && node scripts/check-island-api.mjs
+    design-system:
+      run: pnpm --filter @projektor/cofferdam-design-system build && node scripts/check-design-system.mjs
