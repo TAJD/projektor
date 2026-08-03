@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { resolveWorkspaceSlug } from "../utils/workspace";
 import type { ProjectLookup as ProjectLite } from "./board-utils";
+import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 
 type GrantRole = "viewer" | "member" | "admin";
 
@@ -49,15 +51,6 @@ interface Props {
 
 const GRANT_ROLES: GrantRole[] = ["viewer", "member", "admin"];
 
-const BTN_PRIMARY =
-	"px-3 py-[0.4rem] rounded text-[0.8rem] font-semibold bg-accent text-white border border-accent " +
-	"cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
-const BTN_SECONDARY =
-	"px-3 py-[0.4rem] rounded text-[0.8rem] font-semibold bg-bg text-text-base border border-border " +
-	"cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
-const BTN_DANGER =
-	"px-2 py-[0.3rem] rounded text-[0.75rem] font-semibold bg-transparent text-[var(--danger-text)] " +
-	"border border-border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed";
 const INPUT =
 	"px-[0.625rem] py-[0.4rem] border border-border rounded text-[0.85rem] bg-bg text-text-base " +
 	"font-[inherit] focus:outline-[2px] focus:outline-accent focus:outline-offset-1";
@@ -70,9 +63,6 @@ const ROLE_TAG =
 const CHIP =
 	"inline-flex items-center px-2 py-[0.1rem] mr-1 mb-1 rounded-full text-[0.72rem] " +
 	"bg-bg border border-border text-text-base";
-const BADGE_PENDING =
-	"inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] " +
-	"bg-[var(--priority-low-bg)] text-text-muted border border-border";
 const TH =
 	"text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base text-[0.8rem]";
 const TD =
@@ -258,7 +248,7 @@ function MemberGroupsCell(
 	if (isAdmin) {
 		return <span class="text-[0.78rem] text-text-muted">All projects (bypasses groups)</span>;
 	}
-	if (props.groups.length === 0) return <span class={BADGE_PENDING}>Pending — no access</span>;
+	if (props.groups.length === 0) return <Badge>Pending — no access</Badge>;
 	return (
 		<>
 			{props.groups.map((g) => (
@@ -373,9 +363,9 @@ function GroupMembersSection({
 						<span class={CHIP} style="margin:0;">
 							{m.name || m.email}
 						</span>
-						<button
-							type="button"
-							class={BTN_DANGER}
+						<Button
+							variant="danger"
+							size="sm"
 							disabled={busy}
 							onClick={() =>
 								run(async () => {
@@ -387,7 +377,7 @@ function GroupMembersSection({
 							}
 						>
 							Remove
-						</button>
+						</Button>
 					</div>
 				))}
 			</div>
@@ -404,9 +394,8 @@ function GroupMembersSection({
 						</option>
 					))}
 				</select>
-				<button
-					type="button"
-					class={BTN_PRIMARY}
+				<Button
+					variant="primary"
 					disabled={busy || !addUserId}
 					onClick={() =>
 						run(async () => {
@@ -420,7 +409,7 @@ function GroupMembersSection({
 					}
 				>
 					Add
-				</button>
+				</Button>
 			</div>
 		</>
 	);
@@ -464,9 +453,9 @@ function GroupGrantListItem({
 					</option>
 				))}
 			</select>
-			<button
-				type="button"
-				class={BTN_DANGER}
+			<Button
+				variant="danger"
+				size="sm"
 				disabled={busy}
 				onClick={() =>
 					run(async () => {
@@ -478,7 +467,7 @@ function GroupGrantListItem({
 				}
 			>
 				Remove
-			</button>
+			</Button>
 		</div>
 	);
 }
@@ -528,14 +517,9 @@ function GroupGrantForm({
 					</option>
 				))}
 			</select>
-			<button
-				type="button"
-				class={BTN_PRIMARY}
-				disabled={busy || !grantProjectId}
-				onClick={onGrant}
-			>
+			<Button variant="primary" disabled={busy || !grantProjectId} onClick={onGrant}>
 				Grant
-			</button>
+			</Button>
 		</div>
 	);
 }
@@ -678,9 +662,8 @@ function GroupNameHeader({
 				disabled={busy}
 				onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
 			/>
-			<button
-				type="button"
-				class={BTN_PRIMARY}
+			<Button
+				variant="primary"
 				disabled={busy || trimmedName === "" || trimmedName === detail.name}
 				onClick={() =>
 					run(async () => {
@@ -693,10 +676,10 @@ function GroupNameHeader({
 				}
 			>
 				Rename
-			</button>
-			<button type="button" class={BTN_SECONDARY} onClick={onClose}>
+			</Button>
+			<Button variant="outline" onClick={onClose}>
 				Close
-			</button>
+			</Button>
 		</div>
 	);
 }
@@ -811,14 +794,9 @@ function GroupsTable({ groups, isAdmin, busy, onSelect, onDelete }: GroupsTableP
 							<td class={TD}>{g.grantCount}</td>
 							{isAdmin && (
 								<td class={TD}>
-									<button
-										type="button"
-										class={BTN_DANGER}
-										disabled={busy}
-										onClick={() => onDelete(g.id)}
-									>
+									<Button variant="danger" size="sm" disabled={busy} onClick={() => onDelete(g.id)}>
 										Delete
-									</button>
+									</Button>
 								</td>
 							)}
 						</tr>
@@ -847,14 +825,9 @@ function GroupsMobileCards({ groups, isAdmin, busy, onSelect, onDelete }: Groups
 							<span class="font-medium text-text-base">{g.name}</span>
 						)}
 						{isAdmin && (
-							<button
-								type="button"
-								class={BTN_DANGER}
-								disabled={busy}
-								onClick={() => onDelete(g.id)}
-							>
+							<Button variant="danger" size="sm" disabled={busy} onClick={() => onDelete(g.id)}>
 								Delete
-							</button>
+							</Button>
 						)}
 					</div>
 					<div class="text-[0.75rem] text-text-muted">
@@ -898,14 +871,13 @@ function GroupsSection(props: GroupsSectionProps) {
 								if (e.key === "Enter") void props.createGroup();
 							}}
 						/>
-						<button
-							type="button"
-							class={BTN_PRIMARY}
+						<Button
+							variant="primary"
 							disabled={props.busy || !props.newName.trim()}
 							onClick={props.createGroup}
 						>
 							Create group
-						</button>
+						</Button>
 					</div>
 				)}
 				{props.createErr && (

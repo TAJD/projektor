@@ -3,8 +3,6 @@
 // apps/web/src components must reuse islands/ui/* primitives and
 // Base.astro's CSS tokens instead of drifting into ad-hoc markup/styles.
 // Rules 1, 3, and 4 are line-scans; Rule 2 (import boundary) is AST-based.
-// Only Rule 1 (raw color literal) is implemented here — Rules 2-4 land in
-// later tasks (16-18).
 
 import { Category, defineCheck, Severity } from "@cofferdam/check-sdk";
 

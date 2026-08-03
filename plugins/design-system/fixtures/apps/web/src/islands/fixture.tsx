@@ -1,7 +1,6 @@
 // fixture.tsx — input to `cofferdam check` for the DesignSystemConvention
-// plugin (PROJ-527, Task 14 scaffold). Sections below are placeholders for
-// the four rules landing in Tasks 15-18; each section is currently empty —
-// no findings are expected yet.
+// plugin (PROJ-527). Exercises all four rules with real findings; every
+// section below is populated and expected.json holds 7 entries.
 
 // Rule 1: raw color literal
 
