@@ -105,6 +105,11 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --priority-low-bg: rgba(107, 114, 128, 0.12);
         --priority-none-text: var(--priority-low-text);
         --priority-none-bg: var(--priority-low-bg);
+        /* Priority solid pill tokens (light) - filled swatches (e.g. filter pills), not text-on-surface */
+        --priority-urgent-solid: #dc2626;
+        --priority-high-solid: #d97706;
+        --priority-medium-solid: #2563eb;
+        --priority-low-solid: #6b7280;
         /* Code tokens (light) - dark text on clearly-distinct slate-200 bg */
         --code-color: #1e293b;
         --code-bg: #dde3ea;
@@ -126,6 +131,19 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --danger-text: #dc2626;
         --danger-bg: rgba(220, 38, 38, 0.10);
         --danger-border: rgba(220, 38, 38, 0.30);
+        /* Warning banner tokens (light) */
+        --warning-bg: rgba(251, 191, 36, 0.12);
+        --warning-border: rgba(251, 191, 36, 0.5);
+        /* Success banner tokens (light) */
+        --success-bg: rgba(22, 163, 74, 0.06);
+        --success-border: rgba(22, 163, 74, 0.3);
+        /* Board dropzone token (light) */
+        --dropzone-bg: rgba(37, 99, 235, 0.04);
+        /* Sprint notice banner tokens (light) */
+        --sprint-notice-bg: rgba(37, 99, 235, 0.08);
+        --sprint-notice-border: rgba(37, 99, 235, 0.25);
+        /* Velocity chart bar-track token (light) */
+        --velocity-bar-bg: rgba(37, 99, 235, 0.15);
         /* Chart series tokens (light) - metrics dashboard */
         --chart-secondary: #d97706;
         --chart-seq-1: #86b6ef;
@@ -155,6 +173,11 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           --priority-medium-bg: rgba(129, 140, 248, 0.18);
           --priority-low-text: #cbd5e1;
           --priority-low-bg: rgba(148, 163, 184, 0.18);
+          /* Priority solid pill tokens (dark) - brighter for contrast on near-black */
+          --priority-urgent-solid: #f87171;
+          --priority-high-solid: #f59e0b;
+          --priority-medium-solid: #60a5fa;
+          --priority-low-solid: #94a3b8;
           /* Code tokens (dark) - light text on slightly deeper slate bg */
           --code-color: #e2e8f0;
           --code-bg: #141b2b;
@@ -176,6 +199,19 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           --danger-text: #f87171;
           --danger-bg: rgba(248, 113, 113, 0.12);
           --danger-border: rgba(248, 113, 113, 0.32);
+          /* Warning banner tokens (dark) - lighter amber tint at higher alpha */
+          --warning-bg: rgba(252, 211, 77, 0.18);
+          --warning-border: rgba(252, 211, 77, 0.55);
+          /* Success banner tokens (dark) - lighter green tint at higher alpha */
+          --success-bg: rgba(74, 222, 128, 0.12);
+          --success-border: rgba(74, 222, 128, 0.4);
+          /* Board dropzone token (dark) - lighter indigo tint at higher alpha */
+          --dropzone-bg: rgba(129, 140, 248, 0.08);
+          /* Sprint notice banner tokens (dark) - lighter indigo tint at higher alpha */
+          --sprint-notice-bg: rgba(129, 140, 248, 0.12);
+          --sprint-notice-border: rgba(129, 140, 248, 0.35);
+          /* Velocity chart bar-track token (dark) - lighter indigo tint at higher alpha */
+          --velocity-bar-bg: rgba(129, 140, 248, 0.20);
           /* Chart series tokens (dark) - metrics dashboard */
           --chart-secondary: #d97706;
           --chart-seq-1: #bcd7f7;
@@ -203,6 +239,10 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --priority-medium-bg: rgba(129, 140, 248, 0.18);
         --priority-low-text: #cbd5e1;
         --priority-low-bg: rgba(148, 163, 184, 0.18);
+        --priority-urgent-solid: #f87171;
+        --priority-high-solid: #f59e0b;
+        --priority-medium-solid: #60a5fa;
+        --priority-low-solid: #94a3b8;
         --code-color: #e2e8f0;
         --code-bg: #141b2b;
         --epic-text: #c4b5fd;
@@ -219,6 +259,14 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --danger-text: #f87171;
         --danger-bg: rgba(248, 113, 113, 0.12);
         --danger-border: rgba(248, 113, 113, 0.32);
+        --warning-bg: rgba(252, 211, 77, 0.18);
+        --warning-border: rgba(252, 211, 77, 0.55);
+        --success-bg: rgba(74, 222, 128, 0.12);
+        --success-border: rgba(74, 222, 128, 0.4);
+        --dropzone-bg: rgba(129, 140, 248, 0.08);
+        --sprint-notice-bg: rgba(129, 140, 248, 0.12);
+        --sprint-notice-border: rgba(129, 140, 248, 0.35);
+        --velocity-bar-bg: rgba(129, 140, 248, 0.20);
         --chart-secondary: #d97706;
         --chart-seq-1: #bcd7f7;
         --chart-seq-2: #8ab8f0;
@@ -243,6 +291,10 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --priority-medium-bg: rgba(79, 70, 229, 0.12);
         --priority-low-text: #6b7280;
         --priority-low-bg: rgba(107, 114, 128, 0.12);
+        --priority-urgent-solid: #dc2626;
+        --priority-high-solid: #d97706;
+        --priority-medium-solid: #2563eb;
+        --priority-low-solid: #6b7280;
         --code-color: #1e293b;
         --code-bg: #dde3ea;
         --epic-text: #7c3aed;
@@ -259,6 +311,14 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --danger-text: #dc2626;
         --danger-bg: rgba(220, 38, 38, 0.10);
         --danger-border: rgba(220, 38, 38, 0.30);
+        --warning-bg: rgba(251, 191, 36, 0.12);
+        --warning-border: rgba(251, 191, 36, 0.5);
+        --success-bg: rgba(22, 163, 74, 0.06);
+        --success-border: rgba(22, 163, 74, 0.3);
+        --dropzone-bg: rgba(37, 99, 235, 0.04);
+        --sprint-notice-bg: rgba(37, 99, 235, 0.08);
+        --sprint-notice-border: rgba(37, 99, 235, 0.25);
+        --velocity-bar-bg: rgba(37, 99, 235, 0.15);
         --chart-secondary: #d97706;
         --chart-seq-1: #86b6ef;
         --chart-seq-2: #5598e7;

@@ -137,7 +137,7 @@ function CompletionSummaryPanel({
 	const doneSP = doneIssues.reduce((sum, i) => sum + getStoryPoints(i), 0);
 
 	return (
-		<div class="mb-6 px-5 py-4 bg-[rgba(22,163,74,0.06)] border border-[rgba(22,163,74,0.3)] rounded-lg">
+		<div class="mb-6 px-5 py-4 bg-[var(--success-bg)] border border-[var(--success-border)] rounded-lg">
 			<div class="flex justify-between items-start mb-3">
 				<h3 class="m-0 text-base font-semibold text-text-base">Sprint complete: {sprint.name}</h3>
 				<button
@@ -226,7 +226,7 @@ function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boo
 										class="relative w-full rounded-t"
 										style={{
 											height: `${Math.max(totalH, 2)}px`,
-											background: "rgba(37,99,235,0.15)",
+											background: "var(--velocity-bar-bg)",
 										}}
 									>
 										{doneH > 0 && (
@@ -258,7 +258,7 @@ function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boo
 						<span class="inline-flex items-center gap-1">
 							<span
 								class="inline-block w-3 h-2 rounded-sm"
-								style={{ background: "rgba(37,99,235,0.15)" }}
+								style={{ background: "var(--velocity-bar-bg)" }}
 							/>
 							Total SP
 						</span>
@@ -615,8 +615,8 @@ function SprintBreadcrumb({ project }: { project: Project | null }) {
 }
 
 const ACTIVE_SPRINT_NOTICE_CLASS =
-	"mb-4 px-[0.875rem] py-[0.625rem] bg-[rgba(37,99,235,0.08)] " +
-	"border border-[rgba(37,99,235,0.25)] rounded-md text-sm text-[var(--status-in-progress)]";
+	"mb-4 px-[0.875rem] py-[0.625rem] bg-[var(--sprint-notice-bg)] " +
+	"border border-[var(--sprint-notice-border)] rounded-md text-sm text-[var(--status-in-progress)]";
 
 function ActiveSprintNotice({ sprints }: { sprints: Sprint[] }) {
 	const active = sprints.find((s) => s.status === "active");

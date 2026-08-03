@@ -5,10 +5,10 @@ import { categoryColor, type TaskStatus } from "../board-utils";
 export type DateField = "" | "completed" | "updated";
 
 const PILL_COLORS: Record<string, { bg: string; text: string }> = {
-	urgent: { bg: "#dc2626", text: "#fff" },
-	high: { bg: "#d97706", text: "#fff" },
-	medium: { bg: "#2563eb", text: "#fff" },
-	low: { bg: "#6b7280", text: "#fff" },
+	urgent: { bg: "var(--priority-urgent-solid)", text: "var(--on-accent)" },
+	high: { bg: "var(--priority-high-solid)", text: "var(--on-accent)" },
+	medium: { bg: "var(--priority-medium-solid)", text: "var(--on-accent)" },
+	low: { bg: "var(--priority-low-solid)", text: "var(--on-accent)" },
 };
 
 function StatusPills({
@@ -39,7 +39,7 @@ function StatusPills({
 							borderRadius: "9999px",
 							border: active ? "none" : "1px solid var(--border)",
 							background: active ? categoryColor(s.category) : "var(--bg)",
-							color: active ? "#fff" : "var(--text)",
+							color: active ? "var(--on-accent)" : "var(--text)",
 							cursor: "pointer",
 							fontSize: "0.8rem",
 							fontWeight: active ? 600 : 400,
@@ -180,7 +180,7 @@ function FiltersToggleButton({
 }) {
 	const activeStyle =
 		activeFilterCount > 0
-			? { border: "none", background: "var(--accent)", color: "#fff", fontWeight: 600 }
+			? { border: "none", background: "var(--accent)", color: "var(--on-accent)", fontWeight: 600 }
 			: {
 					border: "1px solid var(--border)",
 					background: "var(--bg)",
