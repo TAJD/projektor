@@ -1,5 +1,36 @@
-import type { ComponentChildren, Ref } from "preact";
-import { createPortal } from "preact/compat";
+import { type ComponentChildren, type Ref, render, type VNode } from "preact";
+import { useLayoutEffect, useRef } from "preact/hooks";
+
+/**
+ * Manual compat-free portal (PROJ-552): `preact/compat`'s `createPortal`
+ * installs global `options.vnode`/`options.event` patches that switch the
+ * *entire app* to React-style event semantics, not just the importing
+ * component — see LazyMarkdownEditor.tsx's PROJ-431 comment. Instead, each
+ * instance renders into its own detached, never-inserted `container` (so
+ * concurrent popovers never fight over a shared parentDom's diff tree —
+ * `render()` keyed off the same real DOM parent would clobber siblings) and
+ * only the resulting DOM node (`container.firstChild`) is moved into `into`,
+ * keeping that node a direct child of `into` as callers rely on.
+ */
+function Portal({ into, vnode }: { into: Element; vnode: VNode }) {
+	const containerRef = useRef<HTMLDivElement | null>(null);
+	if (!containerRef.current) containerRef.current = document.createElement("div");
+	const container = containerRef.current;
+
+	useLayoutEffect(() => {
+		render(vnode, container);
+		const node = container.firstChild;
+		if (node && node.parentNode !== into) into.appendChild(node);
+	});
+
+	useLayoutEffect(() => {
+		return () => {
+			render(null, container);
+		};
+	}, [container]);
+
+	return null;
+}
 
 export interface PopoverProps {
 	id?: string;
@@ -101,5 +132,5 @@ export function Popover({
 		</Tag>
 	);
 
-	return strategy === "portal-fixed" ? createPortal(el, document.body) : el;
+	return strategy === "portal-fixed" ? <Portal into={document.body} vnode={el} /> : el;
 }
