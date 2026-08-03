@@ -62,3 +62,10 @@ const widgetStyles = `
 `;
 
 // Rule 4: inline token-shaped style
+
+// Positive: inline style with token-shaped hardcoded values matching .btn's
+// border-radius and padding — flagged.
+const inlineTokenShaped = <div style={{ borderRadius: "4px", padding: "0.375rem 0.75rem" }}>Box</div>;
+
+// Negative: 12px isn't in the token-shaped list — never flagged.
+const inlineNotTokenShaped = <div style={{ borderRadius: "12px" }}>Box</div>;

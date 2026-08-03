@@ -34,6 +34,28 @@ const COLOR_CONTEXT_PATTERN = /(color|background|border|shadow|fill|stroke)/i;
 
 const NEW_PRIMITIVE_CSS_CLASS_PATTERN = /\.[\w-]*(btn|badge|popover|dropdown|menu-)[\w-]*\s*\{/;
 
+// Values sourced from .btn's border-radius: 4px / padding: 0.375rem 0.75rem,
+// .badge's border-radius: 4px / padding: 0.125rem 0.5rem, and .popover-*'s
+// 6px / 8px border-radius. Both the camelCase JS-object form and the
+// CSS-text-string form are checked on the SAME LINE — a documented, accepted
+// limitation: multi-line style={{...}} objects would be missed, but every
+// real usage in this repo is single-line per its Prettier config.
+const TOKEN_SHAPED_STYLE_VALUES = [
+  "borderRadius:\\s*[\"']4px[\"']",
+  "borderRadius:\\s*[\"']6px[\"']",
+  "borderRadius:\\s*[\"']8px[\"']",
+  "padding:\\s*[\"']0\\.375rem 0\\.75rem[\"']",
+  "padding:\\s*[\"']0\\.125rem 0\\.5rem[\"']",
+  // CSS-text-string form, for completeness
+  "border-radius:\\s*4px",
+  "border-radius:\\s*6px",
+  "border-radius:\\s*8px",
+  "padding:\\s*0\\.375rem\\s*0\\.75rem",
+  "padding:\\s*0\\.125rem\\s*0\\.5rem",
+];
+const INLINE_STYLE_LINE_PATTERN = /style=(\{\{|")/;
+const TOKEN_SHAPED_VALUE_PATTERN = new RegExp(TOKEN_SHAPED_STYLE_VALUES.join("|"), "g");
+
 // cofferdam-ignore: Design.OrphanExport: loaded dynamically via cofferdam.toml's `plugins = ["./plugins/design-system"]`, not a static import
 export default defineCheck({
   id: "DesignSystemConvention",
@@ -101,6 +123,17 @@ export default defineCheck({
         message: `New primitive-shaped CSS class "${m[0].trim().replace(/\s*\{$/, "")}" — reuse or extend an existing islands/ui primitive's CSS instead of defining a new one.`,
         span: ln.spanFor(m.index, m.index + m[0].length),
       });
+    }
+
+    for (const ln of file.lines()) {
+      if (ln.isComment) continue;
+      if (!INLINE_STYLE_LINE_PATTERN.test(ln.text)) continue;
+      for (const m of ln.text.matchAll(TOKEN_SHAPED_VALUE_PATTERN)) {
+        ctx.report({
+          message: `Inline style "${m[0]}" duplicates a primitive's CSS dimension — reuse the islands/ui primitive instead of hardcoding it.`,
+          span: ln.spanFor(m.index, m.index + m[0].length),
+        });
+      }
     }
   },
 });

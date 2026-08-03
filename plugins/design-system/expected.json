@@ -64,6 +64,32 @@
       "end_byte": 1937,
       "message": "New primitive-shaped CSS class \".my-custom-dropdown-menu\" — reuse or extend an existing islands/ui primitive's CSS instead of defining a new one.",
       "baselined": false
+    },
+    {
+      "id": "Warning.DesignSystemConvention",
+      "category": "warning",
+      "priority": 15,
+      "severity": "high",
+      "file": "fixtures/apps/web/src/islands/fixture.tsx",
+      "line": 68,
+      "column": 41,
+      "start_byte": 2371,
+      "end_byte": 2390,
+      "message": "Inline style \"borderRadius: \"4px\"\" duplicates a primitive's CSS dimension — reuse the islands/ui primitive instead of hardcoding it.",
+      "baselined": false
+    },
+    {
+      "id": "Warning.DesignSystemConvention",
+      "category": "warning",
+      "priority": 15,
+      "severity": "high",
+      "file": "fixtures/apps/web/src/islands/fixture.tsx",
+      "line": 68,
+      "column": 62,
+      "start_byte": 2392,
+      "end_byte": 2419,
+      "message": "Inline style \"padding: \"0.375rem 0.75rem\"\" duplicates a primitive's CSS dimension — reuse the islands/ui primitive instead of hardcoding it.",
+      "baselined": false
     }
   ]
 }
