@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { Button } from "./ui/Button";
 
 export interface FeedbackSource {
 	id: string;
@@ -41,9 +42,9 @@ function NewTokenReveal({ token, onDismiss }: { token: string; onDismiss: () => 
 			<code class="block font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded break-all">
 				{token}
 			</code>
-			<button type="button" class="btn btn-outline btn-sm mt-2" onClick={onDismiss}>
+			<Button variant="outline" size="sm" class="mt-2" onClick={onDismiss}>
 				Done
-			</button>
+			</Button>
 		</div>
 	);
 }
@@ -67,25 +68,26 @@ function DangerZone({
 			{rotating ? (
 				<span class="inline-flex gap-[0.375rem] items-center flex-wrap">
 					<span class="text-[0.8rem] text-text-muted">Rotate? Old token dies.</span>
-					<button type="button" class="btn btn-danger btn-sm" onClick={onRotateConfirm}>
+					<Button variant="danger" size="sm" onClick={onRotateConfirm}>
 						Yes
-					</button>
-					<button type="button" class="btn btn-outline btn-sm" onClick={onRotateCancel}>
+					</Button>
+					<Button variant="outline" size="sm" onClick={onRotateCancel}>
 						No
-					</button>
+					</Button>
 				</span>
 			) : (
 				<span class="inline-flex gap-[0.375rem]">
-					<button type="button" class="btn btn-outline btn-sm" onClick={onRotateStart}>
+					<Button variant="outline" size="sm" onClick={onRotateStart}>
 						Rotate token
-					</button>
-					<button
-						type="button"
-						class="btn btn-outline btn-sm text-[var(--danger-text)] border-[var(--danger-border)]"
+					</Button>
+					<Button
+						variant="outline"
+						size="sm"
+						class="text-[var(--danger-text)] border-[var(--danger-border)]"
 						onClick={onRevoke}
 					>
 						Revoke source
-					</button>
+					</Button>
 				</span>
 			)}
 		</div>
@@ -158,9 +160,9 @@ export default function FeedbackSourceSettings({
 
 			<div class="flex flex-col gap-1">
 				<span class="text-[0.8rem] font-semibold text-text-muted">Status</span>
-				<button type="button" class="btn btn-outline btn-sm w-fit" onClick={toggleActive}>
+				<Button variant="outline" size="sm" class="w-fit" onClick={toggleActive}>
 					{source.isActive ? "Active" : "Inactive"}
-				</button>
+				</Button>
 			</div>
 
 			<div class="flex flex-col gap-1">
