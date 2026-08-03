@@ -514,7 +514,7 @@ function IssueDetailView(
 			{props.blockedByLinks.length > 0 && (
 				<div
 					role="alert"
-					class="mb-4 px-[0.875rem] py-2 bg-[rgba(251,191,36,0.12)] border border-[rgba(251,191,36,0.5)]
+					class="mb-4 px-[0.875rem] py-2 bg-[var(--warning-bg)] border border-[var(--warning-border)]
 						rounded-md text-sm text-text-base flex items-center gap-2"
 				>
 					<span>⚠</span>

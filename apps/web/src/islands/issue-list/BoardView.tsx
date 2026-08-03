@@ -151,7 +151,7 @@ export default function BoardView({
 							].join(" ")}
 							style={{
 								border: `1px solid ${isOver ? "var(--accent)" : "var(--border)"}`,
-								background: isOver ? "rgba(37,99,235,0.04)" : "var(--bg)",
+								background: isOver ? "var(--dropzone-bg)" : "var(--bg)",
 							}}
 						>
 							{colIssues.length === 0 ? (
