@@ -19,7 +19,7 @@ import type { Props } from "./MarkdownEditor";
 // is typed here is already in `value` when CodeMirror mounts and adopts it.
 function EditorFallback({ value, onChange, minHeight }: Props) {
 	return (
-		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case">
+		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case font-normal">
 			<div
 				class={
 					"px-2 py-[2px] text-[0.7rem] text-text-muted bg-surface border-b border-border " +

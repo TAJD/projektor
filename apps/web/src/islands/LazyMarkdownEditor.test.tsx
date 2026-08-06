@@ -57,4 +57,13 @@ describe("LazyMarkdownEditor (PROJ-431)", () => {
 		const source = readFileSync(join(__dirname, "LazyMarkdownEditor.tsx"), "utf-8");
 		expect(source).toMatch(/text-base sm:text-sm/);
 	});
+
+	// PROJ-566: the fallback's textarea inherits font-weight via preflight the same way
+	// the real editor's CodeMirror content does — without this reset it briefly renders
+	// bold on a slow connection, matching the reported bug, until the real editor mounts.
+	it("resets font-weight on the fallback root so it can't inherit an ancestor's bold (PROJ-566)", () => {
+		const { container } = render(<LazyMarkdownEditor value="" onChange={() => {}} />);
+		const root = container.firstElementChild;
+		expect(root?.className).toContain("font-normal");
+	});
 });
