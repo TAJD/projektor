@@ -28,3 +28,20 @@ describe("Base layout — account menu replaces legacy login/logout emoji", () =
 		expect(source).not.toContain("🚪");
 	});
 });
+
+describe("Base layout — topbar hide-on-scroll thresholds (PROJ-569)", () => {
+	it("requires a deliberate scroll in each direction before toggling, not a single pixel", () => {
+		// PROJ-569: an 8px hide threshold with an un-thresholded reveal flickered the
+		// topbar on mobile touch-scroll jitter. Both directions need real headroom now.
+		expect(source).toMatch(/var HIDE_THRESHOLD = 40;/);
+		expect(source).toMatch(/var REVEAL_THRESHOLD = 24;/);
+	});
+
+	it("accumulates upward scroll before revealing instead of un-hiding on any negative delta", () => {
+		const scriptStart = source.indexOf("var HIDE_THRESHOLD");
+		const scriptEnd = source.indexOf("</script>", scriptStart);
+		const script = source.slice(scriptStart, scriptEnd);
+		expect(script).toMatch(/accumulatedUp \+= -delta;/);
+		expect(script).toMatch(/if \(accumulatedUp > REVEAL_THRESHOLD\) topbar\.classList\.remove\('topbar-hidden'\);/);
+	});
+});

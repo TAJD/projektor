@@ -951,7 +951,13 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
       (function () {
         var lastY = 0;
         var accumulatedDown = 0;
-        var HIDE_THRESHOLD = 8;
+        var accumulatedUp = 0;
+        // PROJ-569: the old 8px hide threshold with an instant, un-thresholded reveal
+        // meant mobile touch-scroll jitter (momentum deceleration, rubber-band bounce)
+        // flickered the bar hidden/shown on every tiny direction reversal. Both
+        // directions now need a deliberate amount of scroll before the bar reacts.
+        var HIDE_THRESHOLD = 40;
+        var REVEAL_THRESHOLD = 24;
         var ticking = false;
 
         function shouldStayVisible() {
@@ -971,16 +977,19 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
             if (shouldStayVisible() || y <= 0) {
               topbar.classList.remove('topbar-hidden');
               accumulatedDown = 0;
+              accumulatedUp = 0;
               lastY = y;
               return;
             }
             var delta = y - lastY;
             if (delta > 0) {
               accumulatedDown += delta;
+              accumulatedUp = 0;
               if (accumulatedDown > HIDE_THRESHOLD) topbar.classList.add('topbar-hidden');
-            } else {
+            } else if (delta < 0) {
+              accumulatedUp += -delta;
               accumulatedDown = 0;
-              topbar.classList.remove('topbar-hidden');
+              if (accumulatedUp > REVEAL_THRESHOLD) topbar.classList.remove('topbar-hidden');
             }
             lastY = y;
           });
@@ -992,6 +1001,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           if (topbar) topbar.classList.remove('topbar-hidden');
           lastY = window.scrollY;
           accumulatedDown = 0;
+          accumulatedUp = 0;
         });
       })();
     </script>
