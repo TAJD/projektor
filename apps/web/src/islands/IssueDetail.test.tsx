@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanup, render, screen, waitFor } from "@testing-library/preact";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import IssueDetail from "./IssueDetail";
 
@@ -161,6 +161,9 @@ function setupFetch(issueData: IssueFixture, parentData?: IssueFixture) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 			}
 			if (u.includes("task-statuses")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("task-types")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 			}
 			// Parent fetch: /api/issues/<parent_id>
@@ -705,5 +708,84 @@ describe("PROJ-438 — inline prefetch script contract", () => {
 		const pathFallback = source.indexOf("pretty[1] + '-' + pretty[2]");
 		expect(idFirst).toBeGreaterThan(-1);
 		expect(pathFallback).toBeGreaterThan(idFirst);
+	});
+});
+
+// ─── PROJ-567: change issue type from the sidebar ─────────────────────────────
+
+describe("PROJ-567 — issue type change in the sidebar", () => {
+	const TASK_TYPES = [
+		{ id: "type-story", key: "story", name: "Story" },
+		{ id: "type-bug", key: "bug", name: "Bug" },
+	];
+
+	function setupFetchWithTypes(issueData: IssueFixture) {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/comments")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				if (u.includes("/links")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				if (u.includes("task-statuses")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				}
+				if (u.includes("task-types")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(TASK_TYPES) });
+				}
+				if (u.includes("?parentId=")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(issueData) });
+			})
+		);
+	}
+
+	it("renders a Type select in the sidebar once task types load", async () => {
+		setupFetchWithTypes(PLAIN_ISSUE_DATA);
+		render(<IssueDetail issueId="plain-1" />);
+
+		await waitFor(() => {
+			expect(screen.getByLabelText("Change type")).toBeTruthy();
+		});
+	});
+
+	it("PATCHes the issue's typeId when a new type is chosen", async () => {
+		const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+			const u = String(url);
+			if (opts?.method === "PATCH") {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+			}
+			if (u.includes("/comments"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("/links"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("task-statuses"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("task-types"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(TASK_TYPES) });
+			if (u.includes("?parentId="))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [] }) });
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PLAIN_ISSUE_DATA) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<IssueDetail issueId="plain-1" />);
+
+		const trigger = await screen.findByRole("combobox", { name: "Change type" });
+		fireEvent.click(trigger);
+		fireEvent.click(await screen.findByRole("option", { name: "Bug" }));
+
+		await waitFor(() => {
+			const patchCall = (fetchMock.mock.calls as [string, RequestInit][]).find(
+				([, opts]) => opts?.method === "PATCH"
+			);
+			expect(patchCall).toBeDefined();
+			const body = JSON.parse(String(patchCall?.[1]?.body));
+			expect(body.typeId).toBe("type-bug");
+		});
 	});
 });

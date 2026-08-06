@@ -22,6 +22,7 @@ import type {
 	IssueLink,
 	Member,
 	TaskStatus,
+	TaskType,
 } from "./issue-detail-helpers";
 
 interface Props {
@@ -229,6 +230,7 @@ function useIssueCore({
 	const [issue, setIssue] = useState<IssueData | null>(seedIssue);
 	const [comments, setComments] = useState<Comment[]>([]);
 	const [statuses, setStatuses] = useState<TaskStatus[]>([]);
+	const [taskTypes, setTaskTypes] = useState<TaskType[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [members, setMembers] = useState<Member[]>([]);
@@ -280,6 +282,14 @@ function useIssueCore({
 			try {
 				const data = await apiFetch<TaskStatus[]>("/api/task-statuses", { workspaceSlug });
 				if (Array.isArray(data)) setStatuses(data);
+			} catch {
+				// non-fatal
+			}
+		})();
+		(async () => {
+			try {
+				const data = await apiFetch<TaskType[]>("/api/task-types", { workspaceSlug });
+				if (Array.isArray(data)) setTaskTypes(data);
 			} catch {
 				// non-fatal
 			}
@@ -343,6 +353,7 @@ function useIssueCore({
 		setIssue,
 		comments,
 		statuses,
+		taskTypes,
 		loading,
 		error,
 		members,
@@ -359,14 +370,17 @@ function useIssueMutations(
 		issueId: string;
 		workspaceSlug: string | undefined;
 		statuses: TaskStatus[];
+		taskTypes: TaskType[];
 		members: Member[];
 		fetchIssue: () => Promise<void>;
 	}>
 ) {
-	const { issue, setIssue, issueId, workspaceSlug, statuses, members, fetchIssue } = args;
+	const { issue, setIssue, issueId, workspaceSlug, statuses, taskTypes, members, fetchIssue } =
+		args;
 	const [updatingStatus, setUpdatingStatus] = useState(false);
 	const [updatingPriority, setUpdatingPriority] = useState(false);
 	const [updatingAssignee, setUpdatingAssignee] = useState(false);
+	const [updatingType, setUpdatingType] = useState(false);
 
 	async function changeStatus(statusId: string) {
 		if (!issue) return;
@@ -418,6 +432,35 @@ function useIssueMutations(
 		}
 	}
 
+	async function changeType(typeId: string) {
+		if (!issue) return;
+		const type = taskTypes.find((t) => t.id === typeId);
+
+		setIssue((prev) =>
+			prev
+				? {
+						...prev,
+						type_id: typeId || null,
+						type_key: type?.key ?? null,
+						type_name: type?.name ?? null,
+					}
+				: prev
+		);
+
+		setUpdatingType(true);
+		try {
+			await apiFetch(`/api/issues/${issueId}`, {
+				workspaceSlug,
+				method: "PATCH",
+				body: { typeId: typeId || null },
+			});
+		} catch {
+			await fetchIssue();
+		} finally {
+			setUpdatingType(false);
+		}
+	}
+
 	async function changeAssignee(assigneeId: string) {
 		if (!issue) return;
 		const member = members.find((m) => m.id === assigneeId) ?? null;
@@ -450,9 +493,11 @@ function useIssueMutations(
 		updatingStatus,
 		updatingPriority,
 		updatingAssignee,
+		updatingType,
 		changeStatus,
 		changePriority,
 		changeAssignee,
+		changeType,
 	};
 }
 
@@ -495,13 +540,16 @@ function IssueDetailView(
 		currentUserId: string | null;
 		fetchComments: () => Promise<void>;
 		statuses: TaskStatus[];
+		taskTypes: TaskType[];
 		members: Member[];
 		updatingStatus: boolean;
 		updatingPriority: boolean;
 		updatingAssignee: boolean;
+		updatingType: boolean;
 		changeStatus: (statusId: string) => void;
 		changePriority: (priority: string) => void;
 		changeAssignee: (assigneeId: string) => void;
+		changeType: (typeId: string) => void;
 		fetchIssue: () => Promise<void>;
 	}>
 ) {
@@ -592,13 +640,16 @@ function IssueDetailView(
 					issueId={issueId}
 					workspaceSlug={workspaceSlug}
 					statuses={props.statuses}
+					taskTypes={props.taskTypes}
 					members={props.members}
 					updatingStatus={props.updatingStatus}
 					updatingPriority={props.updatingPriority}
 					updatingAssignee={props.updatingAssignee}
+					updatingType={props.updatingType}
 					changeStatus={props.changeStatus}
 					changePriority={props.changePriority}
 					changeAssignee={props.changeAssignee}
+					changeType={props.changeType}
 					fetchIssue={props.fetchIssue}
 				/>
 			</div>
@@ -628,6 +679,7 @@ export default function IssueDetail({
 		setIssue,
 		comments,
 		statuses,
+		taskTypes,
 		loading,
 		error,
 		members,
@@ -649,10 +701,21 @@ export default function IssueDetail({
 		updatingStatus,
 		updatingPriority,
 		updatingAssignee,
+		updatingType,
 		changeStatus,
 		changePriority,
 		changeAssignee,
-	} = useIssueMutations({ issue, setIssue, issueId, workspaceSlug, statuses, members, fetchIssue });
+		changeType,
+	} = useIssueMutations({
+		issue,
+		setIssue,
+		issueId,
+		workspaceSlug,
+		statuses,
+		taskTypes,
+		members,
+		fetchIssue,
+	});
 
 	// Error first: a failed resolve leaves issueId empty, so this has to be checked
 	// before the branches below or it would show as a permanent "Loading…".
@@ -703,13 +766,16 @@ export default function IssueDetail({
 			currentUserId={currentUserId}
 			fetchComments={fetchComments}
 			statuses={statuses}
+			taskTypes={taskTypes}
 			members={members}
 			updatingStatus={updatingStatus}
 			updatingPriority={updatingPriority}
 			updatingAssignee={updatingAssignee}
+			updatingType={updatingType}
 			changeStatus={changeStatus}
 			changePriority={changePriority}
 			changeAssignee={changeAssignee}
+			changeType={changeType}
 			fetchIssue={fetchIssue}
 		/>
 	);

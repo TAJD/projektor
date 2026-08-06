@@ -14,6 +14,7 @@ import type {
 	IssueLink,
 	Member,
 	TaskStatus,
+	TaskType,
 } from "./issue-detail-helpers";
 import {
 	formatBytes,
@@ -1802,6 +1803,37 @@ function StatusField({
 	return <span class="text-sm text-text-muted">—</span>;
 }
 
+function TypeField({
+	issue,
+	taskTypes,
+	updatingType,
+	changeType,
+}: {
+	issue: IssueData;
+	taskTypes: TaskType[];
+	updatingType: boolean;
+	changeType: (typeId: string) => void;
+}) {
+	if (taskTypes.length > 0) {
+		return (
+			<Select
+				ariaLabel="Change type"
+				value={issue.type_id ?? ""}
+				disabled={updatingType}
+				onChange={(v) => changeType(v)}
+				options={[
+					{ value: "", label: "No type" },
+					...taskTypes.map((t) => ({ value: t.id, label: t.name })),
+				]}
+			/>
+		);
+	}
+	if (issue.type_name) {
+		return <span class="text-sm text-text-base">{issue.type_name}</span>;
+	}
+	return <span class="text-sm text-text-muted">—</span>;
+}
+
 function PointsField({
 	issueId,
 	workspaceSlug,
@@ -1885,26 +1917,32 @@ export function SidebarPanel({
 	issueId,
 	workspaceSlug,
 	statuses,
+	taskTypes,
 	members,
 	updatingStatus,
 	updatingPriority,
 	updatingAssignee,
+	updatingType,
 	changeStatus,
 	changePriority,
 	changeAssignee,
+	changeType,
 	fetchIssue,
 }: {
 	issue: IssueData;
 	issueId: string;
 	workspaceSlug?: string;
 	statuses: TaskStatus[];
+	taskTypes: TaskType[];
 	members: Member[];
 	updatingStatus: boolean;
 	updatingPriority: boolean;
 	updatingAssignee: boolean;
+	updatingType: boolean;
 	changeStatus: (statusId: string) => void;
 	changePriority: (priority: string) => void;
 	changeAssignee: (assigneeId: string) => void;
+	changeType: (typeId: string) => void;
 	fetchIssue: () => Promise<void>;
 }) {
 	const priorityStyle = PRIORITY_COLORS[issue.priority] ?? PRIORITY_COLORS.none;
@@ -1919,6 +1957,15 @@ export function SidebarPanel({
 						statuses={statuses}
 						updatingStatus={updatingStatus}
 						changeStatus={changeStatus}
+					/>
+				</SidebarField>
+
+				<SidebarField label="Type">
+					<TypeField
+						issue={issue}
+						taskTypes={taskTypes}
+						updatingType={updatingType}
+						changeType={changeType}
 					/>
 				</SidebarField>
 

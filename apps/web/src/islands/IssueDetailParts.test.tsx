@@ -30,6 +30,7 @@ const ISSUE: IssueData = {
 	parent_id: null,
 	project_key: "PROJ",
 	project_name: "Projektor",
+	type_id: null,
 	type_key: null,
 	type_name: null,
 	status_id: null,
