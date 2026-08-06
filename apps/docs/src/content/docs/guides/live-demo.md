@@ -11,7 +11,7 @@ standing up the wiki and issue tracker on a single Cloudflare Worker.
 No login is configured on the demo - it runs with `PUBLIC_READ_ONLY` enabled (PROJ-373),
 so anyone gets dropped straight into a read-only viewer session instead of a Cloudflare
 Access challenge. You'll see an empty "No projects yet" list and can browse around, but
-creating projects, issues, or wiki pages is disabled - that's expected, not broken. It's
+creating a project is disabled, since the read-only session has nowhere to write it. It's
 the same Worker code you'd deploy yourself, kept empty and login-less on purpose. To use
 Projektor, deploy your own instance.
 
