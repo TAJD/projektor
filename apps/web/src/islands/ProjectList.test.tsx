@@ -15,6 +15,21 @@ function mockFetchOk(payload: unknown) {
 	);
 }
 
+function mockFetchByUrl(routes: { projects: unknown[]; meEmail: string }) {
+	vi.stubGlobal(
+		"fetch",
+		vi.fn().mockImplementation((url: string) => {
+			if (String(url).includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ user: { id: "u1", email: routes.meEmail, name: "User" } }),
+				});
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(routes.projects) });
+		})
+	);
+}
+
 const PROJECT = {
 	id: "p1",
 	name: "Projektor",
@@ -53,5 +68,25 @@ describe("ProjectList", () => {
 		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
 		render(<ProjectList />);
 		expect(await screen.findByText(/Failed to load projects/i)).toBeTruthy();
+	});
+});
+
+// PROJ-568: the public read-only demo viewer (PROJ-373) must not be offered a
+// "+ New project" action that always fails the POST — see apps/api/src/middleware/auth.ts.
+describe("ProjectList — public read-only demo viewer (PROJ-568)", () => {
+	it("hides the create-project button for the public viewer", async () => {
+		mockFetchByUrl({ projects: [], meEmail: "public-viewer@projektor.local" });
+		render(<ProjectList />);
+		await screen.findByText(/No projects yet/i);
+		expect(await screen.findByText(/Read-only demo/i)).toBeTruthy();
+		expect(screen.queryByText("+ New project")).toBeNull();
+	});
+
+	it("shows the create-project button for a real user", async () => {
+		mockFetchByUrl({ projects: [], meEmail: "real-user@example.com" });
+		render(<ProjectList />);
+		await screen.findByText(/No projects yet/i);
+		expect(await screen.findByText("+ New project")).toBeTruthy();
+		expect(screen.queryByText(/Read-only demo/i)).toBeNull();
 	});
 });
