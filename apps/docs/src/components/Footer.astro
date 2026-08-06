@@ -1,0 +1,20 @@
+---
+import Default from '@astrojs/starlight/components/Footer.astro';
+---
+
+<Default {...Astro.props}><slot /></Default>
+
+<p class="verdient-credit">
+	Built by <a href="https://verdient.co.uk" target="_blank" rel="noopener noreferrer">Verdient</a>.
+</p>
+
+<style>
+	.verdient-credit {
+		margin-top: 1rem;
+		font-size: var(--sl-text-xs);
+		color: var(--sl-color-gray-3);
+	}
+	.verdient-credit a {
+		color: var(--sl-color-gray-2);
+	}
+</style>

@@ -17,6 +17,9 @@ export default defineConfig({
 			description:
 				"A self-hosted, MCP-native Jira + wiki that runs in a single Cloudflare Worker.",
 			customCss: ["./src/styles/projektor.css"],
+			components: {
+				Footer: "./src/components/Footer.astro",
+			},
 			plugins: [
 				starlightLinksValidator({
 					// Bare dev-server URL in the mirrored AGENTS.md content, not a docs page.
