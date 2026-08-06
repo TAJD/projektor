@@ -62,6 +62,16 @@ describe("MarkdownEditor", () => {
 		expect(root?.className).toContain("normal-case");
 	});
 
+	it("resets font-weight so it can't inherit an ancestor's bold (PROJ-566)", () => {
+		// The create-issue Description sits inside a <label class="font-semibold">, and
+		// font-weight inherits — without this guard everything typed renders bold.
+		// The reset must live on the editor's own root so it holds wherever the
+		// editor is mounted.
+		const { container } = render(<MarkdownEditor value="" onChange={() => {}} />);
+		const root = container.firstElementChild;
+		expect(root?.className).toContain("font-normal");
+	});
+
 	describe("debounced preview render (PROJ-227)", () => {
 		beforeEach(() => {
 			vi.useFakeTimers();

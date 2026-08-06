@@ -414,7 +414,7 @@ export default function MarkdownEditor({
 		useMarkdownCommands(viewRef);
 
 	return (
-		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case">
+		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case font-normal">
 			<EditorToolbar
 				onBold={bold}
 				onItalic={italic}
