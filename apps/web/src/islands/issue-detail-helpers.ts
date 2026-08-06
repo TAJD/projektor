@@ -36,6 +36,7 @@ export interface IssueData {
 	parent_id: string | null;
 	project_key: string | null;
 	project_name: string | null;
+	type_id: string | null;
 	type_key: string | null;
 	type_name: string | null;
 	status_id: string | null;
@@ -61,6 +62,12 @@ export interface Member {
 	id: string;
 	name: string | null;
 	email: string;
+}
+
+export interface TaskType {
+	id: string;
+	key: string;
+	name: string;
 }
 
 export const PRIORITY_COLORS: Record<string, { bg: string; text: string }> = {
