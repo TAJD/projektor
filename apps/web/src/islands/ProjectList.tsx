@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
+import { usePublicViewer } from "../utils/public-viewer";
 import AccessPending from "./AccessPending";
 import { Button } from "./ui/Button";
 
@@ -322,6 +323,7 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 	}, [workspaceSlug]);
 
 	const gate = useAccessGate(workspaceSlug);
+	const isPublicViewer = usePublicViewer(workspaceSlug);
 
 	const createForm = useProjectCreateForm(workspaceSlug, (p) =>
 		setProjects((prev) => [...prev, p])
@@ -339,14 +341,20 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 	return (
 		<>
 			<div class="flex justify-end mb-4">
-				{!createForm.formOpen && (
-					<Button type="button" variant="primary" size="sm" onClick={createForm.open}>
-						+ New project
-					</Button>
+				{isPublicViewer ? (
+					<p class="text-xs text-[var(--text-muted)] m-0">
+						Read-only demo — projects can't be created here.
+					</p>
+				) : (
+					!createForm.formOpen && (
+						<Button type="button" variant="primary" size="sm" onClick={createForm.open}>
+							+ New project
+						</Button>
+					)
 				)}
 			</div>
 
-			{createForm.formOpen && (
+			{!isPublicViewer && createForm.formOpen && (
 				<ProjectCreateForm
 					nameRef={createForm.nameRef}
 					formName={createForm.formName}
