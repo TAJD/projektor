@@ -182,10 +182,20 @@ export default function CreateIssueModal(props: CreateIssueModalProps) {
 					</div>
 
 					<div class="mb-[0.875rem]">
+						{/* PROJ-566: a caption sibling, NOT a wrapper. A <label> with no `for` forwards
+						    clicks on its non-interactive descendants to its first labelable control —
+						    here the editor toolbar's Bold button — so every tap in the editor body ran
+						    Bold. The editor names itself via ariaLabel instead. */}
+						{/* biome-ignore lint/a11y/noLabelWithoutControl: caption for MarkdownEditor, which has no associable control */}
 						<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
 							Description
-							<MarkdownEditor value={createBody} onChange={setCreateBody} minHeight="160px" />
 						</label>
+						<MarkdownEditor
+							value={createBody}
+							onChange={setCreateBody}
+							minHeight="160px"
+							ariaLabel="Description"
+						/>
 					</div>
 
 					<CreateIssueModalFields {...props} />

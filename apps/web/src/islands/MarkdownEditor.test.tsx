@@ -19,6 +19,19 @@ describe("MarkdownEditor", () => {
 		expect(screen.getByTitle("Link")).toBeTruthy();
 	});
 
+	it("names the editing surface, defaulting when no ariaLabel is given (PROJ-566)", () => {
+		const plain = render(<MarkdownEditor value="" onChange={() => {}} />);
+		const content = plain.container.querySelector(".cm-content");
+		expect(content?.getAttribute("aria-label")).toBe("Markdown editor");
+		expect(content?.getAttribute("role")).toBe("textbox");
+		expect(content?.getAttribute("aria-multiline")).toBe("true");
+
+		const named = render(<MarkdownEditor value="" onChange={() => {}} ariaLabel="Description" />);
+		expect(named.container.querySelector(".cm-content")?.getAttribute("aria-label")).toBe(
+			"Description"
+		);
+	});
+
 	it("shows 'Nothing to preview.' when value is empty", () => {
 		render(<MarkdownEditor value="" onChange={() => {}} />);
 		expect(screen.getByText(/Nothing to preview/i)).toBeTruthy();
@@ -53,20 +66,20 @@ describe("MarkdownEditor", () => {
 	});
 
 	it("resets text-transform so it can't inherit an ancestor's uppercase (PROJ-210)", () => {
-		// The create-issue Description sits inside a <label class="uppercase">, and
-		// text-transform inherits — without this guard everything typed renders as
-		// caps. The reset must live on the editor's own root so it holds wherever
-		// the editor is mounted.
+		// Editors are mounted under uppercase field captions (e.g. the create-issue and
+		// wiki forms), and text-transform inherits — without this guard everything typed
+		// renders as caps. The reset must live on the editor's own root so it holds
+		// wherever the editor is mounted.
 		const { container } = render(<MarkdownEditor value="" onChange={() => {}} />);
 		const root = container.firstElementChild;
 		expect(root?.className).toContain("normal-case");
 	});
 
 	it("resets font-weight so it can't inherit an ancestor's bold (PROJ-566)", () => {
-		// The create-issue Description sits inside a <label class="font-semibold">, and
-		// font-weight inherits — without this guard everything typed renders bold.
-		// The reset must live on the editor's own root so it holds wherever the
-		// editor is mounted.
+		// Editors are mounted under font-semibold field captions, and font-weight
+		// inherits — without this guard the editor body renders bold. (This is not the
+		// PROJ-566 root cause, which was label-click forwarding, see below; it is still
+		// a real inheritance guard for every mount site.)
 		const { container } = render(<MarkdownEditor value="" onChange={() => {}} />);
 		const root = container.firstElementChild;
 		expect(root?.className).toContain("font-normal");
@@ -136,6 +149,58 @@ describe("MarkdownEditor", () => {
 		// After click the Edit button loses its active styles (class contains bg-transparent)
 		const editToggle = buttons.find((b) => b.textContent === "Edit");
 		expect(editToggle?.className).toContain("border-border");
+	});
+});
+
+// ─── PROJ-566 / CD-294: label-forwarded toolbar activation ──────────────────
+
+describe("MarkdownEditor — toolbar ignores label-forwarded clicks (PROJ-566)", () => {
+	function boldButton(): HTMLButtonElement {
+		return screen.getByTitle("Bold (Ctrl+B)") as HTMLButtonElement;
+	}
+
+	it("binds a wrapping label's implicit control to the Bold button (the bug's mechanism)", () => {
+		const { container } = render(
+			<label>
+				Description
+				<MarkdownEditor value="" onChange={() => {}} />
+			</label>
+		);
+		const label = container.querySelector("label") as HTMLLabelElement;
+		expect(label.control).toBe(boldButton());
+	});
+
+	it("does not run Bold for a click whose coordinates are outside the button", () => {
+		const onChange = vi.fn();
+		render(
+			<label>
+				Description
+				<MarkdownEditor value="" onChange={onChange} />
+			</label>
+		);
+		// jsdom does not implement <label>'s activation-behavior forwarding, so replay
+		// what a real browser does: the same click, re-dispatched on the implicit
+		// control, still carrying the coordinates of the tap in the editor body.
+		fireEvent.click(boldButton(), { clientX: 120, clientY: 300, detail: 1 });
+
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("still runs Bold for a direct click on the button", () => {
+		const onChange = vi.fn();
+		render(<MarkdownEditor value="" onChange={onChange} />);
+		// jsdom reports a zero-sized rect for every element, so (0,0) is "inside".
+		fireEvent.click(boldButton(), { clientX: 0, clientY: 0, detail: 1 });
+
+		expect(onChange).toHaveBeenCalledWith("****");
+	});
+
+	it("still runs Bold for keyboard activation (detail 0)", () => {
+		const onChange = vi.fn();
+		render(<MarkdownEditor value="" onChange={onChange} />);
+		fireEvent.click(boldButton(), { clientX: 0, clientY: 0, detail: 0 });
+
+		expect(onChange).toHaveBeenCalledWith("****");
 	});
 });
 

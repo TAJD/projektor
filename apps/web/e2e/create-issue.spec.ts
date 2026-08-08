@@ -36,6 +36,21 @@ async function openIssues(page: Page, ctx: E2EContext) {
 	await page.reload();
 }
 
+// Opens /issues and the "New issue" modal, returning the dialog locator.
+async function openCreateDialog(page: Page) {
+	await openIssues(page, readCtx());
+
+	// Wait for the island to load and for at least one project to be fetched
+	// (the "New issue" button is gated on projects.length > 0).
+	const newIssueBtn = page.locator("button", { hasText: "+ New issue" });
+	await expect(newIssueBtn).toBeVisible({ timeout: 20_000 });
+	await newIssueBtn.click();
+
+	const dialog = page.locator('[role="dialog"][aria-label="Create new issue"]');
+	await expect(dialog).toBeVisible({ timeout: 5_000 });
+	return dialog;
+}
+
 test.describe("Create issue flow", () => {
 	test("creates a new issue and views it on the detail page", async ({ page }) => {
 		test.skip(
@@ -43,18 +58,7 @@ test.describe("Create issue flow", () => {
 			"E2E_BASE_URL not set — skipping live deployment test",
 		);
 
-		const ctx = readCtx();
-		await openIssues(page, ctx);
-
-		// Wait for the island to load and for at least one project to be fetched
-		// (the "New issue" button is gated on projects.length > 0).
-		const newIssueBtn = page.locator("button", { hasText: "+ New issue" });
-		await expect(newIssueBtn).toBeVisible({ timeout: 20_000 });
-		await newIssueBtn.click();
-
-		// Wait for the create-issue modal.
-		const dialog = page.locator('[role="dialog"][aria-label="Create new issue"]');
-		await expect(dialog).toBeVisible({ timeout: 5_000 });
+		const dialog = await openCreateDialog(page);
 
 		// Fill in the title.
 		const titleInput = dialog.locator('input[placeholder="Issue title"]');
@@ -82,5 +86,46 @@ test.describe("Create issue flow", () => {
 		await expect(
 			page.locator('[aria-label^="Change status"]'),
 		).toBeVisible({ timeout: 5_000 });
+	});
+
+	// PROJ-566 / CD-294: the Description caption used to *wrap* the editor. A <label>
+	// with no `for` forwards clicks on its non-interactive descendants to its first
+	// labelable control — the toolbar's Bold button — so clicking into the editor body
+	// inserted `****` and everything typed afterwards came out bold.
+	test("typing in the description does not insert markdown bold markers", async ({ page }) => {
+		test.skip(
+			!process.env.E2E_BASE_URL,
+			"E2E_BASE_URL not set — skipping live deployment test",
+		);
+
+		const dialog = await openCreateDialog(page);
+
+		const title = `E2E No Bold ${Date.now()}`;
+		await dialog.locator('input[placeholder="Issue title"]').fill(title);
+
+		// Wait for the real CodeMirror surface — `.cm-content` only exists once the lazy
+		// chunk has landed, which distinguishes it from the loading textarea fallback.
+		const content = dialog.locator(".cm-content");
+		await expect(content).toBeVisible({ timeout: 20_000 });
+
+		await content.click();
+		await page.keyboard.type("hello");
+
+		await expect(content).toHaveText("hello");
+		expect(await content.innerText()).not.toContain("*");
+
+		await dialog.locator('button[type="submit"]', { hasText: "Create issue" }).click();
+		await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+
+		const issueLink = page.locator("a", { hasText: title }).first();
+		await expect(issueLink).toBeVisible({ timeout: 10_000 });
+		await issueLink.click();
+		await expect(page.locator("h1")).toContainText(title, { timeout: 10_000 });
+
+		// The stored body must be the plain text. `**hello**` would render as "hello"
+		// too, so assert on the rendered markup: no <strong> means no bold markers.
+		const body = page.locator(".prose").first();
+		await expect(body).toContainText("hello", { timeout: 10_000 });
+		expect(await body.locator("strong").count()).toBe(0);
 	});
 });
