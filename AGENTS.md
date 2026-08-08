@@ -191,7 +191,7 @@ curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 Then open **http://localhost:4321** - with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
-**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, `pnpm --filter @projektor/api test:coverage`, `pnpm --filter @projektor/web test:coverage`, `pnpm --filter @projektor/web build`, and `pnpm --filter @projektor/docs build` must all be green, and `pnpm gen:docs` must produce no diff. CI runs these plus `node scripts/check-island-api.mjs` (`.github/workflows/ci.yml`).
+**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, `pnpm --filter @projektor/api test:coverage`, `pnpm --filter @projektor/web test:coverage`, `pnpm --filter @projektor/web build`, and `pnpm --filter @projektor/docs build` must all be green, and `pnpm gen:docs` must produce no diff. CI runs these plus the island API and design system convention checks (`.github/workflows/ci.yml`).
 
 ## Git hooks (lefthook)
 
@@ -201,7 +201,7 @@ as that user (a member of the seeded `projektor` workspace), and the islands loa
 
 There is deliberately no `pre-push` hook - CI (`.github/workflows/ci.yml`) is the authoritative gate before merge (main is PR-protected; direct pushes are rejected), so a local pre-push copy of the same checks was pure redundant overhead. It was also a source of real bugs: under concurrent local load its test step could fail while a backgrounded `git push` still reported exit code 0, masking a rejected push. It was removed for these reasons; don't re-add one without addressing both.
 
-CI runs a superset of the pre-commit checks: the generated-docs freshness check, `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, coverage-enforced test runs for `@projektor/api` and `@projektor/web`, both the web and docs builds, and `node scripts/check-island-api.mjs`. New contributors get the pre-commit hook automatically after `pnpm install`. See **Before opening a PR** above for the full local command set to run before pushing.
+CI runs a superset of the pre-commit checks: the generated-docs freshness check, `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, coverage-enforced test runs for `@projektor/api` and `@projektor/web`, both the web and docs builds, and the island API and design system convention checks. Each of those two builds its cofferdam plugin and then runs `cofferdam check <dir> --only <CheckId>`, which scopes the exit-code gate to that one check. New contributors get the pre-commit hook automatically after `pnpm install`. See **Before opening a PR** above for the full local command set to run before pushing.
 
 **Bypass for WIP commits:** pass `--no-verify` (or `-n`) to git:
 
