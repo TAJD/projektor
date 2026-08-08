@@ -6,6 +6,13 @@ import { Button } from "../ui/Button";
 import Select from "../ui/Select";
 import type { ProjectMeta } from "./types";
 
+// PROJ-566: a caption *sibling*, never a wrapper. A <label> with no `for` binds to
+// its first labelable descendant — for a Select that's the trigger <button>, so the
+// menu's own <li> options (not interactive content) forwarded their clicks to it too.
+// Matches EpicList.tsx's create-epic form; the Select names itself via `ariaLabel`.
+const FIELD_CAPTION_CLASS =
+	"block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]";
+
 interface CreateIssueModalProps {
 	createTitle: string;
 	setCreateTitle: Dispatch<StateUpdater<string>>;
@@ -55,68 +62,64 @@ function CreateIssueModalFields({
 		<div class="flex gap-3 mb-5 flex-wrap items-end">
 			{projects.length > 1 && (
 				<div>
-					<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-						Project
-						<Select
-							ariaLabel="Select project"
-							value={createProjectId}
-							onChange={setCreateProjectId}
-							options={projects.map((p) => ({ value: p.id, label: p.name }))}
-						/>
-					</label>
+					{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+					<label class={FIELD_CAPTION_CLASS}>Project</label>
+					<Select
+						ariaLabel="Select project"
+						value={createProjectId}
+						onChange={setCreateProjectId}
+						options={projects.map((p) => ({ value: p.id, label: p.name }))}
+					/>
 				</div>
 			)}
 
 			<div>
-				<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-					Priority
-					<Select
-						ariaLabel="Select priority"
-						value={createPriority}
-						onChange={setCreatePriority}
-						capitalize
-						options={PRIORITY_OPTIONS}
-						buttonStyle={{
-							background: `var(--priority-${createPriority}-bg, var(--priority-low-bg))`,
-							color: `var(--priority-${createPriority}-text, var(--text-muted))`,
-							fontWeight: 500,
-							borderColor: "transparent",
-						}}
-					/>
-				</label>
+				{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+				<label class={FIELD_CAPTION_CLASS}>Priority</label>
+				<Select
+					ariaLabel="Select priority"
+					value={createPriority}
+					onChange={setCreatePriority}
+					capitalize
+					options={PRIORITY_OPTIONS}
+					buttonStyle={{
+						background: `var(--priority-${createPriority}-bg, var(--priority-low-bg))`,
+						color: `var(--priority-${createPriority}-text, var(--text-muted))`,
+						fontWeight: 500,
+						borderColor: "transparent",
+					}}
+				/>
 			</div>
 
 			{taskTypes.length > 0 && (
 				<div>
-					<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-						Type
-						<Select
-							ariaLabel="Select type"
-							value={createTypeId}
-							onChange={setCreateTypeId}
-							options={[
-								{ value: "", label: "No type" },
-								...taskTypes.map((t) => ({ value: t.id, label: t.name })),
-							]}
-						/>
-					</label>
+					{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+					<label class={FIELD_CAPTION_CLASS}>Type</label>
+					<Select
+						ariaLabel="Select type"
+						value={createTypeId}
+						onChange={setCreateTypeId}
+						options={[
+							{ value: "", label: "No type" },
+							...taskTypes.map((t) => ({ value: t.id, label: t.name })),
+						]}
+					/>
 				</div>
 			)}
 
 			{statuses.length > 0 && (
 				<div>
-					<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-						Status
-						<Select
-							ariaLabel="Select status"
-							value={createStatusId}
-							onChange={setCreateStatusId}
-							options={[
-								{ value: "", label: "Default" },
-								...statuses.map((s) => ({ value: s.id, label: s.name })),
-							]}
-						/>
-					</label>
+					{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+					<label class={FIELD_CAPTION_CLASS}>Status</label>
+					<Select
+						ariaLabel="Select status"
+						value={createStatusId}
+						onChange={setCreateStatusId}
+						options={[
+							{ value: "", label: "Default" },
+							...statuses.map((s) => ({ value: s.id, label: s.name })),
+						]}
+					/>
 				</div>
 			)}
 		</div>

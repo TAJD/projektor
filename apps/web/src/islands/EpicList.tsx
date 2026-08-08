@@ -39,9 +39,15 @@ const TH_CLASS =
 	"text-left px-3 py-2 text-xs font-semibold text-text-muted uppercase tracking-[0.05em] border-b-2 border-border";
 const CELL_CLASS =
 	"px-3 py-[0.625rem] border-b border-border align-middle group-hover:bg-surface [tr:last-child_&]:border-b-0";
+// CD-294: the panel had no max-height and no scroll region, so inside the
+// `fixed inset-0` backdrop (bottom-anchored on phones) anything taller than the
+// visual viewport overflowed off the top with no way to scroll to it — the Title
+// field first. `dvh`, not `vh`: iOS never shrinks `vh` for the keyboard or an
+// expanded URL bar, which is exactly when this panel runs out of room.
 const MODAL_CLASS =
 	"bg-bg border border-border rounded-lg p-6 w-full max-w-[480px] mx-4 " +
-	"max-sm:rounded-t-lg max-sm:rounded-b-none max-sm:mx-0";
+	"max-h-[80dvh] overflow-y-auto overscroll-contain " +
+	"max-sm:rounded-t-lg max-sm:rounded-b-none max-sm:mx-0 max-sm:max-h-[90dvh]";
 
 function parseDateField(v: string | null): DateField {
 	return v === "completed" || v === "updated" ? v : "";

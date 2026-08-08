@@ -159,8 +159,12 @@ export default function NewSourceModal({ projectId, workspaceSlug, onClose, onCr
 		>
 			<div
 				class={[
-					"bg-bg border border-border rounded-lg p-6 w-full max-w-[480px] max-h-[80vh] overflow-y-auto mx-4",
-					"max-sm:rounded-t-lg max-sm:rounded-b-none max-sm:max-h-[90vh] max-sm:mx-0",
+					// CD-294: `dvh`, not `vh` — iOS reports `vh` as the large viewport and never
+					// shrinks it for the keyboard or an expanded URL bar, so the panel's real
+					// visible area is smaller than its max-height and the action row falls below
+					// the fold. `overscroll-contain` keeps the panel's own scroll off the page.
+					"bg-bg border border-border rounded-lg p-6 w-full max-w-[480px] max-h-[80dvh] overflow-y-auto overscroll-contain mx-4",
+					"max-sm:rounded-t-lg max-sm:rounded-b-none max-sm:max-h-[90dvh] max-sm:mx-0",
 				].join(" ")}
 				role="dialog"
 				aria-modal="true"

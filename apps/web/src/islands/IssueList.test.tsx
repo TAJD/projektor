@@ -847,3 +847,19 @@ describe("mount fetch count (perf regression)", () => {
 		expect(epicDropdownCalls).toHaveLength(1);
 	});
 });
+
+describe("Filters popover stacking (CD-294)", () => {
+	it("sits on the popover layer, above the fixed topbar", async () => {
+		// The topbar is `z-index: 110` (Base.astro). At 100 this popover — whose
+		// fixed coordinates are captured once on open and never track the page
+		// scroll — could slide beneath it and become untappable.
+		render(<IssueList />);
+		await waitForLoaded();
+		openFiltersPopover();
+
+		const panel = await screen.findByRole("button", { name: "Todo" });
+		const popover = panel.closest("[style*='position: fixed']") as HTMLElement;
+		expect(popover).toBeTruthy();
+		expect(Number(popover.style.zIndex)).toBeGreaterThan(110);
+	});
+});

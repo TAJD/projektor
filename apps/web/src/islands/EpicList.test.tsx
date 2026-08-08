@@ -232,6 +232,25 @@ describe("EpicList", () => {
 		expect(screen.getByRole("button", { name: /New Epic/i })).toBeTruthy();
 	});
 
+	it("gives the create-epic panel a dvh-bounded scroll region so nothing lands off-screen (CD-294)", async () => {
+		// The panel had no max-height and no scroll region: inside the `fixed inset-0`
+		// backdrop (bottom-anchored on phones) anything taller than the visual viewport
+		// overflowed off the top with no way to reach it. `vh` wouldn't do — iOS never
+		// shrinks it for the keyboard or an expanded URL bar.
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchEpics([EPIC_ISSUE]);
+		render(<EpicList />);
+		await screen.findAllByText("Big Epic");
+		fireEvent.click(screen.getByRole("button", { name: /New Epic/i }));
+
+		const panel = screen.getByRole("dialog", { name: "Create new epic" });
+		expect(panel.className).toContain("max-h-[80dvh]");
+		expect(panel.className).toContain("max-sm:max-h-[90dvh]");
+		expect(panel.className).toContain("overflow-y-auto");
+		expect(panel.className).toContain("overscroll-contain");
+		expect(panel.className).not.toMatch(/max-h-\[\d+vh\]/);
+	});
+
 	it("sends completedAfter/completedBefore query params when a date-range filter is set via the URL", async () => {
 		history.replaceState(
 			null,

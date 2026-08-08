@@ -340,7 +340,10 @@ export default function FiltersPopover({
 						position: "fixed",
 						top: `${popoverPos.current.top}px`,
 						left: `${popoverPos.current.left}px`,
-						zIndex: 100,
+						// CD-294: 200 is the popover layer (Base.astro's `.popover`). At 100 this
+						// sat *under* the fixed topbar (110), which it can slide beneath — the
+						// coordinates are captured once on open and never track the page scroll.
+						zIndex: 200,
 						background: "var(--surface)",
 						border: "1px solid var(--border)",
 						borderRadius: "0.5rem",

@@ -59,6 +59,21 @@ describe("GlossaryHelp", () => {
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
+	it("stays open on a height-only resize, but closes when the width changes (CD-294)", () => {
+		// iOS fires `resize` on every keyboard show/hide and Safari chrome collapse.
+		// Closing on those made the toggletip vanish moments after it was tapped.
+		render(<GlossaryHelp id="tokens" />);
+		fireEvent.click(screen.getByRole("button", { name: "About Tokens" }));
+
+		window.innerHeight = window.innerHeight - 300;
+		fireEvent.resize(window);
+		expect(screen.queryByRole("dialog")).toBeTruthy();
+
+		window.innerWidth = window.innerWidth - 100;
+		fireEvent.resize(window);
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
 	it("portals the popover onto document.body and doesn't self-close on a click inside it (PROJ-419)", () => {
 		// Portalled to escape a transformed ancestor's containing-block trap for
 		// `position: fixed` (the mobile off-canvas drawer applies a CSS

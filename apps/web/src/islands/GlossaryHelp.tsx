@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useId, useRef, useState } from "preact/hooks";
 import { GLOSSARY_TERMS, type GlossaryTermId } from "./glossary-definitions";
 import { Popover } from "./ui/Popover";
 
@@ -29,15 +29,18 @@ export function GlossaryHelp({ id }: { id: GlossaryTermId }) {
 	const popoverRef = useRef<HTMLDivElement>(null);
 	const popoverId = useId();
 
-	function openPopover() {
+	const reposition = useCallback(() => {
 		const rect = triggerRef.current?.getBoundingClientRect();
-		if (rect) {
-			const left = Math.max(
-				POPOVER_MARGIN,
-				Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - POPOVER_MARGIN)
-			);
-			setPopoverPos({ top: rect.bottom + 4, left });
-		}
+		if (!rect) return;
+		const left = Math.max(
+			POPOVER_MARGIN,
+			Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - POPOVER_MARGIN)
+		);
+		setPopoverPos({ top: rect.bottom + 4, left });
+	}, []);
+
+	function openPopover() {
+		reposition();
 		setOpen(true);
 	}
 
@@ -57,20 +60,33 @@ export function GlossaryHelp({ id }: { id: GlossaryTermId }) {
 			if (e.target instanceof Node && isInside(e.target)) return;
 			setOpen(false);
 		}
+		// CD-294: only a width change (rotation, desktop resize) invalidates the
+		// popover enough to dismiss it. iOS fires `resize` on every keyboard
+		// show/hide and Safari chrome collapse — height-only events — which made
+		// the toggletip vanish moments after it was tapped. Same split as Select.tsx.
+		let lastWidth = window.innerWidth;
 		function onResize() {
-			setOpen(false);
+			if (window.innerWidth !== lastWidth) {
+				lastWidth = window.innerWidth;
+				setOpen(false);
+				return;
+			}
+			reposition();
 		}
+		const vv = window.visualViewport;
 		document.addEventListener("mousedown", onPointerDown);
 		document.addEventListener("keydown", onKeyDown);
 		window.addEventListener("scroll", onScroll, true);
 		window.addEventListener("resize", onResize);
+		vv?.addEventListener("resize", onResize);
 		return () => {
 			document.removeEventListener("mousedown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
 			window.removeEventListener("scroll", onScroll, true);
 			window.removeEventListener("resize", onResize);
+			vv?.removeEventListener("resize", onResize);
 		};
-	}, [open]);
+	}, [open, reposition]);
 
 	return (
 		<span class="metric-help" ref={rootRef}>

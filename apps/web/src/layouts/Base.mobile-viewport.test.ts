@@ -53,6 +53,16 @@ describe("Base layout — mobile Select menu sheet (CD-294)", () => {
 	});
 });
 
+describe("Base layout — scrollable popover menus contain their scroll (CD-294)", () => {
+	it("stops .popover-select-menu chaining its scroll to the page behind it", () => {
+		const start = source.indexOf("      .popover-select-menu {");
+		const block = source.slice(start, source.indexOf("\n      }", start));
+		expect(start).toBeGreaterThan(-1);
+		expect(block).toMatch(/overflow-y:\s*auto/);
+		expect(block).toMatch(/overscroll-behavior:\s*contain/);
+	});
+});
+
 describe("Base layout — account menu replaces legacy login/logout emoji", () => {
 	it("renders AccountMenu in the topbar and has no leftover key/door emoji links", () => {
 		expect(source).toContain("<AccountMenu");
