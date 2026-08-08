@@ -46,6 +46,14 @@ async function openIssues(page: Page, ctx: E2EContext) {
 	await page.waitForSelector("text=/\\d+ issues?/", { timeout: 15_000 });
 }
 
+async function openCreateModal(page: Page, ctx: E2EContext) {
+	await openIssues(page, ctx);
+	await page.locator("button", { hasText: "+ New issue" }).click();
+	const dialog = page.locator('[role="dialog"][aria-label="Create new issue"]');
+	await expect(dialog).toBeVisible({ timeout: 5_000 });
+	return dialog;
+}
+
 test.describe("Mobile issue list layout (375×812)", () => {
 	test("header row: New issue button and view toggle never overlap the count label", async ({
 		page,
@@ -148,6 +156,11 @@ test.describe("Mobile issue list layout (375×812)", () => {
 		if (!dialogBox || !viewportSize) throw new Error("boundingBox()/viewportSize() null");
 		expect(dialogBox.width).toBeLessThanOrEqual(viewportSize.width);
 
+		// CD-294: the action row must be reachable without the user having to
+		// fight the page behind the sheet. Before the fix it sat below the fold.
+		await expect(dialog.locator('button[type="submit"]')).toBeInViewport();
+		await expect(dialog.locator("button", { hasText: "Cancel" })).toBeInViewport();
+
 		await dialog.locator('input[placeholder="Issue title"]').fill("E2E Mobile Test Issue");
 		await dialog.locator('button[type="submit"]', { hasText: "Create issue" }).click();
 
@@ -155,5 +168,77 @@ test.describe("Mobile issue list layout (375×812)", () => {
 		await expect(
 			page.locator("a", { hasText: "E2E Mobile Test Issue" }).first(),
 		).toBeVisible({ timeout: 10_000 });
+	});
+
+	test("New issue modal renders above the topbar, not under it (CD-294)", async ({ page }) => {
+		test.skip(
+			!process.env.E2E_BASE_URL,
+			"E2E_BASE_URL not set — skipping live deployment test",
+		);
+
+		const dialog = await openCreateModal(page, readCtx());
+		await expect(dialog).toBeVisible();
+
+		// The topbar is z-index: 110 (Base.astro); the backdrop used to be z-50, so
+		// the topbar painted over the sheet and stayed tappable behind it.
+		const stacking = await page.evaluate(() => {
+			const topbar = document.querySelector(".app-topbar");
+			const backdrop = document
+				.querySelector('[role="dialog"][aria-label="Create new issue"]')
+				?.closest("div.fixed");
+			if (!topbar || !backdrop) return null;
+			return {
+				topbar: Number(getComputedStyle(topbar).zIndex),
+				backdrop: Number(getComputedStyle(backdrop).zIndex),
+			};
+		});
+		if (!stacking) throw new Error("topbar/backdrop not found");
+		expect(stacking.backdrop).toBeGreaterThan(stacking.topbar);
+
+		// And the point at the topbar's centre must belong to the modal, not the topbar.
+		const box = await page.locator(".app-topbar").boundingBox();
+		if (!box) throw new Error("topbar boundingBox() null");
+		const hitsModal = await page.evaluate(
+			({ x, y }) =>
+				!!document.elementFromPoint(x, y)?.closest('[aria-label="Create new issue"], div.fixed'),
+			{ x: box.x + box.width / 2, y: box.y + box.height / 2 },
+		);
+		expect(hitsModal).toBe(true);
+	});
+
+	test("dropdowns inside the New issue modal stay open and on-screen while scrolling (CD-294)", async ({
+		page,
+	}) => {
+		test.skip(
+			!process.env.E2E_BASE_URL,
+			"E2E_BASE_URL not set — skipping live deployment test",
+		);
+
+		const dialog = await openCreateModal(page, readCtx());
+
+		const trigger = dialog.locator('[aria-label="Select priority"]');
+		await trigger.scrollIntoViewIfNeeded();
+		await trigger.click();
+
+		const listbox = page.locator('[role="listbox"][aria-label="Select priority"]');
+		await expect(listbox).toBeVisible();
+		await expect(listbox).toBeInViewport();
+		// Every option must be reachable — the old fixed menu could hang off the
+		// bottom of the viewport with no way to scroll it into view.
+		const options = listbox.locator('[role="option"]');
+		for (let i = 0; i < (await options.count()); i++) {
+			await expect(options.nth(i)).toBeInViewport();
+		}
+
+		// Scrolling the modal body used to fire resize/scroll and kill the menu.
+		await dialog
+			.locator("form > div")
+			.first()
+			.evaluate((el) => el.scrollBy(0, 40));
+		await expect(listbox).toBeVisible();
+		await expect(listbox).toBeInViewport();
+
+		await options.first().click();
+		await expect(listbox).toBeHidden();
 	});
 });

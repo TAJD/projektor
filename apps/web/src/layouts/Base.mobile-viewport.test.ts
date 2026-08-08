@@ -21,6 +21,38 @@ describe("Base layout — mobile viewport", () => {
 	});
 });
 
+describe("Base layout — mobile Select menu sheet (CD-294)", () => {
+	const blockStart = source.indexOf("/* CD-294: phone-sized Select menu.");
+	const block = source.slice(blockStart, source.indexOf("\n      }\n", blockStart));
+
+	it("has the mobile block, and places it after the base .select-* rules so it wins on source order", () => {
+		expect(blockStart).toBeGreaterThan(-1);
+		// Equal specificity (single class each), so the later rule wins — if the
+		// base `.select-menu` ever moves below this block, the sheet silently dies.
+		expect(blockStart).toBeGreaterThan(source.indexOf("      .select-menu {"));
+	});
+
+	it("anchors the menu to the bottom of the viewport instead of under its trigger", () => {
+		expect(block).toMatch(/position:\s*fixed/);
+		expect(block).toMatch(/top:\s*auto/);
+		expect(block).toMatch(/bottom:\s*0/);
+	});
+
+	it("uses dvh (not vh) and contains its own scroll so it can't chain to the page", () => {
+		expect(block).toMatch(/max-height:\s*50dvh/);
+		expect(block).toMatch(/overscroll-behavior:\s*contain/);
+	});
+
+	it("pads for the iOS home-indicator safe area", () => {
+		expect(block).toMatch(/padding-bottom:\s*max\(0\.25rem,\s*env\(safe-area-inset-bottom\)\)/);
+	});
+
+	it("gives options and triggers a 44px minimum touch target", () => {
+		expect(block).toMatch(/\.select-option\s*{\s*min-height:\s*44px;/);
+		expect(block).toMatch(/\.select-button\s*{\s*min-height:\s*44px;/);
+	});
+});
+
 describe("Base layout — account menu replaces legacy login/logout emoji", () => {
 	it("renders AccountMenu in the topbar and has no leftover key/door emoji links", () => {
 		expect(source).toContain("<AccountMenu");

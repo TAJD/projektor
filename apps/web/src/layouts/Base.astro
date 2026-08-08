@@ -645,6 +645,33 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         color: var(--accent);
       }
 
+      /* CD-294: phone-sized Select menu. A fixed menu anchored under its trigger
+         can't survive iOS Safari's chrome/keyboard resizing the visual viewport,
+         and one opened low on the screen extends past the fold with no way to
+         scroll it into view. Below this breakpoint it becomes a bottom-anchored
+         sheet instead, and Select.tsx omits its inline coordinates so these rules
+         own the position (inline styles beat class rules at any specificity).
+         Must stay AFTER the base `.select-*` rules above: equal specificity, so
+         source order decides. Extends the PROJ-397 mobile `.select` block. */
+      @media (max-width: 640px) {
+        .select-menu {
+          position: fixed;
+          top: auto;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          width: 100%;
+          min-width: 0;
+          max-height: 50dvh;
+          overscroll-behavior: contain;
+          border-radius: 10px 10px 0 0;
+          padding-bottom: max(0.25rem, env(safe-area-inset-bottom));
+        }
+        /* 44px minimum touch target, matching .hamburger/.theme-toggle above. */
+        .select-option { min-height: 44px; }
+        .select-button { min-height: 44px; }
+      }
+
       /* ── Metric help (islands) ─────────────────────────────────────── */
       .metric-help { position: relative; display: inline-flex; }
       .metric-help-trigger {

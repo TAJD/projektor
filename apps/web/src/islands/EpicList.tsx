@@ -682,7 +682,8 @@ function CreateEpicModal({
 		// biome-ignore lint/a11y/noStaticElementInteractions: backdrop closes on click; Escape on the dialog covers keyboard
 		// biome-ignore lint/a11y/useKeyWithClickEvents: backdrop closes on click; Escape on the dialog covers keyboard
 		<div
-			class="fixed inset-0 z-50 flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
+			// CD-294: above the topbar (z-index: 110), below popovers (200).
+			class="fixed inset-0 z-[120] flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
 			onClick={(e) => {
 				if (e.target === e.currentTarget) setShowCreate(false);
 			}}

@@ -151,7 +151,8 @@ export default function NewSourceModal({ projectId, workspaceSlug, onClose, onCr
 		// biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-close
 		// biome-ignore lint/a11y/useKeyWithClickEvents: see above
 		<div
-			class="fixed inset-0 z-50 flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
+			// CD-294: above the topbar (z-index: 110), below popovers (200).
+			class="fixed inset-0 z-[120] flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
 			onClick={(e) => {
 				if (e.target === e.currentTarget && !newToken) onClose();
 			}}
