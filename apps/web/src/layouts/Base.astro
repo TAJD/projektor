@@ -36,7 +36,16 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#6366f1" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="manifest" href="/manifest.json" />
+    <!-- CD-293: the manifest link defaults to a no-credentials fetch, which behind
+         Cloudflare Access comes back as the login redirect instead of the manifest —
+         so the browser sees no manifest at all and never offers to install. -->
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
+    <!-- CD-293: iOS Safari only launches an Add-to-Home-Screen shortcut standalone
+         when this is present (it read the manifest's `display` only from 16.4 on);
+         `mobile-web-app-capable` is the standardised spelling Chrome now wants. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Projektor" />
     <title>{title}</title>
     <meta name="description" content={description} />
     <meta property="og:title" content={title} />
