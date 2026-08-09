@@ -57,7 +57,7 @@ describe("SavedViewsControl — views menu on Select (PROJ-565)", () => {
 
 		await waitFor(() => screen.getByRole("combobox", { name: "Saved views" }));
 		fireEvent.click(screen.getByRole("combobox", { name: "Saved views" }));
-		fireEvent.click(screen.getByRole("option", { name: /^My bugs/ }));
+		fireEvent.click(screen.getByRole("option", { name: "My bugs" }));
 
 		expect(onApply).toHaveBeenCalledWith(EMPTY_FILTERS);
 		expect(screen.getByRole("combobox", { name: "Saved views" }).textContent).toContain("My bugs");
@@ -70,13 +70,27 @@ describe("SavedViewsControl — views menu on Select (PROJ-565)", () => {
 
 		await waitFor(() => screen.getByRole("combobox", { name: "Saved views" }));
 		fireEvent.click(screen.getByRole("combobox", { name: "Saved views" }));
-		fireEvent.click(screen.getByRole("option", { name: /^My bugs/ }));
+		fireEvent.click(screen.getByRole("option", { name: "My bugs" }));
 		onApply.mockClear();
 		fireEvent.click(screen.getByRole("combobox", { name: "Saved views" }));
 		fireEvent.click(screen.getByRole("button", { name: "Delete view Sprint board" }));
 
 		expect(onApply).not.toHaveBeenCalled();
-		expect(screen.queryByRole("option", { name: /^Sprint board/ })).toBeNull();
+		expect(screen.queryByRole("option", { name: "Sprint board" })).toBeNull();
+		expect(JSON.parse(localStorage.getItem("issue-views-PROJ") ?? "[]")).toHaveLength(1);
+	});
+
+	it("deletes the highlighted view with Backspace, keyboard-only (PROJ-565)", async () => {
+		seedViews(["Sprint board", "My bugs"]);
+		render(<Harness onApply={() => {}} />);
+
+		await waitFor(() => screen.getByRole("combobox", { name: "Saved views" }));
+		const trigger = screen.getByRole("combobox", { name: "Saved views" });
+		fireEvent.click(trigger);
+		// Highlight moves to "Sprint board" (index 0) on open by default.
+		fireEvent.keyDown(trigger, { key: "Backspace" });
+
+		expect(screen.queryByRole("option", { name: "Sprint board" })).toBeNull();
 		expect(JSON.parse(localStorage.getItem("issue-views-PROJ") ?? "[]")).toHaveLength(1);
 	});
 });

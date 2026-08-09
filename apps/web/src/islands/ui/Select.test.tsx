@@ -130,9 +130,48 @@ describe("Select — per-item action (PROJ-565)", () => {
 			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={onChange} ariaLabel="Views" />
 		);
 		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
-		fireEvent.click(screen.getByRole("option", { name: /^Beta/ }));
+		fireEvent.click(screen.getByRole("option", { name: "Beta" }));
 
 		expect(onChange).toHaveBeenCalledWith("b");
+	});
+
+	it("gives an option with an action a name that is just its label, not the action's too", () => {
+		render(
+			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={() => {}} ariaLabel="Views" />
+		);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+
+		// Without an explicit aria-label, the nested "Delete Alpha" button's own
+		// accessible name would fold into the option's, per the accname spec.
+		expect(screen.getByRole("option", { name: "Alpha" })).toBeTruthy();
+	});
+
+	it("still marks the selected option (checkmark) when it also has an action", () => {
+		render(
+			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={() => {}} ariaLabel="Views" />
+		);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+
+		expect(screen.getByRole("option", { name: "Alpha" }).getAttribute("data-selected")).toBe(
+			"true"
+		);
+		expect(screen.getByRole("option", { name: "Beta" }).getAttribute("data-selected")).toBeNull();
+	});
+
+	it("runs the highlighted option's action on Backspace/Delete, keyboard-only", () => {
+		const onAction = vi.fn();
+		const options: SelectOption[] = [
+			{ value: "a", label: "Alpha", action: { ariaLabel: "Delete Alpha", onClick: onAction } },
+		];
+		render(<Select value="a" options={options} onChange={() => {}} ariaLabel="Views" />);
+		const trigger = screen.getByRole("combobox", { name: "Views" });
+		fireEvent.click(trigger);
+
+		fireEvent.keyDown(trigger, { key: "Backspace" });
+		expect(onAction).toHaveBeenCalledTimes(1);
+
+		fireEvent.keyDown(trigger, { key: "Delete" });
+		expect(onAction).toHaveBeenCalledTimes(2);
 	});
 });
 

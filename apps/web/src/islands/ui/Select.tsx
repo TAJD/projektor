@@ -117,6 +117,8 @@ interface SelectKeyDownConfig {
 	setHighlight: (fn: (h: number) => number) => void;
 	choose: (index: number) => void;
 	close: () => void;
+	/** PROJ-565: runs the highlighted option's `action`, if it has one. */
+	runAction: (index: number) => void;
 }
 
 function createSelectKeyDownHandler({
@@ -128,6 +130,7 @@ function createSelectKeyDownHandler({
 	setHighlight,
 	choose,
 	close,
+	runAction,
 }: SelectKeyDownConfig) {
 	return function onKeyDown(e: KeyboardEvent) {
 		if (disabled) return;
@@ -168,6 +171,18 @@ function createSelectKeyDownHandler({
 				close();
 			},
 			Tab: () => close(),
+			// PROJ-565: the trailing per-item action (e.g. delete a saved view) is a
+			// nested <button>, but this listbox uses the aria-activedescendant pattern —
+			// DOM focus never leaves the trigger, so the button is otherwise unreachable
+			// by keyboard. Delete/Backspace on the highlighted option runs it instead.
+			Delete: (ev) => {
+				ev.preventDefault();
+				runAction(highlight);
+			},
+			Backspace: (ev) => {
+				ev.preventDefault();
+				runAction(highlight);
+			},
 		};
 		handlers[e.key]?.(e);
 	};
@@ -221,18 +236,15 @@ function SelectMenu({
 					id={`${baseId}-opt-${i}`}
 					role="option"
 					aria-selected={opt.value === value}
+					// PROJ-565: an explicit aria-label pins the accessible name to just the
+					// label — without it, the nested action button's own aria-label gets
+					// folded into the option's computed name (browser accname rules
+					// substitute a descendant's aria-label into the concatenation), so an
+					// option like "My bugs" would announce as "My bugs Delete view My bugs".
+					aria-label={opt.action ? opt.label : undefined}
+					data-selected={opt.value === value || undefined}
 					class={i === highlight ? "select-option highlighted" : "select-option"}
-					style={{
-						textTransform: capitalize ? "capitalize" : undefined,
-						...(opt.action
-							? {
-									display: "flex",
-									justifyContent: "space-between",
-									alignItems: "center",
-									gap: "0.5rem",
-								}
-							: undefined),
-					}}
+					style={{ textTransform: capitalize ? "capitalize" : undefined }}
 					onMouseEnter={() => onHighlight(i)}
 					onClick={() => onChoose(i)}
 				>
@@ -246,6 +258,7 @@ function SelectMenu({
 								opt.action?.onClick();
 							}}
 							style={{
+								marginLeft: "auto",
 								background: "none",
 								border: "none",
 								cursor: "pointer",
@@ -335,6 +348,11 @@ export default function Select({
 		setOpen(false);
 	}
 
+	// PROJ-565: keyboard equivalent of clicking an option's trailing action button.
+	function runAction(index: number) {
+		options[index]?.action?.onClick();
+	}
+
 	useCloseOnOutside(open, close, reposition, rootRef);
 
 	const onKeyDown = createSelectKeyDownHandler({
@@ -346,6 +364,7 @@ export default function Select({
 		setHighlight,
 		choose,
 		close,
+		runAction,
 	});
 
 	const label = selected?.label ?? (value || placeholder || "");
