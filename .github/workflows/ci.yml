@@ -27,6 +27,11 @@ jobs:
             apps/docs/src/content/docs/contributing/conventions.md \
             apps/docs/src/content/docs/guides/feedback-widget-integration.md \
             || { echo "::error::Generated docs are stale. Run 'pnpm gen:docs' and commit the result."; exit 1; }
+          # A directory, not a fixed file list (PLAYBOOKS can gain/lose entries), so
+          # `git status --porcelain` (which also reports untracked new files) is the
+          # right check here, not `git diff` (which misses untracked additions).
+          [ -z "$(git status --porcelain -- apps/docs/src/content/docs/agents/playbooks/)" ] \
+            || { echo "::error::Generated playbook docs are stale. Run 'pnpm gen:docs' and commit the result."; exit 1; }
       - run: pnpm lint
       - run: pnpm turbo type-check
       - run: pnpm --filter @projektor/db test

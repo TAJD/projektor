@@ -35,7 +35,7 @@ async function assertIssueExists(
 }
 
 // The project's agent WIP cap (its own agent_wip_limit, else the default).
-async function fetchAgentWipCap(
+export async function fetchAgentWipCap(
 	orm: ReturnType<typeof drizzle>,
 	ctx: ServiceCtx,
 	projectId: string

@@ -12,6 +12,7 @@ import { groupsTools } from "./groups";
 import { issueLeasesTools } from "./issue-leases";
 import { issueLinksTools } from "./issue-links";
 import { issuesTools } from "./issues";
+import { playbooksTools } from "./playbooks";
 import { projectActivityTools } from "./project-activity";
 import { projectsTools } from "./projects";
 import { sprintsTools } from "./sprints";
@@ -85,6 +86,7 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 		tools: agentMessagesTools,
 	},
 	{ domain: "workflow", title: "Workflow spec", group: "Coordination", tools: workflowTools },
+	{ domain: "playbooks", title: "Playbooks", group: "Coordination", tools: playbooksTools },
 	{ domain: "flow-metrics", title: "Flow metrics", group: "Project data", tools: flowMetricsTools },
 	{
 		domain: "code-heatmap",

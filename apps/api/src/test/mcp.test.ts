@@ -75,6 +75,10 @@ describe("MCP endpoint", () => {
 		expect(res.result.serverInfo.version).toBe("dev");
 		// Instructions point at the canonical workflow spec rather than restating rules (PROJ-251).
 		expect(res.result.instructions).toContain("get_workflow");
+		// PROJ-599: instructions point working-an-epic agents at the shipped playbook.
+		expect(res.result.instructions).toContain('get_playbook("epic-goal")');
+		// PROJ-600: capabilities advertise the native prompts primitive.
+		expect(res.result).toHaveProperty("capabilities.prompts");
 	});
 
 	it("initialize response carries no session identifier (PROJ-452)", async () => {

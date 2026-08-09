@@ -11,7 +11,7 @@
     "format": "biome format --write .",
     "cofferdam": "cofferdam check",
     "cofferdam:fix": "cofferdam baseline write",
-    "gen:docs": "pnpm --filter @projektor/api gen:catalog && pnpm --filter @projektor/api gen:workflow-spec && tsx scripts/gen-conventions-page.ts && tsx scripts/gen-feedback-example-page.ts",
+    "gen:docs": "pnpm --filter @projektor/api gen:catalog && pnpm --filter @projektor/api gen:workflow-spec && pnpm --filter @projektor/api gen:playbooks && tsx scripts/gen-conventions-page.ts && tsx scripts/gen-feedback-example-page.ts",
     "prepare": "lefthook install"
   },
   "devDependencies": {

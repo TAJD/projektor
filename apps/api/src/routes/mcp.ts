@@ -15,8 +15,10 @@ import { groupsTools } from "../mcp/groups";
 import { issueLeasesTools } from "../mcp/issue-leases";
 import { issueLinksTools } from "../mcp/issue-links";
 import { issuesTools } from "../mcp/issues";
+import { playbooksTools } from "../mcp/playbooks";
 import { projectActivityTools } from "../mcp/project-activity";
 import { projectsTools } from "../mcp/projects";
+import { getPrompt, listPrompts } from "../mcp/prompts";
 import { sprintsTools } from "../mcp/sprints";
 import { taskStatusesTools } from "../mcp/task-statuses";
 import { taskTypesTools } from "../mcp/task-types";
@@ -57,7 +59,8 @@ const SERVER_INSTRUCTIONS =
 	'is available here as a tool. Handy entry points: get_issue accepts a ref like "PROJ-42"; ' +
 	'get_prioritized_issues answers "what should I work on next?"; search_issues / search_wiki ground you in ' +
 	"existing context. Call get_workflow before claiming work — it returns the definition of ready, the state " +
-	"machine, human review gates, and fleet coordination rules.";
+	"machine, human review gates, and fleet coordination rules. Working an epic end-to-end? Call " +
+	'get_playbook("epic-goal") (or compose_playbook to have it filled in with the epic\'s live data).';
 
 const router = new Hono<HonoEnv>();
 
@@ -109,7 +112,7 @@ router.post("/:workspaceId", async (c) => {
 			return c.json(
 				jsonRpcResult(body.id, {
 					protocolVersion: "2025-11-25",
-					capabilities: { tools: {} },
+					capabilities: { tools: {}, prompts: {} },
 					serverInfo: { name: "projektor", version: SERVER_VERSION },
 					instructions: SERVER_INSTRUCTIONS,
 				})
@@ -162,6 +165,34 @@ router.post("/:workspaceId", async (c) => {
 			}
 		}
 
+		case "prompts/list":
+			return c.json(jsonRpcResult(body.id, { prompts: listPrompts() }));
+
+		case "prompts/get": {
+			const { name, arguments: promptArgs } = (body.params ?? {}) as {
+				name: string;
+				arguments?: Record<string, string>;
+			};
+
+			// PROJ-600: prompts/get delegates to compose_playbook under the hood, so it's
+			// gated by the same scope as calling that tool directly.
+			const scopes = c.get("tokenScopes");
+			if (scopes) {
+				const required = capabilityForMcpTool("compose_playbook");
+				if (!tokenAllows(scopes, required)) {
+					return c.json(jsonRpcError(body.id, -32003, `Token lacks '${required}' scope`));
+				}
+			}
+
+			try {
+				const result = await getPrompt(ctx, name, promptArgs ?? {});
+				return c.json(jsonRpcResult(body.id, result));
+			} catch (err) {
+				const { code, message, data } = toMcpError(err);
+				return c.json(jsonRpcError(body.id, code, message, data));
+			}
+		}
+
 		default:
 			return c.json(jsonRpcError(body.id, -32601, "Method not found"));
 	}
@@ -191,6 +222,7 @@ const coreMCPTools: MCPTool[] = [
 	...issueLeasesTools,
 	...agentMessagesTools,
 	...workflowTools,
+	...playbooksTools,
 	...flowMetricsTools,
 	...codeHeatmapTools,
 ];
