@@ -111,7 +111,12 @@ equivalent and is safe to depend on; see [REST endpoints](/projektor/agents/rest
 1. **Agent** → `POST /mcp/:workspaceId` with `Authorization: Bearer pk_…` + `X-Workspace-Slug`.
 2. `authMiddleware`: CF Access JWT → API-token (D1 hash lookup) → dev bypass.
 3. `workspaceMiddleware`: resolve slug → load workspace → verify `workspace_members` row.
-4. MCP router dispatches `initialize` / `tools/list` / `tools/call` → core tool handler → D1.
+4. MCP router dispatches one of three method groups:
+   - `initialize` — server info and capabilities.
+   - `tools/list` / `tools/call` → core tool handler → D1.
+   - `prompts/list` / `prompts/get` → a composed [playbook](/projektor/agents/playbooks/)
+     directive. `prompts/get` delegates to `compose_playbook`, so it reads the epic it is
+     given but is otherwise served from the shipped templates, not the database.
 
 Workspace membership is only the outer gate. Which *projects* a member can see and
 what they can do inside them is decided per-request in the service layer — see
