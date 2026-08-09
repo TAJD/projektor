@@ -45,10 +45,19 @@ export default function LazyMarkdownEditor(props: Props) {
 
 	useEffect(() => {
 		let cancelled = false;
-		import("./MarkdownEditor").then((m) => {
-			// Wrapped in a thunk: a bare component would be read as a state updater.
-			if (!cancelled) setEditor(() => m.default);
-		});
+		import("./MarkdownEditor")
+			.then((m) => {
+				// Wrapped in a thunk: a bare component would be read as a state updater.
+				if (!cancelled) setEditor(() => m.default);
+			})
+			.catch((err) => {
+				// PROJ-506: an unhandled rejection here (chunk-load failure on a flaky
+				// connection in prod, or the import resolving after a test's jsdom
+				// environment has already torn down) otherwise surfaces as an uncaught
+				// error with no indication of what failed. The user already has a
+				// working fallback textarea regardless, so there's nothing to recover.
+				if (!cancelled) console.error("Failed to load the markdown editor", err);
+			});
 		return () => {
 			cancelled = true;
 		};
