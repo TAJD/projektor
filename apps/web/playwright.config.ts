@@ -51,5 +51,15 @@ export default defineConfig({
 				hasTouch: true,
 			},
 		},
+		// Real WebKit (not Chromium's "mobile" emulation above) — catches iOS Safari
+		// engine quirks (visual-viewport/keyboard resize behavior, position: fixed
+		// under scroll, etc.) that Chromium's mobile emulation doesn't reproduce.
+		// Still not real Mobile Safari/iOS chrome — see apps/web/README.md.
+		{
+			name: "mobile-webkit",
+			use: {
+				...devices["iPhone 13"],
+			},
+		},
 	],
 });

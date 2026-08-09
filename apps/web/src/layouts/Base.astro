@@ -36,7 +36,16 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="theme-color" content="#6366f1" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
-    <link rel="manifest" href="/manifest.json" />
+    <!-- CD-293: the manifest link defaults to a no-credentials fetch, which behind
+         Cloudflare Access comes back as the login redirect instead of the manifest —
+         so the browser sees no manifest at all and never offers to install. -->
+    <link rel="manifest" href="/manifest.json" crossorigin="use-credentials" />
+    <!-- CD-293: iOS Safari only launches an Add-to-Home-Screen shortcut standalone
+         when this is present (it read the manifest's `display` only from 16.4 on);
+         `mobile-web-app-capable` is the standardised spelling Chrome now wants. -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Projektor" />
     <title>{title}</title>
     <meta name="description" content={description} />
     <meta property="og:title" content={title} />
@@ -645,6 +654,33 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         color: var(--accent);
       }
 
+      /* CD-294: phone-sized Select menu. A fixed menu anchored under its trigger
+         can't survive iOS Safari's chrome/keyboard resizing the visual viewport,
+         and one opened low on the screen extends past the fold with no way to
+         scroll it into view. Below this breakpoint it becomes a bottom-anchored
+         sheet instead, and Select.tsx omits its inline coordinates so these rules
+         own the position (inline styles beat class rules at any specificity).
+         Must stay AFTER the base `.select-*` rules above: equal specificity, so
+         source order decides. Extends the PROJ-397 mobile `.select` block. */
+      @media (max-width: 640px) {
+        .select-menu {
+          position: fixed;
+          top: auto;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          width: 100%;
+          min-width: 0;
+          max-height: 50dvh;
+          overscroll-behavior: contain;
+          border-radius: 10px 10px 0 0;
+          padding-bottom: max(0.25rem, env(safe-area-inset-bottom));
+        }
+        /* 44px minimum touch target, matching .hamburger/.theme-toggle above. */
+        .select-option { min-height: 44px; }
+        .select-button { min-height: 44px; }
+      }
+
       /* ── Metric help (islands) ─────────────────────────────────────── */
       .metric-help { position: relative; display: inline-flex; }
       .metric-help-trigger {
@@ -694,6 +730,8 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         padding: 0.25rem;
         max-height: 16rem;
         overflow-y: auto;
+        /* CD-294: keep the menu's own scroll from chaining to the page behind it. */
+        overscroll-behavior: contain;
       }
       .metric-help-popover {
         position: absolute;

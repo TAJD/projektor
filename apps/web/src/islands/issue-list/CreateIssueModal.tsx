@@ -6,6 +6,13 @@ import { Button } from "../ui/Button";
 import Select from "../ui/Select";
 import type { ProjectMeta } from "./types";
 
+// PROJ-566: a caption *sibling*, never a wrapper. A <label> with no `for` binds to
+// its first labelable descendant — for a Select that's the trigger <button>, so the
+// menu's own <li> options (not interactive content) forwarded their clicks to it too.
+// Matches EpicList.tsx's create-epic form; the Select names itself via `ariaLabel`.
+const FIELD_CAPTION_CLASS =
+	"block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]";
+
 interface CreateIssueModalProps {
 	createTitle: string;
 	setCreateTitle: Dispatch<StateUpdater<string>>;
@@ -55,68 +62,64 @@ function CreateIssueModalFields({
 		<div class="flex gap-3 mb-5 flex-wrap items-end">
 			{projects.length > 1 && (
 				<div>
-					<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-						Project
-						<Select
-							ariaLabel="Select project"
-							value={createProjectId}
-							onChange={setCreateProjectId}
-							options={projects.map((p) => ({ value: p.id, label: p.name }))}
-						/>
-					</label>
+					{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+					<label class={FIELD_CAPTION_CLASS}>Project</label>
+					<Select
+						ariaLabel="Select project"
+						value={createProjectId}
+						onChange={setCreateProjectId}
+						options={projects.map((p) => ({ value: p.id, label: p.name }))}
+					/>
 				</div>
 			)}
 
 			<div>
-				<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-					Priority
-					<Select
-						ariaLabel="Select priority"
-						value={createPriority}
-						onChange={setCreatePriority}
-						capitalize
-						options={PRIORITY_OPTIONS}
-						buttonStyle={{
-							background: `var(--priority-${createPriority}-bg, var(--priority-low-bg))`,
-							color: `var(--priority-${createPriority}-text, var(--text-muted))`,
-							fontWeight: 500,
-							borderColor: "transparent",
-						}}
-					/>
-				</label>
+				{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+				<label class={FIELD_CAPTION_CLASS}>Priority</label>
+				<Select
+					ariaLabel="Select priority"
+					value={createPriority}
+					onChange={setCreatePriority}
+					capitalize
+					options={PRIORITY_OPTIONS}
+					buttonStyle={{
+						background: `var(--priority-${createPriority}-bg, var(--priority-low-bg))`,
+						color: `var(--priority-${createPriority}-text, var(--text-muted))`,
+						fontWeight: 500,
+						borderColor: "transparent",
+					}}
+				/>
 			</div>
 
 			{taskTypes.length > 0 && (
 				<div>
-					<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-						Type
-						<Select
-							ariaLabel="Select type"
-							value={createTypeId}
-							onChange={setCreateTypeId}
-							options={[
-								{ value: "", label: "No type" },
-								...taskTypes.map((t) => ({ value: t.id, label: t.name })),
-							]}
-						/>
-					</label>
+					{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+					<label class={FIELD_CAPTION_CLASS}>Type</label>
+					<Select
+						ariaLabel="Select type"
+						value={createTypeId}
+						onChange={setCreateTypeId}
+						options={[
+							{ value: "", label: "No type" },
+							...taskTypes.map((t) => ({ value: t.id, label: t.name })),
+						]}
+					/>
 				</div>
 			)}
 
 			{statuses.length > 0 && (
 				<div>
-					<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-						Status
-						<Select
-							ariaLabel="Select status"
-							value={createStatusId}
-							onChange={setCreateStatusId}
-							options={[
-								{ value: "", label: "Default" },
-								...statuses.map((s) => ({ value: s.id, label: s.name })),
-							]}
-						/>
-					</label>
+					{/* biome-ignore lint/a11y/noLabelWithoutControl: Select uses ariaLabel for accessibility */}
+					<label class={FIELD_CAPTION_CLASS}>Status</label>
+					<Select
+						ariaLabel="Select status"
+						value={createStatusId}
+						onChange={setCreateStatusId}
+						options={[
+							{ value: "", label: "Default" },
+							...statuses.map((s) => ({ value: s.id, label: s.name })),
+						]}
+					/>
 				</div>
 			)}
 		</div>
@@ -139,58 +142,89 @@ export default function CreateIssueModal(props: CreateIssueModalProps) {
 		// biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-close; Escape handles keyboard
 		// biome-ignore lint/a11y/useKeyWithClickEvents: see above
 		<div
-			class="fixed inset-0 z-50 flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
+			// CD-294: above the topbar's z-index: 110 (Base.astro), below the
+			// popover/select-menu layer at 200. At z-50 the topbar painted over the
+			// modal and stayed tappable behind it.
+			class="fixed inset-0 z-[120] flex items-start justify-center pt-12 bg-black/40 max-sm:items-end max-sm:pt-0"
 			onClick={(e) => {
 				if (e.target === e.currentTarget) setShowCreateModal(false);
 			}}
 		>
 			<div
+				// CD-294: `dvh`, not `vh` — iOS reports `vh` as the large viewport
+				// (chrome collapsed) and never shrinks it for the keyboard or an
+				// expanded URL bar, which pushed the action row below the fold. On
+				// phones the field count already forces near-full height, so this is a
+				// full-height sheet with its own scroll region rather than a floating one.
 				class={[
-					"bg-bg border border-border rounded-lg p-6 w-full max-w-[660px] max-h-[80vh] overflow-y-auto mx-4",
-					"max-sm:rounded-t-lg max-sm:rounded-b-none max-sm:max-h-[90vh] max-sm:mx-0",
+					"bg-bg border border-border rounded-lg w-full max-w-[660px] max-h-[80dvh] mx-4",
+					"flex flex-col overflow-hidden",
+					"max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:rounded-none max-sm:mx-0",
 				].join(" ")}
 				role="dialog"
 				aria-modal="true"
 				aria-label="Create new issue"
 			>
-				<h2 class="mb-5 text-lg font-bold text-text-base">New issue</h2>
+				<h2 class="shrink-0 px-6 pt-6 pb-4 text-lg font-bold text-text-base">New issue</h2>
 
-				{createError && (
-					<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
-						{createError}
-					</p>
-				)}
+				<form onSubmit={submitCreate} class="flex flex-col flex-1 min-h-0">
+					<div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6">
+						{createError && (
+							<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
+								{createError}
+							</p>
+						)}
 
-				<form onSubmit={submitCreate}>
-					<div class="mb-[0.875rem]">
-						<label class="block text-[0.78rem] font-semibold text-text-muted uppercase tracking-[0.04em]">
-							Title *
-							<input
-								type="text"
-								value={createTitle}
-								onInput={(e) => setCreateTitle((e.target as HTMLInputElement).value)}
-								placeholder="Issue title"
-								required
-								// biome-ignore lint/a11y/noAutofocus: intentional — modal opens on user action
-								autoFocus
-								class={[
-									"w-full px-3 py-2 border border-border rounded bg-bg text-text-base box-border text-[0.9rem]",
-									"font-normal normal-case tracking-normal mt-[0.3rem]",
-								].join(" ")}
+						<div class="mb-[0.875rem]">
+							<label class="block text-[0.78rem] font-semibold text-text-muted uppercase tracking-[0.04em]">
+								Title *
+								<input
+									type="text"
+									value={createTitle}
+									onInput={(e) => setCreateTitle((e.target as HTMLInputElement).value)}
+									placeholder="Issue title"
+									required
+									// CD-294 follow-up (deliberately NOT changed here): on iOS this opens
+									// the keyboard the instant the modal mounts, shrinking the visual
+									// viewport before the user has seen the form. Gating it to
+									// non-touch/desktop is a UX behaviour change and needs a human call.
+									// biome-ignore lint/a11y/noAutofocus: intentional — modal opens on user action
+									autoFocus
+									class={[
+										"w-full px-3 py-2 border border-border rounded bg-bg text-text-base box-border text-[0.9rem]",
+										"font-normal normal-case tracking-normal mt-[0.3rem]",
+									].join(" ")}
+								/>
+							</label>
+						</div>
+
+						<div class="mb-[0.875rem]">
+							{/* PROJ-566: a caption sibling, NOT a wrapper. A <label> with no `for` forwards
+							    clicks on its non-interactive descendants to its first labelable control —
+							    here the editor toolbar's Bold button — so every tap in the editor body ran
+							    Bold. The editor names itself via ariaLabel instead. */}
+							{/* biome-ignore lint/a11y/noLabelWithoutControl: caption for MarkdownEditor, which has no associable control */}
+							<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
+								Description
+							</label>
+							<MarkdownEditor
+								value={createBody}
+								onChange={setCreateBody}
+								minHeight="160px"
+								ariaLabel="Description"
 							/>
-						</label>
+						</div>
+
+						<CreateIssueModalFields {...props} />
 					</div>
 
-					<div class="mb-[0.875rem]">
-						<label class="block text-[0.78rem] font-semibold text-text-muted mb-[0.3rem] uppercase tracking-[0.04em]">
-							Description
-							<MarkdownEditor value={createBody} onChange={setCreateBody} minHeight="160px" />
-						</label>
-					</div>
-
-					<CreateIssueModalFields {...props} />
-
-					<div class="flex gap-2">
+					{/* Stays inside the <form> so the submit button still submits it. */}
+					<div
+						class={[
+							"shrink-0 sticky bottom-0 flex gap-2 border-t border-border bg-bg px-6 pt-4",
+							"pb-[max(1rem,env(safe-area-inset-bottom))]",
+						].join(" ")}
+					>
 						<Button
 							type="submit"
 							variant="primary"

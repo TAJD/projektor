@@ -15,6 +15,11 @@ export interface Props {
 	// leaves the editor untouched. Undefined disables image interception entirely —
 	// paste/drop of non-image content is never affected either way.
 	onImageFile?: (file: File) => Promise<string | null>;
+	// Accessible name for the editing surface. CodeMirror's `.cm-content` is a bare
+	// contenteditable div, so it has no name of its own — call sites that render a
+	// caption next to the editor (rather than a wrapping <label>, see PROJ-566) pass
+	// that caption's text here.
+	ariaLabel?: string;
 }
 
 // Mirrors services/files.ts's INLINE_TYPES on the API side — the set of image types the
@@ -117,6 +122,27 @@ function prefixLines(view: EditorView, prefix: string): boolean {
 	return true;
 }
 
+// PROJ-566: a <label> with no `for` forwards clicks on its non-interactive descendants
+// to its first labelable control. When the editor is mounted inside such a label, that
+// control is this toolbar's first button — so every tap in the editor body (a plain
+// contenteditable div, not interactive content) silently ran Bold, wrapping whatever was
+// typed next in `**`. The forwarded event carries the pointer coordinates of the original
+// click, which land outside the button's own box; a genuine click on the button never
+// does. Keyboard activation reports detail 0 (and 0,0 coords) and must still pass.
+function isDirectPointerActivation(e: MouseEvent): boolean {
+	if (e.detail === 0) return true;
+	const target = e.currentTarget as HTMLElement | null;
+	if (!target) return false;
+	const r = target.getBoundingClientRect();
+	return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+}
+
+function direct(run: () => void): (e: MouseEvent) => void {
+	return (e) => {
+		if (isDirectPointerActivation(e)) run();
+	};
+}
+
 interface EditorToolbarProps {
 	onBold: () => void;
 	onItalic: () => void;
@@ -138,13 +164,18 @@ function EditorToolbar({
 }: EditorToolbarProps) {
 	return (
 		<div class="flex gap-[2px] px-[6px] py-1 bg-surface border-b border-border flex-wrap items-center">
-			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onBold} title="Bold (Ctrl+B)">
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={direct(onBold)}
+				title="Bold (Ctrl+B)"
+			>
 				<strong>B</strong>
 			</button>
 			<button
 				type="button"
 				class={`${TOOLBAR_BUTTON_CLASS} italic`}
-				onClick={onItalic}
+				onClick={direct(onItalic)}
 				title="Italic (Ctrl+I)"
 			>
 				I
@@ -153,7 +184,7 @@ function EditorToolbar({
 			<button
 				type="button"
 				class={TOOLBAR_BUTTON_CLASS}
-				onClick={() => onHeading(1)}
+				onClick={direct(() => onHeading(1))}
 				title="Heading 1"
 			>
 				H1
@@ -161,7 +192,7 @@ function EditorToolbar({
 			<button
 				type="button"
 				class={TOOLBAR_BUTTON_CLASS}
-				onClick={() => onHeading(2)}
+				onClick={direct(() => onHeading(2))}
 				title="Heading 2"
 			>
 				H2
@@ -169,25 +200,35 @@ function EditorToolbar({
 			<button
 				type="button"
 				class={TOOLBAR_BUTTON_CLASS}
-				onClick={() => onHeading(3)}
+				onClick={direct(() => onHeading(3))}
 				title="Heading 3"
 			>
 				H3
 			</button>
 			<div class="w-px bg-border mx-[3px] my-[2px] self-stretch min-h-[16px]" />
-			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onLink} title="Link">
+			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={direct(onLink)} title="Link">
 				Link
 			</button>
-			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onCodeBlock} title="Code block">
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={direct(onCodeBlock)}
+				title="Code block"
+			>
 				Code
 			</button>
-			<button type="button" class={TOOLBAR_BUTTON_CLASS} onClick={onBulletList} title="Bullet list">
+			<button
+				type="button"
+				class={TOOLBAR_BUTTON_CLASS}
+				onClick={direct(onBulletList)}
+				title="Bullet list"
+			>
 				• List
 			</button>
 			<button
 				type="button"
 				class={TOOLBAR_BUTTON_CLASS}
-				onClick={onNumberedList}
+				onClick={direct(onNumberedList)}
 				title="Numbered list"
 			>
 				1. List
@@ -231,7 +272,8 @@ function useMarkdownEditorView(
 	value: string,
 	onChange: (value: string) => void,
 	minHeight: string,
-	onImageFile: ((file: File) => Promise<string | null>) | undefined
+	onImageFile: ((file: File) => Promise<string | null>) | undefined,
+	ariaLabel: string
 ) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const viewRef = useRef<EditorView | null>(null);
@@ -296,6 +338,11 @@ function useMarkdownEditorView(
 					".cm-cursor": { borderLeftColor: "var(--text)" },
 				}),
 				EditorView.lineWrapping,
+				EditorView.contentAttributes.of({
+					"aria-label": ariaLabel,
+					role: "textbox",
+					"aria-multiline": "true",
+				}),
 				EditorView.domEventHandlers({
 					paste(event, view) {
 						const handler = onImageFileRef.current;
@@ -398,6 +445,7 @@ export default function MarkdownEditor({
 	onChange,
 	minHeight = "240px",
 	onImageFile,
+	ariaLabel = "Markdown editor",
 }: Props) {
 	const [mobilePreview, setMobilePreview] = useState(false);
 	const [preview, setPreview] = useState("");
@@ -409,7 +457,13 @@ export default function MarkdownEditor({
 		return () => clearTimeout(timer);
 	}, [value]);
 
-	const { containerRef, viewRef } = useMarkdownEditorView(value, onChange, minHeight, onImageFile);
+	const { containerRef, viewRef } = useMarkdownEditorView(
+		value,
+		onChange,
+		minHeight,
+		onImageFile,
+		ariaLabel
+	);
 	const { bold, italic, heading, link, codeBlock, bulletList, numberedList } =
 		useMarkdownCommands(viewRef);
 

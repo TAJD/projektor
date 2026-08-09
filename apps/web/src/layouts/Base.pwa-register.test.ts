@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 const source = readFileSync(join(__dirname, "Base.astro"), "utf-8");
 const configSource = readFileSync(join(__dirname, "../../astro.config.mjs"), "utf-8");
+const publicDir = join(__dirname, "../../public");
 
 describe("Base layout — PWA service worker registration (PROJ-418)", () => {
 	it("registers the service worker via the virtual:pwa-register module", () => {
@@ -62,5 +63,74 @@ describe("PWA precache — keep the install payload small (PROJ-431)", () => {
 			readFileSync(join(__dirname, "../../package.json"), "utf-8")
 		) as { scripts: Record<string, string> };
 		expect(pkg.scripts.build).toContain("scripts/assert-sw.mjs");
+	});
+});
+
+// CD-293: the manifest, the service worker and HTTPS get you a Chrome install
+// prompt; iOS Safari's Add to Home Screen is a separate mechanism that keys off
+// the apple-* meta tags and the apple-touch-icon. The repo satisfied the first
+// and none of the second.
+describe("Base layout — installability (CD-293)", () => {
+	it("fetches the manifest with credentials so Cloudflare Access can't swallow it", () => {
+		// A default (anonymous) manifest fetch behind Access resolves to the login
+		// redirect, so the browser sees no manifest and never offers to install.
+		expect(source).toMatch(
+			/<link\s+rel="manifest"[^>]*crossorigin="use-credentials"/
+		);
+	});
+
+	it("declares itself web-app capable under both the standard and the iOS name", () => {
+		expect(source).toMatch(/<meta\s+name="mobile-web-app-capable"\s+content="yes"/);
+		expect(source).toMatch(/<meta\s+name="apple-mobile-web-app-capable"\s+content="yes"/);
+	});
+
+	it("names the iOS home-screen shortcut and points at a touch icon", () => {
+		expect(source).toMatch(/<meta\s+name="apple-mobile-web-app-title"\s+content="Projektor"/);
+		expect(source).toMatch(/<link\s+rel="apple-touch-icon"\s+href="\/icon-192\.png"/);
+	});
+});
+
+describe("PWA manifest (CD-293)", () => {
+	const manifest = JSON.parse(readFileSync(join(publicDir, "manifest.json"), "utf-8")) as {
+		name: string;
+		short_name: string;
+		start_url: string;
+		display: string;
+		theme_color: string;
+		background_color: string;
+		icons: Array<{ src: string; sizes: string; type: string; purpose: string }>;
+	};
+
+	it("has the fields Chrome requires before it will offer an install", () => {
+		expect(manifest.name).toBeTruthy();
+		expect(manifest.short_name).toBeTruthy();
+		expect(manifest.start_url).toBe("/");
+		expect(["standalone", "fullscreen", "minimal-ui"]).toContain(manifest.display);
+		expect(manifest.theme_color).toMatch(/^#[0-9a-f]{6}$/i);
+		expect(manifest.background_color).toMatch(/^#[0-9a-f]{6}$/i);
+	});
+
+	it("ships a maskable icon so Android doesn't letterbox the launcher tile", () => {
+		expect(manifest.icons.some((i) => i.purpose?.split(/\s+/).includes("maskable"))).toBe(true);
+	});
+
+	// A manifest that points at a missing or wrongly-sized icon silently suppresses
+	// the install prompt, which is exactly the failure this ticket describes.
+	it("references icons that exist at the declared pixel sizes", () => {
+		expect(manifest.icons.length).toBeGreaterThan(0);
+		for (const icon of manifest.icons) {
+			const file = join(publicDir, icon.src.replace(/^\//, ""));
+			const png = readFileSync(file);
+			// PNG IHDR: 8-byte signature, 4-byte length, 4-byte type, then width/height.
+			expect(png.subarray(12, 16).toString("ascii"), `${icon.src} is not a PNG`).toBe("IHDR");
+			const [w, h] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+			expect(`${w}x${h}`, `${icon.src} is not ${icon.sizes}`).toBe(icon.sizes);
+		}
+	});
+
+	it("also covers the apple-touch-icon, which the manifest doesn't govern", () => {
+		const href = source.match(/<link\s+rel="apple-touch-icon"\s+href="([^"]+)"/)?.[1];
+		expect(href).toBeTruthy();
+		expect(() => readFileSync(join(publicDir, (href as string).replace(/^\//, "")))).not.toThrow();
 	});
 });

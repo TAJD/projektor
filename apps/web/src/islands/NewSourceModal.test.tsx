@@ -72,4 +72,24 @@ describe("NewSourceModal", () => {
 		fireEvent.click(await screen.findByRole("button", { name: /^Done$/i }));
 		expect(onClose).toHaveBeenCalled();
 	});
+
+	it("sizes the panel in dvh and contains its own scroll (CD-294)", () => {
+		// `vh` is iOS's *large* viewport — never shrunk for the keyboard or an expanded
+		// URL bar — so an 80vh panel's action row can sit below the fold with no way to
+		// scroll to it. `overscroll-contain` stops the panel's scroll chaining to the page.
+		stubFetch();
+		render(
+			<NewSourceModal
+				projectId="p1"
+				workspaceSlug="my-ws"
+				onClose={() => {}}
+				onCreated={() => {}}
+			/>
+		);
+		const panel = screen.getByRole("dialog", { name: "New feedback source" });
+		expect(panel.className).toContain("max-h-[80dvh]");
+		expect(panel.className).toContain("max-sm:max-h-[90dvh]");
+		expect(panel.className).toContain("overscroll-contain");
+		expect(panel.className).not.toMatch(/max-h-\[\d+vh\]/);
+	});
 });

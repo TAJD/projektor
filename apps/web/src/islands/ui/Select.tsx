@@ -8,31 +8,94 @@ export interface SelectOption {
 
 const OPEN_TRIGGER_KEYS = new Set(["ArrowDown", "Enter", " "]);
 
-// Close on outside click, and on scroll/resize (the fixed menu can't track its
-// anchor, so dismiss rather than let it drift).
+/** Matches Base.astro's mobile `@media (max-width: 640px)` Select rules. */
+const MOBILE_MENU_QUERY = "(max-width: 640px)";
+const MENU_GAP = 4;
+const MENU_VIEWPORT_MARGIN = 8;
+/** Mirrors `.select-menu`'s `max-height: 16rem` in Base.astro. */
+const MENU_MAX_HEIGHT = 256;
+const MENU_MIN_HEIGHT = 80;
+
+export interface MenuPos {
+	top: number;
+	left: number;
+	width: number;
+	maxHeight: number;
+}
+
+/**
+ * Below `MOBILE_MENU_QUERY` the menu is a CSS-owned bottom sheet: the component
+ * must NOT emit inline coordinates, because inline styles beat class rules
+ * regardless of specificity (same split as Popover.tsx's `strategy` prop).
+ */
+function isMobileMenu(): boolean {
+	return typeof window !== "undefined" && window.matchMedia?.(MOBILE_MENU_QUERY).matches === true;
+}
+
+function viewportHeight(): number {
+	return window.visualViewport?.height ?? window.innerHeight;
+}
+
+/**
+ * CD-294: clamp the fixed menu to the *visual* viewport and flip it above the
+ * trigger when below has no room. Without this a select in the lower half of a
+ * phone screen opens a menu whose bottom is off-screen and unreachable — a
+ * `position: fixed` element can't be scrolled into view.
+ */
+export function computeMenuPosition(rect: DOMRect): MenuPos {
+	const below = viewportHeight() - rect.bottom - MENU_GAP - MENU_VIEWPORT_MARGIN;
+	const above = rect.top - MENU_GAP - MENU_VIEWPORT_MARGIN;
+	const flip = below < MENU_MIN_HEIGHT && above > below;
+	const space = flip ? above : below;
+	const maxHeight = Math.max(MENU_MIN_HEIGHT, Math.min(MENU_MAX_HEIGHT, space));
+	const top = flip
+		? Math.max(MENU_VIEWPORT_MARGIN, rect.top - MENU_GAP - maxHeight)
+		: rect.bottom + MENU_GAP;
+	return { top, left: rect.left, width: rect.width, maxHeight };
+}
+
+// Close on genuine outside taps and on width changes (orientation), but only
+// *reposition* on scroll and height-only resizes. CD-294: iOS fires `resize` on
+// keyboard show/hide and on Safari chrome collapsing, so closing there made
+// every dropdown vanish the moment it was tapped.
 function useCloseOnOutside(
 	open: boolean,
 	close: () => void,
+	reposition: () => void,
 	rootRef: Readonly<{ current: HTMLDivElement | null }>
 ) {
 	useEffect(() => {
 		if (!open) return;
-		function onDocPointer(e: MouseEvent) {
+		let lastWidth = window.innerWidth;
+		function onDocPointer(e: Event) {
 			if (!rootRef.current?.contains(e.target as Node)) close();
 		}
 		function onScroll(e: Event) {
 			if (rootRef.current?.contains(e.target as Node)) return;
-			close();
+			reposition();
 		}
-		document.addEventListener("mousedown", onDocPointer);
+		function onResize() {
+			if (window.innerWidth !== lastWidth) {
+				lastWidth = window.innerWidth;
+				close();
+				return;
+			}
+			reposition();
+		}
+		const vv = window.visualViewport;
+		document.addEventListener("pointerdown", onDocPointer);
 		window.addEventListener("scroll", onScroll, true);
-		window.addEventListener("resize", close);
+		window.addEventListener("resize", onResize);
+		vv?.addEventListener("resize", onResize);
+		vv?.addEventListener("scroll", reposition);
 		return () => {
-			document.removeEventListener("mousedown", onDocPointer);
+			document.removeEventListener("pointerdown", onDocPointer);
 			window.removeEventListener("scroll", onScroll, true);
-			window.removeEventListener("resize", close);
+			window.removeEventListener("resize", onResize);
+			vv?.removeEventListener("resize", onResize);
+			vv?.removeEventListener("scroll", reposition);
 		};
-	}, [open, close, rootRef]);
+	}, [open, close, reposition, rootRef]);
 }
 
 interface SelectKeyDownConfig {
@@ -105,7 +168,8 @@ interface SelectMenuProps {
 	options: SelectOption[];
 	value: string;
 	highlight: number;
-	menuPos: { top: number; left: number; width: number };
+	/** `null` = mobile sheet mode: CSS owns position, emit no inline coordinates. */
+	menuPos: MenuPos | null;
 	ariaLabel: string;
 	capitalize: boolean;
 	onHighlight: (i: number) => void;
@@ -129,12 +193,17 @@ function SelectMenu({
 			class="select-menu"
 			role="listbox"
 			aria-label={ariaLabel}
-			style={{
-				position: "fixed",
-				top: `${menuPos.top}px`,
-				left: `${menuPos.left}px`,
-				minWidth: `${menuPos.width}px`,
-			}}
+			style={
+				menuPos
+					? {
+							position: "fixed",
+							top: `${menuPos.top}px`,
+							left: `${menuPos.left}px`,
+							minWidth: `${menuPos.width}px`,
+							maxHeight: `${menuPos.maxHeight}px`,
+						}
+					: undefined
+			}
 		>
 			{options.map((opt, i) => (
 				<li
@@ -187,11 +256,7 @@ export default function Select({
 }: Props) {
 	const [open, setOpen] = useState(false);
 	const [highlight, setHighlight] = useState(0);
-	const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number }>({
-		top: 0,
-		left: 0,
-		width: 0,
-	});
+	const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const baseId = useId();
@@ -201,12 +266,17 @@ export default function Select({
 
 	const close = useCallback(() => setOpen(false), []);
 
-	// Open at the current selection. The menu is positioned with `position: fixed`
-	// from the button's rect so it escapes any `overflow` clipping ancestor (e.g.
-	// the horizontally-scrollable issue table) — the way a native popup would.
+	// On desktop the menu is positioned with `position: fixed` from the button's
+	// rect so it escapes any `overflow` clipping ancestor (e.g. the
+	// horizontally-scrollable issue table) — the way a native popup would. Below
+	// the mobile breakpoint it becomes a CSS-owned bottom sheet (`menuPos: null`).
+	const reposition = useCallback(() => {
+		const rect = isMobileMenu() ? undefined : buttonRef.current?.getBoundingClientRect();
+		setMenuPos(rect ? computeMenuPosition(rect) : null);
+	}, []);
+
 	function openMenu() {
-		const rect = buttonRef.current?.getBoundingClientRect();
-		if (rect) setMenuPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+		reposition();
 		setHighlight(selectedIndex >= 0 ? selectedIndex : 0);
 		setOpen(true);
 	}
@@ -217,7 +287,7 @@ export default function Select({
 		setOpen(false);
 	}
 
-	useCloseOnOutside(open, close, rootRef);
+	useCloseOnOutside(open, close, reposition, rootRef);
 
 	const onKeyDown = createSelectKeyDownHandler({
 		disabled,

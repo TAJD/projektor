@@ -17,7 +17,7 @@ import type { Props } from "./MarkdownEditor";
 // spinner: on a slow mobile connection the chunk can take seconds, and the whole point
 // of tapping Edit is to type. Same controlled contract as the real editor, so whatever
 // is typed here is already in `value` when CodeMirror mounts and adopts it.
-function EditorFallback({ value, onChange, minHeight }: Props) {
+function EditorFallback({ value, onChange, minHeight, ariaLabel = "Markdown editor" }: Props) {
 	return (
 		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case font-normal">
 			<div
@@ -31,7 +31,7 @@ function EditorFallback({ value, onChange, minHeight }: Props) {
 			<textarea
 				value={value}
 				onInput={(e) => onChange((e.target as HTMLTextAreaElement).value)}
-				aria-label="Markdown editor"
+				aria-label={ariaLabel}
 				style={{ minHeight }}
 				class="w-full px-3 py-2 border-0 resize-y box-border bg-bg text-text-base font-mono
 					text-base sm:text-sm leading-[1.6] focus:outline-none"
