@@ -101,5 +101,13 @@ has a few weeks of real data, not a fixed rule.
 and WIP-over-time for a project, computed from indexed timestamps stamped the first
 time an issue enters each state. Use it to decide whether the WIP limit above is too
 tight, too loose, or about right — measure before you tune.
+
+## Playbooks
+
+Generic, reusable working patterns (as opposed to the projektor-specific rules above)
+ship the same way this spec does — one home, fetched at the moment of use. Call
+\`list_playbooks\` / \`get_playbook(name)\`, or \`compose_playbook(name, params)\` to have
+the template filled server-side with live data. Working an epic end-to-end? Start with
+\`get_playbook("epic-goal")\`.
 `,
 } as const;

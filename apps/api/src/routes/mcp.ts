@@ -58,7 +58,8 @@ const SERVER_INSTRUCTIONS =
 	'is available here as a tool. Handy entry points: get_issue accepts a ref like "PROJ-42"; ' +
 	'get_prioritized_issues answers "what should I work on next?"; search_issues / search_wiki ground you in ' +
 	"existing context. Call get_workflow before claiming work — it returns the definition of ready, the state " +
-	"machine, human review gates, and fleet coordination rules.";
+	"machine, human review gates, and fleet coordination rules. Working an epic end-to-end? Call " +
+	'get_playbook("epic-goal") (or compose_playbook to have it filled in with the epic\'s live data).';
 
 const router = new Hono<HonoEnv>();
 

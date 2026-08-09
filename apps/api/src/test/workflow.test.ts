@@ -23,6 +23,9 @@ describe("Workflow spec", () => {
 		expect(body.title).toBe("Workflow spec");
 		expect(body.content).toContain("Definition of ready");
 		expect(body.content).toContain("Human gates");
+		// PROJ-599: a pointer only, per the spec's own single-home rule.
+		expect(body.content).toContain("## Playbooks");
+		expect(body.content).toContain('get_playbook("epic-goal")');
 	});
 
 	it("MCP get_workflow returns the same content as REST", async () => {
