@@ -381,6 +381,7 @@ function useIssueMutations(
 	const [updatingPriority, setUpdatingPriority] = useState(false);
 	const [updatingAssignee, setUpdatingAssignee] = useState(false);
 	const [updatingType, setUpdatingType] = useState(false);
+	const [typeChangeError, setTypeChangeError] = useState<string | null>(null);
 
 	async function changeStatus(statusId: string) {
 		if (!issue) return;
@@ -448,13 +449,18 @@ function useIssueMutations(
 		);
 
 		setUpdatingType(true);
+		setTypeChangeError(null);
 		try {
 			await apiFetch(`/api/issues/${issueId}`, {
 				workspaceSlug,
 				method: "PATCH",
 				body: { typeId: typeId || null },
 			});
-		} catch {
+		} catch (e) {
+			// PROJ-602: the optimistic swap above is wrong once the request is rejected
+			// (e.g. demoting an epic that still has children) — fetchIssue() reverts the
+			// dropdown, but silently, with no explanation for why it snapped back.
+			setTypeChangeError(String(e));
 			await fetchIssue();
 		} finally {
 			setUpdatingType(false);
@@ -494,6 +500,7 @@ function useIssueMutations(
 		updatingPriority,
 		updatingAssignee,
 		updatingType,
+		typeChangeError,
 		changeStatus,
 		changePriority,
 		changeAssignee,
@@ -546,6 +553,7 @@ function IssueDetailView(
 		updatingPriority: boolean;
 		updatingAssignee: boolean;
 		updatingType: boolean;
+		typeChangeError: string | null;
 		changeStatus: (statusId: string) => void;
 		changePriority: (priority: string) => void;
 		changeAssignee: (assigneeId: string) => void;
@@ -646,6 +654,7 @@ function IssueDetailView(
 					updatingPriority={props.updatingPriority}
 					updatingAssignee={props.updatingAssignee}
 					updatingType={props.updatingType}
+					typeChangeError={props.typeChangeError}
 					changeStatus={props.changeStatus}
 					changePriority={props.changePriority}
 					changeAssignee={props.changeAssignee}
@@ -702,6 +711,7 @@ export default function IssueDetail({
 		updatingPriority,
 		updatingAssignee,
 		updatingType,
+		typeChangeError,
 		changeStatus,
 		changePriority,
 		changeAssignee,
@@ -772,6 +782,7 @@ export default function IssueDetail({
 			updatingPriority={updatingPriority}
 			updatingAssignee={updatingAssignee}
 			updatingType={updatingType}
+			typeChangeError={typeChangeError}
 			changeStatus={changeStatus}
 			changePriority={changePriority}
 			changeAssignee={changeAssignee}

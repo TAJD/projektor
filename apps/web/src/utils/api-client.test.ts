@@ -27,6 +27,40 @@ describe("apiFetch", () => {
 		await expect(apiFetch("/api/issues/i1")).rejects.toThrow(/404/);
 	});
 
+	// PROJ-602: a ValidationError from the service layer reaches the client as
+	// `{ error: { formErrors: [...] } }` (http/error-adapter.ts) — without reading it,
+	// every caller only ever saw the generic status code, never why the request failed.
+	it("surfaces a service-layer formErrors message on a 400 response", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 400,
+				json: () =>
+					Promise.resolve({
+						error: { formErrors: ["Cannot change type: this epic still has child issues"] },
+					}),
+			})
+		);
+
+		await expect(apiFetch("/api/issues/i1", { method: "PATCH" })).rejects.toThrow(
+			/Cannot change type: this epic still has child issues/
+		);
+	});
+
+	it("falls back to the status code when the error body has no formErrors", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 500,
+				json: () => Promise.resolve({}),
+			})
+		);
+
+		await expect(apiFetch("/api/issues/i1")).rejects.toThrow(/500/);
+	});
+
 	it("throws ApiOfflineError when fetch itself rejects (network failure)", async () => {
 		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
 

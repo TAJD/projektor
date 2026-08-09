@@ -162,6 +162,23 @@ function handleUnauthorized<T>(
 	return new Promise<T>(() => {});
 }
 
+// PROJ-602: a service-layer rejection (ValidationError) reaches here as `{ error: {
+// formErrors: string[], fieldErrors: {...} } }` — see http/error-adapter.ts. Without this,
+// every caller's catch block only ever saw the generic "failed: 400", never the actual
+// reason (e.g. "Cannot change type: this epic still has child issues"), even though
+// several call sites already show `String(e)` to the user assuming it would be useful.
+async function describeApiError(res: Response): Promise<string> {
+	try {
+		const body = (await res.json()) as { error?: { formErrors?: string[] } | string };
+		if (typeof body?.error === "string") return body.error;
+		const formError = body?.error?.formErrors?.[0];
+		if (formError) return formError;
+	} catch {
+		// Not JSON, or no body — fall through to the status code.
+	}
+	return String(res.status);
+}
+
 async function apiFetchUncached<T>(path: string, opts: ApiFetchOpts, method: string): Promise<T> {
 	const isFormData = opts.body instanceof FormData;
 	let res: Response;
@@ -174,7 +191,7 @@ async function apiFetchUncached<T>(path: string, opts: ApiFetchOpts, method: str
 	if (!res.ok) {
 		if (res.status === 401) return handleUnauthorized<T>(path, method, opts.on401);
 		if (reauthReloadInFlight) return new Promise<T>(() => {});
-		throw new Error(`API ${method} ${path} failed: ${res.status}`);
+		throw new Error(`API ${method} ${path} failed: ${await describeApiError(res)}`);
 	}
 	// A working request proves the session is good again — re-arm the guard so a
 	// later expiry gets its own reload attempt.
