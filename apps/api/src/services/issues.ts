@@ -1135,7 +1135,12 @@ async function assertNotDemotingEpicWithChildren(
 	const currentType = await orm
 		.select({ key: schema.taskTypes.key })
 		.from(schema.taskTypes)
-		.where(eq(schema.taskTypes.id, existing.typeId))
+		.where(
+			and(
+				eq(schema.taskTypes.id, existing.typeId),
+				eq(schema.taskTypes.workspaceId, ctx.workspaceId)
+			)
+		)
 		.get();
 	if (currentType?.key !== "epic") return;
 
@@ -1148,7 +1153,9 @@ async function assertNotDemotingEpicWithChildren(
 		.get();
 	if ((childCount?.count ?? 0) > 0) {
 		throw new ValidationError({
-			formErrors: ["Cannot change type: this epic still has child issues"],
+			formErrors: [
+				"Cannot change type: this epic still has child issues — move or remove them first",
+			],
 			fieldErrors: {},
 		});
 	}
