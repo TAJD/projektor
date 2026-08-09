@@ -987,9 +987,11 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
          often than a frame renders. -->
     <script is:inline>
       (function () {
-        // PROJ-595: this inline script isn't dedup'd across Astro client-side
-        // navigations, so without this guard every nav would add another set of
-        // scroll/astro:* listeners on top of the previous ones.
+        // PROJ-595: defensive. Astro's ClientRouter dedups an inline script by its exact
+        // text and won't re-run one it's already run (see pages/issues/view.astro's
+        // PROJ-438 comment and IssueDetail.test.tsx's assertion of that), so this guard
+        // shouldn't currently be load-bearing — but it makes re-binding impossible if
+        // that dedup behavior ever changes or this script's text ever varies per page.
         if (window.__topbarScrollBound) return;
         window.__topbarScrollBound = true;
 

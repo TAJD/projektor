@@ -122,5 +122,8 @@ describe("Base layout — topbar hide-on-scroll thresholds (PROJ-569)", () => {
 		expect(script).toMatch(/e\.target\.closest\('a\[href\^="#"\]'\)/);
 		expect(script).toMatch(/expectingAnchorJump = true;/);
 		expect(script).toMatch(/if \(expectingAnchorJump\) {\s*expectingAnchorJump = false;\s*resetTopbarScrollState\(\);/);
+		// The flag above is only ever set inside onClick — without actually binding
+		// it, the detection logic would be dead code that never runs.
+		expect(script).toMatch(/document\.addEventListener\('click', onClick\);/);
 	});
 });
