@@ -7,29 +7,48 @@ sidebar:
 A prompt pattern for pointing an agent at an epic (or ticket list) and having it work
 autonomously until everything — including work it discovers along the way — is done.
 
-## The six ingredients
+It's deliberately generic. [The workflow spec](/projektor/agents/workflow-spec/) is the
+projektor-specific half — definition of ready, the status state machine, human review
+gates, fleet coordination rules. This playbook is the shape of the *run* that drives
+those rules, so an agent working an epic normally fetches both.
 
-The productive runs all combined these; the weak ones ("implement 134") had only the first:
+## Getting the directive
 
-1. **Concrete entry point** — an epic ref/URL or explicit ticket IDs.
-2. **Explicit autonomy grant** — "autonomously", "do not stop until…". Sessions with this
-   stall far less.
-3. **Review cadence with a named model** — "use opus for reviews every two tickets". The
-   cadence survives context compaction and gets self-enforced.
-4. **Self-feeding loop** — file tickets for discovered bugs/improvements, link them to the
-   epic, action them. Turns the epic into a generator, not a fixed list.
-5. **Verifiable termination condition** — "complete when the epic is implemented AND shown
-   to work on all test repos", not "when done".
-6. **Decisions log instead of interruptions** — record decisions and judgment calls as
-   comments on the epic for review at the end, rather than asking questions mid-run.
+`get_playbook("epic-goal")` returns this page verbatim, template and all — read it and
+adapt it by hand.
 
-Plus one situational clause that earned its place: **audit-first** — on resumed work,
-audit origin/main, open PRs, and local state before implementing anything, so finished
-work is folded in rather than redone.
+`compose_playbook("epic-goal", { epicRef, variant, reviewModel, cadence })` returns just
+the directive, with every placeholder already filled from data the server holds:
 
-Call `compose_playbook("epic-goal", { epicRef, variant, reviewModel, cadence })` to have
-the server fill the template below with live data (epic title, open child count, project
-WIP limit) instead of copying it out by hand.
+| Parameter / source | Fills |
+|---|---|
+| `epicRef` *(required)* — resolved to the epic's ref and title | the **Goal** clause |
+| `variant` — `bounded` (default) or `full` | the **Self-feed** and **Done when** clauses |
+| `cadence` (default 2) and `reviewModel` (default `opus`) | the **Review cadence** clause |
+| the epic's open child count and the project's agent WIP limit | an extra **Live data** clause |
+
+MCP clients that support the `prompts` primitive surface the same composed directive as a
+slash command, with the three optional parameters as prompt arguments.
+
+## What each clause is for
+
+- **Goal** — a concrete entry point (an epic ref, not a prose description) plus an explicit
+  autonomy grant. Without the grant a run tends to stop after the first ticket to ask
+  what's next.
+- **Audit first** — on a resumed run, an agent that doesn't look first repeats work that
+  is already merged to origin/main or sitting in an open PR. This is also the clause that
+  matters most after a context compaction, when the agent's memory of the run is gone but
+  the directive isn't.
+- **Loop** — `get_prioritized_issues` chooses the next ticket rather than the agent, so
+  ordering follows the project's own priority and blocked-by rules.
+- **Self-feed** — filing discovered bugs and follow-ons back onto the epic turns it into a
+  generator rather than a fixed list. This is the only clause the two variants differ on.
+- **Review cadence** — naming the model and the interval up front makes the checkpoint
+  something the agent can self-enforce; "review as you go" doesn't survive a long run.
+- **Done when** — a checkable condition (every ticket closed, verification green,
+  everything pushed) instead of a judgment call.
+- **Decisions log** — judgment calls land as comments on the epic for review at the end,
+  so an ambiguity doesn't block the run on a question.
 
 ## Template — bounded variant (default)
 
@@ -60,13 +79,15 @@ And "done when" covers original + generated tickets.
 | Situation | Variant |
 |---|---|
 | Epic has a crisp outcome; scope creep is the risk | bounded |
-| Exploratory/quality epic where discovered work IS the point | full |
+| Exploratory/quality epic where the discovered work *is* the point | full |
 
 Full-variant runs can generate more tickets than the epic started with; if that happens
 mid-run, switch to bounded and park the tail.
 
-## Fleet / multi-agent use
+## Fleet and multi-agent use
 
-For epics too large for one session, the same template works as a worker prompt: post it
-as a comment on the epic and pass the ticket URL as the worker's entry point, with each
-worker taking disjoint tickets.
+For epics too large for one session, the same directive works as a worker prompt: post it
+as a comment on the epic and give each worker the ticket URL as its entry point. Nobody
+hands out the tickets: each worker takes its own through `claim_issue`, and the lease
+keeps the others off it. That is why the composed directive reports the project's agent
+WIP limit, the cap on how many tickets one worker may hold at a time.
