@@ -2864,6 +2864,13 @@ const WIKI_PAGE_STYLES = `
 		width: auto;
 		height: auto;
 	}
+	/* PROJ-612: renderMdWithWikilinks (markdown.ts) wraps every rendered <table> in
+	 * a .table-scroll div (PROJ-605), but this page never defined the scroll rule
+	 * for it — unlike IssueDetailParts.tsx and share/view.astro, a wide table here
+	 * had no horizontal scroll boundary at all. */
+	.prose .table-scroll {
+		overflow-x: auto;
+	}
 	@media (max-width: 640px) {
 		.wiki-breadcrumb button {
 			max-width: 8rem;
