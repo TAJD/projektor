@@ -11,14 +11,22 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(join(__dirname, "../pages/share/view.astro"), "utf-8");
 
 describe("share view — wide table scroll boundary (PROJ-606)", () => {
-	it("gives .prose tables their own horizontal scroll boundary", () => {
+	it("keeps tables full-width and gives the .table-scroll wrapper the scroll boundary (PROJ-605)", () => {
 		// This page's markdown styling is hand-rolled (not Tailwind Typography), so
-		// without this rule a wide table has no scroll boundary at all — unlike
-		// IssueDetailParts.tsx's prose, which gets one via the same rule (PROJ-603).
-		const start = source.indexOf(".prose table {");
-		expect(start).toBeGreaterThan(-1);
-		const block = source.slice(start, source.indexOf("}", start));
-		expect(block).toMatch(/display:\s*block/);
-		expect(block).toMatch(/overflow-x:\s*auto/);
+		// without these rules a wide table has no scroll boundary at all — unlike
+		// IssueDetailParts.tsx's prose, which gets one via the same rules (PROJ-603).
+		// renderMd's table renderer (markdown.ts) wraps every rendered <table> in a
+		// .table-scroll div, so the boundary lives on the wrapper, not the table
+		// itself — a bare "display: block" on <table> would shrink a narrow table
+		// to content width instead of spanning the container (PROJ-605).
+		const tableStart = source.indexOf(".prose table {");
+		expect(tableStart).toBeGreaterThan(-1);
+		const tableBlock = source.slice(tableStart, source.indexOf("}", tableStart));
+		expect(tableBlock).toMatch(/width:\s*100%/);
+
+		const scrollStart = source.indexOf(".prose .table-scroll {");
+		expect(scrollStart).toBeGreaterThan(-1);
+		const scrollBlock = source.slice(scrollStart, source.indexOf("}", scrollStart));
+		expect(scrollBlock).toMatch(/overflow-x:\s*auto/);
 	});
 });
