@@ -254,18 +254,7 @@ This repo is built out via parallel workers in separate git worktrees. To avoid 
 
 ### Spawn prompt requirement
 
-Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination` section:
-
-```
-## Coordination (required)
-You are working in a parallel fleet. Use the projektor MCP to coordinate:
-
-1. `register_agent` at session start - link to your issue ID, save the returned `id`.
-2. `claim_files` before touching any file - check `list_file_claims` first; back off if another agent holds a file.
-3. `post_message` to `scope: "issue:<uuid>"` when you start, hit a blocker, and finish. Use `scope: "workspace"` for fleet-wide announcements (e.g. "rebasing mcp.ts, hold off").
-4. `heartbeat_agent` every ~60 s while working (sessions time out after 120 s of silence).
-5. `release_files` then `end_agent` when done.
-```
+Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination (required)` section stating the 5-step sequence from "Fleet coordination protocol" above.
 
 A full spawn prompt also needs a **Finish** section (what "done" means for the task,
 and what to report back) alongside the Coordination section above.
