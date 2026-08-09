@@ -1541,6 +1541,60 @@ describe("Issues MCP — typeId", () => {
 		expect(issue.type_id).toBeNull();
 	});
 
+	// PROJ-571: changing an epic's type away from Epic while it still has children
+	// silently orphans them from the epic UI/rollups — block it at the service layer
+	// so both REST and MCP callers get the guard.
+	it("MCP update_issue rejects demoting an epic that still has children", async () => {
+		const { id: epicTypeId } = await seedTaskType(workspaceId, { key: "epic", name: "Epic" });
+		const { id: storyTypeId } = await seedTaskType(workspaceId, { key: "story", name: "Story" });
+
+		const createResp = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Parent epic", typeId: epicTypeId },
+		});
+		const { id: epicId } = JSON.parse(createResp.result!.content[0].text) as { id: string };
+
+		await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Child of epic", parentId: epicId },
+		});
+
+		const updateResp = await mcpCall({
+			name: "update_issue",
+			arguments: { id: epicId, typeId: storyTypeId },
+		});
+		expect(updateResp.error).toBeDefined();
+
+		const getRes = await SELF.fetch(`http://localhost/api/issues/${epicId}`, {
+			headers: authHeaders(token, slug),
+		});
+		const issue = (await getRes.json()) as { type_id: string };
+		expect(issue.type_id).toBe(epicTypeId);
+	});
+
+	it("MCP update_issue allows changing an epic's type once it has no children", async () => {
+		const { id: epicTypeId } = await seedTaskType(workspaceId, { key: "epic", name: "Epic" });
+		const { id: storyTypeId } = await seedTaskType(workspaceId, { key: "story", name: "Story" });
+
+		const createResp = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Childless epic", typeId: epicTypeId },
+		});
+		const { id: epicId } = JSON.parse(createResp.result!.content[0].text) as { id: string };
+
+		const updateResp = await mcpCall({
+			name: "update_issue",
+			arguments: { id: epicId, typeId: storyTypeId },
+		});
+		expect(updateResp.error).toBeUndefined();
+
+		const getRes = await SELF.fetch(`http://localhost/api/issues/${epicId}`, {
+			headers: authHeaders(token, slug),
+		});
+		const issue = (await getRes.json()) as { type_id: string };
+		expect(issue.type_id).toBe(storyTypeId);
+	});
+
 	it("MCP list_issues typeId filter returns only matching issues", async () => {
 		const { id: bugTypeId } = await seedTaskType(workspaceId, { key: "bug", name: "Bug" });
 		const { id: storyTypeId } = await seedTaskType(workspaceId, { key: "story", name: "Story" });

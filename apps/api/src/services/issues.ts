@@ -817,6 +817,7 @@ type UpdateIssueData = z.infer<typeof UpdateIssueSchema>;
 type ExistingIssue = {
 	id: string;
 	parentId: string | null;
+	typeId: string | null;
 	status: string;
 	statusCategory: string | null;
 	readyAt: number | null;
@@ -1119,6 +1120,40 @@ function formatCompletionReportComment(
 	return lines.join("\n");
 }
 
+// PROJ-571: changing an epic's type away from Epic silently orphans its children
+// from the epic UI/rollups (parentId is untouched, but nothing surfaces the epic
+// view for them anymore). Block it at the service layer so REST and MCP both get
+// the guard, rather than only a frontend confirm dialog.
+async function assertNotDemotingEpicWithChildren(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	existing: ExistingIssue,
+	newTypeId: string | null
+): Promise<void> {
+	if (!existing.typeId || existing.typeId === newTypeId) return;
+
+	const currentType = await orm
+		.select({ key: schema.taskTypes.key })
+		.from(schema.taskTypes)
+		.where(eq(schema.taskTypes.id, existing.typeId))
+		.get();
+	if (currentType?.key !== "epic") return;
+
+	const childCount = await orm
+		.select({ count: sql<number>`count(*)` })
+		.from(schema.issues)
+		.where(
+			and(eq(schema.issues.parentId, existing.id), eq(schema.issues.workspaceId, ctx.workspaceId))
+		)
+		.get();
+	if ((childCount?.count ?? 0) > 0) {
+		throw new ValidationError({
+			formErrors: ["Cannot change type: this epic still has child issues"],
+			fieldErrors: {},
+		});
+	}
+}
+
 async function buildUpdateSetValues(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
@@ -1130,7 +1165,9 @@ async function buildUpdateSetValues(
 	Object.assign(setValues, statusFields.setValues);
 	const reviewOrDoneTransition = statusFields.reviewOrDoneTransition;
 	if ("typeId" in data) {
-		setValues.typeId = await resolveTypeId(ctx, data.typeId);
+		const resolvedTypeId = await resolveTypeId(ctx, data.typeId);
+		await assertNotDemotingEpicWithChildren(ctx, orm, existing, resolvedTypeId);
+		setValues.typeId = resolvedTypeId;
 	}
 	// PROJ-293: only stamp/post the report when the issue actually transitions into
 	// review or done — a title-only update carrying a completionReport must not
@@ -1231,6 +1268,7 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 			id: schema.issues.id,
 			projectId: schema.issues.projectId,
 			parentId: schema.issues.parentId,
+			typeId: schema.issues.typeId,
 			status: schema.issues.status,
 			statusCategory: schema.issues.statusCategory,
 			readyAt: schema.issues.readyAt,
