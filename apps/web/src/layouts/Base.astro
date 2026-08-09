@@ -987,7 +987,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
          often than a frame renders. -->
     <script is:inline>
       (function () {
-        var lastY = 0;
+        var lastY = window.scrollY;
         var accumulatedDown = 0;
         var accumulatedUp = 0;
         // PROJ-569: the old 8px hide threshold with an instant, un-thresholded reveal
@@ -1033,14 +1033,22 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           });
         }
 
-        window.addEventListener('scroll', onScroll, { passive: true });
-        document.addEventListener('astro:after-swap', function () {
+        function resetTopbarScrollState() {
           var topbar = document.getElementById('app-topbar');
           if (topbar) topbar.classList.remove('topbar-hidden');
           lastY = window.scrollY;
           accumulatedDown = 0;
           accumulatedUp = 0;
-        });
+        }
+
+        window.addEventListener('scroll', onScroll, { passive: true });
+        // PROJ-572: astro:after-swap alone misses the very first load — a bfcache
+        // restore, browser scroll restoration, or an #anchor link can land the page
+        // already scrolled down before any swap has happened, so the initial
+        // lastY = window.scrollY above can still be stale by the time this runs.
+        // astro:page-load fires on first load too (unlike astro:after-swap).
+        document.addEventListener('astro:after-swap', resetTopbarScrollState);
+        document.addEventListener('astro:page-load', resetTopbarScrollState);
       })();
     </script>
   </body>

@@ -86,4 +86,18 @@ describe("Base layout — topbar hide-on-scroll thresholds (PROJ-569)", () => {
 		expect(script).toMatch(/accumulatedUp \+= -delta;/);
 		expect(script).toMatch(/if \(accumulatedUp > REVEAL_THRESHOLD\) topbar\.classList\.remove\('topbar-hidden'\);/);
 	});
+
+	it("initializes lastY from the real scroll position, and resets it on first load too (PROJ-572)", () => {
+		// A page loading already scrolled (bfcache restore, scroll restoration, #anchor
+		// link) must not compute its first delta against a stale lastY = 0 — that slams
+		// the topbar hidden immediately instead of respecting the 40px threshold.
+		const scriptStart = source.indexOf("var lastY");
+		const scriptEnd = source.indexOf("</script>", scriptStart);
+		const script = source.slice(scriptStart, scriptEnd);
+		expect(script).toMatch(/var lastY = window\.scrollY;/);
+		// astro:after-swap alone misses the very first load (it only fires on
+		// client-side navigations), so the reset must also run on astro:page-load.
+		expect(script).toMatch(/addEventListener\('astro:after-swap', resetTopbarScrollState\)/);
+		expect(script).toMatch(/addEventListener\('astro:page-load', resetTopbarScrollState\)/);
+	});
 });
