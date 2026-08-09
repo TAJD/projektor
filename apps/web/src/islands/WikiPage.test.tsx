@@ -1282,3 +1282,27 @@ describe("WikiPage — inline images & attachment badges (PROJ-494)", () => {
 		expect(form.get("entityId")).toBe(PAGE.id);
 	});
 });
+
+describe("WikiPage — wide table scroll boundary (PROJ-612)", () => {
+	it("gives the .table-scroll wrapper around a rendered table its own horizontal scroll boundary", async () => {
+		const PAGE_WITH_TABLE = {
+			...PAGE,
+			content: "| Column A | Column B |\n| --- | --- |\n| a | b |\n",
+		};
+		mockFetchWiki(PAGE_WITH_TABLE);
+		render(<WikiPage slug="my-page" />);
+
+		// renderMdWithWikilinks (markdown.ts) wraps every rendered <table> in a
+		// .table-scroll div (PROJ-605) — the scroll boundary belongs on that
+		// wrapper, not the table itself.
+		const table = await screen.findByRole("table");
+		expect(table.parentElement?.className).toBe("table-scroll");
+
+		const styleTags = Array.from(document.querySelectorAll("style"));
+		const rule = styleTags
+			.map((s) => s.textContent)
+			.find((css) => css?.includes(".prose .table-scroll"));
+		expect(rule).toBeTruthy();
+		expect(rule).toContain("overflow-x: auto");
+	});
+});
