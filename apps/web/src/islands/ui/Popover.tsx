@@ -58,11 +58,13 @@ export interface PopoverProps {
 	/**
 	 * "anchored" renders in place, positioned by the parent's own
 	 * `position: relative` + the modifier class's own `position:
-	 * absolute; top/left` rule (matches `.metric-help-popover`'s existing
-	 * CSS — `MetricHelp.tsx`'s own usage). "portal-fixed" portals to
+	 * absolute; top/left` rule. No current production caller uses it (see
+	 * PROJ-607) — it's kept for a future toggletip that doesn't need to
+	 * escape an ancestor's overflow/transform. "portal-fixed" portals to
 	 * `document.body` with caller-computed fixed coordinates (matches
-	 * `AccountMenu.tsx`/`GlossaryHelp.tsx`'s existing pattern, needed to
-	 * escape an ancestor's `transform`, e.g. the topbar's scroll-hide).
+	 * `AccountMenu.tsx`/`GlossaryHelp.tsx`/`MetricHelp.tsx`'s existing
+	 * pattern, needed to escape an ancestor's `transform`, e.g. the
+	 * topbar's scroll-hide).
 	 */
 	strategy: "anchored" | "portal-fixed";
 	/** Required when strategy is "portal-fixed". */
