@@ -17,6 +17,15 @@ renderer.code = (token: Tokens.Code) => {
 	return defaultCode(token);
 };
 
+// PROJ-605: giving `.prose table` itself `display: block; overflow-x: auto` (the
+// PROJ-603 fix) makes the *table* the block box that Typography's `width: 100%`
+// sizes, while the anonymous table-formatting box inside it shrink-wraps to
+// content — so a narrow table no longer spans the container. Wrapping the table
+// in a real scroll div instead keeps the table itself `display: table` (full
+// width, normal table layout) and puts the scroll boundary on the wrapper.
+const defaultTable = renderer.table.bind(renderer);
+renderer.table = (token: Tokens.Table) => `<div class="table-scroll">${defaultTable(token)}</div>`;
+
 /**
  * Render untrusted markdown to sanitized HTML.
  *

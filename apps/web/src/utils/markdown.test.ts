@@ -62,6 +62,21 @@ describe("renderMd — XSS sanitization", () => {
 	});
 });
 
+// PROJ-605: wrapping in a div (not `display: block` on <table> itself) keeps the
+// table's own display: table intact, so consumers' CSS can size the wrapper for
+// scroll without shrinking a narrow table to content width.
+describe("renderMd — table rendering (PROJ-605)", () => {
+	it("wraps a rendered table in a .table-scroll div", () => {
+		const html = renderMd("| A | B |\n| --- | --- |\n| 1 | 2 |\n");
+		const wrapStart = html.indexOf('<div class="table-scroll">');
+		expect(wrapStart).toBeGreaterThan(-1);
+		const tableStart = html.indexOf("<table", wrapStart);
+		expect(tableStart).toBeGreaterThan(wrapStart);
+		const closeTableEnd = html.indexOf("</table>") + "</table>".length;
+		expect(html.slice(closeTableEnd).trim()).toBe("</div>");
+	});
+});
+
 describe("renderMd — legitimate markdown still renders", () => {
 	it("renders bold and italic", () => {
 		const html = renderMd("**bold** and _italic_");

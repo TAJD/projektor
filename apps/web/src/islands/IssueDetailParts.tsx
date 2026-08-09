@@ -46,10 +46,14 @@ const MERMAID_PROSE_STYLES = `
 	/* PROJ-603: the .prose box itself no longer scrolls (that forced overflow-y
 	 * to auto too, clipping outside-positioned <ol>/<ul> markers). Typography
 	 * already gives <pre> its own overflow-x: auto; tables get none by default,
-	 * so give them one directly — this is the same "display: block" trick GFM's
-	 * own stylesheet uses to make a table scroll without an outer scrollport. */
-	.prose table {
-		display: block;
+	 * so give them one directly. PROJ-605: a bare "display: block" on <table>
+	 * makes Typography's width: 100% size the table's own block box while the
+	 * anonymous table-formatting box inside it shrink-wraps to content, so a
+	 * narrow table no longer spans the container — renderMd's table renderer
+	 * (markdown.ts) wraps rendered tables in a .table-scroll div instead, so
+	 * the table itself stays display: table (full width) and the wrapper
+	 * carries the scroll boundary. */
+	.prose .table-scroll {
 		overflow-x: auto;
 	}
 `;

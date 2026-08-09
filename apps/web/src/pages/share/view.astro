@@ -90,8 +90,13 @@ import ShareView from '../../islands/ShareView';
       .prose a { color: var(--accent); }
       /* PROJ-606: unlike IssueDetailParts.tsx's prose (PROJ-603), this hand-rolled
          stylesheet gets no table handling from Tailwind Typography, so a wide table
-         has no scroll boundary at all without this. */
-      .prose table { display: block; overflow-x: auto; }
+         has no scroll boundary at all without this. PROJ-605: the scroll boundary
+         lives on the .table-scroll wrapper renderMd's table renderer adds around
+         each table (markdown.ts), not on the table itself — a bare "display: block"
+         on <table> would keep the table full-width but shrink a narrow table's
+         inner anonymous table box to content width. */
+      .prose table { width: 100%; }
+      .prose .table-scroll { overflow-x: auto; }
       .prose blockquote {
         border-left: 3px solid var(--border); margin: 0.75em 0;
         padding: 0.25em 1em; color: var(--text-muted);

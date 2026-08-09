@@ -9,10 +9,13 @@
 // entire box into a scrollport that clips anything an ordered/unordered list
 // marker renders outside its gutter (PROJ-603). The fix moves the scroll
 // boundary onto the individual elements that actually need it: <pre> already
-// gets `overflow-x: auto` from Typography by default, and `.prose table` gets
-// the same via MERMAID_PROSE_STYLES (the `display: block` + `overflow-x: auto`
-// trick GFM's own stylesheet uses). jsdom doesn't lay out real pixel widths, so
-// this asserts the containing classes/rules rather than measured overflow.
+// gets `overflow-x: auto` from Typography by default, and each rendered
+// <table> is wrapped in a `.table-scroll` div that gets the same via
+// MERMAID_PROSE_STYLES (PROJ-605: the wrapper carries the scroll boundary
+// instead of `display: block` on <table> itself, so a narrow table still
+// renders full-width instead of shrinking to content). jsdom doesn't lay out
+// real pixel widths, so this asserts the containing classes/rules rather than
+// measured overflow.
 import { render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BodySection } from "./IssueDetailParts";
@@ -78,7 +81,7 @@ describe("BodySection", () => {
 		expect(pre?.closest(".prose")).toBe(container);
 	});
 
-	it("gives wide tables their own horizontal scroll boundary via .prose table CSS (PROJ-603)", async () => {
+	it("gives wide tables their own horizontal scroll boundary via a .table-scroll wrapper (PROJ-603, PROJ-605)", async () => {
 		render(
 			<BodySection
 				issue={ISSUE}
@@ -88,11 +91,15 @@ describe("BodySection", () => {
 			/>
 		);
 
-		await screen.findByRole("table");
+		const table = await screen.findByRole("table");
+		// renderMd's table renderer (markdown.ts) wraps every rendered <table> in
+		// this div — the scroll boundary lives on the wrapper, not the table.
+		expect(table.parentElement?.className).toBe("table-scroll");
+
 		const styleTags = Array.from(document.querySelectorAll("style"));
 		const tableRule = styleTags
 			.map((s) => s.textContent)
-			.find((css) => css?.includes(".prose table"));
+			.find((css) => css?.includes(".prose .table-scroll"));
 		expect(tableRule).toBeTruthy();
 		expect(tableRule).toContain("overflow-x: auto");
 	});
