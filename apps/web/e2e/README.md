@@ -10,7 +10,7 @@ These tests target a **deployed dev instance**, not a local dev server.
 | Requirement | Detail |
 |---|---|
 | Node ≥ 18 | Built-in `fetch` used in global setup |
-| Playwright browsers | `pnpm --filter @projektor/web exec playwright install --with-deps chromium` |
+| Playwright browsers | `pnpm --filter @projektor/web exec playwright install --with-deps chromium webkit` |
 | Dev deployment | `ENVIRONMENT=development`, `DEV_USER_EMAIL` set on the Worker |
 
 ### Why a deployed dev instance?
@@ -40,6 +40,7 @@ pnpm --filter @projektor/web exec playwright test
 # Run a single project:
 pnpm --filter @projektor/web exec playwright test --project=desktop
 pnpm --filter @projektor/web exec playwright test --project=mobile
+pnpm --filter @projektor/web exec playwright test --project=mobile-webkit
 
 # Show the HTML report:
 pnpm --filter @projektor/web exec playwright show-report
@@ -157,6 +158,19 @@ The `onDragStart` handler in IssueList.tsx calls `e.preventDefault()` when
 2. Performs `dragTo` on a card.
 3. Asserts the Todo column still has all its cards (nothing moved).
 4. Asserts `patches.length === 0` (no PATCH was fired).
+
+### `mobile-webkit` project (real WebKit engine)
+
+Runs the same specs as `mobile`, but on Playwright's WebKit browser (via
+`devices["iPhone 13"]`) instead of Chromium's mobile emulation. This catches
+iOS Safari engine-level quirks — visual-viewport/keyboard resize behavior,
+`position: fixed` under scroll, etc. — that Chromium's "mobile" project
+can't reproduce, since it's still Chromium under the hood.
+
+Note this is still not a substitute for testing on real Mobile Safari/iOS:
+Playwright's WebKit is the same rendering engine but doesn't run inside
+actual iOS or Mobile Safari's chrome, so OS-level behavior (Safari toolbar
+collapse, PWA install prompts, Add-to-Home-Screen) isn't covered.
 
 ### Test: Groups flow — admin (`groups-flow.spec.ts`)
 
