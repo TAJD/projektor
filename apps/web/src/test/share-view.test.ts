@@ -29,4 +29,14 @@ describe("share view — wide table scroll boundary (PROJ-606)", () => {
 		const scrollBlock = source.slice(scrollStart, source.indexOf("}", scrollStart));
 		expect(scrollBlock).toMatch(/overflow-x:\s*auto/);
 	});
+
+	it("gives table rows and headers borders and cell padding (PROJ-611)", () => {
+		// This page's markdown styling is hand-rolled, so it never inherited
+		// Tailwind Typography's default table border/padding — a table rendered as
+		// bare unbordered text with no row/column separation without these rules.
+		expect(source).toMatch(/\.prose thead \{[^}]*border-bottom:\s*1px solid var\(--border\)/);
+		expect(source).toMatch(/\.prose tbody tr \{[^}]*border-bottom:\s*1px solid var\(--border\)/);
+		expect(source).toMatch(/\.prose thead th \{[^}]*padding:/);
+		expect(source).toMatch(/\.prose tbody td \{[^}]*padding:/);
+	});
 });

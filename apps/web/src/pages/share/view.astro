@@ -95,8 +95,17 @@ import ShareView from '../../islands/ShareView';
          each table (markdown.ts), not on the table itself — a bare "display: block"
          on <table> would keep the table full-width but shrink a narrow table's
          inner anonymous table box to content width. */
-      .prose table { width: 100%; }
+      /* PROJ-611: Tailwind Typography (used by IssueDetailParts.tsx's prose) supplies
+         table border/padding by default; this hand-rolled stylesheet doesn't, so a
+         table here rendered as bare unbordered text. Mirrors Typography's own
+         thead/tbody border + cell padding shape. */
+      .prose table { width: 100%; border-collapse: collapse; }
       .prose .table-scroll { overflow-x: auto; }
+      .prose thead { border-bottom: 1px solid var(--border); }
+      .prose thead th { font-weight: 600; text-align: left; padding: 0.4em 0.75em; }
+      .prose tbody td { padding: 0.4em 0.75em; }
+      .prose tbody tr { border-bottom: 1px solid var(--border); }
+      .prose tbody tr:last-child { border-bottom: none; }
       .prose blockquote {
         border-left: 3px solid var(--border); margin: 0.75em 0;
         padding: 0.25em 1em; color: var(--text-muted);
