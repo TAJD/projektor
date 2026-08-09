@@ -1,7 +1,8 @@
 /**
  * Regenerates the playbook docs pages (each has no hand-edited prose, like
  * workflow-spec.md) from the single source of truth in
- * src/services/playbook-content.ts.
+ * src/services/playbook-content.ts. index.md in the output directory is the one
+ * exception — a hand-authored section landing page this script never touches.
  *
  * CI runs this and fails if the committed files are stale (see
  * .github/workflows/ci.yml), the same pattern as gen-workflow-spec.ts.
@@ -19,9 +20,12 @@ const outDir = join(repoRoot, "apps", "docs", "src", "content", "docs", "agents"
 
 mkdirSync(outDir, { recursive: true });
 
-// Clear stale entries (a renamed/removed playbook) before writing the current set,
-// same reasoning as any generated-directory sync step.
+// Clear stale generated entries (a renamed/removed playbook) before writing the
+// current set, same reasoning as any generated-directory sync step — but never
+// touch index.md, the hand-authored landing page for this section (PROJ-609).
+const expectedFiles = new Set(PLAYBOOKS.map((p) => `${p.name}.md`));
 for (const entry of readdirSync(outDir)) {
+	if (entry === "index.md" || expectedFiles.has(entry)) continue;
 	rmSync(join(outDir, entry), { recursive: true });
 }
 
