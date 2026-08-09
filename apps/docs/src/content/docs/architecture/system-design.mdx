@@ -95,7 +95,7 @@ flowchart TB
 | Data model | Drizzle ORM → D1 | `packages/db` | Drizzle is the schema and primary query layer; raw `DB.prepare` remains in the auth/workspace middleware hot path, the dev bootstrap, and a handful of service queries (FTS, counters) where hand-written SQL is clearer. |
 | Shared types | TS | `packages/types` | `HonoEnv`, `Plugin`, `MCPTool`, `PluginContext`. |
 | Auth | CF Access JWT (RS256) + API tokens (SHA-256) | `middleware/auth.ts` | Plus dev bypass via `DEV_USER_EMAIL`. |
-| Deploy | wrangler + GitHub Actions | `projektor-deploy-example`, `projektor-workspace` | projektor publishes a release artifact; a config-only deploy repo downloads + ships it (no submodule). |
+| Deploy | wrangler + GitHub Actions | `projektor-deploy-example` | projektor publishes a release artifact; a config-only deploy repo downloads + ships it (no submodule). |
 
 ## API surfaces
 
