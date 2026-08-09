@@ -606,8 +606,8 @@ export const wikiTools: MCPTool[] = [
 		name: "get_wiki_draft",
 		description:
 			"Get the calling user's saved server-side draft for a wiki page by id or slug " +
-			"(PROJ-495/R13 — replaces the old localStorage-only autosave, so a draft survives " +
-			"a device switch). Returns null if there is no draft. `baseRevisionId` is the " +
+			"(server-side, so a draft survives a device switch). Returns null if there is no " +
+			"draft. `baseRevisionId` is the " +
 			"page's latest revision id as of when the draft was started — pass it straight " +
 			"through to update_wiki_page/patch_wiki_page's own baseRevisionId when publishing, " +
 			"so a stale draft hits the normal conflict response instead of silently clobbering " +
