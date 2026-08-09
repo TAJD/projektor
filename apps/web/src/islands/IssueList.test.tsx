@@ -862,4 +862,17 @@ describe("Filters popover stacking (CD-294)", () => {
 		expect(popover).toBeTruthy();
 		expect(Number(popover.style.zIndex)).toBeGreaterThan(110);
 	});
+
+	// PROJ-588 review: the pure computeFiltersPopoverPosition tests never assert the
+	// component actually wires maxHeight/overflow onto the rendered panel.
+	it("clamps the rendered panel's maxHeight and makes it scrollable (PROJ-588)", async () => {
+		render(<IssueList />);
+		await waitForLoaded();
+		openFiltersPopover();
+
+		const panel = await screen.findByRole("button", { name: "Todo" });
+		const popover = panel.closest("[style*='position: fixed']") as HTMLElement;
+		expect(popover.style.maxHeight).toBeTruthy();
+		expect(popover.style.overflowY).toBe("auto");
+	});
 });

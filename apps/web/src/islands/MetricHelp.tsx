@@ -9,6 +9,25 @@ import { Popover } from "./ui/Popover";
 // reposition it back on-screen.
 const POPOVER_WIDTH = 256; // 16rem, matches .popover-metric-help's `width`
 const POPOVER_MARGIN = 8;
+const POPOVER_GAP = 4;
+// PROJ-588 review: unlike FiltersPopover the content here is two short, unscrollable
+// paragraphs, so there's no maxHeight to clamp — just flip above the trigger when there
+// isn't room below. 140px comfortably covers two wrapped paragraphs in a 256px-wide panel.
+const POPOVER_EST_HEIGHT = 140;
+
+export function computeMetricHelpPosition(rect: DOMRect): { top: number; left: number } {
+	const left = Math.max(
+		POPOVER_MARGIN,
+		Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - POPOVER_MARGIN)
+	);
+	const below = window.innerHeight - rect.bottom - POPOVER_GAP - POPOVER_MARGIN;
+	const above = rect.top - POPOVER_GAP - POPOVER_MARGIN;
+	const flip = below < POPOVER_EST_HEIGHT && above > below;
+	const top = flip
+		? Math.max(POPOVER_MARGIN, rect.top - POPOVER_GAP - POPOVER_EST_HEIGHT)
+		: rect.bottom + POPOVER_GAP;
+	return { top, left };
+}
 
 // PROJ-335: shared help affordance for every stat/chart, backed by metric-definitions.ts.
 // A toggletip, not a native <dialog>/alert: a button that toggles a popover, dismissed via
@@ -27,11 +46,7 @@ export function MetricHelp({ id }: { id: MetricId }) {
 	const reposition = useCallback(() => {
 		const rect = triggerRef.current?.getBoundingClientRect();
 		if (!rect) return;
-		const left = Math.max(
-			POPOVER_MARGIN,
-			Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - POPOVER_MARGIN)
-		);
-		setPopoverPos({ top: rect.bottom + 4, left });
+		setPopoverPos(computeMetricHelpPosition(rect));
 	}, []);
 
 	function openPopover() {

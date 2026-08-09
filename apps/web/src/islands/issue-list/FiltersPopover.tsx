@@ -392,6 +392,10 @@ export default function FiltersPopover({
 						padding: "0.75rem",
 						boxShadow: "var(--shadow-sm)",
 						minWidth: "16rem",
+						// PROJ-588 review: the left clamp assumes POPOVER_WIDTH (256px); without a
+						// matching maxWidth, content wider than that could still push the right edge
+						// past the viewport.
+						maxWidth: "calc(100vw - 16px)",
 						// PROJ-588: clamp+flip alone isn't enough on a short phone viewport where
 						// even the flipped side can't fit every field — scroll within the panel
 						// rather than letting it (or its contents) run off-screen.
