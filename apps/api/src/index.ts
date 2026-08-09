@@ -25,6 +25,7 @@ import { groupsRouter } from "./routes/groups";
 import { issueLinksRouter } from "./routes/issue-links";
 import { issuesRouter } from "./routes/issues";
 import { mcpRouter } from "./routes/mcp";
+import { playbooksRouter } from "./routes/playbooks";
 import { projectActivityRouter } from "./routes/project-activity";
 import { projectsRouter } from "./routes/projects";
 import { shareIssuesRouter, sharePublicRouter } from "./routes/share";
@@ -299,6 +300,7 @@ app.route("/api/agents", agentsRouter);
 app.route("/api/file-claims", fileClaimsRouter);
 app.route("/api/agent-messages", agentMessagesRouter);
 app.route("/api/workflow", workflowRouter);
+app.route("/api/playbooks", playbooksRouter);
 
 // PROJ-487 fix-up: /wiki is a static asset (wiki/index.html) that Cloudflare serves
 // directly without ever invoking the Worker — so the legacy `?slug=` query param can

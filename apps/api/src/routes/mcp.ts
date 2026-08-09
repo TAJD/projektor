@@ -15,6 +15,7 @@ import { groupsTools } from "../mcp/groups";
 import { issueLeasesTools } from "../mcp/issue-leases";
 import { issueLinksTools } from "../mcp/issue-links";
 import { issuesTools } from "../mcp/issues";
+import { playbooksTools } from "../mcp/playbooks";
 import { projectActivityTools } from "../mcp/project-activity";
 import { projectsTools } from "../mcp/projects";
 import { sprintsTools } from "../mcp/sprints";
@@ -191,6 +192,7 @@ const coreMCPTools: MCPTool[] = [
 	...issueLeasesTools,
 	...agentMessagesTools,
 	...workflowTools,
+	...playbooksTools,
 	...flowMetricsTools,
 	...codeHeatmapTools,
 ];
