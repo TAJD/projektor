@@ -6,11 +6,14 @@ sidebar:
 ---
 Projektor's REST API (`/api/*`) is the SPA's private, versionless contract - it can
 change shape without notice, and agents should use [MCP](/projektor/agents/mcp-connection/)
-instead wherever a tool exists. A handful of endpoints are the deliberate exception:
-things the browser can do that have no MCP equivalent, because they don't fit the
-JSON-RPC/tool-call shape (binary uploads, redirects, public unauthenticated links).
-Guides already point users at these, so they're documented here as a stable subset
-you can depend on.
+instead wherever a tool exists. A handful of endpoints are the deliberate exception,
+documented here as a stable subset you can depend on. Two kinds qualify:
+
+- **No MCP equivalent** — things the browser can do that don't fit the JSON-RPC/tool-call
+  shape at all (binary uploads, redirects, public unauthenticated links).
+- **Fetchable without an MCP session** — the shipped specs and playbooks, which have MCP
+  tools too, but which CI jobs and setup scripts need to pull over plain HTTP before any
+  agent is connected.
 
 All `/api/*` endpoints below require the same bearer-token auth as MCP
 (`Authorization: Bearer pk_...` plus `X-Workspace-Slug`) unless marked **public**. The
@@ -68,11 +71,30 @@ workspace token - it has to be public.
 |--------|------|-------|
 | `POST` | `/api/feedback/submit` | **Public.** Submit feedback via a feedback-source key. See [Feedback widget integration](/projektor/guides/feedback-widget-integration/). |
 
+## Workflow spec and playbooks
+
+The [workflow spec](/projektor/agents/workflow-spec/) and the
+[playbooks](/projektor/agents/playbooks/) are served from the same constants the MCP
+tools read, so a fetch here and a `get_playbook` call can never drift. These have MCP
+equivalents (`get_workflow`, `list_playbooks`, `get_playbook`) and an agent should
+prefer those; the REST form is for everything that isn't an MCP client.
+
+| Method | Path | Notes |
+|--------|------|-------|
+| `GET` | `/api/workflow` | The workflow spec: definition of ready, state machine, review gates |
+| `GET` | `/api/playbooks` | List the shipped playbooks |
+| `GET` | `/api/playbooks/:name` | One playbook's full markdown |
+
+`compose_playbook` — which fills a playbook's template with live epic data — is MCP-only,
+so these return the templates as shipped rather than a composed directive.
+
 ## The inverse case
 
-One tool has no REST equivalent: `get_prioritized_issues` (the "what should I work
+Two tools have no REST equivalent. `get_prioritized_issues` (the "what should I work
 on next?" ranking) is MCP-only - it's an agent-facing entry point the SPA doesn't
-need, since a human browsing issues doesn't want a single ranked queue.
+need, since a human browsing issues doesn't want a single ranked queue. So is
+`compose_playbook`, for the same reason: it exists to hand an agent a filled-in
+directive, which is not something a browser has any use for.
 
 Everything else - issues, sprints, wiki, comments, links, members, projects - is
 available over MCP and should be called there. See the
