@@ -1042,11 +1042,11 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         }
 
         window.addEventListener('scroll', onScroll, { passive: true });
-        // PROJ-572: astro:after-swap alone misses the very first load — a bfcache
-        // restore, browser scroll restoration, or an #anchor link can land the page
-        // already scrolled down before any swap has happened, so the initial
-        // lastY = window.scrollY above can still be stale by the time this runs.
-        // astro:page-load fires on first load too (unlike astro:after-swap).
+        // PROJ-572: astro:after-swap alone misses the very first load — browser scroll
+        // restoration or an #anchor link can land the page already scrolled down before
+        // any swap has happened, so the initial lastY = window.scrollY above can still
+        // be stale by the time this runs. astro:page-load fires on first load too
+        // (unlike astro:after-swap), so re-running the reset there catches it.
         document.addEventListener('astro:after-swap', resetTopbarScrollState);
         document.addEventListener('astro:page-load', resetTopbarScrollState);
       })();
