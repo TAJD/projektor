@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { formatIssueRef } from "../lib/issue-ref";
-import { apiFetch } from "../utils/api-client";
+import { ApiError, apiFetch } from "../utils/api-client";
 import { claimPrefetchedIssue } from "../utils/issue-prefetch";
 import { issueUrl } from "../utils/issue-url";
 import {
@@ -460,7 +460,7 @@ function useIssueMutations(
 			// PROJ-602: the optimistic swap above is wrong once the request is rejected
 			// (e.g. demoting an epic that still has children) — fetchIssue() reverts the
 			// dropdown, but silently, with no explanation for why it snapped back.
-			setTypeChangeError(String(e));
+			setTypeChangeError(e instanceof ApiError ? e.detail : String(e));
 			await fetchIssue();
 		} finally {
 			setUpdatingType(false);

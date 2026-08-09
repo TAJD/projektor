@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	__resetApiFetchStateForTests,
+	ApiError,
 	ApiOfflineError,
 	apiFetch,
 	SessionExpiredError,
@@ -30,7 +31,10 @@ describe("apiFetch", () => {
 	// PROJ-602: a ValidationError from the service layer reaches the client as
 	// `{ error: { formErrors: [...] } }` (http/error-adapter.ts) — without reading it,
 	// every caller only ever saw the generic status code, never why the request failed.
-	it("surfaces a service-layer formErrors message on a 400 response", async () => {
+	// `message` deliberately keeps its original `failed: <status>` shape (WikiPage's
+	// 409/404 handling and ShareView's 404 handling pattern-match on it) — the parsed
+	// reason is carried separately on `.detail` for callers that want to show it.
+	it("carries a service-layer formErrors message on ApiError.detail, without changing .message", async () => {
 		vi.stubGlobal(
 			"fetch",
 			vi.fn().mockResolvedValue({
@@ -43,12 +47,29 @@ describe("apiFetch", () => {
 			})
 		);
 
-		await expect(apiFetch("/api/issues/i1", { method: "PATCH" })).rejects.toThrow(
-			/Cannot change type: this epic still has child issues/
-		);
+		await expect(apiFetch("/api/issues/i1", { method: "PATCH" })).rejects.toMatchObject({
+			message: "API PATCH /api/issues/i1 failed: 400",
+			status: 400,
+			detail: "Cannot change type: this epic still has child issues",
+		});
 	});
 
-	it("falls back to the status code when the error body has no formErrors", async () => {
+	it("carries a plain string error body on ApiError.detail", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({
+				ok: false,
+				status: 404,
+				json: () => Promise.resolve({ error: "Wiki page not found" }),
+			})
+		);
+
+		await expect(apiFetch("/api/issues/i1")).rejects.toMatchObject({
+			detail: "Wiki page not found",
+		});
+	});
+
+	it("falls back to the status code as detail when the error body has no formErrors", async () => {
 		vi.stubGlobal(
 			"fetch",
 			vi.fn().mockResolvedValue({
@@ -58,7 +79,16 @@ describe("apiFetch", () => {
 			})
 		);
 
-		await expect(apiFetch("/api/issues/i1")).rejects.toThrow(/500/);
+		await expect(apiFetch("/api/issues/i1")).rejects.toMatchObject({
+			message: "API GET /api/issues/i1 failed: 500",
+			detail: "500",
+		});
+	});
+
+	it("throws an ApiError instance on any HTTP error response", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+
+		await expect(apiFetch("/api/issues/i1")).rejects.toBeInstanceOf(ApiError);
 	});
 
 	it("throws ApiOfflineError when fetch itself rejects (network failure)", async () => {
