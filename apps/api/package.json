@@ -12,7 +12,8 @@
     "test:coverage": "vitest run --coverage",
     "type-check": "tsc --noEmit",
     "gen:catalog": "tsx scripts/gen-mcp-catalog.ts",
-    "gen:workflow-spec": "tsx scripts/gen-workflow-spec.ts"
+    "gen:workflow-spec": "tsx scripts/gen-workflow-spec.ts",
+    "gen:playbooks": "tsx scripts/gen-playbooks.ts"
   },
   "dependencies": {
     "@projektor/db": "workspace:*",
