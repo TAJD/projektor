@@ -54,7 +54,7 @@ const TOKEN_SHAPED_STYLE_VALUES = [
 const INLINE_STYLE_LINE_PATTERN = /style=(\{\{|")/;
 const TOKEN_SHAPED_VALUE_PATTERN = new RegExp(TOKEN_SHAPED_STYLE_VALUES.join("|"), "g");
 
-// cofferdam-ignore: Design.OrphanExport: loaded dynamically via cofferdam.toml's `plugins = ["./plugins/design-system"]`, not a static import
+// cofferdam-ignore: Design.OrphanExport: loaded dynamically via cofferdam.toml's `plugins` list, not a static import
 export default defineCheck({
   id: "DesignSystemConvention",
   category: Category.Warning,

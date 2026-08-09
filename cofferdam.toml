@@ -50,3 +50,42 @@ severity = "medium"
 
 # [checks."Consistency.QuoteStyle"]
 # severity = "low"
+
+# --- Path-scoped overrides (PROJ-613) ----------------------------------------
+
+# `Consistency.SpellingDialect` counts any string literal containing a space as
+# prose, and a Tailwind class list qualifies — on poker-puzzle it recommended
+# rewriting `items-center` as `items-centre`, which silently breaks the UI.
+# Filed upstream as cofferdam CD-319. Off across the estate until that lands.
+[[overrides]]
+paths = ["**"]
+[overrides.checks."Consistency.SpellingDialect"]
+disabled = true
+
+# `Design.MissingTestFile` scoped to the code where a sibling unit test is
+# genuinely the expected form. Zod request schemas and Drizzle table
+# definitions are declarations with no behaviour to test; islands are covered
+# by the Playwright e2e suite rather than one spec per component; test helpers
+# and plugin fixtures are test infrastructure. What remains — services, routes,
+# MCP handlers, middleware, shared libs — is where a missing test is a gap.
+# 176 findings -> 100.
+[[overrides]]
+paths = [
+  "apps/api/src/schemas/**",
+  "packages/db/src/schema/**",
+  "apps/web/src/islands/**",
+  "apps/web/e2e/**",
+  "**/src/test/**",
+  "plugins/*/fixtures/**",
+]
+[overrides.checks."Design.MissingTestFile"]
+disabled = true
+
+# The design-system plugin's fixture is a file of deliberate violations — it is
+# the plugin's test input — and it reports eight findings at `high` in a
+# whole-project run, the loudest thing in the output. There is no way to
+# suppress them: `[[overrides]]` has no effect on checks that come from a JS
+# plugin, not even with `paths = ["**"]`, while the identical stanza works on
+# built-ins in this same file. Filed upstream as cofferdam CD-321. They sit in
+# the baseline until it lands. CI is unaffected — it scopes the check to
+# apps/web/src, where there are none.
