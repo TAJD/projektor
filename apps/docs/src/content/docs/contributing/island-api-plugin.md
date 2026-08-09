@@ -135,15 +135,26 @@ copy this `**/*` suffix rather than assume `**` alone covers direct files too.
 
 ## How it's wired in
 
-- **`cofferdam.toml`** (projektor repo root) lists the plugin: `plugins = ["./plugins/island-api"]`.
-- **Local pre-commit** (`lefthook.yml`): builds the plugin and runs
-  `node scripts/check-island-api.mjs`, a thin wrapper around
-  `cofferdam check apps/web/src/islands --format json` that filters findings down to
-  `Warning.IslandApiConvention` and prints a pass/fail summary. Like any lefthook step,
-  it can be bypassed locally with `--no-verify`.
-- **CI** (`.github/workflows/ci.yml`): runs the same `scripts/check-island-api.mjs` as an
-  unconditional job step. This is the check that can't be skipped — it gates
-  every PR regardless of what happened locally.
+- **`cofferdam.toml`** (projektor repo root) lists the plugin alongside the others:
+  `plugins = ["./plugins/island-api", "./plugins/design-system"]`.
+- **Local pre-commit** (`lefthook.yml`): builds the plugin, then runs
+
+  ```bash
+  cofferdam check apps/web/src/islands --only Warning.IslandApiConvention
+  ```
+
+  `--only` restricts the run — and the exit code — to that one check, so the
+  directory's pre-existing findings from unrelated built-in checks cannot fail the
+  hook. Like any lefthook step, `--no-verify` skips it.
+- **CI** (`.github/workflows/ci.yml`): runs the same command as an unconditional job
+  step. This is the check that cannot be skipped — it gates every PR regardless of what
+  happened locally.
+
+The build step is not optional. `plugins/island-api/dist/` is gitignored, so a fresh
+checkout has no plugin until `pnpm --filter @projektor/cofferdam-island-api build` runs.
+Skip it and `--only` exits 2, because the check id it names no longer exists. That is the
+intended behaviour: a gate that cannot find its check must fail loudly rather than report
+success against nothing.
 
 ## Testing and extending the plugin
 

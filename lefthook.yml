@@ -5,6 +5,6 @@ pre-commit:
     lint:
       run: pnpm biome check --changed --no-errors-on-unmatched
     island-api:
-      run: pnpm --filter @projektor/cofferdam-island-api build && node scripts/check-island-api.mjs
+      run: pnpm --filter @projektor/cofferdam-island-api build && npx --no-install cofferdam check apps/web/src/islands --only Warning.IslandApiConvention
     design-system:
-      run: pnpm --filter @projektor/cofferdam-design-system build && node scripts/check-design-system.mjs
+      run: pnpm --filter @projektor/cofferdam-design-system build && npx --no-install cofferdam check apps/web/src --only Warning.DesignSystemConvention

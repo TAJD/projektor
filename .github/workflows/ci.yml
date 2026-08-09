@@ -36,10 +36,12 @@ jobs:
       - run: pnpm --filter @projektor/web test:coverage
       - run: pnpm --filter @projektor/web build
       - run: pnpm --filter @projektor/docs build
+      # Both plugin dist/ dirs are gitignored, so each step must build its own
+      # plugin first: an unbuilt plugin makes --only exit 2 rather than pass.
       - name: Island API convention
-        run: node scripts/check-island-api.mjs
+        run: pnpm --filter @projektor/cofferdam-island-api build && npx --no-install cofferdam check apps/web/src/islands --only Warning.IslandApiConvention
       - name: Design system convention
-        run: pnpm --filter @projektor/cofferdam-design-system build && node scripts/check-design-system.mjs
+        run: pnpm --filter @projektor/cofferdam-design-system build && npx --no-install cofferdam check apps/web/src --only Warning.DesignSystemConvention
       - name: Design system fixture regression test
         run: pnpm --filter @projektor/cofferdam-design-system test
 # E2E tests: run manually with 'pnpm --filter @projektor/web test:e2e'
