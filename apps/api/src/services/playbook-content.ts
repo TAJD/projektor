@@ -1,9 +1,10 @@
 // Single source of truth for shipped agent playbooks — generic, reusable working
 // patterns (as opposed to workflow-content.ts, which is projektor's own state-machine
 // rules). Consumed via list_playbooks/get_playbook (services/playbooks.ts) and
-// GET /api/playbooks[/:name], and at build time by scripts/gen-playbooks.ts, which
-// renders these into docs-site pages; CI fails if those are stale (see
-// .github/workflows/ci.yml), the same pattern used for workflow-spec.md.
+// GET /api/playbooks[/:name]. PROJ-601 adds a scripts/gen-playbooks.ts that renders
+// these into docs-site pages with a CI staleness gate, the same pattern used for
+// workflow-spec.md (see scripts/gen-workflow-spec.ts) — sidebarOrder below exists for
+// that consumer.
 //
 // Kept as a plain TS constant (not a `?raw` markdown import) for the same reason as
 // WORKFLOW_SPEC: identical loading under tsx, vitest, and the wrangler/esbuild release

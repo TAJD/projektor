@@ -19,15 +19,24 @@ function fillEpicGoalDirective(params: {
 	openChildCount: number;
 	wipLimit: number;
 }): string {
+	// Plain split/join instead of String.replace: replace's *replacement* string
+	// treats "$&", "$`", "$'", "$$" as special patterns, so a caller-controlled
+	// epic title or review model containing e.g. "$'" would silently corrupt the
+	// directive.
+	const fill = (template: string, placeholder: string, value: string) =>
+		template.split(placeholder).join(value);
+
 	const epicLabel = `${params.epicRef} ("${params.epicTitle}")`;
 	const clauses = [
-		EPIC_GOAL_TEMPLATE.goal.replace("{EPIC}", epicLabel),
+		fill(EPIC_GOAL_TEMPLATE.goal, "{EPIC}", epicLabel),
 		EPIC_GOAL_TEMPLATE.auditFirst,
 		EPIC_GOAL_TEMPLATE.loop,
 		EPIC_GOAL_TEMPLATE.selfFeed[params.variant],
-		EPIC_GOAL_TEMPLATE.reviewCadence
-			.replace("{N}", String(params.cadence))
-			.replace("{MODEL}", params.reviewModel),
+		fill(
+			fill(EPIC_GOAL_TEMPLATE.reviewCadence, "{N}", String(params.cadence)),
+			"{MODEL}",
+			params.reviewModel
+		),
 		EPIC_GOAL_TEMPLATE.doneWhen[params.variant],
 		EPIC_GOAL_TEMPLATE.decisionsLog,
 	];
@@ -39,7 +48,7 @@ function fillEpicGoalDirective(params: {
 			: `**Live data:** the epic has no open child tickets yet — file some before looping; ` +
 				`project agent WIP limit is ${params.wipLimit}.`;
 
-	return [...clauses, liveData].map((c) => `> ${c}`).join(">\n");
+	return [...clauses, liveData].map((c) => `> ${c}`).join("\n>\n");
 }
 
 export async function composePlaybook(ctx: ServiceCtx, raw: unknown) {
@@ -47,19 +56,13 @@ export async function composePlaybook(ctx: ServiceCtx, raw: unknown) {
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { name, params } = result.data;
 
-	const playbook = PLAYBOOKS.find((p) => p.name === name);
-	if (!playbook) {
-		throw new NotFoundError(`Unknown playbook "${name}"`, {
-			validNames: PLAYBOOKS.map((p) => p.name),
-		});
-	}
 	// epic-goal is the only composable playbook today; a future second playbook
 	// needs its own composer branch here rather than a generic dispatch table —
 	// not worth building ahead of a second real case.
-	if (name !== "epic-goal") {
-		throw new ValidationError({
-			formErrors: [`Playbook "${name}" does not support composition`],
-			fieldErrors: {},
+	const playbook = PLAYBOOKS.find((p) => p.name === name && name === "epic-goal");
+	if (!playbook) {
+		throw new NotFoundError(`Unknown or non-composable playbook "${name}"`, {
+			validNames: PLAYBOOKS.filter((p) => p.name === "epic-goal").map((p) => p.name),
 		});
 	}
 

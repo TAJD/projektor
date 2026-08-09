@@ -265,6 +265,8 @@ app.use("/api/agent-messages/*", authMiddleware, workspaceMiddleware);
 // No workspaceMiddleware: the workflow spec is global, not workspace-scoped.
 app.use("/api/workflow", authMiddleware);
 app.use("/api/workflow/*", authMiddleware);
+app.use("/api/playbooks", authMiddleware);
+app.use("/api/playbooks/*", authMiddleware);
 
 // PROJ-439: conditional GETs on the read-heavy JSON routes. Registered *after* the
 // auth/workspace .use() calls above so an unauthorised request short-circuits before

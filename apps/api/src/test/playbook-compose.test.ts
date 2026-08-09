@@ -6,6 +6,7 @@ import {
 	type JsonRpcResult,
 	seedIssue,
 	seedIssueFixture,
+	seedProject,
 } from "./helpers";
 
 describe("compose_playbook", () => {
@@ -49,13 +50,19 @@ describe("compose_playbook", () => {
 		return res;
 	}
 
-	it("composes with defaults (bounded, opus, cadence 2) and embeds live data", async () => {
+	it("composes with defaults (bounded, opus, cadence 2), well-formed blockquote, and embeds live data", async () => {
 		await seedIssue(workspaceId, projectId, userId, { title: "Child 1", parentId: epicId });
 		await seedIssue(workspaceId, projectId, userId, {
 			title: "Child 2 (done)",
 			status: "done",
 			parentId: epicId,
 		});
+		// Non-default WIP limit so the assertion below can't pass on the fallback
+		// default (DEFAULT_AGENT_WIP_LIMIT is also 3) — prove the value actually
+		// flows from the project row, not from fetchAgentWipCap's no-match default.
+		await env.DB.prepare("UPDATE projects SET agent_wip_limit = ? WHERE id = ?")
+			.bind(7, projectId)
+			.run();
 
 		const res = await compose({ epicRef: `PROJ-${epicNumber}` });
 		const json = (await res.json()) as JsonRpcResult<{ content: Array<{ text: string }> }>;
@@ -75,7 +82,13 @@ describe("compose_playbook", () => {
 		expect(body.directive).toContain("adversarial opus review");
 		// one open child (Child 1), one done (Child 2) -> rollup.remaining == 1
 		expect(body.directive).toContain("1 open child ticket(s)");
-		expect(body.directive).toContain("WIP limit is 3");
+		expect(body.directive).toContain("WIP limit is 7");
+		// every quoted line starts with "> " and there's no run-on "clause>clause"
+		// artifact from a malformed line-join
+		for (const line of body.directive.split("\n")) {
+			expect(line === ">" || line.startsWith("> ")).toBe(true);
+		}
+		expect(body.directive).not.toMatch(/[^\n]>\s*$/m);
 	});
 
 	it("composes the full variant with a custom review model and cadence", async () => {
@@ -101,6 +114,23 @@ describe("compose_playbook", () => {
 		const body = JSON.parse(json.result.content[0].text) as { directive: string };
 
 		expect(body.directive).toContain("no open child tickets yet");
+	});
+
+	it("errors like an unresolvable ref when epicRef points at a project the caller can't see", async () => {
+		// A second project in the same workspace that the fixture's member token
+		// was never granted access to (seedIssueFixture only grants the first
+		// project) — assertIssueProjectVisible must reject this before any
+		// title/rollup data is returned.
+		const otherProject = await seedProject(workspaceId, "SECRET");
+		const otherEpic = await seedIssue(workspaceId, otherProject.id, userId, {
+			title: "Confidential epic",
+		});
+
+		const res = await compose({ epicRef: `SECRET-${otherEpic.number}` });
+		const json = (await res.json()) as JsonRpcError;
+		expect(json.error.code).toBe(-32000);
+		expect(json.error.message).toContain("not found");
+		expect(json.error.message).not.toContain("Confidential epic");
 	});
 
 	it("errors on an unresolvable epicRef", async () => {
