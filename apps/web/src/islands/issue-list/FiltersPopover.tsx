@@ -1,8 +1,40 @@
 import type { Dispatch, StateUpdater } from "preact/hooks";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { categoryColor, type TaskStatus } from "../board-utils";
 
 export type DateField = "" | "completed" | "updated";
+
+// PROJ-588: opened low on a phone, this fixed-position panel had no viewport clamping —
+// the date-range fields and "Clear all" could fall below the viewport with nothing to
+// scroll to reach them. Same flip/clamp/scroll shape as Select.tsx's computeMenuPosition,
+// tuned for this panel's own width and content height rather than a listbox row.
+const POPOVER_WIDTH = 256; // 16rem, matches the inline minWidth below
+const POPOVER_GAP = 4;
+const POPOVER_MARGIN = 8;
+const POPOVER_MIN_HEIGHT = 160;
+const POPOVER_MAX_HEIGHT = 420;
+
+export interface FiltersPopoverPos {
+	top: number;
+	left: number;
+	maxHeight: number;
+}
+
+export function computeFiltersPopoverPosition(rect: DOMRect): FiltersPopoverPos {
+	const left = Math.max(
+		POPOVER_MARGIN,
+		Math.min(rect.left, window.innerWidth - POPOVER_WIDTH - POPOVER_MARGIN)
+	);
+	const below = window.innerHeight - rect.bottom - POPOVER_GAP - POPOVER_MARGIN;
+	const above = rect.top - POPOVER_GAP - POPOVER_MARGIN;
+	const flip = below < POPOVER_MIN_HEIGHT && above > below;
+	const space = flip ? above : below;
+	const maxHeight = Math.max(POPOVER_MIN_HEIGHT, Math.min(POPOVER_MAX_HEIGHT, space));
+	const top = flip
+		? Math.max(POPOVER_MARGIN, rect.top - POPOVER_GAP - maxHeight)
+		: rect.bottom + POPOVER_GAP;
+	return { top, left, maxHeight };
+}
 
 const PILL_COLORS: Record<string, { bg: string; text: string }> = {
 	urgent: { bg: "var(--priority-urgent-solid)", text: "var(--on-accent)" },
@@ -299,7 +331,12 @@ export default function FiltersPopover({
 	const containerRef = useRef<HTMLDivElement>(null);
 	const popoverRef = useRef<HTMLDivElement>(null);
 	const buttonRef = useRef<HTMLButtonElement>(null);
-	const popoverPos = useRef<{ top: number; left: number }>({ top: 0, left: 0 });
+	const [popoverPos, setPopoverPos] = useState<FiltersPopoverPos | null>(null);
+
+	const reposition = useCallback(() => {
+		const rect = buttonRef.current?.getBoundingClientRect();
+		if (rect) setPopoverPos(computeFiltersPopoverPosition(rect));
+	}, []);
 
 	useEffect(() => {
 		if (!showFiltersPopover) return;
@@ -309,9 +346,15 @@ export default function FiltersPopover({
 				setShowFiltersPopover(false);
 			}
 		}
+		// Orientation change / desktop resize can invalidate a clamped position computed
+		// at open time (e.g. rotating the phone the popover was flipped-above on).
+		window.addEventListener("resize", reposition);
 		document.addEventListener("mousedown", onPointer);
-		return () => document.removeEventListener("mousedown", onPointer);
-	}, [showFiltersPopover]);
+		return () => {
+			window.removeEventListener("resize", reposition);
+			document.removeEventListener("mousedown", onPointer);
+		};
+	}, [showFiltersPopover, reposition]);
 
 	const dateFilterActive = !!(filterDateField && (filterDateFrom || filterDateTo));
 	const activeFilterCount =
@@ -327,19 +370,18 @@ export default function FiltersPopover({
 					if (showFiltersPopover) {
 						setShowFiltersPopover(false);
 					} else {
-						const rect = buttonRef.current?.getBoundingClientRect();
-						if (rect) popoverPos.current = { top: rect.bottom + 4, left: rect.left };
+						reposition();
 						setShowFiltersPopover(true);
 					}
 				}}
 			/>
-			{showFiltersPopover && (
+			{showFiltersPopover && popoverPos && (
 				<div
 					ref={popoverRef}
 					style={{
 						position: "fixed",
-						top: `${popoverPos.current.top}px`,
-						left: `${popoverPos.current.left}px`,
+						top: `${popoverPos.top}px`,
+						left: `${popoverPos.left}px`,
 						// CD-294: 200 is the popover layer (Base.astro's `.popover`). At 100 this
 						// sat *under* the fixed topbar (110), which it can slide beneath — the
 						// coordinates are captured once on open and never track the page scroll.
@@ -350,6 +392,12 @@ export default function FiltersPopover({
 						padding: "0.75rem",
 						boxShadow: "var(--shadow-sm)",
 						minWidth: "16rem",
+						// PROJ-588: clamp+flip alone isn't enough on a short phone viewport where
+						// even the flipped side can't fit every field — scroll within the panel
+						// rather than letting it (or its contents) run off-screen.
+						maxHeight: `${popoverPos.maxHeight}px`,
+						overflowY: "auto",
+						overscrollBehavior: "contain",
 					}}
 				>
 					<FiltersPopoverContent
