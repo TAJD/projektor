@@ -81,7 +81,7 @@ describe("BodySection", () => {
 		expect(pre?.closest(".prose")).toBe(container);
 	});
 
-	it("gives wide tables their own horizontal scroll boundary via a .table-scroll wrapper (PROJ-603, PROJ-605)", async () => {
+	it("wraps wide tables in .table-scroll for their own scroll boundary (PROJ-603, PROJ-605)", async () => {
 		render(
 			<BodySection
 				issue={ISSUE}
