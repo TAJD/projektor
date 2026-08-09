@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**110 tools across 21 domains.**
+**113 tools across 22 domains.**
 
 ## Coordination
 
@@ -52,6 +52,14 @@ running server.
 | Tool | Description |
 |------|-------------|
 | `get_workflow` | Fetch the canonical agent workflow spec: definition of ready, state machine, human gates, completion report requirements, and WIP limits. Call this before claiming work. |
+
+### Playbooks
+
+| Tool | Description |
+|------|-------------|
+| `list_playbooks` | List shipped agent playbooks — generic, reusable working patterns (e.g. epic-goal). Returns name/title/description/whenToUse for each; call get_playbook(name) for the full body. |
+| `get_playbook` | Fetch a shipped playbook's full content by name. |
+| `compose_playbook` | Fill a playbook template server-side using live project data (epic title, open child count, agent WIP limit). For "epic-goal": params.epicRef is required; params.variant (bounded\|full, default bounded), params.reviewModel (default "opus"), params.cadence (default 2) are optional. |
 
 ## Project data
 

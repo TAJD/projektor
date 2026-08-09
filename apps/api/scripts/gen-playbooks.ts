@@ -22,7 +22,7 @@ mkdirSync(outDir, { recursive: true });
 // Clear stale entries (a renamed/removed playbook) before writing the current set,
 // same reasoning as any generated-directory sync step.
 for (const entry of readdirSync(outDir)) {
-	rmSync(join(outDir, entry));
+	rmSync(join(outDir, entry), { recursive: true });
 }
 
 for (const playbook of PLAYBOOKS) {

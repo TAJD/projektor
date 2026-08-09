@@ -119,7 +119,7 @@ command shown beside it (token + workspace pre-filled). The full walkthrough - A
 setup, first login, token, MCP - is in
 [CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
-See the **[agent connection guide](https://tajd.github.io/projektor/agents/mcp-connection/)** for the full connection guide, protocol reference, and tool catalog (<!-- gen-mcp-stats:start -->110 tools across 21 domains<!-- gen-mcp-stats:end --> - project data plus agent-coordination primitives).
+See the **[agent connection guide](https://tajd.github.io/projektor/agents/mcp-connection/)** for the full connection guide, protocol reference, and tool catalog (<!-- gen-mcp-stats:start -->113 tools across 22 domains<!-- gen-mcp-stats:end --> - project data plus agent-coordination primitives).
 
 ## Development
 
