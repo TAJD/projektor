@@ -298,7 +298,12 @@ function useMarkdownEditorView(
 	const applyingExternal = useRef(false);
 
 	useEffect(() => {
-		if (!containerRef.current) return;
+		// PROJ-506: this effect is scheduled via Preact's rAF-batched effect flush, so it
+		// can still run after the environment it was scheduled in has gone away — e.g. a
+		// test's jsdom `document` torn down between when this mount effect was queued and
+		// when it fires. `new EditorView` internally touches `document`, so guard both
+		// halves of that race rather than just the DOM node.
+		if (!containerRef.current || typeof document === "undefined") return;
 
 		const customKeymap = [
 			{ key: "Mod-b", run: (v: EditorView) => wrapSelection(v, "**", "**") },

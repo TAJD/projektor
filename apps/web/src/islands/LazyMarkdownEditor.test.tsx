@@ -72,7 +72,29 @@ describe("LazyMarkdownEditor (PROJ-431)", () => {
 	// already torn down — an unhandled promise rejection, not a React/Preact error.
 	it("catches the dynamic import so a chunk-load failure doesn't go unhandled", () => {
 		const source = readFileSync(join(__dirname, "LazyMarkdownEditor.tsx"), "utf-8");
-		expect(source).toMatch(/import\("\.\/MarkdownEditor"\)\s*\n?\s*\.then/);
+		expect(source).toMatch(/import\("\.\/MarkdownEditor"\)\s*\.then/);
 		expect(source).toMatch(/\.catch\(/);
+	});
+
+	it("logs and keeps the fallback usable when the chunk load rejects", async () => {
+		vi.doMock("./MarkdownEditor", () => {
+			throw new Error("chunk load failed");
+		});
+		vi.resetModules();
+		const { default: LazyMarkdownEditorWithMock } = await import("./LazyMarkdownEditor");
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		const onChange = vi.fn();
+
+		render(<LazyMarkdownEditorWithMock value="seed" onChange={onChange} minHeight="240px" />);
+
+		const field = await screen.findByLabelText("Markdown editor");
+		await waitFor(() => expect(consoleError).toHaveBeenCalled());
+		expect((field as HTMLTextAreaElement).value).toBe("seed");
+
+		fireEvent.input(field, { target: { value: "still typable" } });
+		expect(onChange).toHaveBeenCalledWith("still typable");
+
+		consoleError.mockRestore();
+		vi.doUnmock("./MarkdownEditor");
 	});
 });
