@@ -17,6 +17,46 @@ export interface Playbook {
 	body: string;
 }
 
+// The individual template clauses, factored out so services/playbook-compose.ts can
+// fill and assemble the same wording that PLAYBOOKS' prose body documents below —
+// one source for both the human-readable doc and the machine-composed directive.
+export const EPIC_GOAL_TEMPLATE = {
+	goal: "**Goal:** work through {EPIC} autonomously until it is fully done.",
+	auditFirst:
+		"**Audit first:** before implementing anything, audit origin/main, open PRs, and local " +
+		"worktree state so already-finished or in-flight work is folded in, not redone.",
+	loop:
+		"**Loop:** pick the next open ticket on the epic (`get_prioritized_issues`), implement " +
+		"it, verify (tests/build), commit, close the ticket, move on.",
+	selfFeed: {
+		bounded:
+			"**Self-feed (bounded):** file tickets for bugs, improvements, and follow-on features you " +
+			"discover and link them to the epic — but only action ones that block or directly improve " +
+			"the epic's outcome. Park everything else in the backlog untriaged. At each review " +
+			"checkpoint, have the reviewer rank the parked tickets and drop any not worth keeping.",
+		full:
+			"**Self-feed (full):** file tickets for bugs, improvements, and follow-on features you " +
+			"discover, link them to the epic, and action them in the same loop — the goal covers " +
+			"generated work, not just the original tickets.",
+	},
+	reviewCadence:
+		"**Review cadence:** after every {N} completed tickets, run an adversarial {MODEL} review " +
+		"of the accumulated diff; file and fix anything it finds before continuing.",
+	doneWhen: {
+		bounded:
+			"**Done when:** every ticket on the epic (original + actioned generated) is closed, " +
+			"verification is green, and everything is committed and pushed.",
+		full:
+			"**Done when:** every ticket on the epic (original + generated) is closed, verification " +
+			"is green, and everything is committed and pushed.",
+	},
+	decisionsLog:
+		"**Decisions log:** instead of asking questions, make the call and record decisions, " +
+		"tradeoffs, and anything needing human judgment as comments on the epic for review at the " +
+		"end. If two reasonable implementations diverge, comment both options on the ticket, pick " +
+		"the simpler, and flag it.",
+} as const;
+
 export const PLAYBOOKS: Playbook[] = [
 	{
 		name: "epic-goal",
@@ -51,39 +91,31 @@ Plus one situational clause that earned its place: **audit-first** — on resume
 audit origin/main, open PRs, and local state before implementing anything, so finished
 work is folded in rather than redone.
 
+Call \`compose_playbook("epic-goal", { epicRef, variant, reviewModel, cadence })\` to have
+the server fill the template below with live data (epic title, open child count, project
+WIP limit) instead of copying it out by hand.
+
 ## Template — bounded variant (default)
 
-> **Goal:** work through {EPIC} autonomously until it is fully done.
+> ${EPIC_GOAL_TEMPLATE.goal}
 >
-> **Audit first:** before implementing anything, audit origin/main, open PRs, and local
-> worktree state so already-finished or in-flight work is folded in, not redone.
+> ${EPIC_GOAL_TEMPLATE.auditFirst}
 >
-> **Loop:** pick the next open ticket on the epic (\`get_prioritized_issues\`), implement
-> it, verify (tests/build), commit, close the ticket, move on.
+> ${EPIC_GOAL_TEMPLATE.loop}
 >
-> **Self-feed (bounded):** file tickets for bugs, improvements, and follow-on features you
-> discover and link them to the epic — but only action ones that block or directly improve
-> the epic's outcome. Park everything else in the backlog untriaged. At each review
-> checkpoint, have the reviewer rank the parked tickets and drop any not worth keeping.
+> ${EPIC_GOAL_TEMPLATE.selfFeed.bounded}
 >
-> **Review cadence:** after every {N} completed tickets, run an adversarial {MODEL} review
-> of the accumulated diff; file and fix anything it finds before continuing.
+> ${EPIC_GOAL_TEMPLATE.reviewCadence}
 >
-> **Done when:** every ticket on the epic (original + actioned generated) is closed,
-> verification is green, and everything is committed and pushed.
+> ${EPIC_GOAL_TEMPLATE.doneWhen.bounded}
 >
-> **Decisions log:** instead of asking questions, make the call and record decisions,
-> tradeoffs, and anything needing human judgment as comments on the epic for review at the
-> end. If two reasonable implementations diverge, comment both options on the ticket, pick
-> the simpler, and flag it.
+> ${EPIC_GOAL_TEMPLATE.decisionsLog}
 
 ## Template — full variant
 
 Same as bounded, with the self-feed clause replaced by:
 
-> **Self-feed (full):** file tickets for bugs, improvements, and follow-on features you
-> discover, link them to the epic, and action them in the same loop — the goal covers
-> generated work, not just the original tickets.
+> ${EPIC_GOAL_TEMPLATE.selfFeed.full}
 
 And "done when" covers original + generated tickets.
 

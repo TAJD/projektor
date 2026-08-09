@@ -1,4 +1,5 @@
 import type { MCPTool } from "@projektor/types";
+import { composePlaybook } from "../services/playbook-compose";
 import { getPlaybook, listPlaybooks } from "../services/playbooks";
 
 export const playbooksTools: MCPTool[] = [
@@ -28,6 +29,34 @@ export const playbooksTools: MCPTool[] = [
 		async handler(input) {
 			const { name } = input as { name: string };
 			return getPlaybook(name);
+		},
+	},
+	{
+		name: "compose_playbook",
+		description:
+			"Fill a playbook template server-side using live project data (epic title, open child " +
+			'count, agent WIP limit). For "epic-goal": params.epicRef is required; ' +
+			'params.variant (bounded|full, default bounded), params.reviewModel (default "opus"), ' +
+			"params.cadence (default 2) are optional.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				name: { type: "string", description: 'Playbook name, e.g. "epic-goal"' },
+				params: {
+					type: "object",
+					properties: {
+						epicRef: { type: "string", description: 'Epic ref, e.g. "PROJ-596"' },
+						variant: { type: "string", enum: ["bounded", "full"] },
+						reviewModel: { type: "string" },
+						cadence: { type: "integer", minimum: 1 },
+					},
+					required: ["epicRef"],
+				},
+			},
+			required: ["name", "params"],
+		},
+		async handler(input, ctx) {
+			return composePlaybook(ctx, input);
 		},
 	},
 ];
