@@ -66,4 +66,13 @@ describe("LazyMarkdownEditor (PROJ-431)", () => {
 		const root = container.firstElementChild;
 		expect(root?.className).toContain("font-normal");
 	});
+
+	// PROJ-506: WikiPage.test.tsx intermittently threw an uncaught "document is not
+	// defined" from this chunk load resolving after a test's jsdom environment had
+	// already torn down — an unhandled promise rejection, not a React/Preact error.
+	it("catches the dynamic import so a chunk-load failure doesn't go unhandled", () => {
+		const source = readFileSync(join(__dirname, "LazyMarkdownEditor.tsx"), "utf-8");
+		expect(source).toMatch(/import\("\.\/MarkdownEditor"\)\s*\n?\s*\.then/);
+		expect(source).toMatch(/\.catch\(/);
+	});
 });
