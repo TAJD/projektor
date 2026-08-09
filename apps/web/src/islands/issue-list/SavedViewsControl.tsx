@@ -1,131 +1,32 @@
-import type { SavedView } from "../saved-views";
-import { Popover } from "../ui/Popover";
+import Select, { type SelectOption } from "../ui/Select";
 import type { useSavedViews } from "./useSavedViews";
 
 type Saved = ReturnType<typeof useSavedViews>;
 
-function ViewsMenuItem({
-	view,
-	activeViewName,
-	applyView,
-	deleteView,
-}: Pick<Saved, "applyView" | "deleteView"> & { view: SavedView; activeViewName: string | null }) {
-	return (
-		<li
-			key={view.name}
-			// cofferdam-ignore: Warning.DesignSystemConvention: reuses Select's option visual style for a non-value-driven menu with a per-item delete action; full Select reuse would need Select's option renderer extended for that, out of scope for PROJ-527, tracked as PROJ-565
-			class="select-option"
-			data-selected={view.name === activeViewName || undefined}
-			style={{
-				display: "flex",
-				justifyContent: "space-between",
-				alignItems: "center",
-				gap: "0.5rem",
-			}}
-		>
-			<button
-				type="button"
-				style={{
-					flexGrow: 1,
-					cursor: "pointer",
-					background: "none",
-					border: "none",
-					padding: 0,
-					textAlign: "left",
-					font: "inherit",
-					color: "inherit",
-				}}
-				onClick={() => applyView(view)}
-			>
-				{view.name}
-			</button>
-			<button
-				type="button"
-				aria-label={`Delete view ${view.name}`}
-				onClick={(e: MouseEvent) => {
-					e.stopPropagation();
-					deleteView(view.name);
-				}}
-				style={{
-					background: "none",
-					border: "none",
-					cursor: "pointer",
-					color: "var(--text-muted)",
-					padding: "0 0.2rem",
-					fontSize: "0.85rem",
-					lineHeight: "1",
-					flexShrink: 0,
-				}}
-			>
-				×
-			</button>
-		</li>
-	);
-}
-
+// PROJ-565: Select's option renderer now supports a per-item trailing action, so this no
+// longer needs its own hand-rolled trigger/menu — Select owns positioning, outside-click,
+// and keyboard handling in one shared place instead of duplicating it here.
 function ViewsMenu({ saved }: { saved: Saved }) {
-	const {
-		savedViews,
-		activeViewName,
-		showViewsMenu,
-		setShowViewsMenu,
-		viewsContainerRef,
-		viewsMenuRef,
-		viewsButtonRef,
-		viewsMenuPos,
-		applyView,
-		deleteView,
-	} = saved;
+	const { savedViews, activeViewName, applyView, deleteView } = saved;
 	if (savedViews.length === 0) return null;
 
+	const options: SelectOption[] = savedViews.map((v) => ({
+		value: v.name,
+		label: v.name,
+		action: { ariaLabel: `Delete view ${v.name}`, onClick: () => deleteView(v.name) },
+	}));
+
 	return (
-		<div class="relative" ref={viewsContainerRef}>
-			<button
-				ref={viewsButtonRef}
-				type="button"
-				// cofferdam-ignore: Warning.DesignSystemConvention: reuses Select's trigger visual style for a non-value-driven menu; full Select reuse would need Select's option renderer extended for per-item actions (rename/delete), out of scope for PROJ-527, tracked as PROJ-565
-				class="select-button"
-				aria-haspopup="listbox"
-				aria-expanded={showViewsMenu}
-				aria-label="Saved views"
-				onClick={() => {
-					if (showViewsMenu) {
-						setShowViewsMenu(false);
-					} else {
-						const rect = viewsButtonRef.current?.getBoundingClientRect();
-						if (rect)
-							viewsMenuPos.current = { top: rect.bottom + 4, left: rect.left, width: rect.width };
-						setShowViewsMenu(true);
-					}
-				}}
-			>
-				<span>{activeViewName ?? "Views"}</span>
-				{/* cofferdam-ignore: Warning.DesignSystemConvention: reuses Select's caret visual style for a non-value-driven menu, out of scope for PROJ-527, tracked as PROJ-565 */}
-				<span class="select-caret" aria-hidden="true">
-					▾
-				</span>
-			</button>
-			{showViewsMenu && (
-				<Popover
-					as="ul"
-					strategy="fixed-inline"
-					class="popover-select-menu"
-					ariaLabel="Saved views"
-					elementRef={viewsMenuRef}
-					position={viewsMenuPos.current}
-				>
-					{savedViews.map((v) => (
-						<ViewsMenuItem
-							key={v.name}
-							view={v}
-							activeViewName={activeViewName}
-							applyView={applyView}
-							deleteView={deleteView}
-						/>
-					))}
-				</Popover>
-			)}
-		</div>
+		<Select
+			value={activeViewName ?? ""}
+			options={options}
+			onChange={(name) => {
+				const view = savedViews.find((v) => v.name === name);
+				if (view) applyView(view);
+			}}
+			ariaLabel="Saved views"
+			placeholder="Views"
+		/>
 	);
 }
 

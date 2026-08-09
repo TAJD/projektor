@@ -4,6 +4,16 @@ import { useCallback, useEffect, useId, useRef, useState } from "preact/hooks";
 export interface SelectOption {
 	value: string;
 	label: string;
+	/**
+	 * PROJ-565: an optional trailing action rendered inside the option row (e.g. delete a
+	 * saved view). Stops propagation so it never triggers `onChange` for the option itself.
+	 */
+	action?: {
+		ariaLabel: string;
+		/** Defaults to "×". */
+		icon?: string;
+		onClick: () => void;
+	};
 }
 
 const OPEN_TRIGGER_KEYS = new Set(["ArrowDown", "Enter", " "]);
@@ -212,11 +222,43 @@ function SelectMenu({
 					role="option"
 					aria-selected={opt.value === value}
 					class={i === highlight ? "select-option highlighted" : "select-option"}
-					style={{ textTransform: capitalize ? "capitalize" : undefined }}
+					style={{
+						textTransform: capitalize ? "capitalize" : undefined,
+						...(opt.action
+							? {
+									display: "flex",
+									justifyContent: "space-between",
+									alignItems: "center",
+									gap: "0.5rem",
+								}
+							: undefined),
+					}}
 					onMouseEnter={() => onHighlight(i)}
 					onClick={() => onChoose(i)}
 				>
 					{opt.label}
+					{opt.action && (
+						<button
+							type="button"
+							aria-label={opt.action.ariaLabel}
+							onClick={(e: MouseEvent) => {
+								e.stopPropagation();
+								opt.action?.onClick();
+							}}
+							style={{
+								background: "none",
+								border: "none",
+								cursor: "pointer",
+								color: "var(--text-muted)",
+								padding: "0 0.2rem",
+								fontSize: "0.85rem",
+								lineHeight: "1",
+								flexShrink: 0,
+							}}
+						>
+							{opt.action.icon ?? "×"}
+						</button>
+					)}
 				</li>
 			))}
 		</ul>
@@ -235,6 +277,11 @@ interface Props {
 	capitalize?: boolean;
 	/** Extra class appended to the trigger button. */
 	buttonClass?: string;
+	/**
+	 * PROJ-565: label shown when `value` matches no option (e.g. no saved view is active
+	 * yet). Falls back to the raw `value` when omitted, unchanged from prior behavior.
+	 */
+	placeholder?: string;
 }
 
 /**
@@ -253,6 +300,7 @@ export default function Select({
 	buttonStyle,
 	capitalize = false,
 	buttonClass,
+	placeholder,
 }: Props) {
 	const [open, setOpen] = useState(false);
 	const [highlight, setHighlight] = useState(0);
@@ -300,7 +348,7 @@ export default function Select({
 		close,
 	});
 
-	const label = selected?.label ?? value;
+	const label = selected?.label ?? (value || placeholder || "");
 
 	return (
 		<div class="select" ref={rootRef}>

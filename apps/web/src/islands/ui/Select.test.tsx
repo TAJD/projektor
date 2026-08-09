@@ -73,6 +73,67 @@ describe("Select", () => {
 		// browser; keyboard handling also early-returns on `disabled`.
 		expect((button as HTMLButtonElement).disabled).toBe(true);
 	});
+
+	it("shows the placeholder when value matches no option", () => {
+		render(
+			<Select
+				value=""
+				options={OPTIONS}
+				onChange={() => {}}
+				ariaLabel="Status"
+				placeholder="Pick one"
+			/>
+		);
+		expect(screen.getByRole("combobox", { name: "Status" }).textContent).toContain("Pick one");
+	});
+});
+
+// PROJ-565: SavedViewsControl needs a per-item trailing action (delete a saved view)
+// without regressing plain value-driven usages elsewhere (priority/status pickers etc.).
+describe("Select — per-item action (PROJ-565)", () => {
+	const OPTIONS_WITH_ACTION: SelectOption[] = [
+		{
+			value: "a",
+			label: "Alpha",
+			action: { ariaLabel: "Delete Alpha", onClick: vi.fn() },
+		},
+		{ value: "b", label: "Beta" },
+	];
+
+	it("renders a trailing action button only for options that declare one", () => {
+		render(
+			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={() => {}} ariaLabel="Views" />
+		);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+
+		expect(screen.getByRole("button", { name: "Delete Alpha" })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /Delete Beta/ })).toBeNull();
+	});
+
+	it("clicking the action fires its onClick without selecting the option", () => {
+		const onAction = vi.fn();
+		const onChange = vi.fn();
+		const options: SelectOption[] = [
+			{ value: "a", label: "Alpha", action: { ariaLabel: "Delete Alpha", onClick: onAction } },
+		];
+		render(<Select value="a" options={options} onChange={onChange} ariaLabel="Views" />);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+		fireEvent.click(screen.getByRole("button", { name: "Delete Alpha" }));
+
+		expect(onAction).toHaveBeenCalledTimes(1);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("clicking the option row itself still selects it", () => {
+		const onChange = vi.fn();
+		render(
+			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={onChange} ariaLabel="Views" />
+		);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+		fireEvent.click(screen.getByRole("option", { name: /^Beta/ }));
+
+		expect(onChange).toHaveBeenCalledWith("b");
+	});
 });
 
 // CD-294: the real iOS failure mode. Safari fires `resize` when the on-screen

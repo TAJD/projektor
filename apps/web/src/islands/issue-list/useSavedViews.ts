@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import {
 	captureView,
 	filtersMatch,
@@ -10,7 +10,7 @@ import {
 	viewsStorageKey,
 } from "../saved-views";
 
-/** Owns saved-views state (localStorage-backed) and the views-menu UI state. */
+/** Owns saved-views state (localStorage-backed) and the save-view input UI state. */
 export function useSavedViews(
 	filterProject: string,
 	currentFilters: SavedViewFilters,
@@ -20,33 +20,11 @@ export function useSavedViews(
 	const [activeViewName, setActiveViewName] = useState<string | null>(null);
 	const [showSaveInput, setShowSaveInput] = useState(false);
 	const [saveViewName, setSaveViewName] = useState("");
-	const [showViewsMenu, setShowViewsMenu] = useState(false);
-	const viewsContainerRef = useRef<HTMLDivElement>(null);
-	const viewsMenuRef = useRef<HTMLUListElement>(null);
-	const viewsButtonRef = useRef<HTMLButtonElement>(null);
-	const viewsMenuPos = useRef<{ top: number; left: number; width: number }>({
-		top: 0,
-		left: 0,
-		width: 0,
-	});
 
 	// Load saved views from localStorage when the project context changes (PROJ-141)
 	useEffect(() => {
 		setSavedViews(parseSavedViews(localStorage.getItem(viewsStorageKey(filterProject))));
 	}, [filterProject]);
-
-	// Close views menu on outside click (PROJ-141)
-	useEffect(() => {
-		if (!showViewsMenu) return;
-		function onPointer(e: MouseEvent) {
-			const target = e.target as Node;
-			if (!viewsContainerRef.current?.contains(target) && !viewsMenuRef.current?.contains(target)) {
-				setShowViewsMenu(false);
-			}
-		}
-		document.addEventListener("mousedown", onPointer);
-		return () => document.removeEventListener("mousedown", onPointer);
-	}, [showViewsMenu]);
 
 	// Clear active view name when filters drift from the saved state (PROJ-141)
 	useEffect(() => {
@@ -85,7 +63,6 @@ export function useSavedViews(
 	function applyView(view: SavedView) {
 		onApply(view.filters);
 		setActiveViewName(view.name);
-		setShowViewsMenu(false);
 	}
 
 	return {
@@ -95,12 +72,6 @@ export function useSavedViews(
 		setShowSaveInput,
 		saveViewName,
 		setSaveViewName,
-		showViewsMenu,
-		setShowViewsMenu,
-		viewsContainerRef,
-		viewsMenuRef,
-		viewsButtonRef,
-		viewsMenuPos,
 		doSaveView,
 		deleteView,
 		applyView,
