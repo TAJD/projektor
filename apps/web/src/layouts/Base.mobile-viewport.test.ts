@@ -100,4 +100,30 @@ describe("Base layout — topbar hide-on-scroll thresholds (PROJ-569)", () => {
 		expect(script).toMatch(/addEventListener\('astro:after-swap', resetTopbarScrollState\)/);
 		expect(script).toMatch(/addEventListener\('astro:page-load', resetTopbarScrollState\)/);
 	});
+
+	it("guards against re-binding its listeners on every client-side nav (PROJ-595)", () => {
+		// This inline script isn't dedup'd across Astro swaps — without a guard,
+		// every nav adds another scroll/astro:* listener on top of the previous set.
+		const scriptStart = source.indexOf("if (window.__topbarScrollBound)");
+		const scriptEnd = source.indexOf("</script>", scriptStart);
+		const script = source.slice(scriptStart, scriptEnd);
+		expect(scriptStart).toBeGreaterThan(-1);
+		expect(script).toMatch(/if \(window\.__topbarScrollBound\) return;/);
+		expect(script).toMatch(/window\.__topbarScrollBound = true;/);
+	});
+
+	it("treats the scroll after an in-page #anchor click as a reset, not a hide trigger (PROJ-594)", () => {
+		// An anchor jump has no Astro navigation event to reset tracking state
+		// against, so it reads as one huge delta and slams the topbar hidden
+		// regardless of the hide threshold.
+		const scriptStart = source.indexOf("var lastY");
+		const scriptEnd = source.indexOf("</script>", scriptStart);
+		const script = source.slice(scriptStart, scriptEnd);
+		expect(script).toMatch(/e\.target\.closest\('a\[href\^="#"\]'\)/);
+		expect(script).toMatch(/expectingAnchorJump = true;/);
+		expect(script).toMatch(/if \(expectingAnchorJump\) {\s*expectingAnchorJump = false;\s*resetTopbarScrollState\(\);/);
+		// The flag above is only ever set inside onClick — without actually binding
+		// it, the detection logic would be dead code that never runs.
+		expect(script).toMatch(/document\.addEventListener\('click', onClick\);/);
+	});
 });
