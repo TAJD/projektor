@@ -987,9 +987,20 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
          often than a frame renders. -->
     <script is:inline>
       (function () {
+        // PROJ-595: this inline script isn't dedup'd across Astro client-side
+        // navigations, so without this guard every nav would add another set of
+        // scroll/astro:* listeners on top of the previous ones.
+        if (window.__topbarScrollBound) return;
+        window.__topbarScrollBound = true;
+
         var lastY = window.scrollY;
         var accumulatedDown = 0;
         var accumulatedUp = 0;
+        // PROJ-594: an in-page #anchor click jumps the scroll position instantly with
+        // no Astro navigation event to reset tracking state against, so the jump reads
+        // as one huge scroll delta and slams the topbar hidden regardless of the
+        // hide threshold. Treat the next scroll event after such a click as a reset.
+        var expectingAnchorJump = false;
         // PROJ-569: the old 8px hide threshold with an instant, un-thresholded reveal
         // meant mobile touch-scroll jitter (momentum deceleration, rubber-band bounce)
         // flickered the bar hidden/shown on every tiny direction reversal. Both
@@ -1012,6 +1023,11 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
             var topbar = document.getElementById('app-topbar');
             if (!topbar) return;
             var y = window.scrollY;
+            if (expectingAnchorJump) {
+              expectingAnchorJump = false;
+              resetTopbarScrollState();
+              return;
+            }
             if (shouldStayVisible() || y <= 0) {
               topbar.classList.remove('topbar-hidden');
               accumulatedDown = 0;
@@ -1041,7 +1057,12 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           accumulatedUp = 0;
         }
 
+        function onClick(e) {
+          if (e.target.closest('a[href^="#"]')) expectingAnchorJump = true;
+        }
+
         window.addEventListener('scroll', onScroll, { passive: true });
+        document.addEventListener('click', onClick);
         // PROJ-572: astro:after-swap alone misses the very first load — browser scroll
         // restoration or an #anchor link can land the page already scrolled down before
         // any swap has happened, so the initial lastY = window.scrollY above can still
