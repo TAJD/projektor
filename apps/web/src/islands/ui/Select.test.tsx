@@ -173,6 +173,70 @@ describe("Select — per-item action (PROJ-565)", () => {
 		fireEvent.keyDown(trigger, { key: "Delete" });
 		expect(onAction).toHaveBeenCalledTimes(2);
 	});
+
+	it("targets the highlighted option, not just the first one", () => {
+		const onA = vi.fn();
+		const onB = vi.fn();
+		const options: SelectOption[] = [
+			{ value: "a", label: "Alpha", action: { ariaLabel: "Delete Alpha", onClick: onA } },
+			{ value: "b", label: "Beta", action: { ariaLabel: "Delete Beta", onClick: onB } },
+		];
+		render(<Select value="a" options={options} onChange={() => {}} ariaLabel="Views" />);
+		const trigger = screen.getByRole("combobox", { name: "Views" });
+		fireEvent.click(trigger);
+
+		fireEvent.keyDown(trigger, { key: "ArrowDown" });
+		fireEvent.keyDown(trigger, { key: "Backspace" });
+
+		expect(onA).not.toHaveBeenCalled();
+		expect(onB).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not swallow Backspace/Delete on plain options with no action", () => {
+		const onChange = vi.fn();
+		render(<Select value="open" options={OPTIONS} onChange={onChange} ariaLabel="Status" />);
+		const trigger = screen.getByRole("combobox", { name: "Status" });
+		fireEvent.click(trigger);
+
+		const event = new KeyboardEvent("keydown", {
+			key: "Backspace",
+			bubbles: true,
+			cancelable: true,
+		});
+		fireEvent(trigger, event);
+
+		expect(event.defaultPrevented).toBe(false);
+	});
+
+	it("clamps highlight when the highlighted option's action removes it from the list", () => {
+		const options: SelectOption[] = [
+			{ value: "a", label: "Alpha" },
+			{ value: "b", label: "Beta" },
+			{
+				value: "c",
+				label: "Gamma",
+				action: { ariaLabel: "Delete Gamma", onClick: () => {} },
+			},
+		];
+		const { rerender } = render(
+			<Select value="a" options={options} onChange={() => {}} ariaLabel="Views" />
+		);
+		const trigger = screen.getByRole("combobox", { name: "Views" });
+		fireEvent.click(trigger);
+		fireEvent.keyDown(trigger, { key: "End" });
+		expect(trigger.getAttribute("aria-activedescendant")).toMatch(/-opt-2$/);
+
+		// Simulate the action removing "Gamma" from the list, as a real delete would.
+		rerender(
+			<Select value="a" options={options.slice(0, 2)} onChange={() => {}} ariaLabel="Views" />
+		);
+
+		const after = trigger.getAttribute("aria-activedescendant");
+		expect(after).toMatch(/-opt-1$/);
+		// The regression: aria-activedescendant pointing at a removed <li> id,
+		// stranding a screen-reader user. Confirm the id it points to still exists.
+		expect(after && document.getElementById(after)).toBeTruthy();
+	});
 });
 
 // CD-294: the real iOS failure mode. Safari fires `resize` when the on-screen

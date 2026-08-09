@@ -117,8 +117,8 @@ interface SelectKeyDownConfig {
 	setHighlight: (fn: (h: number) => number) => void;
 	choose: (index: number) => void;
 	close: () => void;
-	/** PROJ-565: runs the highlighted option's `action`, if it has one. */
-	runAction: (index: number) => void;
+	/** PROJ-565: runs the highlighted option's `action`, if it has one. Returns whether it did. */
+	runAction: (index: number) => boolean;
 }
 
 function createSelectKeyDownHandler({
@@ -175,13 +175,13 @@ function createSelectKeyDownHandler({
 			// nested <button>, but this listbox uses the aria-activedescendant pattern —
 			// DOM focus never leaves the trigger, so the button is otherwise unreachable
 			// by keyboard. Delete/Backspace on the highlighted option runs it instead.
+			// Only preventDefault when there's actually an action to run, so plain
+			// Selects (no action on any option) don't swallow the keystroke.
 			Delete: (ev) => {
-				ev.preventDefault();
-				runAction(highlight);
+				if (runAction(highlight)) ev.preventDefault();
 			},
 			Backspace: (ev) => {
-				ev.preventDefault();
-				runAction(highlight);
+				if (runAction(highlight)) ev.preventDefault();
 			},
 		};
 		handlers[e.key]?.(e);
@@ -248,7 +248,7 @@ function SelectMenu({
 					onMouseEnter={() => onHighlight(i)}
 					onClick={() => onChoose(i)}
 				>
-					{opt.label}
+					{opt.action ? <span style={{ flexGrow: 1 }}>{opt.label}</span> : opt.label}
 					{opt.action && (
 						<button
 							type="button"
@@ -349,9 +349,19 @@ export default function Select({
 	}
 
 	// PROJ-565: keyboard equivalent of clicking an option's trailing action button.
-	function runAction(index: number) {
-		options[index]?.action?.onClick();
+	// Returns whether an action actually ran, so the caller only preventDefaults then.
+	function runAction(index: number): boolean {
+		const action = options[index]?.action;
+		if (!action) return false;
+		action.onClick();
+		return true;
 	}
+
+	// PROJ-565: an action (e.g. delete) can shrink `options` while the menu is open —
+	// clamp so `highlight`/`aria-activedescendant` never point past the new end.
+	useEffect(() => {
+		if (highlight > options.length - 1) setHighlight(Math.max(0, options.length - 1));
+	}, [options.length, highlight]);
 
 	useCloseOnOutside(open, close, reposition, rootRef);
 
