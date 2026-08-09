@@ -4,6 +4,16 @@ import { useCallback, useEffect, useId, useRef, useState } from "preact/hooks";
 export interface SelectOption {
 	value: string;
 	label: string;
+	/**
+	 * PROJ-565: an optional trailing action rendered inside the option row (e.g. delete a
+	 * saved view). Stops propagation so it never triggers `onChange` for the option itself.
+	 */
+	action?: {
+		ariaLabel: string;
+		/** Defaults to "×". */
+		icon?: string;
+		onClick: () => void;
+	};
 }
 
 const OPEN_TRIGGER_KEYS = new Set(["ArrowDown", "Enter", " "]);
@@ -107,6 +117,8 @@ interface SelectKeyDownConfig {
 	setHighlight: (fn: (h: number) => number) => void;
 	choose: (index: number) => void;
 	close: () => void;
+	/** PROJ-565: runs the highlighted option's `action`, if it has one. Returns whether it did. */
+	runAction: (index: number) => boolean;
 }
 
 function createSelectKeyDownHandler({
@@ -118,6 +130,7 @@ function createSelectKeyDownHandler({
 	setHighlight,
 	choose,
 	close,
+	runAction,
 }: SelectKeyDownConfig) {
 	return function onKeyDown(e: KeyboardEvent) {
 		if (disabled) return;
@@ -158,6 +171,18 @@ function createSelectKeyDownHandler({
 				close();
 			},
 			Tab: () => close(),
+			// PROJ-565: the trailing per-item action (e.g. delete a saved view) is a
+			// nested <button>, but this listbox uses the aria-activedescendant pattern —
+			// DOM focus never leaves the trigger, so the button is otherwise unreachable
+			// by keyboard. Delete/Backspace on the highlighted option runs it instead.
+			// Only preventDefault when there's actually an action to run, so plain
+			// Selects (no action on any option) don't swallow the keystroke.
+			Delete: (ev) => {
+				if (runAction(highlight)) ev.preventDefault();
+			},
+			Backspace: (ev) => {
+				if (runAction(highlight)) ev.preventDefault();
+			},
 		};
 		handlers[e.key]?.(e);
 	};
@@ -211,12 +236,42 @@ function SelectMenu({
 					id={`${baseId}-opt-${i}`}
 					role="option"
 					aria-selected={opt.value === value}
+					// PROJ-565: an explicit aria-label pins the accessible name to just the
+					// label — without it, the nested action button's own aria-label gets
+					// folded into the option's computed name (browser accname rules
+					// substitute a descendant's aria-label into the concatenation), so an
+					// option like "My bugs" would announce as "My bugs Delete view My bugs".
+					aria-label={opt.action ? opt.label : undefined}
+					data-selected={opt.value === value || undefined}
 					class={i === highlight ? "select-option highlighted" : "select-option"}
 					style={{ textTransform: capitalize ? "capitalize" : undefined }}
 					onMouseEnter={() => onHighlight(i)}
 					onClick={() => onChoose(i)}
 				>
-					{opt.label}
+					{opt.action ? <span style={{ flexGrow: 1 }}>{opt.label}</span> : opt.label}
+					{opt.action && (
+						<button
+							type="button"
+							aria-label={opt.action.ariaLabel}
+							onClick={(e: MouseEvent) => {
+								e.stopPropagation();
+								opt.action?.onClick();
+							}}
+							style={{
+								marginLeft: "auto",
+								background: "none",
+								border: "none",
+								cursor: "pointer",
+								color: "var(--text-muted)",
+								padding: "0 0.2rem",
+								fontSize: "0.85rem",
+								lineHeight: "1",
+								flexShrink: 0,
+							}}
+						>
+							{opt.action.icon ?? "×"}
+						</button>
+					)}
 				</li>
 			))}
 		</ul>
@@ -235,6 +290,11 @@ interface Props {
 	capitalize?: boolean;
 	/** Extra class appended to the trigger button. */
 	buttonClass?: string;
+	/**
+	 * PROJ-565: label shown when `value` matches no option (e.g. no saved view is active
+	 * yet). Falls back to the raw `value` when omitted, unchanged from prior behavior.
+	 */
+	placeholder?: string;
 }
 
 /**
@@ -253,6 +313,7 @@ export default function Select({
 	buttonStyle,
 	capitalize = false,
 	buttonClass,
+	placeholder,
 }: Props) {
 	const [open, setOpen] = useState(false);
 	const [highlight, setHighlight] = useState(0);
@@ -287,6 +348,21 @@ export default function Select({
 		setOpen(false);
 	}
 
+	// PROJ-565: keyboard equivalent of clicking an option's trailing action button.
+	// Returns whether an action actually ran, so the caller only preventDefaults then.
+	function runAction(index: number): boolean {
+		const action = options[index]?.action;
+		if (!action) return false;
+		action.onClick();
+		return true;
+	}
+
+	// PROJ-565: an action (e.g. delete) can shrink `options` while the menu is open —
+	// clamp so `highlight`/`aria-activedescendant` never point past the new end.
+	useEffect(() => {
+		if (highlight > options.length - 1) setHighlight(Math.max(0, options.length - 1));
+	}, [options.length, highlight]);
+
 	useCloseOnOutside(open, close, reposition, rootRef);
 
 	const onKeyDown = createSelectKeyDownHandler({
@@ -298,9 +374,10 @@ export default function Select({
 		setHighlight,
 		choose,
 		close,
+		runAction,
 	});
 
-	const label = selected?.label ?? value;
+	const label = selected?.label ?? (value || placeholder || "");
 
 	return (
 		<div class="select" ref={rootRef}>

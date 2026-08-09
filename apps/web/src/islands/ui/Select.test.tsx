@@ -73,6 +73,170 @@ describe("Select", () => {
 		// browser; keyboard handling also early-returns on `disabled`.
 		expect((button as HTMLButtonElement).disabled).toBe(true);
 	});
+
+	it("shows the placeholder when value matches no option", () => {
+		render(
+			<Select
+				value=""
+				options={OPTIONS}
+				onChange={() => {}}
+				ariaLabel="Status"
+				placeholder="Pick one"
+			/>
+		);
+		expect(screen.getByRole("combobox", { name: "Status" }).textContent).toContain("Pick one");
+	});
+});
+
+// PROJ-565: SavedViewsControl needs a per-item trailing action (delete a saved view)
+// without regressing plain value-driven usages elsewhere (priority/status pickers etc.).
+describe("Select — per-item action (PROJ-565)", () => {
+	const OPTIONS_WITH_ACTION: SelectOption[] = [
+		{
+			value: "a",
+			label: "Alpha",
+			action: { ariaLabel: "Delete Alpha", onClick: vi.fn() },
+		},
+		{ value: "b", label: "Beta" },
+	];
+
+	it("renders a trailing action button only for options that declare one", () => {
+		render(
+			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={() => {}} ariaLabel="Views" />
+		);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+
+		expect(screen.getByRole("button", { name: "Delete Alpha" })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /Delete Beta/ })).toBeNull();
+	});
+
+	it("clicking the action fires its onClick without selecting the option", () => {
+		const onAction = vi.fn();
+		const onChange = vi.fn();
+		const options: SelectOption[] = [
+			{ value: "a", label: "Alpha", action: { ariaLabel: "Delete Alpha", onClick: onAction } },
+		];
+		render(<Select value="a" options={options} onChange={onChange} ariaLabel="Views" />);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+		fireEvent.click(screen.getByRole("button", { name: "Delete Alpha" }));
+
+		expect(onAction).toHaveBeenCalledTimes(1);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("clicking the option row itself still selects it", () => {
+		const onChange = vi.fn();
+		render(
+			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={onChange} ariaLabel="Views" />
+		);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+		fireEvent.click(screen.getByRole("option", { name: "Beta" }));
+
+		expect(onChange).toHaveBeenCalledWith("b");
+	});
+
+	it("gives an option with an action a name that is just its label, not the action's too", () => {
+		render(
+			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={() => {}} ariaLabel="Views" />
+		);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+
+		// Without an explicit aria-label, the nested "Delete Alpha" button's own
+		// accessible name would fold into the option's, per the accname spec.
+		expect(screen.getByRole("option", { name: "Alpha" })).toBeTruthy();
+	});
+
+	it("still marks the selected option (checkmark) when it also has an action", () => {
+		render(
+			<Select value="a" options={OPTIONS_WITH_ACTION} onChange={() => {}} ariaLabel="Views" />
+		);
+		fireEvent.click(screen.getByRole("combobox", { name: "Views" }));
+
+		expect(screen.getByRole("option", { name: "Alpha" }).getAttribute("data-selected")).toBe(
+			"true"
+		);
+		expect(screen.getByRole("option", { name: "Beta" }).getAttribute("data-selected")).toBeNull();
+	});
+
+	it("runs the highlighted option's action on Backspace/Delete, keyboard-only", () => {
+		const onAction = vi.fn();
+		const options: SelectOption[] = [
+			{ value: "a", label: "Alpha", action: { ariaLabel: "Delete Alpha", onClick: onAction } },
+		];
+		render(<Select value="a" options={options} onChange={() => {}} ariaLabel="Views" />);
+		const trigger = screen.getByRole("combobox", { name: "Views" });
+		fireEvent.click(trigger);
+
+		fireEvent.keyDown(trigger, { key: "Backspace" });
+		expect(onAction).toHaveBeenCalledTimes(1);
+
+		fireEvent.keyDown(trigger, { key: "Delete" });
+		expect(onAction).toHaveBeenCalledTimes(2);
+	});
+
+	it("targets the highlighted option, not just the first one", () => {
+		const onA = vi.fn();
+		const onB = vi.fn();
+		const options: SelectOption[] = [
+			{ value: "a", label: "Alpha", action: { ariaLabel: "Delete Alpha", onClick: onA } },
+			{ value: "b", label: "Beta", action: { ariaLabel: "Delete Beta", onClick: onB } },
+		];
+		render(<Select value="a" options={options} onChange={() => {}} ariaLabel="Views" />);
+		const trigger = screen.getByRole("combobox", { name: "Views" });
+		fireEvent.click(trigger);
+
+		fireEvent.keyDown(trigger, { key: "ArrowDown" });
+		fireEvent.keyDown(trigger, { key: "Backspace" });
+
+		expect(onA).not.toHaveBeenCalled();
+		expect(onB).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not swallow Backspace/Delete on plain options with no action", () => {
+		const onChange = vi.fn();
+		render(<Select value="open" options={OPTIONS} onChange={onChange} ariaLabel="Status" />);
+		const trigger = screen.getByRole("combobox", { name: "Status" });
+		fireEvent.click(trigger);
+
+		const event = new KeyboardEvent("keydown", {
+			key: "Backspace",
+			bubbles: true,
+			cancelable: true,
+		});
+		fireEvent(trigger, event);
+
+		expect(event.defaultPrevented).toBe(false);
+	});
+
+	it("clamps highlight when the highlighted option's action removes it from the list", () => {
+		const options: SelectOption[] = [
+			{ value: "a", label: "Alpha" },
+			{ value: "b", label: "Beta" },
+			{
+				value: "c",
+				label: "Gamma",
+				action: { ariaLabel: "Delete Gamma", onClick: () => {} },
+			},
+		];
+		const { rerender } = render(
+			<Select value="a" options={options} onChange={() => {}} ariaLabel="Views" />
+		);
+		const trigger = screen.getByRole("combobox", { name: "Views" });
+		fireEvent.click(trigger);
+		fireEvent.keyDown(trigger, { key: "End" });
+		expect(trigger.getAttribute("aria-activedescendant")).toMatch(/-opt-2$/);
+
+		// Simulate the action removing "Gamma" from the list, as a real delete would.
+		rerender(
+			<Select value="a" options={options.slice(0, 2)} onChange={() => {}} ariaLabel="Views" />
+		);
+
+		const after = trigger.getAttribute("aria-activedescendant");
+		expect(after).toMatch(/-opt-1$/);
+		// The regression: aria-activedescendant pointing at a removed <li> id,
+		// stranding a screen-reader user. Confirm the id it points to still exists.
+		expect(after && document.getElementById(after)).toBeTruthy();
+	});
 });
 
 // CD-294: the real iOS failure mode. Safari fires `resize` when the on-screen
