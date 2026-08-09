@@ -26,6 +26,22 @@ export class SessionExpiredError extends Error {
 	}
 }
 
+// PROJ-602: several callers (WikiPage's 409/404 handling, ShareView's 404 handling) pattern-match
+// on `message`'s `failed: ${status}` suffix, so it can't be widened to carry the server's detail
+// text without breaking them. Carry the parsed detail separately instead — `message` keeps its
+// original shape, `detail` is for callers (like IssueDetail's type-change error) that want to
+// show the actual reason.
+export class ApiError extends Error {
+	readonly status: number;
+	readonly detail: string;
+	constructor(path: string, method: string, status: number, detail: string) {
+		super(`API ${method} ${path} failed: ${status}`);
+		this.name = "ApiError";
+		this.status = status;
+		this.detail = detail;
+	}
+}
+
 // Set once a 401 triggers window.location.reload(). The reload doesn't tear down the
 // page instantly, so other in-flight calls can still land (or get aborted by the
 // navigation) in the meantime — once we're reloading, suppress their errors too rather
@@ -162,6 +178,23 @@ function handleUnauthorized<T>(
 	return new Promise<T>(() => {});
 }
 
+// PROJ-602: a service-layer rejection (ValidationError) reaches here as `{ error: {
+// formErrors: string[], fieldErrors: {...} } }` — see http/error-adapter.ts. Without this,
+// every caller's catch block only ever saw the generic "failed: 400", never the actual
+// reason (e.g. "Cannot change type: this epic still has child issues"), even though
+// several call sites already show `String(e)` to the user assuming it would be useful.
+async function describeApiError(res: Response): Promise<string> {
+	try {
+		const body = (await res.json()) as { error?: { formErrors?: string[] } | string };
+		if (typeof body?.error === "string") return body.error;
+		const formError = body?.error?.formErrors?.[0];
+		if (formError) return formError;
+	} catch {
+		// Not JSON, or no body — fall through to the status code.
+	}
+	return String(res.status);
+}
+
 async function apiFetchUncached<T>(path: string, opts: ApiFetchOpts, method: string): Promise<T> {
 	const isFormData = opts.body instanceof FormData;
 	let res: Response;
@@ -174,7 +207,7 @@ async function apiFetchUncached<T>(path: string, opts: ApiFetchOpts, method: str
 	if (!res.ok) {
 		if (res.status === 401) return handleUnauthorized<T>(path, method, opts.on401);
 		if (reauthReloadInFlight) return new Promise<T>(() => {});
-		throw new Error(`API ${method} ${path} failed: ${res.status}`);
+		throw new ApiError(path, method, res.status, await describeApiError(res));
 	}
 	// A working request proves the session is good again — re-arm the guard so a
 	// later expiry gets its own reload attempt.

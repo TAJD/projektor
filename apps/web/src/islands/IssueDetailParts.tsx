@@ -1816,25 +1816,36 @@ function TypeField({
 	issue,
 	taskTypes,
 	updatingType,
+	typeChangeError,
 	changeType,
 }: {
 	issue: IssueData;
 	taskTypes: TaskType[];
 	updatingType: boolean;
+	typeChangeError: string | null;
 	changeType: (typeId: string) => void;
 }) {
 	if (taskTypes.length > 0) {
 		return (
-			<Select
-				ariaLabel="Change type"
-				value={issue.type_id ?? ""}
-				disabled={updatingType}
-				onChange={(v) => changeType(v)}
-				options={[
-					{ value: "", label: "No type" },
-					...taskTypes.map((t) => ({ value: t.id, label: t.name })),
-				]}
-			/>
+			<>
+				<Select
+					ariaLabel="Change type"
+					value={issue.type_id ?? ""}
+					disabled={updatingType}
+					onChange={(v) => changeType(v)}
+					options={[
+						{ value: "", label: "No type" },
+						...taskTypes.map((t) => ({ value: t.id, label: t.name })),
+					]}
+				/>
+				{/* PROJ-602: without this, a rejected type change (e.g. demoting an epic
+					that still has children) reverts the dropdown with zero explanation. */}
+				{typeChangeError && (
+					<p role="alert" class="text-[var(--danger-text)] text-xs mt-1">
+						{typeChangeError}
+					</p>
+				)}
+			</>
 		);
 	}
 	if (issue.type_name) {
@@ -1932,6 +1943,7 @@ export function SidebarPanel({
 	updatingPriority,
 	updatingAssignee,
 	updatingType,
+	typeChangeError,
 	changeStatus,
 	changePriority,
 	changeAssignee,
@@ -1948,6 +1960,7 @@ export function SidebarPanel({
 	updatingPriority: boolean;
 	updatingAssignee: boolean;
 	updatingType: boolean;
+	typeChangeError: string | null;
 	changeStatus: (statusId: string) => void;
 	changePriority: (priority: string) => void;
 	changeAssignee: (assigneeId: string) => void;
@@ -1974,6 +1987,7 @@ export function SidebarPanel({
 						issue={issue}
 						taskTypes={taskTypes}
 						updatingType={updatingType}
+						typeChangeError={typeChangeError}
 						changeType={changeType}
 					/>
 				</SidebarField>
