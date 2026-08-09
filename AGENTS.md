@@ -193,6 +193,19 @@ as that user (a member of the seeded `projektor` workspace), and the islands loa
 
 **Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, `pnpm --filter @projektor/api test:coverage`, `pnpm --filter @projektor/web test:coverage`, `pnpm --filter @projektor/web build`, and `pnpm --filter @projektor/docs build` must all be green, and `pnpm gen:docs` must produce no diff. CI runs these plus `node scripts/check-island-api.mjs` (`.github/workflows/ci.yml`).
 
+## E2E testing (`apps/web/e2e`, Playwright)
+
+Targets a **deployed dev instance** (`E2E_BASE_URL`), not local dev — see `apps/web/e2e/README.md` for the full setup, fixtures, and per-spec breakdown. Not run in CI (no live deployment there); run manually or on a schedule.
+
+Three projects, pick the narrowest one that answers your question:
+- `desktop` - default viewport, Chromium.
+- `mobile` - 375×812 viewport via Chromium's mobile emulation. Fast, good for layout/CSS regressions.
+- `mobile-webkit` - real WebKit engine (`devices["iPhone 13"]`). Reach for this specifically when investigating iOS Safari engine-level behavior that Chromium can't reproduce (visual-viewport/on-screen-keyboard resize events, `position: fixed` under scroll, etc.) - it caught the PROJ-397/PROJ-566 class of mobile-modal bugs. Still not a substitute for a real device: no Safari chrome, no PWA install/Add-to-Home-Screen coverage.
+
+```bash
+pnpm --filter @projektor/web exec playwright test --project=mobile-webkit
+```
+
 ## Git hooks (lefthook)
 
 `pnpm install` runs `prepare`, which calls `lefthook install` and wires one hook:
