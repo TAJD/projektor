@@ -72,17 +72,6 @@ describe("Popover", () => {
 		expect(el.style.minWidth).toBe("40px");
 	});
 
-	it("stays in the render container with an inline fixed position when fixed-inline", () => {
-		const { container } = render(
-			<Popover strategy="fixed-inline" position={{ top: 10, left: 20 }}>
-				<span>Inline fixed content</span>
-			</Popover>
-		);
-		const el = screen.getByText("Inline fixed content").parentElement as HTMLElement;
-		expect(container.contains(el)).toBe(true);
-		expect(el.style.position).toBe("fixed");
-	});
-
 	it("renders no ARIA attributes when role is omitted", () => {
 		const { container } = render(
 			<Popover strategy="anchored">
@@ -95,9 +84,8 @@ describe("Popover", () => {
 		expect(container).toBeTruthy();
 	});
 
-	it("throws without `position` when strategy is 'portal-fixed' or 'fixed-inline'", () => {
+	it("throws without `position` when strategy is 'portal-fixed'", () => {
 		expect(() => render(<Popover strategy="portal-fixed">No position</Popover>)).toThrow();
-		expect(() => render(<Popover strategy="fixed-inline">No position</Popover>)).toThrow();
 	});
 
 	it("resolves elementRef to the rendered DOM element when anchored", () => {

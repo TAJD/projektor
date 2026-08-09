@@ -34,10 +34,6 @@ function Portal({ into, vnode }: { into: Element; vnode: VNode }) {
 
 export interface PopoverProps {
 	id?: string;
-	/** Root element tag. Defaults to "div". "ul" is needed for a listbox
-	 * popover (e.g. SavedViewsControl's saved-views menu) where the
-	 * popover element itself must carry `role="listbox"`, not wrap one. */
-	as?: "div" | "ul";
 	/** Omit both `role`/`ariaLabel` to render no ARIA attributes at all —
 	 * needed when the caller's own children already declare the
 	 * accessible role/name (e.g. AccountMenu's inner `role="menu"` div),
@@ -67,25 +63,15 @@ export interface PopoverProps {
 	 * `document.body` with caller-computed fixed coordinates (matches
 	 * `AccountMenu.tsx`/`GlossaryHelp.tsx`'s existing pattern, needed to
 	 * escape an ancestor's `transform`, e.g. the topbar's scroll-hide).
-	 * "fixed-inline" renders in place (no portal) but with caller-computed
-	 * `position: fixed` coordinates via inline style — matches
-	 * `SavedViewsControl.tsx`'s existing saved-views menu, which needs
-	 * fixed positioning (to escape a scrollable toolbar) but was never
-	 * portaled. Inline `style` always wins over the modifier class's own
-	 * `position`/`top`/`left` (inline styles beat class selectors
-	 * regardless of specificity), so sharing a modifier class between an
-	 * "anchored" call site and a "portal-fixed"/"fixed-inline" call site
-	 * for the same visual style is safe.
 	 */
-	strategy: "anchored" | "portal-fixed" | "fixed-inline";
-	/** Required when strategy is "portal-fixed" or "fixed-inline". */
+	strategy: "anchored" | "portal-fixed";
+	/** Required when strategy is "portal-fixed". */
 	position?: { top: number; left?: number; right?: number; width?: number };
 	children: ComponentChildren;
 }
 
 export function Popover({
 	id,
-	as = "div",
 	role,
 	ariaLabel,
 	ariaModal,
@@ -96,7 +82,6 @@ export function Popover({
 	children,
 }: PopoverProps) {
 	const classes = extraClass ? `popover ${extraClass}` : "popover";
-	const Tag = as;
 	const a11yProps = {
 		...(role !== undefined ? { role } : {}),
 		...(ariaLabel !== undefined ? { "aria-label": ariaLabel } : {}),
@@ -104,19 +89,15 @@ export function Popover({
 			? { "aria-modal": (ariaModal ? "true" : "false") as "true" | "false" }
 			: {}),
 	};
-	// biome-ignore lint/suspicious/noExplicitAny: dynamic `Tag = as` ("div" | "ul") makes JSX infer an unsatisfiable intersection ref type across both element kinds.
-	const refProp = { ref: elementRef as any };
-
 	if (strategy === "anchored") {
 		return (
-			<Tag id={id} class={classes} {...a11yProps} {...refProp}>
+			<div id={id} class={classes} {...a11yProps} ref={elementRef as Ref<HTMLDivElement>}>
 				{children}
-			</Tag>
+			</div>
 		);
 	}
 
-	if (!position)
-		throw new Error(`Popover: \`position\` is required when strategy is '${strategy}'`);
+	if (!position) throw new Error("Popover: `position` is required when strategy is 'portal-fixed'");
 
 	const style = {
 		position: "fixed" as const,
@@ -127,10 +108,16 @@ export function Popover({
 	};
 
 	const el = (
-		<Tag id={id} class={classes} style={style} {...a11yProps} {...refProp}>
+		<div
+			id={id}
+			class={classes}
+			style={style}
+			{...a11yProps}
+			ref={elementRef as Ref<HTMLDivElement>}
+		>
 			{children}
-		</Tag>
+		</div>
 	);
 
-	return strategy === "portal-fixed" ? <Portal into={document.body} vnode={el} /> : el;
+	return <Portal into={document.body} vnode={el} />;
 }
