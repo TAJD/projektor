@@ -43,6 +43,15 @@ const MERMAID_PROSE_STYLES = `
 		width: auto;
 		height: auto;
 	}
+	/* PROJ-603: the .prose box itself no longer scrolls (that forced overflow-y
+	 * to auto too, clipping outside-positioned <ol>/<ul> markers). Typography
+	 * already gives <pre> its own overflow-x: auto; tables get none by default,
+	 * so give them one directly — this is the same "display: block" trick GFM's
+	 * own stylesheet uses to make a table scroll without an outer scrollport. */
+	.prose table {
+		display: block;
+		overflow-x: auto;
+	}
 `;
 
 const PencilIcon = () => (
@@ -531,7 +540,7 @@ export function BodySection({
 			) : issue.body ? (
 				<div
 					ref={bodyRef}
-					class="prose prose-sm max-w-none overflow-x-auto break-words"
+					class="prose prose-sm max-w-none break-words"
 					dangerouslySetInnerHTML={{ __html: renderMd(issue.body) }}
 				/>
 			) : (
@@ -1565,7 +1574,7 @@ function CommentItem({
 			) : (
 				<div
 					ref={bodyRef}
-					class="prose prose-sm max-w-none overflow-x-auto break-words"
+					class="prose prose-sm max-w-none break-words"
 					dangerouslySetInnerHTML={{ __html: renderMd(comment.body) }}
 				/>
 			)}

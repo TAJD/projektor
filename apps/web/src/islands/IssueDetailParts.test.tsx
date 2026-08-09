@@ -1,9 +1,18 @@
-// IssueDetailParts island — BodySection overflow-containment regression test (PROJ-344).
+// IssueDetailParts island — BodySection overflow-containment regression test (PROJ-344),
+// updated for PROJ-603.
 //
 // A wide markdown table or a long unbroken code line must not force the whole
-// page to scroll horizontally on mobile; the rendered-markdown container must
-// carry its own horizontal scroll instead. jsdom doesn't lay out real pixel
-// widths, so this asserts the containing class rather than measured overflow.
+// page to scroll horizontally on mobile. PROJ-344 originally made the whole
+// `.prose` box a horizontal scrollport (`overflow-x-auto`) to contain them —
+// but per the CSS overflow spec, setting overflow-x to a non-visible value
+// while overflow-y stays visible forces overflow-y to `auto` too, turning the
+// entire box into a scrollport that clips anything an ordered/unordered list
+// marker renders outside its gutter (PROJ-603). The fix moves the scroll
+// boundary onto the individual elements that actually need it: <pre> already
+// gets `overflow-x: auto` from Typography by default, and `.prose table` gets
+// the same via MERMAID_PROSE_STYLES (the `display: block` + `overflow-x: auto`
+// trick GFM's own stylesheet uses). jsdom doesn't lay out real pixel widths, so
+// this asserts the containing classes/rules rather than measured overflow.
 import { render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BodySection } from "./IssueDetailParts";
@@ -43,7 +52,7 @@ const ISSUE: IssueData = {
 };
 
 describe("BodySection", () => {
-	it("wraps the rendered markdown body in a horizontally-scrollable container", async () => {
+	it("does not turn the .prose box itself into a scrollport (PROJ-603)", async () => {
 		render(
 			<BodySection
 				issue={ISSUE}
@@ -56,14 +65,36 @@ describe("BodySection", () => {
 		const table = await screen.findByRole("table");
 		const container = table.closest(".prose");
 		expect(container).toBeTruthy();
-		expect(container?.className).toContain("overflow-x-auto");
+		// PROJ-603: overflow-x-auto here forces overflow-y to auto too (CSS
+		// overflow spec), clipping outside-positioned list markers. The scroll
+		// boundary now lives on <pre>/<table> themselves, not this container.
+		expect(container?.className).not.toContain("overflow-x-auto");
 		expect(container?.className).toContain("break-words");
 
-		// The long code line rendered inside <pre> — the wrapping container is
-		// still the scroll boundary, not the page.
+		// The long code line rendered inside <pre>, which still self-scrolls
+		// (Typography's default `pre { overflow-x: auto }`).
 		const pre = container?.querySelector("pre");
 		expect(pre).toBeTruthy();
 		expect(pre?.closest(".prose")).toBe(container);
+	});
+
+	it("gives wide tables their own horizontal scroll boundary via .prose table CSS (PROJ-603)", async () => {
+		render(
+			<BodySection
+				issue={ISSUE}
+				issueId={ISSUE.id}
+				workspaceSlug="ws"
+				fetchIssue={async () => {}}
+			/>
+		);
+
+		await screen.findByRole("table");
+		const styleTags = Array.from(document.querySelectorAll("style"));
+		const tableRule = styleTags
+			.map((s) => s.textContent)
+			.find((css) => css?.includes(".prose table"));
+		expect(tableRule).toBeTruthy();
+		expect(tableRule).toContain("overflow-x: auto");
 	});
 });
 
