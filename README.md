@@ -1,5 +1,9 @@
 # projektor
 
+[![CI](https://github.com/TAJD/projektor/actions/workflows/ci.yml/badge.svg)](https://github.com/TAJD/projektor/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/TAJD/projektor)](https://github.com/TAJD/projektor/releases)
+[![License: MIT](https://img.shields.io/github/license/TAJD/projektor)](./LICENSE)
+
 > An issue tracker and wiki that an AI coding agent runs as a first-class client -
 > self-hosted, cross-project, and cheap enough to run serverless.
 
