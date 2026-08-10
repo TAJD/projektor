@@ -9,8 +9,8 @@ import mcpStats from "../../../generated/mcp-stats.json";
 > Wiki + Jira-style issue tracker built MCP-native, running entirely on Cloudflare's edge.
 > Monorepo (pnpm + turbo).
 
-This page maps how Projektor is actually built - its surfaces, service layer, and
-storage - including what is wired up and what isn't yet. It describes the system as
+This page maps how Projektor is actually built — its surfaces, service layer, and
+storage — including what is wired up and what isn't yet. It describes the system as
 it stands today, not an idealised summary.
 
 ## How it works
@@ -18,8 +18,8 @@ it stands today, not an idealised summary.
 Projektor runs as a **single Cloudflare Worker** (`apps/api`, built on Hono). That one
 Worker exposes two surfaces over a shared request pipeline: a **REST API** for the
 browser SPA, and an **MCP endpoint** (JSON-RPC 2.0) that is the primary
-surface for AI agents. Every request flows through auth middleware - Cloudflare Access
-JWTs for human browser sessions, hashed API tokens for agents - and then workspace
+surface for AI agents. Every request flows through auth middleware — Cloudflare Access
+JWTs for human browser sessions, hashed API tokens for agents — and then workspace
 middleware that resolves the tenant from the slug and verifies membership before any
 handler runs.
 
@@ -29,7 +29,7 @@ revisions. **KV** caches Access certs and email lookups. **R2** holds
 file attachments. There are no servers and no containers: the whole system deploys as a
 Worker plus its bound data stores, which is what makes a five-minute self-host possible.
 
-The sections below give the picture in increasing detail - first a diagram, then a
+The sections below give the picture in increasing detail — first a diagram, then a
 layer-by-layer breakdown, then the request flow through a single agent call.
 
 ## System diagram
@@ -88,7 +88,7 @@ flowchart TB
 
 | Layer | Tech | Package | Notes |
 |-------|------|---------|-------|
-| Frontend | Astro + Preact | `apps/web` | Full SPA - issues, board, sprints, wiki, settings, tokens. Dev-proxies `/api` + `/mcp` to `:8787`. |
+| Frontend | Astro + Preact | `apps/web` | Full SPA — issues, board, sprints, wiki, settings, tokens. Dev-proxies `/api` + `/mcp` to `:8787`. |
 | API / edge runtime | Hono on Cloudflare Workers | `apps/api` | REST + MCP, two-mode auth, workspace tenancy. |
 | MCP server | JSON-RPC 2.0 over HTTP | `apps/api/src/routes/mcp.ts` | {mcpStats.tools} tools across {mcpStats.domains} domains (coordination + project data). Primary surface. |
 | Plugin system | Registry + SDK | `apps/api/src/plugins`, `packages/plugin-sdk` | `definePlugin` / `defineMCPTool`. **Not loaded at runtime.** |
@@ -99,11 +99,11 @@ flowchart TB
 
 ## API surfaces
 
-REST (`/api/*`) is the SPA's **private contract** - versionless, and may change shape
+REST (`/api/*`) is the SPA's **private contract** — versionless, and may change shape
 between releases without notice. MCP (`/mcp/:workspaceId`) is the **stable public
 surface** for agents. The two are usually kept at parity (see `AGENTS.md`'s
-service-layer contract), but a small, documented subset of REST endpoints - file
-attachments, tokens, public share links, feedback submission - has no MCP
+service-layer contract), but a small, documented subset of REST endpoints — file
+attachments, tokens, public share links, feedback submission — has no MCP
 equivalent and is safe to depend on; see [REST endpoints](/projektor/agents/rest-endpoints/).
 
 ## Request flow

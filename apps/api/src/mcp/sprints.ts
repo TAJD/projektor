@@ -63,7 +63,7 @@ export const sprintsTools: MCPTool[] = [
 	},
 	{
 		name: "update_sprint",
-		description: "Update sprint fields - name, goal, status, start/end dates",
+		description: "Update sprint fields — name, goal, status, start/end dates",
 		inputSchema: {
 			type: "object",
 			required: ["id"],

@@ -6,7 +6,7 @@ sidebar:
 ---
 > **Note:** the code below is generated from [`apps/api/src/examples/feedback-widget-submit.ts`][src]
 > by `scripts/gen-feedback-example-page.ts`, and is executed against a live projektor instance in
-> [`apps/api/src/test/feedback-example.test.ts`][test] - edit that source file, not this page, and
+> [`apps/api/src/test/feedback-example.test.ts`][test] — edit that source file, not this page, and
 > run `pnpm gen:docs`.
 
 [src]: https://github.com/TAJD/projektor/blob/main/apps/api/src/examples/feedback-widget-submit.ts
@@ -29,7 +29,7 @@ curl -X POST https://your-projektor-instance/api/projects/<projectId>/feedback-s
   -d '{"name": "In-app rating widget", "allowedOrigins": ["https://your-site.example"]}'
 ```
 
-The response includes a one-time `token` - copy it now, it is never shown again. This
+The response includes a one-time `token` — copy it now, it is never shown again. This
 token is the trust boundary for the integration: it's deliberately public and safe to
 ship in client-side code (the same category as a Sentry DSN or a Stripe publishable
 key), narrow in scope (submit-only), and independently revocable/rotatable per source.
@@ -90,7 +90,7 @@ export async function submitFeedback(
 }
 ```
 
-Call it after whatever moment makes sense for your product - a thumbs up/down after
+Call it after whatever moment makes sense for your product — a thumbs up/down after
 generating something, a rating prompt after a task completes, an in-app "send feedback"
 form:
 
@@ -116,5 +116,5 @@ status/source, mark it reviewed, or convert it directly into an issue.
 
 - [MCP tool catalog](/projektor/agents/tool-catalog/) for the full set of
   feedback-source management tools (create/list/update/rotate/revoke)
-- [REST endpoints](/projektor/agents/rest-endpoints/) - `POST /api/feedback/submit`
+- [REST endpoints](/projektor/agents/rest-endpoints/) — `POST /api/feedback/submit`
   is public and REST-only; there is no MCP equivalent for end-user submission

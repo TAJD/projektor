@@ -32,15 +32,15 @@ flowchart LR
     cfg -->|"wrangler"| cf
 ```
 
-- **`projektor`** - the source. Tagging `v*` builds a release artifact and publishes
+- **`projektor`** — the source. Tagging `v*` builds a release artifact and publishes
   it to a GitHub Release. Stays generic: it knows nothing about any particular
   deployment.
-- **Your deploy repo** - holds *only* configuration: a `wrangler.toml` with your
+- **Your deploy repo** — holds *only* configuration: a `wrangler.toml` with your
   Cloudflare resource IDs, a pinned `projektor.version`, and a deploy workflow.
   [`projektor-deploy-example`](https://github.com/TAJD/projektor-deploy-example) is
   the public template; copy it.
 
-The deploy machine needs only **`wrangler`** and **`gh`** - never `pnpm`,
+The deploy machine needs only **`wrangler`** and **`gh`** — never `pnpm`,
 `node_modules`, or the projektor source.
 
 ## What's in a release
@@ -49,13 +49,13 @@ Each `projektor-<version>.tar.gz`, extracted into `./vendor`:
 
 | Path | Contents |
 |------|----------|
-| `vendor/worker.js` | the entire Worker, bundled and self-contained (Hono, Drizzle, all deps inlined - only `node:*` builtins remain, provided by `nodejs_compat`) |
+| `vendor/worker.js` | the entire Worker, bundled and self-contained (Hono, Drizzle, all deps inlined — only `node:*` builtins remain, provided by `nodejs_compat`) |
 | `vendor/web/` | the pre-built frontend, served as static assets |
 | `vendor/migrations/` | D1 migrations |
 | `vendor/wrangler.example.toml` | the config template (`compatibility_date` baked from source) |
 | `vendor/VERSION` | the version string |
 
-These four travel together at one version - a migration, the code that reads it,
+These four travel together at one version — a migration, the code that reads it,
 and the frontend that calls it are always in lockstep.
 
 ## Deploy your own instance
@@ -85,7 +85,7 @@ wrangler r2 bucket create projektor-files
 
 ### 3. Configure `wrangler.toml`
 
-Pin a version and run the deploy script once - it downloads the release and
+Pin a version and run the deploy script once — it downloads the release and
 scaffolds your `wrangler.toml` from the template:
 
 ```bash
@@ -98,9 +98,9 @@ Fill in the `REPLACE_` values: D1 `database_id`, KV `id`, your Cloudflare Access
 team domain and audience, and `ADMIN_EMAILS`. The artifact-owned paths
 (`main = ./vendor/worker.js`, `[assets].directory = ./vendor/web`,
 `migrations_dir = ./vendor/migrations`) and `compatibility_flags = ["nodejs_compat"]`
-are already set - leave them.
+are already set — leave them.
 
-### 4. Cloudflare API token - include D1
+### 4. Cloudflare API token — include D1
 
 This is the step that most often goes wrong. **Do not** use Cloudflare's built-in
 "Edit Cloudflare Workers" token template: it omits D1, so `wrangler deploy`
@@ -137,15 +137,15 @@ If `d1 list` errors, the token is missing the D1 permission.
 |--------|---------|
 | `CLOUDFLARE_API_TOKEN` | the custom token from step 4 |
 | `CLOUDFLARE_ACCOUNT_ID` | target account (`wrangler whoami`) |
-| `PROJEKTOR_RELEASE_PAT` | only if `projektor` is **private** - a fine-grained PAT with `Contents: Read` on it, so CI can download the release asset. For a public projektor, use the built-in `GITHUB_TOKEN` instead. |
+| `PROJEKTOR_RELEASE_PAT` | only if `projektor` is **private** — a fine-grained PAT with `Contents: Read` on it, so CI can download the release asset. For a public projektor, use the built-in `GITHUB_TOKEN` instead. |
 
-**On the Worker** (set once; persists across every deploy - *not* a GitHub secret):
+**On the Worker** (set once; persists across every deploy — *not* a GitHub secret):
 
 ```bash
 wrangler secret put JWT_SECRET     # any long random string, used to sign API tokens
 ```
 
-CI never manages runtime secrets - it only needs the deploy token. Rotating
+CI never manages runtime secrets — it only needs the deploy token. Rotating
 `JWT_SECRET` invalidates existing API tokens, so set it once and leave it.
 
 ### 6. Deploy
@@ -157,7 +157,7 @@ git push             # CI deploys on push to main
 
 ## How a deploy works
 
-`deploy.sh` is the whole contract - it runs identically locally and in CI:
+`deploy.sh` is the whole contract — it runs identically locally and in CI:
 
 ```bash
 gh release download "$(cat projektor.version)" -R OWNER/projektor -p 'projektor-*.tar.gz'
@@ -189,7 +189,7 @@ Release with `projektor-v1.2.0.tar.gz` attached.
 
 ## Automatic updates
 
-An instance can track the latest release automatically - push-based, so a new
+An instance can track the latest release automatically — push-based, so a new
 release deploys within seconds and the producer stays generic.
 
 How it's wired:
@@ -204,12 +204,12 @@ How it's wired:
      versa) silently fails.
 
    > **Gotcha:** if the PAT can't see the repo or lacks `Contents: write`, the
-   > dispatch fails with **HTTP 404 "Not Found"** - *not* 403. GitHub masks a
+   > dispatch fails with **HTTP 404 "Not Found"** — *not* 403. GitHub masks a
    > permission failure as a missing resource, so a 404 on the dispatch step means
    > "fix the PAT's repo access / Contents permission," not "wrong URL."
 
    The release workflow's final step fires a `repository_dispatch`
-   (`projektor-release`, payload `version`) - but only if `DEPLOY_DISPATCH_REPO`
+   (`projektor-release`, payload `version`) — but only if `DEPLOY_DISPATCH_REPO`
    is set, so projektor remains generic for everyone else.
 2. Your deploy workflow listens for that dispatch, records the released tag into
    `projektor.version` (a `[skip ci]` commit), and deploys.
@@ -221,10 +221,10 @@ commit, and push.
 ## Operating notes
 
 - **Roll out a specific version:** `echo "v1.3.0" > projektor.version && git commit -am … && git push`.
-- **Migrations** apply automatically on every deploy and are idempotent - only
+- **Migrations** apply automatically on every deploy and are idempotent — only
   unapplied ones run (`✅ No migrations to apply!` when there are none).
 - **Deploy triggers** are scoped: the deploy workflow runs on changes to
-  `projektor.version`, `wrangler.toml`, `deploy.sh`, or the workflow itself - so
+  `projektor.version`, `wrangler.toml`, `deploy.sh`, or the workflow itself — so
   documentation edits don't trigger redeploys, but version bumps do.
 - **Releases & changelog:** every tagged release is listed at
   [github.com/TAJD/projektor/releases](https://github.com/TAJD/projektor/releases).
@@ -234,7 +234,7 @@ commit, and push.
 | Symptom | Cause / fix |
 |---------|-------------|
 | `wrangler d1 migrations apply` fails with an auth error | The API token is missing **D1: Edit** (the "Edit Cloudflare Workers" template omits it). Recreate as a custom token; verify with `wrangler d1 list`. |
-| `Wrangler requires at least Node.js v22` | Your workflow uses an older Node. wrangler 4.x needs **Node ≥ 22** - set `node-version: '22'` in `setup-node`. |
+| `Wrangler requires at least Node.js v22` | Your workflow uses an older Node. wrangler 4.x needs **Node ≥ 22** — set `node-version: '22'` in `setup-node`. |
 | Release published but the instance didn't auto-deploy | The `DEPLOY_DISPATCH_REPO` variable is unset, or `WORKSPACE_PAT` can't dispatch to the deploy repo. The dispatch step fails with **HTTP 404** (GitHub masks a permission failure as "Not Found"). Fix: a fine-grained `WORKSPACE_PAT` needs the deploy repo selected in *Repository access* **and** *Contents: Read and write*. |
 | `gh release download` 404 in CI | `projektor` is private and `PROJEKTOR_RELEASE_PAT` (with `Contents: Read`) is missing or expired. |
 | Auto-bump commit triggers a second deploy | The bump commit must include `[skip ci]` and be pushed by `GITHUB_TOKEN` (which doesn't re-trigger workflows). |

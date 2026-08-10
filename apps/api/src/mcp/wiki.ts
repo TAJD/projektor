@@ -57,7 +57,7 @@ export const wikiTools: MCPTool[] = [
 			"Full-text search over wiki pages (FTS5, BM25-ranked, title weighted above body). " +
 			"Returns match-anchored snippets highlighted with ** markers, plus a computed " +
 			"`freshness` ({state, staleSince} or null if the page has no verify_interval/status " +
-			"signal) per result. type/status/tags filter on the denormalized frontmatter columns " +
+			"signal) per result. type/status/tags filter on the denormalised frontmatter columns " +
 			"(R6). Results are demoted (ranked below everything else, ties broken by bm25 within " +
 			"each tier) when the page is computed-stale/unverified OR has an explicit " +
 			"status: stale|deprecated (R7).",
@@ -113,8 +113,8 @@ export const wikiTools: MCPTool[] = [
 			"(`---\\ntype: runbook\\ntags: [foo]\\nstatus: draft\\n---\\n...`) — type (freeform; " +
 			`well-known values ${WELL_KNOWN_TYPES}), tags[], status (draft|current|stale|` +
 			"deprecated), verified_at, verified_by, owners[], verify_interval (days), template " +
-			"(boolean) are parsed and denormalized for filtering. Invalid frontmatter (bad " +
-			"status/enum value, wrong field type, unrecognized key) is rejected with a structured " +
+			"(boolean) are parsed and denormalised for filtering. Invalid frontmatter (bad " +
+			"status/enum value, wrong field type, unrecognised key) is rejected with a structured " +
 			"validation error, not silently ignored. Alternatively, pass `templateSlug` (from " +
 			"list_wiki_templates) to seed this page's content from an existing template page — " +
 			"its `template: true` flag is stripped from the seeded content (the new page is not " +
@@ -532,7 +532,7 @@ export const wikiTools: MCPTool[] = [
 		name: "list_wiki_notifications",
 		description:
 			"List the calling user's wiki watch notifications (newest first). Each entry " +
-			"records the page (denormalized slug/title, so a notification about a page " +
+			"records the page (denormalised slug/title, so a notification about a page " +
 			"that's since been deleted still shows what it was about), the action " +
 			"(created|updated|deleted), the actor, and whether it's been read.",
 		inputSchema: {

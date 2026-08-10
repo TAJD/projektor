@@ -153,7 +153,7 @@ export const issuesTools: MCPTool[] = [
 	{
 		name: "update_issue",
 		description:
-			"Update an issue - status, priority, title, body, assignee, or labels. Review gating: " +
+			"Update an issue — status, priority, title, body, assignee, or labels. Review gating: " +
 			"pass agentSessionId to identify yourself as an agent; entering in_review as " +
 			"an agent requires completionReport. Agents CAN transition directly to done (no human " +
 			"approval gate) — but if the completionReport.verification isn't externally checkable (no " +
