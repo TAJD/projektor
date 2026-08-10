@@ -52,11 +52,11 @@ The bootstrap endpoint is enabled only when `ENVIRONMENT=development` - any othe
 Mint a token from the UI (Settings → Tokens) or via the API, then add the MCP server:
 
 ```bash
-claude mcp add --transport http \
+claude mcp add projektor \
+  "https://<your-worker>.workers.dev/mcp/<workspace-uuid>" \
+  --transport http \
   --header "Authorization: Bearer pk_<64 hex chars>" \
-  --header "X-Workspace-Slug: <slug>" \
-  projektor \
-  "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
+  --header "X-Workspace-Slug: <slug>"
 ```
 
 **Finding the workspace ID:** it is returned by `GET /api/workspaces` or shown in the bootstrap response. The slug is the short identifier you chose when creating the workspace (e.g. `projektor`).
@@ -175,13 +175,13 @@ If your projektor instance is behind Cloudflare Access (which it should be in pr
 Pass the service token credentials alongside the API token:
 
 ```bash
-claude mcp add --transport http \
+claude mcp add projektor \
+  "https://<your-worker>.workers.dev/mcp/<workspace-uuid>" \
+  --transport http \
   --header "Authorization: Bearer pk_<token>" \
   --header "X-Workspace-Slug: <slug>" \
   --header "CF-Access-Client-Id: <client-id>" \
-  --header "CF-Access-Client-Secret: <client-secret>" \
-  projektor \
-  "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
+  --header "CF-Access-Client-Secret: <client-secret>"
 ```
 
 Without a valid CF Access service token, the Worker returns a `403` before it reaches the MCP layer - the agent connection fails silently. The bootstrap flow bypasses Access; agent workflows in production need both headers.
