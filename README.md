@@ -102,11 +102,11 @@ curl -s "https://<your-worker>.workers.dev/bootstrap" \
 Pipe the printed command straight into your shell:
 
 ```bash
-claude mcp add --transport http \
+claude mcp add projektor \
+  "https://<your-worker>.workers.dev/mcp/<workspace-uuid>" \
+  --transport http \
   --header "Authorization: Bearer pk_<64 hex chars>" \
-  --header "X-Workspace-Slug: projektor" \
-  projektor \
-  "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
+  --header "X-Workspace-Slug: projektor"
 ```
 
 Once connected, the agent has access to the full tool catalog - create issues, update statuses, search the wiki, plan sprints - anything a browser user can do.

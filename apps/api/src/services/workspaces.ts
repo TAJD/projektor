@@ -320,10 +320,10 @@ export async function getWorkspaceMcpInfo(
 }> {
 	const mcpUrl = `${origin}/mcp/${workspace.id}`;
 	const mcpAddCommandTemplate =
-		`claude mcp add --transport http ` +
+		`claude mcp add projektor "${mcpUrl}" ` +
+		`--transport http ` +
 		`--header "Authorization: Bearer {{TOKEN}}" ` +
-		`--header "X-Workspace-Slug: ${workspace.slug}" ` +
-		`projektor "${mcpUrl}"`;
+		`--header "X-Workspace-Slug: ${workspace.slug}"`;
 	return {
 		mcpUrl,
 		workspaceId: workspace.id,

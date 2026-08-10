@@ -10,7 +10,7 @@
 curl -s https://<worker>.workers.dev/bootstrap \
   -H "X-Bootstrap-Secret: <secret>" | jq -r .mcpAddCommand | sh
 
-# Then use the printed: claude mcp add --transport http ...
+# Then use the printed: claude mcp add projektor <url> --transport http ...
 ```
 
 ## MCP endpoint

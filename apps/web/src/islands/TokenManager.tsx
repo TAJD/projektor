@@ -74,10 +74,10 @@ function buildMcpCommand(
 	}
 	if (!mcpUrl) return "";
 	const lines = [
-		"claude mcp add --transport http \\",
+		`claude mcp add projektor "${mcpUrl}" \\`,
+		"  --transport http \\",
 		`  --header "Authorization: Bearer ${token}" \\`,
-		`  --header "X-Workspace-Slug: ${workspaceSlug}" \\`,
-		`  projektor "${mcpUrl}"`,
+		`  --header "X-Workspace-Slug: ${workspaceSlug}"`,
 	];
 	return lines.join("\n");
 }
