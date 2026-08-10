@@ -74,7 +74,7 @@ This loop deliberately does **not** skip lines flagged by `LineView.isComment` o
 `isStringLiteral` — the original grep script scanned raw text unconditionally, and
 preserving that means the plugin doesn't silently lose coverage relative to what it
 replaced (the fixture's third case exists specifically to guard against a future "skip
-string-literal lines" optimization regressing this).
+string-literal lines" optimisation regressing this).
 
 ### Raw `fetch()`: an AST walk
 

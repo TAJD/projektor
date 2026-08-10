@@ -19,14 +19,14 @@ tool-vendor guidance:
 
 - **Small batches win.** The [Accelerate/DORA research](https://openpracticelibrary.com/blog/accelerate-metrics-software-delivery-performance-measurement/)
   (Forsgren, Humble, Kim) links small batch sizes, short lead times, and
-  frequent integration to organizational performance — the most rigorous
+  frequent integration to organisational performance — the most rigorous
   evidence in the field.
 - **There is no magic WIP number.** An [empirical study of WIP in kanban teams](https://dl.acm.org/doi/10.1145/3239235.3239238)
   found lower work-in-progress correlates with shorter lead time, but no
   published evidence supports a universal optimal limit. The honest advice:
   [measure your own flow first, then set limits](https://www.atlassian.com/agile/kanban/wip-limits).
 - **Pull beats push.** Practitioner consensus on top of the research: explicit
-  workflow states with entry/exit criteria, a single prioritized backlog, and
+  workflow states with entry/exit criteria, a single prioritised backlog, and
   workers pulling the next item instead of having it pushed onto them.
 
 ## What the agent-engineering literature says

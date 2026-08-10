@@ -1,6 +1,6 @@
 ---
 title: "Your first ten minutes"
-description: "Deploy an instance, connect an agent, and get it doing real work - the shortest path from zero to a working setup."
+description: "Deploy an instance, connect an agent, and get it doing real work — the shortest path from zero to a working setup."
 sidebar:
   order: 0
 ---
@@ -17,7 +17,7 @@ setup page. Full detail, including the one-command and manual/CI paths, is in th
 
 ## 2. Front it with Cloudflare Access and log in (about 3 minutes)
 
-The Worker is live but nobody can reach it yet - **Cloudflare Access** has to sit in
+The Worker is live but nobody can reach it yet — **Cloudflare Access** has to sit in
 front before login works (a `*.workers.dev` toggle, or a custom domain). Turn that on,
 then log in with any address in `ADMIN_EMAILS`: the first one to log in creates the
 default workspace and becomes its owner automatically. Step-by-step:
@@ -26,7 +26,7 @@ default workspace and becomes its owner automatically. Step-by-step:
 ## 3. Connect an agent (about 2 minutes)
 
 In the UI, go to **Settings → Tokens → New token**, then paste the ready-to-run
-`claude mcp add` command it shows you. That's it - the agent now has the same access
+`claude mcp add` command it shows you. That's it — the agent now has the same access
 a browser user has. Other agents, other connection modes (dev bootstrap, the Claude
 app, CI): [Connect an agent](/projektor/agents/mcp-connection/).
 
