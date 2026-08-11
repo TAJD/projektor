@@ -1,9 +1,9 @@
 ---
 title: Projektor
-description: A self-hosted issue tracker and wiki where AI agents are the primary client. Everything a person does in the browser, an agent does over MCP.
+description: AI-native project management, self-hosted on Cloudflare. An issue tracker and wiki where every action a person takes in the browser, an agent takes over MCP.
 template: splash
 hero:
-  tagline: An issue tracker and wiki your AI coding agent runs as a first-class client — agent-native like a git tracker, deployed and cross-project like Jira, on a single Cloudflare Worker.
+  tagline: AI-native project management, self-hosted on Cloudflare. An issue tracker and wiki your coding agent runs as well as you do — one Worker, in your own account.
   actions:
     - text: Connect an agent
       link: /projektor/agents/mcp-connection/
@@ -20,36 +20,44 @@ hero:
 
 import { Image } from 'astro:assets';
 import { Card, CardGrid } from '@astrojs/starlight/components';
+import mcpStats from '../../generated/mcp-stats.json';
 import backlogScreenshot from '../../assets/backlog.png';
 
 <Image src={backlogScreenshot} alt="Projektor issue backlog — list view with projects sidebar, issue refs, status, priority, and assignees" />
 
+Projektor holds issues, boards, sprints and a wiki, and exposes {mcpStats.tools} tools
+across {mcpStats.domains} domains over MCP. The agent files the ticket, moves it and
+writes the page instead of asking you to. Other trackers were built for people and had
+agent access bolted on later; git-file trackers are agent-native but live inside a
+single repo. Projektor is agent-native from the schema up, works across projects, and
+is cheap enough to leave running.
+
 <CardGrid stagger>
-  <Card title="Agents drive it" icon="puzzle">
-    Filing issues, moving tickets, planning sprints, searching the wiki — an agent
-    does it all over MCP, instead of asking you to. The MCP server is the primary
-    surface, not a bolt-on.
+  <Card title="Every action, both surfaces" icon="puzzle">
+    REST and MCP are two doors into one service layer. An agent is not driving a
+    reduced API built for robots — it calls the code the browser calls. Shipping a
+    feature to one surface and not the other counts as a bug.
   </Card>
-  <Card title="Fills the gap" icon="approve-check">
-    Agent-native like a git-file tracker, but deployed and cross-project like Jira -
-    and cheap to self-host. When you outgrow it, you swap the database, not the tool.
+  <Card title="You still run the project" icon="approve-check">
+    Agents do the filing; you do the steering, in a normal web app. Backlog and kanban
+    board, epics, sprint planning, a nested wiki with full-text search, flow metrics.
+    Nothing an agent does is buried in a log.
   </Card>
   <Card title="Built for fleets" icon="seti:notebook">
-    An agent registry, file claims, and coordination messages let many agents work
-    the same repo in parallel without colliding.
+    An agent registry, file claims and coordination messages let many agents work the
+    same repo in parallel without colliding.
   </Card>
   <Card title="Runs on the edge" icon="cloudflare">
-    One Cloudflare Worker: Hono, D1 for data, KV for cache, R2 for attachments.
-    No servers, no containers. Deploy to your own account in minutes.
+    One Cloudflare Worker: Hono, D1 for data, KV for cache, R2 for attachments. No
+    servers, no containers. Deploy to your own account in minutes.
   </Card>
 </CardGrid>
 
 ## Self-host in minutes
 
-Deploy to your own Cloudflare account from a config-only repo — wrangler
-auto-provisions D1, KV, and R2, applies migrations, and ships. One button, one
-command, or hand the repo to an agent and say *"deploy projektor to my Cloudflare
-account."*
+Deploy to your own Cloudflare account from a config-only repo. Wrangler provisions D1,
+KV and R2, applies the migrations and ships. Use the one-click button, run one command,
+or hand the repo to an agent and say *"deploy projektor to my Cloudflare account."*
 
 [Your first ten minutes →](/projektor/guides/getting-started/) ·
 [Why Projektor looks like this →](/projektor/agents/agent-workflows/) ·
