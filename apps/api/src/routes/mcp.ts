@@ -202,7 +202,10 @@ function getAllTools(workspaceId: string): MCPTool[] {
 	return [...coreMCPTools, ...pluginRegistry.getToolsForWorkspace(workspaceId)];
 }
 
-const coreMCPTools: MCPTool[] = [
+// Exported for the parity test (src/test/mcp-parity.node.test.ts), which asserts this
+// array agrees with mcp/catalog.ts on both membership and order. Not part of the
+// runtime surface — nothing else should import it.
+export const coreMCPTools: MCPTool[] = [
 	...workspacesTools,
 	...groupsTools,
 	...projectsTools,
@@ -210,13 +213,13 @@ const coreMCPTools: MCPTool[] = [
 	...issuesTools,
 	...issueLinksTools,
 	...commentsTools,
-	...feedbackTools,
 	...wikiTools,
 	...filesTools,
 	...taskTypesTools,
 	...taskStatusesTools,
 	...customFieldsTools,
 	...sprintsTools,
+	...feedbackTools,
 	...agentsTools,
 	...fileClaimsTools,
 	...issueLeasesTools,
