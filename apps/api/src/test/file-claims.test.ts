@@ -306,4 +306,53 @@ describe("File Claims API", () => {
 			.all();
 		expect(rows.results).toHaveLength(0);
 	});
+
+	async function listMessagesForScope(scope: string) {
+		const res = await SELF.fetch(
+			`http://localhost/api/agent-messages?scope=${encodeURIComponent(scope)}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		return (await res.json()) as { items: Array<{ body: string }> };
+	}
+
+	// PROJ-624: rejection (force=false) must not post any agent message — this was
+	// previously mis-stated in the project's own docs as a message-posting path.
+	it("PROJ-624: a rejected claim (force=false) posts no agent message to any scope", async () => {
+		await claimFiles({ issueId, paths: ["src/no-message-on-reject.ts"] });
+
+		const issue2 = await seedIssue(workspaceId, projectId, userId, {
+			title: "Rejected, no message",
+		});
+		const res = await claimFiles({ issueId: issue2.id, paths: ["src/no-message-on-reject.ts"] });
+		expect(res.status).toBe(409);
+
+		const holderMessages = await listMessagesForScope(`issue:${issueId}`);
+		expect(holderMessages.items).toHaveLength(0);
+
+		const rejectedMessages = await listMessagesForScope(`issue:${issue2.id}`);
+		expect(rejectedMessages.items).toHaveLength(0);
+	});
+
+	// PROJ-624: force:true DOES post a message, scoped to the issue that ends up
+	// holding the claim after the override (not the prior holder that lost it).
+	it("PROJ-624: force:true override posts a message scoped to the now-holding issue", async () => {
+		await claimFiles({ issueId, paths: ["src/message-on-force.ts"] });
+
+		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Force claims" });
+		const forceRes = await claimFiles({
+			issueId: issue2.id,
+			paths: ["src/message-on-force.ts"],
+			force: true,
+		});
+		expect(forceRes.status).toBe(201);
+
+		const messages = await listMessagesForScope(`issue:${issue2.id}`);
+		expect(messages.items).toHaveLength(1);
+		expect(messages.items[0].body).toContain("src/message-on-force.ts");
+		expect(messages.items[0].body).toContain(issueId);
+
+		const priorHolderMessages = await listMessagesForScope(`issue:${issueId}`);
+		expect(priorHolderMessages.items).toHaveLength(0);
+	});
 });
