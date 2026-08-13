@@ -176,7 +176,7 @@ When adding/changing a domain (issues, projects, wiki, comments, …):
 
 ## Conventions & gotchas
 
-- **Adding a migration?** After adding a new `.sql` file to `packages/db/migrations/`, you must also add a corresponding `?raw` import to `apps/api/src/test/migrations.ts` and append it to the `MIGRATIONS` array. Without this the test DB won't have the new table and integration tests will silently fail or error.
+- **Adding a migration?** After adding a new `.sql` file to `packages/db/migrations/`, you must also add a corresponding `?raw` import to `apps/api/src/test/migrations.ts` and append it to the `MIGRATIONS` array. Without this the test DB won't have the new table and integration tests will silently fail or error. Migrations are **hand-written SQL** — drizzle-kit's generator is deliberately not wired up (PROJ-643): its journal was abandoned after `0001`, so `drizzle-kit generate` diffed against a snapshot ~52 migrations stale and emitted a full `CREATE TABLE` for every table, which would fail against any non-empty database. Don't re-add it without re-baselining the snapshot first.
 - **camelCase at the boundary, snake_case in the DB.** Input schemas use `assigneeId`, `parentId`, etc.; the service maps to the `assignee_id` column. Keep both surfaces on the same naming.
 - **JSON columns** (`labels`, `scopes`) are stored via `JSON.stringify` and returned as raw JSON strings — callers `JSON.parse` on read. There is no automatic (de)serialization.
 - **Timestamps** are unix seconds: `Math.floor(Date.now() / 1000)`.
