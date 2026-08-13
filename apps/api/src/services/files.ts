@@ -6,7 +6,7 @@ import {
 	ListAttachmentsSchema,
 	RecordFileUploadSchema,
 } from "../schemas/files";
-import { visibleProjectSqlFragment } from "./access";
+import { canWriteProject, requireProjectAccess, visibleProjectSqlFragment } from "./access";
 import {
 	ForbiddenError,
 	NotFoundError,
@@ -24,6 +24,60 @@ import * as wikiService from "./wiki";
 // so resolving a project to check per-project role isn't possible in general.
 function requireAttachmentWrite(ctx: ServiceCtx): void {
 	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+}
+
+// PROJ-639: nothing resolved an attachment to the project it hangs off, so project
+// visibility was never consulted on any attachment path. Workspace membership alone got
+// you the filename, size and *bytes* of every attachment in the workspace, including
+// those on issues and wiki pages in projects you hold no grant on.
+//
+// entity_id is deliberately not a foreign key (see requireAttachmentWrite), so it can
+// reference a row that does not exist. The guard is therefore "no resolvable owning row
+// is invisible" rather than "the owning row is visible": an unresolvable entity_id has no
+// project and so nothing to authorise, and stays workspace-scoped exactly as before.
+// Inverting that — requiring a visible owner — would make every free-floating attachment
+// vanish from its own uploader's view. Wiki pages with a null project_id are
+// workspace-level and visible to every member.
+//
+// Queries applying this must alias `attachments` as `a`. Returns null for workspace
+// owner/admin, who see every project.
+function ownerVisibleFilter(ctx: ServiceCtx): { sql: string; params: unknown[] } | null {
+	const issue = visibleProjectSqlFragment(ctx, "i.project_id");
+	const page = visibleProjectSqlFragment(ctx, "p.project_id");
+	if (!issue || !page) return null;
+	return {
+		sql: `NOT EXISTS (SELECT 1 FROM issues i
+		        WHERE a.entity_type = 'issue' AND i.id = a.entity_id AND NOT ${issue.sql})
+		      AND NOT EXISTS (SELECT 1 FROM wiki_pages p
+		        WHERE a.entity_type = 'wiki_page' AND p.id = a.entity_id
+		          AND p.project_id IS NOT NULL AND NOT ${page.sql})`,
+		params: [...issue.params, ...page.params],
+	};
+}
+
+/**
+ * Read-side twin of `ownerVisibleFilter` for the write paths, which are keyed by
+ * (entityType, entityId) rather than by attachment id. Resolves the owning row's project
+ * and requires the caller both to see it and to hold write rights inside it — planting an
+ * attachment on an issue in a project you were never granted is the write-side half of
+ * the same hole. An entity_id that resolves to nothing is left to the flat
+ * `requireAttachmentWrite` guard, for the reason given above.
+ */
+async function assertEntityWritable(
+	ctx: ServiceCtx,
+	entityType: "issue" | "wiki_page",
+	entityId: string
+): Promise<void> {
+	const table = entityType === "issue" ? "issues" : "wiki_pages";
+	const row = await ctx.db
+		.prepare(`SELECT project_id FROM ${table} WHERE id = ? AND workspace_id = ?`)
+		.bind(entityId, ctx.workspaceId)
+		.first<{ project_id: string | null }>();
+
+	if (!row?.project_id) return;
+	if (!canWriteProject(await requireProjectAccess(ctx, row.project_id))) {
+		throw new ForbiddenError("Insufficient permissions");
+	}
 }
 
 export interface AttachmentDto {
@@ -108,6 +162,8 @@ export async function listAttachments(ctx: ServiceCtx, input: unknown): Promise<
 		? `w.id = a.linked_wiki_page_id AND w.deleted_at IS NULL AND (w.project_id IS NULL OR ${visible.sql})`
 		: "w.id = a.linked_wiki_page_id AND w.deleted_at IS NULL";
 
+	const owner = ownerVisibleFilter(ctx);
+
 	const rows = await ctx.db
 		.prepare(
 			`SELECT a.id, a.kind, a.filename, a.content_type, a.size, a.url, a.created_at,
@@ -116,9 +172,16 @@ export async function listAttachments(ctx: ServiceCtx, input: unknown): Promise<
 	     FROM attachments a
 	     LEFT JOIN wiki_pages w ON ${joinCond}
 	     WHERE a.workspace_id = ? AND a.entity_type = ? AND a.entity_id = ?
+	       ${owner ? `AND ${owner.sql}` : ""}
 	     ORDER BY a.created_at ASC`
 		)
-		.bind(...(visible ? visible.params : []), ctx.workspaceId, entityType, entityId)
+		.bind(
+			...(visible ? visible.params : []),
+			ctx.workspaceId,
+			entityType,
+			entityId,
+			...(owner ? owner.params : [])
+		)
 		.all<AttachmentRow>();
 
 	return (rows.results ?? []).map(toDto);
@@ -133,6 +196,7 @@ export async function createLinkAttachment(
 	const data = parsed.data;
 
 	requireAttachmentWrite(ctx);
+	await assertEntityWritable(ctx, data.entityType, data.entityId);
 
 	if (data.kind === "wiki_ref") {
 		// PROJ-311: getWikiPage enforces project-grant visibility, not just existence —
@@ -211,6 +275,7 @@ export async function recordUpload(ctx: ServiceCtx, input: unknown): Promise<{ i
 	const { entityType, entityId, filename, contentType, size, r2Key } = parsed.data;
 
 	requireAttachmentWrite(ctx);
+	await assertEntityWritable(ctx, entityType, entityId);
 
 	const id = crypto.randomUUID();
 	const now = Math.floor(Date.now() / 1000);
@@ -243,11 +308,14 @@ export async function getAttachmentForDownload(
 	ctx: ServiceCtx,
 	id: string
 ): Promise<{ r2Key: string; filename: string; contentType: string }> {
+	const owner = ownerVisibleFilter(ctx);
+
 	const row = await ctx.db
 		.prepare(
-			"SELECT r2_key, filename, content_type FROM attachments WHERE id = ? AND workspace_id = ?"
+			`SELECT a.r2_key, a.filename, a.content_type FROM attachments a
+	     WHERE a.id = ? AND a.workspace_id = ? ${owner ? `AND ${owner.sql}` : ""}`
 		)
-		.bind(id, ctx.workspaceId)
+		.bind(id, ctx.workspaceId, ...(owner ? owner.params : []))
 		.first<{ r2_key: string; filename: string; content_type: string }>();
 
 	if (!row) throw new NotFoundError("Not found");
@@ -263,6 +331,7 @@ export async function getAttachment(ctx: ServiceCtx, input: unknown): Promise<At
 	const joinCond = visible
 		? `w.id = a.linked_wiki_page_id AND w.deleted_at IS NULL AND (w.project_id IS NULL OR ${visible.sql})`
 		: "w.id = a.linked_wiki_page_id AND w.deleted_at IS NULL";
+	const owner = ownerVisibleFilter(ctx);
 
 	const row = await ctx.db
 		.prepare(
@@ -271,9 +340,15 @@ export async function getAttachment(ctx: ServiceCtx, input: unknown): Promise<At
 	            w.project_id AS wiki_page_project_id
 	     FROM attachments a
 	     LEFT JOIN wiki_pages w ON ${joinCond}
-	     WHERE a.workspace_id = ? AND a.id = ?`
+	     WHERE a.workspace_id = ? AND a.id = ?
+	       ${owner ? `AND ${owner.sql}` : ""}`
 		)
-		.bind(...(visible ? visible.params : []), ctx.workspaceId, parsed.data.id)
+		.bind(
+			...(visible ? visible.params : []),
+			ctx.workspaceId,
+			parsed.data.id,
+			...(owner ? owner.params : [])
+		)
 		.first<AttachmentRow>();
 
 	if (!row) throw new NotFoundError("Not found");
@@ -289,10 +364,14 @@ export async function deleteAttachment(
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 
 	requireAttachmentWrite(ctx);
+	const owner = ownerVisibleFilter(ctx);
 
 	const row = await ctx.db
-		.prepare("SELECT r2_key FROM attachments WHERE id = ? AND workspace_id = ?")
-		.bind(parsed.data.id, ctx.workspaceId)
+		.prepare(
+			`SELECT a.r2_key FROM attachments a
+	     WHERE a.id = ? AND a.workspace_id = ? ${owner ? `AND ${owner.sql}` : ""}`
+		)
+		.bind(parsed.data.id, ctx.workspaceId, ...(owner ? owner.params : []))
 		.first<{ r2_key: string }>();
 
 	if (!row) throw new NotFoundError("Not found");

@@ -5,6 +5,8 @@ import {
 	type JsonRpcError,
 	type JsonRpcResult,
 	seedFixture,
+	seedGroupGrant,
+	seedIssue,
 	seedMember,
 	seedProject,
 	seedToken,
@@ -918,5 +920,285 @@ describe("Files MCP tools", () => {
 			authHeaders(viewer.token, workspace.slug)
 		)) as JsonRpcError;
 		expect(res.error).toBeDefined();
+	});
+});
+
+// PROJ-639: an attachment hangs off an issue or a wiki page, and those live in projects
+// that are default-deny. Nothing resolved that chain, so workspace membership alone got
+// you the filename, size and bytes of every attachment in the workspace.
+describe("Attachment project visibility", () => {
+	let slug: string;
+	let workspaceId: string;
+	let memberToken: string;
+	let memberId: string;
+	let adminToken: string;
+	// A project the member holds no grant on, with an issue and an attachment on it.
+	let hiddenIssueId: string;
+	let hiddenAttachmentId: string;
+	let hiddenR2Key: string;
+	// A project the member can write.
+	let grantedProjectId: string;
+
+	async function seedAttachment(entityType: string, entityId: string, filename: string) {
+		const id = crypto.randomUUID();
+		const r2Key = `${workspaceId}/${crypto.randomUUID()}`;
+		await env.R2.put(r2Key, "secret bytes");
+		await env.DB.prepare(
+			`INSERT INTO attachments (id, workspace_id, kind, r2_key, filename, content_type, size,
+	       entity_type, entity_id, created_by_id, created_at)
+	     VALUES (?, ?, 'file', ?, ?, 'text/plain', 12, ?, ?, ?, ?)`
+		)
+			.bind(
+				id,
+				workspaceId,
+				r2Key,
+				filename,
+				entityType,
+				entityId,
+				memberId,
+				Math.floor(Date.now() / 1000)
+			)
+			.run();
+		return { id, r2Key };
+	}
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+		memberToken = fixture.token;
+		memberId = fixture.user.id;
+
+		const admin = await seedUser(`admin-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		await seedMember(workspaceId, admin.id, "admin");
+		adminToken = await seedToken(workspaceId, admin.id);
+
+		const granted = await seedProject(workspaceId, "OPEN");
+		grantedProjectId = granted.id;
+		await seedGroupGrant(workspaceId, memberId, granted.id, "member");
+
+		const hidden = await seedProject(workspaceId, "SECRET");
+		const issue = await seedIssue(workspaceId, hidden.id, admin.id, { title: "Hidden issue" });
+		hiddenIssueId = issue.id;
+		const att = await seedAttachment("issue", issue.id, "confidential.txt");
+		hiddenAttachmentId = att.id;
+		hiddenR2Key = att.r2Key;
+	});
+
+	const asMember = () => authHeaders(memberToken, slug);
+
+	it("hides attachments on an issue in a project the member has no grant on", async () => {
+		const res = await SELF.fetch(
+			`http://localhost/api/files?entityType=issue&entityId=${hiddenIssueId}`,
+			{ headers: asMember() }
+		);
+		expect(res.status).toBe(200);
+		// The filename alone is the leak this closes — "acquisition-terms.pdf" on a ticket
+		// you cannot see tells you plenty without the bytes.
+		expect(await res.json()).toEqual([]);
+	});
+
+	it("404s the metadata read for an attachment on an invisible issue", async () => {
+		const res = await SELF.fetch(`http://localhost/api/files/${hiddenAttachmentId}/metadata`, {
+			headers: asMember(),
+		});
+		expect(res.status).toBe(404);
+	});
+
+	it("404s the download rather than streaming the bytes", async () => {
+		const res = await SELF.fetch(`http://localhost/api/files/${hiddenAttachmentId}`, {
+			headers: asMember(),
+		});
+		expect(res.status).toBe(404);
+		// Assert on the body too: the route 404s separately when the R2 object is missing,
+		// so a status check alone would pass even if authz were bypassed and the object
+		// simply absent. This proves the row was never handed over.
+		expect(await res.text()).not.toContain("secret bytes");
+	});
+
+	it("404s the delete and leaves the R2 object intact", async () => {
+		const res = await SELF.fetch(`http://localhost/api/files/${hiddenAttachmentId}`, {
+			method: "DELETE",
+			headers: asMember(),
+		});
+		expect(res.status).toBe(404);
+		expect(await env.R2.get(hiddenR2Key)).not.toBeNull();
+		const row = await env.DB.prepare("SELECT id FROM attachments WHERE id = ?")
+			.bind(hiddenAttachmentId)
+			.first();
+		expect(row).not.toBeNull();
+	});
+
+	it("hides attachments on a wiki page in an invisible project, but not workspace-level ones", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const hiddenProject = await env.DB.prepare(
+			"SELECT id FROM projects WHERE workspace_id = ? AND key = 'SECRET'"
+		)
+			.bind(workspaceId)
+			.first<{ id: string }>();
+
+		const pages: Record<string, string> = {
+			scoped: crypto.randomUUID(),
+			global: crypto.randomUUID(),
+		};
+		for (const [name, id] of Object.entries(pages)) {
+			await env.DB.prepare(
+				`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content,
+		       parent_id, created_by_id, updated_by_id, created_at, updated_at)
+		     VALUES (?, ?, ?, ?, ?, '', NULL, ?, ?, ?, ?)`
+			)
+				.bind(
+					id,
+					workspaceId,
+					name === "scoped" ? hiddenProject?.id : null,
+					`page-${name}-${id.slice(0, 8)}`,
+					name,
+					memberId,
+					memberId,
+					now,
+					now
+				)
+				.run();
+			await seedAttachment("wiki_page", id, `${name}.txt`);
+		}
+
+		const scoped = await SELF.fetch(
+			`http://localhost/api/files?entityType=wiki_page&entityId=${pages.scoped}`,
+			{ headers: asMember() }
+		);
+		expect(await scoped.json()).toEqual([]);
+
+		// A null project_id is a workspace-level page. Filtering these out too would be a
+		// silent regression that the invisible-project assertions above cannot catch.
+		const global = await SELF.fetch(
+			`http://localhost/api/files?entityType=wiki_page&entityId=${pages.global}`,
+			{ headers: asMember() }
+		);
+		expect(((await global.json()) as unknown[]).length).toBe(1);
+	});
+
+	it("still shows the attachment to a workspace admin", async () => {
+		// The filter must be scoped to grant-less members; an admin losing access would be
+		// this fix overshooting into a denial of service.
+		const list = await SELF.fetch(
+			`http://localhost/api/files?entityType=issue&entityId=${hiddenIssueId}`,
+			{ headers: authHeaders(adminToken, slug) }
+		);
+		expect(((await list.json()) as unknown[]).length).toBe(1);
+
+		const meta = await SELF.fetch(`http://localhost/api/files/${hiddenAttachmentId}/metadata`, {
+			headers: authHeaders(adminToken, slug),
+		});
+		expect(meta.status).toBe(200);
+	});
+
+	it("still lists an attachment whose entity_id resolves to nothing", async () => {
+		// entity_id is not a foreign key, so free-floating attachments are legal and have no
+		// project to authorise against. Requiring a *visible* owner rather than the absence
+		// of an invisible one would make these vanish from their own uploader's view.
+		const orphanId = crypto.randomUUID();
+		await seedAttachment("issue", orphanId, "orphan.txt");
+
+		const res = await SELF.fetch(
+			`http://localhost/api/files?entityType=issue&entityId=${orphanId}`,
+			{ headers: asMember() }
+		);
+		expect(((await res.json()) as Array<{ filename: string }>).map((a) => a.filename)).toEqual([
+			"orphan.txt",
+		]);
+	});
+
+	it("rejects uploading onto an issue in an invisible project without orphaning the R2 object", async () => {
+		const before = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM attachments WHERE workspace_id = ?"
+		)
+			.bind(workspaceId)
+			.first<{ n: number }>();
+
+		const form = new FormData();
+		form.append("file", new File(["planted"], "planted.txt", { type: "text/plain" }));
+		form.append("entityType", "issue");
+		form.append("entityId", hiddenIssueId);
+		const res = await SELF.fetch("http://localhost/api/files", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${memberToken}`, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		// 404, not 403: an invisible project 404s so its existence never leaks (see
+		// requireProjectAccess).
+		expect(res.status).toBe(404);
+
+		const after = await env.DB.prepare(
+			"SELECT COUNT(*) AS n FROM attachments WHERE workspace_id = ?"
+		)
+			.bind(workspaceId)
+			.first<{ n: number }>();
+		expect(after?.n).toBe(before?.n);
+
+		// The route puts bytes in R2 before recordUpload can reject, so it must clean up or
+		// every rejected upload leaves a billable orphan.
+		const keys = await env.R2.list({ prefix: `${workspaceId}/` });
+		expect(keys.objects.map((o) => o.key)).toEqual([hiddenR2Key]);
+	});
+
+	it("rejects a link attachment onto an issue in an invisible project", async () => {
+		const res = await SELF.fetch("http://localhost/api/files/links", {
+			method: "POST",
+			headers: asMember(),
+			body: JSON.stringify({
+				kind: "url",
+				entityType: "issue",
+				entityId: hiddenIssueId,
+				url: "https://example.com",
+			}),
+		});
+		expect(res.status).toBe(404);
+	});
+
+	it("rejects an upload onto a project where the member's grant is viewer-only", async () => {
+		const viewerUser = await seedUser(`viewer-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		await seedMember(workspaceId, viewerUser.id, "member");
+		await seedGroupGrant(workspaceId, viewerUser.id, grantedProjectId, "viewer");
+		const viewerToken = await seedToken(workspaceId, viewerUser.id);
+		const issue = await seedIssue(workspaceId, grantedProjectId, memberId, { title: "Open issue" });
+
+		const form = new FormData();
+		form.append("file", new File(["nope"], "nope.txt", { type: "text/plain" }));
+		form.append("entityType", "issue");
+		form.append("entityId", issue.id);
+		const res = await SELF.fetch("http://localhost/api/files", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${viewerToken}`, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		// 403, not 404: the project is visible to them, the write is what's refused. Their
+		// workspace role is `member`, so the flat requireAttachmentWrite guard passes and only
+		// the per-project grant can reject this.
+		expect(res.status).toBe(403);
+	});
+
+	it("still allows an upload onto an issue in a project the member can write", async () => {
+		const issue = await seedIssue(workspaceId, grantedProjectId, memberId, { title: "Open issue" });
+		const form = new FormData();
+		form.append("file", new File(["fine"], "fine.txt", { type: "text/plain" }));
+		form.append("entityType", "issue");
+		form.append("entityId", issue.id);
+		const res = await SELF.fetch("http://localhost/api/files", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${memberToken}`, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		expect(res.status).toBe(201);
+	});
+
+	it("hides the attachment from the MCP surface too", async () => {
+		const res = (await mcpCall(
+			workspaceId,
+			"tools/call",
+			{ name: "get_attachment", arguments: { id: hiddenAttachmentId } },
+			asMember()
+		)) as JsonRpcError;
+		expect(res.error).toBeDefined();
+		expect(res.error.code).toBe(-32000);
 	});
 });
