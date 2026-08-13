@@ -114,4 +114,7 @@ you can't evaluate them without flow metrics. Measure first.
 
 For how these principles play out in practice — the multi-agent loop,
 coordination primitives, and the tool catalog — see
-[Agentic workflows](/projektor/agents/agent-workflows/).
+[Agentic workflows](/projektor/agents/agent-workflows/). For the coordination layer
+itself examined as a designed distributed system — identity, leases, file claims,
+stale reclaim, conflict routing — see
+[Coordination model](/projektor/philosophy/coordination-model/).

@@ -1,6 +1,6 @@
 import { cloudflareTest } from '@cloudflare/vitest-pool-workers'
 import { readFileSync } from 'node:fs'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 // Wrangler 4 auto-loads a developer's local `apps/api/.dev.vars` into the test
 // runtime, which would override the deterministic values in wrangler.test.toml
@@ -20,25 +20,47 @@ function testTomlVars(): Record<string, string> {
 }
 
 export default defineConfig({
-  // vitest-pool-workers ≥0.13 (vitest 4) exposes the Workers test runtime as a
-  // plugin instead of `poolOptions.workers` / `defineWorkersConfig`.
-  plugins: [
-    cloudflareTest({
-      wrangler: { configPath: './wrangler.test.toml' },
-      miniflare: {
-        bindings: {
-          // wrangler.test.toml is the source of truth for the test env.
-          ...testTomlVars(),
-          // The dev-only auth bypass must stay OFF in tests even if a
-          // developer's .dev.vars sets DEV_USER_EMAIL (wrangler 4 loads
-          // .dev.vars into the test runtime). Empty = bypass disabled.
-          DEV_USER_EMAIL: '',
+  test: {
+    // Two projects because they need different runtimes. Behavioural tests run in
+    // workerd (the real Worker runtime, D1 bindings, miniflare). Source-parity tests
+    // (*.node.test.ts) read the repo's own source files off disk to prove the four
+    // tool surfaces agree — workerd has no node:fs, so they can't run there.
+    projects: [
+      {
+        // vitest-pool-workers ≥0.13 (vitest 4) exposes the Workers test runtime as a
+        // plugin instead of `poolOptions.workers` / `defineWorkersConfig`.
+        plugins: [
+          cloudflareTest({
+            wrangler: { configPath: './wrangler.test.toml' },
+            miniflare: {
+              bindings: {
+                // wrangler.test.toml is the source of truth for the test env.
+                ...testTomlVars(),
+                // The dev-only auth bypass must stay OFF in tests even if a
+                // developer's .dev.vars sets DEV_USER_EMAIL (wrangler 4 loads
+                // .dev.vars into the test runtime). Empty = bypass disabled.
+                DEV_USER_EMAIL: '',
+              },
+            },
+          }),
+        ],
+        test: {
+          name: 'workers',
+          include: ['src/**/*.test.ts'],
+          // Spread the defaults: setting `exclude` replaces them wholesale, which
+          // would drop node_modules/dist from the ignore list.
+          exclude: [...configDefaults.exclude, 'src/**/*.node.test.ts'],
+          setupFiles: ['./src/test/setup.ts'],
         },
       },
-    }),
-  ],
-  test: {
-    setupFiles: ['./src/test/setup.ts'],
+      {
+        test: {
+          name: 'node',
+          environment: 'node',
+          include: ['src/**/*.node.test.ts'],
+        },
+      },
+    ],
     // workerd has no node:inspector, so the v8 coverage provider can't attach —
     // use istanbul (source instrumentation) instead, per @cloudflare/vitest-pool-workers.
     coverage: {
@@ -62,6 +84,10 @@ export default defineConfig({
     // These are expected — every failing test asserts the resulting JSON-RPC
     // error and passes. Suppress only our discriminated ServiceError kinds;
     // any other unhandled error still fails the run.
+    //
+    // Must stay at root, not inside the `projects` entry above: vitest 4 only honours
+    // onUnhandledError from the root config, and moving it into the workers project
+    // silently stops suppressing (224/224 tests pass but the file still fails).
     onUnhandledError(error: Readonly<{ kind?: string }>) {
       const KNOWN = ['validation', 'not_found', 'forbidden', 'conflict']
       if (error?.kind && KNOWN.includes(error.kind)) return false

@@ -27,7 +27,23 @@ State lives entirely on Cloudflare's edge. **D1** (SQLite) holds the relational 
 workspaces, users, projects, issues, comments, wiki pages, tokens, activity, and
 revisions. **KV** caches Access certs and email lookups. **R2** holds
 file attachments. There are no servers and no containers: the whole system deploys as a
-Worker plus its bound data stores, which is what makes a five-minute self-host possible.
+Worker plus its bound data stores.
+
+That storage choice is load-bearing, not incidental. Coordination state — issue leases,
+file claims, workspace membership — is shared, durable, and workspace-scoped in D1,
+reachable by any client that can make an HTTPS request. Two agents on two machines, or
+an agent and a CI job, read and write the same lease and claim rows and see each other's
+state immediately. A tool that keeps this state in a local SQLite file or an in-repo
+JSONL log cannot do that: two machines don't share a filesystem, and a CI job doesn't
+have a persistent one to write to. That's a ceiling on what a local-first design can
+coordinate — a whole class of cross-machine and agent/CI fleets is unreachable no matter
+how good its primitives are — not a convenience Projektor happens to also offer.
+
+Deployment is also operationally simple, which is a separate, smaller claim: a release
+artifact plus a config-only repo as the distribution unit, a pinned version, wrangler
+auto-provisioning D1/KV/R2, migrations applied automatically at deploy, `/bootstrap`
+gated to non-production environments, and an agent-executable runbook. See
+[Deploying & operating](/projektor/guides/deploying/) for the full mechanics.
 
 The sections below give the picture in increasing detail — first a diagram, then a
 layer-by-layer breakdown, then the request flow through a single agent call.
@@ -105,6 +121,36 @@ surface** for agents. The two are usually kept at parity (see `AGENTS.md`'s
 service-layer contract), but a small, documented subset of REST endpoints — file
 attachments, tokens, public share links, feedback submission — has no MCP
 equivalent and is safe to depend on; see [REST endpoints](/projektor/agents/rest-endpoints/).
+
+## Platform constraints
+
+A few Cloudflare platform limits are encoded directly in the service layer, not just
+implied by the runtime:
+
+- **D1 rejects any query with more than 100 bound parameters.** A query whose parameter
+  count scales with an input array — `inArray`, a raw `IN (...)`, a batched mutation
+  keyed by ids — throws once the array is large enough. This is invisible in tests: the
+  vitest runner backs D1 with SQLite, whose limit is 32766, so an un-chunked query passes
+  CI and only fails against real D1. `inChunks` in `apps/api/src/services/sql.ts` splits
+  such queries into chunks of 90 (leaving headroom for the query's other predicates), and
+  is used wherever a query binds a caller- or row-scaled array, e.g.
+  `apps/api/src/services/issue-links.ts` and `apps/api/src/services/wiki-links.ts`.
+- **D1 has no interactive transactions.** A read-then-insert can race: two concurrent
+  claims can each see "one slot free" and both proceed. `claimIssue` in
+  `apps/api/src/services/issue-leases.ts` (PROJ-290) avoids this by folding both
+  atomicity guards — a per-issue uniqueness check and a per-project WIP-cap count — into
+  a single INSERT, relying on SQLite's write lock rather than a transaction boundary.
+  Multi-statement atomic writes elsewhere use `ctx.db.batch()` instead, e.g.
+  `apps/api/src/services/wiki.ts`.
+- **D1 limits compound SELECT to a small number of terms.** `fetchActivityRows` in
+  `apps/api/src/services/project-activity.ts` runs one query per event category and
+  merges and sorts the results in JS rather than a single UNION.
+- **A Worker isolate has a 128 MB memory ceiling.**
+  `apps/api/src/services/wiki-export.ts` bounds wiki export size against it — a hard cap
+  of 500 pages and 100 MB of attachments per export, on top of the existing 50 MB
+  per-file upload cap in `apps/api/src/services/files.ts`. A streaming zip build is the
+  primary defense against buffering the whole export into memory; these caps are a
+  fast-failing backstop against pathological page counts or attachment totals.
 
 ## Request flow
 

@@ -1,5 +1,8 @@
 import { env, SELF } from "cloudflare:test";
+import { drizzle, schema } from "@projektor/db";
 import { beforeEach, describe, expect, it } from "vitest";
+import { fetchAgentWipCap } from "../services/issue-leases";
+import type { ServiceCtx } from "../services/types";
 import { authHeaders, seedFixture, seedIssue, seedProjectFixture } from "./helpers";
 
 // cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
@@ -271,6 +274,34 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		expect(res.status).toBe(409);
 		const body = (await res.json()) as { error?: string };
 		expect(JSON.stringify(body)).toMatch(/WIP limit/i);
+	});
+
+	// PROJ-624: the Nth claim (at the cap) must succeed and the (N+1)th must be
+	// rejected with an error that names the actual configured cap — read from
+	// fetchAgentWipCap (exported), not retyped as a literal, so the assertion
+	// stays honest if DEFAULT_AGENT_WIP_LIMIT ever changes.
+	it("PROJ-624: claim at the cap succeeds; the (cap+1)th is rejected and the error names the cap", async () => {
+		const orm = drizzle(env.DB, { schema });
+		const cap = await fetchAgentWipCap(orm, { workspaceId } as ServiceCtx, projectId);
+
+		const agent = await registerAgent("worker");
+		const issues = await Promise.all(
+			Array.from({ length: cap + 1 }, (_, i) =>
+				seedIssue(workspaceId, projectId, userId, { title: `Cap ${i}` })
+			)
+		);
+
+		for (const issue of issues.slice(0, cap)) {
+			expect((await claim(issue.id, agent)).status).toBe(201);
+		}
+
+		const res = await claim(issues[cap].id, agent);
+		expect(res.status).toBe(409);
+		const body = (await res.json()) as { error?: string };
+		// Anchored to the phrase, not a bare `toContain(String(cap))`: the message
+		// also lists `cap` held issue UUIDs, and a single digit occurs in those by
+		// chance often enough that the loose form passes even if the cap is dropped.
+		expect(body.error).toMatch(new RegExp(`WIP limit reached \\(${cap}\\)`));
 	});
 
 	it("records a wip_cap_denials event when a claim is rejected over-cap (PROJ-342)", async () => {

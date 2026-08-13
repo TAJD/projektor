@@ -25,12 +25,27 @@ Required headers:
 Protocol: JSON-RPC 2.0 (MCP Streamable HTTP - not SSE)
 Methods: initialize  tools/list  tools/call
 
-## Core tools (13 essentials; 64 total - see https://tajd.github.io/projektor/agents/tool-catalog/)
+## Core tools (13 essentials; 113 total - see https://tajd.github.io/projektor/agents/tool-catalog/)
 
 Projects:   list_projects  create_project
 Issues:     list_issues  get_issue  create_issue  update_issue
 Comments:   list_comments  add_comment
 Wiki:       list_wiki_pages  search_wiki  get_wiki_page  create_wiki_page  update_wiki_page
+
+## Coordination (multi-agent)
+
+Claim before editing: claim_files (exact path strings, no globs) and claim_issue
+(work-item-level) are independent — you need both. Your session goes stale if you stop
+heartbeating: liveness TTL is 120s (ACTIVE_TTL, apps/api/src/services/agents.ts), and a
+stale session cannot claim. An issue lease held by a stale session is reclaimed by the
+next claimer automatically; file claims are NOT — they release only on release_files, on
+end_agent, or when someone claims with force. Each project caps concurrent agent-leased
+issues (DEFAULT_AGENT_WIP_LIMIT = 3, admission control, not a rate limit). A refused
+claim does not notify the holder: it returns an error naming the holding issue and agent,
+so message them yourself with post_message. Every contended path is recorded either way.
+Workflow rules (definition of ready, state machine, human gates) live only at
+get_workflow / GET /api/workflow.
+See https://tajd.github.io/projektor/philosophy/coordination-model/ for the full model.
 
 ## Key docs
 

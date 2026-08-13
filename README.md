@@ -20,12 +20,49 @@ It holds issues, boards, sprints and a wiki, and it exposes
 so the agent files the ticket, moves it and writes the page instead of asking you to.
 The whole thing is one Cloudflare Worker in your own account.
 
-Other trackers were built for people and had agent access bolted on later. Git-file
-trackers such as beads are agent-native but live inside a single repo. Projektor is
-agent-native from the schema up, works across projects, and is cheap enough to leave
-running.
+## One work graph, not a tracker plus a sidecar
 
-## Every action, both surfaces
+Running a fleet of agents normally means assembling three things: a tracker for the
+work, a coordination layer so two agents do not edit the same file, and worktree
+tooling to keep their checkouts apart. That leaves two or three sources of truth about
+what is being worked on, and nothing that can answer a question spanning them.
+
+In Projektor the coordination state *is* the work graph. The lease is on the issue and
+the claim is on the file, in one schema behind one auth boundary:
+
+- **Issue leases** — an agent takes a work-item lease before starting, and a
+  per-project cap (`agent_wip_limit`, default 3) bounds how many issues the fleet can
+  hold at once. That is admission control on the backlog, not a rate limit: it decides
+  how much work is allowed to be in flight.
+- **File claims** — path-level claims stop two agents editing the same code. A refused
+  claim is rejected whole and names the issue and agent already holding the path, so the
+  blocked agent knows who to talk to, and every contended path is recorded.
+- **Liveness** — an issue lease is derived from its holder's heartbeat, so a lease whose
+  agent stopped reporting is reclaimed by the next claim in the same call. An agent that
+  crashes mid-ticket does not deadlock the backlog behind it. File claims are released on
+  session end or explicitly, not by TTL — the
+  [coordination model](https://tajd.github.io/projektor/philosophy/coordination-model/)
+  is explicit about that asymmetry.
+
+Because it is one graph, "which issue is this claim for" is a join, not an integration.
+The [coordination model](https://tajd.github.io/projektor/philosophy/coordination-model/)
+documents the design. [How Projektor differs](https://tajd.github.io/projektor/philosophy/alternatives/)
+compares it against beads, MCP Agent Mail, Linear and the worktree tools, and is honest
+about what each of those does better.
+
+## Contention is data
+
+When a claim collides, most systems return an error and forget it. Projektor writes the
+contended path to an event log — whether the claim was refused or forced through — and
+ranks it, so the code heatmap has two modes: where the fleet is *working*, and where the
+fleet is *colliding*.
+
+That closes a loop back into the backlog. A directory that shows up hot in contention
+week after week is telling you something about how the work is sliced — two tickets that
+keep fighting over the same module probably wanted to be one ticket, or the module
+wanted splitting. Refused claims are evidence about your plan, not just failures.
+
+## Both surfaces, checked mechanically
 
 REST and MCP are two doors into one service layer:
 
@@ -35,10 +72,20 @@ REST  /api/*         ─┐
 MCP   /mcp/:wsId    ─┘
 ```
 
-Routes and MCP tools are thin wrappers. The business logic and the SQL live in
-`services/`. That is what makes the parity claim hold: an agent is not driving a
-reduced API built for robots, it is calling the code the browser calls. Shipping a
-feature to one surface and not the other counts as a bug, not a backlog item.
+Routes and MCP tools are thin wrappers; the business logic and the SQL live in
+`services/`. An agent is not driving a reduced API built for robots, it is calling the
+code the browser calls.
+
+That used to be a convention held up by review. It is now a test: `mcp-parity.node.test.ts`
+cross-references every exported service function against the REST routes, the runtime MCP
+registry and the documented catalog, and fails the build on drift — including a catalog
+reordered without the dispatch table. Operations deliberately on one surface only are
+enumerated with a reason each, and the test fails if that list goes stale, so the
+exceptions stay few and visible rather than accumulating quietly.
+
+Every surface described here was used to build Projektor: the epics, the tickets, the
+coordination primitives and the wiki pages all carried their own development. The tool
+catalog is a discovered surface, not a designed one.
 
 ## You still run the project
 
@@ -48,9 +95,6 @@ revision history, flow metrics, and a feedback widget that turns user reports in
 issues. Nothing an agent does is buried in a log - it lands on the board, where you can
 read it, argue with it and move it.
 
-Agents get their own coordination primitives as well - a registry, file claims and
-messages - so several can work one repo without treading on each other.
-
 ## What is in it
 
 - **Issues** - status, priority, assignee, labels, parent/child hierarchy and
@@ -59,7 +103,8 @@ messages - so several can work one repo without treading on each other.
 - **Wiki** - nested markdown pages, full-text search, revision history.
 - **MCP server** - the primary surface, not an add-on. Any MCP agent connects; Claude
   Code does it with `claude mcp add`.
-- **Fleet coordination** - agent registry, file claims and messages for parallel agents.
+- **Fleet coordination** - agent registry, issue leases with a per-project WIP cap, file
+  claims, agent messages, and a contention heatmap over every contended path.
 - **Ops** - file attachments, workspaces, projects and members with roles, scoped API
   tokens, share links, installable PWA.
 
@@ -96,6 +141,8 @@ the protocol reference and the full tool catalog.
 | [Self-hosting](https://tajd.github.io/projektor/guides/self-hosting/) and [deploying](https://tajd.github.io/projektor/guides/deploying/) | Cloudflare setup, API token scopes, updates |
 | [MCP connection](https://tajd.github.io/projektor/agents/mcp-connection/) and [tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) | wiring an agent up, every tool it gets |
 | [Agentic workflows](https://tajd.github.io/projektor/agents/agent-workflows/) | how agents are meant to use the tracker |
+| [Coordination model](https://tajd.github.io/projektor/philosophy/coordination-model/) | leases, claims, liveness and contention as a designed system |
+| [How Projektor differs](https://tajd.github.io/projektor/philosophy/alternatives/) | compared against beads, MCP Agent Mail, Hiveship, Linear |
 | [System design](https://tajd.github.io/projektor/architecture/system-design/) | the two surfaces and the service layer beneath them |
 | [AGENTS.md](./AGENTS.md) | contributor guide: conventions, file layout, the service-layer contract |
 
