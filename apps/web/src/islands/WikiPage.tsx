@@ -428,7 +428,7 @@ function renderHighlightedExcerpt(excerpt: string) {
 	const parts = excerpt.split(/(\*\*[^*]*\*\*)/g).filter((part) => part !== "");
 	return parts.map((part, i) =>
 		part.startsWith("**") && part.endsWith("**") ? (
-			<mark key={i} class="bg-accent/30 text-inherit rounded-sm">
+			<mark key={i} class="bg-accent-soft text-inherit rounded-xs">
 				{part.slice(2, -2)}
 			</mark>
 		) : (

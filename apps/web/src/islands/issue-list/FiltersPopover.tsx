@@ -390,7 +390,7 @@ export default function FiltersPopover({
 						border: "1px solid var(--border)",
 						borderRadius: "0.5rem",
 						padding: "0.75rem",
-						boxShadow: "var(--shadow-sm)",
+						boxShadow: "var(--elevation-sm)",
 						minWidth: "16rem",
 						// PROJ-588 review: the left clamp assumes POPOVER_WIDTH (256px); without a
 						// matching maxWidth, content wider than that could still push the right edge

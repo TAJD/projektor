@@ -1,5 +1,8 @@
 ---
 import ShareView from '../../islands/ShareView';
+// This page deliberately bypasses Base.astro (no sidebar, no auth chrome), so it has to
+// pull the Tailwind entry point in itself — ShareView renders its body into `.prose`.
+import '../../styles/global.css';
 ---
 <!DOCTYPE html>
 <html lang="en">

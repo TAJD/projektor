@@ -89,7 +89,8 @@ describe("GroupManager rename", () => {
 			);
 			expect(patch).toBeTruthy();
 			expect(String(patch?.[0])).toContain("/groups/g1");
-			expect(JSON.parse(String((patch?.[1] as RequestInit).body))).toEqual({ name: "Platform" });
+			const init = patch?.[1] as RequestInit | undefined;
+			expect(JSON.parse(String(init?.body))).toEqual({ name: "Platform" });
 		});
 	});
 });

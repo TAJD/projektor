@@ -1,0 +1,77 @@
+/* Tailwind v4 entry point. Replaces the @astrojs/tailwind integration, which injected a
+   stylesheet into every page implicitly; v4 is driven from CSS, so this file has to be
+   imported by anything that renders Tailwind classes. Base.astro covers every page except
+   the standalone share view, which imports it directly. */
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* v3 declared a `content` glob over src for astro/tsx/ts/js. v4 auto-detects sources, but
+   the detection root is inferred rather than declared, so pin it at src/. The directory
+   form is deliberate: a brace glob makes Tailwind's CSS parser read the extension list as a
+   declaration block and fail with "Invalid declaration". Scanning the directory covers the
+   same set. */
+@source "../";
+
+/* The colour values live in Base.astro's :root / [data-theme='dark'] blocks (and in the
+   share page's own copy), which is what makes theme switching a pure custom-property swap
+   with no class toggling. This only teaches Tailwind the names, so `bg-accent` and
+   `text-text-muted` resolve to whichever theme is active.
+
+   v3 also set `darkMode: 'class'`; nothing used a `dark:` variant, because theming goes
+   through data-theme instead, so it is dropped rather than translated. */
+@theme {
+	--color-accent: var(--accent);
+	--color-bg: var(--bg);
+	--color-surface: var(--surface);
+	--color-text-base: var(--text);
+	--color-text-muted: var(--text-muted);
+	--color-border: var(--border);
+	/* An opacity modifier cannot be applied to any of the tokens above: Tailwind needs a
+	   literal colour to mix against, and given a var() it silently emits the colour at full
+	   strength instead. `bg-accent/30` on the wiki search highlight hit that — under v3 it
+	   produced no rule at all, so the highlight never rendered; under v4 it would have
+	   rendered solid indigo behind the text. Mixing explicitly here keeps it theme-aware. */
+	--color-accent-soft: color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
+/* Translated from v3's `theme.extend.typography` override. The colour half becomes the
+   plugin's own custom properties; the rest has to stay real CSS. Deliberately unlayered so
+   it outranks the plugin's `@layer utilities` output — including its `pre code` reset,
+   which would otherwise beat the `code` background set below. */
+.prose {
+	--tw-prose-body: var(--text);
+	--tw-prose-headings: var(--text);
+	--tw-prose-links: var(--accent);
+	--tw-prose-bold: var(--text-strong);
+	--tw-prose-quotes: var(--text-muted);
+	--tw-prose-quote-borders: var(--accent);
+	--tw-prose-hr: var(--border);
+	--tw-prose-code: var(--code-color);
+	--tw-prose-pre-code: var(--code-color);
+	--tw-prose-pre-bg: var(--code-bg);
+}
+
+.prose :where(a):hover {
+	opacity: 0.8;
+}
+
+.prose :where(code) {
+	background: var(--code-bg);
+	border-radius: 4px;
+	padding: 0.1em 0.3em;
+}
+
+/* The plugin's default is a literal backtick on either side of every inline code span. */
+.prose :where(code)::before,
+.prose :where(code)::after {
+	content: "";
+}
+
+.prose :where(pre) {
+	border: 1px solid var(--border);
+}
+
+.prose :where(pre) :where(code) {
+	background: transparent;
+	padding: 0;
+}

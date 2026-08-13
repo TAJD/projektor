@@ -94,7 +94,7 @@ export function createTooltipPlugin({ formatX, formatY }: TooltipPluginOpts): uP
 					background: "var(--surface)",
 					border: "1px solid var(--border)",
 					color: "var(--text)",
-					boxShadow: "var(--shadow-sm)",
+					boxShadow: "var(--elevation-sm)",
 					zIndex: "10",
 					display: "none",
 				});

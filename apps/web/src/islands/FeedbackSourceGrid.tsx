@@ -30,7 +30,7 @@ function statusClass(s: FeedbackSource): string {
 }
 
 const CARD_CLASS =
-	"flex flex-col gap-2 p-4 bg-surface border border-border rounded-lg no-underline shadow-sm " +
+	"flex flex-col gap-2 p-4 bg-surface border border-border rounded-lg no-underline shadow-xs " +
 	"transition-all duration-150 hover:border-accent hover:-translate-y-px";
 
 function SourceCard({ source, summary }: { source: FeedbackSource; summary?: SourceSummary }) {

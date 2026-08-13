@@ -30,7 +30,7 @@ const INPUT_BASE_CLASS =
 	"w-full px-2 py-1.5 text-sm border border-[var(--border)] rounded bg-[var(--bg)] text-[var(--text)]";
 
 const PROJECT_CARD_CLASS =
-	"flex flex-col gap-2 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg no-underline shadow-sm" +
+	"flex flex-col gap-2 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg no-underline shadow-xs" +
 	" transition-all duration-150 hover:border-[var(--accent)] hover:-translate-y-px";
 
 const KEY_BADGE_CLASS =

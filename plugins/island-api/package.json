@@ -12,10 +12,10 @@
     "test": "node scripts/check-fixture.mjs"
   },
   "dependencies": {
-    "@cofferdam/check-sdk": "^0.3.7"
+    "@cofferdam/check-sdk": "^0.4.2"
   },
   "devDependencies": {
-    "typescript": "^5.5.0"
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=16"

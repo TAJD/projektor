@@ -4,6 +4,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+// Plain .mjs build helper, shared with astro.config.mjs; typed by its JSDoc.
+import { lazyOnlyChunkNames } from "../../scripts/lazy-only-chunks.mjs";
 
 const source = readFileSync(join(__dirname, "Base.astro"), "utf-8");
 const configSource = readFileSync(join(__dirname, "../../astro.config.mjs"), "utf-8");
@@ -46,17 +48,72 @@ describe("PWA service worker — navigations must reach the network (PROJ-430)",
 // that are dynamically imported and reached by a minority of sessions (mermaid,
 // cytoscape and katex render wiki diagrams and maths; the editor mounts only on Edit).
 // They still load on demand — this only keeps them out of the install-time payload.
+// PROJ-302 replaced the original filename globs ('**/mermaid*.js' and friends) with a walk
+// of the module graph, because astro 7's rolldown build names shared chunks 'chunk-<id>' and
+// silently stopped matching every one of those patterns — putting 1.2 MiB of mermaid back
+// into the precache. These assert the derivation, not a list of names.
 describe("PWA precache — keep the install payload small (PROJ-431)", () => {
-	it("excludes the heavy dynamically-imported vendor chunks", () => {
-		const globIgnores = configSource.match(/globIgnores:\s*\[([\s\S]*?)\]/)?.[1] ?? "";
-		for (const chunk of ["mermaid", "cytoscape", "katex", "MarkdownEditor", "Diagram-"]) {
-			expect(globIgnores, `${chunk} should not be precached`).toContain(chunk);
-		}
+	const chunk = (fileName: string, extra = {}) => ({
+		type: "chunk" as const,
+		fileName,
+		imports: [],
+		...extra,
 	});
 
-	// The config patterns above are brittle to chunk renames; the byte budget asserted
-	// against the built sw.js is the guard that actually holds. It runs as part of the
-	// build (astro build && node scripts/assert-sw.mjs) because CI runs unit tests
+	it("keeps everything statically reachable from an entry", () => {
+		const lazy = lazyOnlyChunkNames({
+			a: chunk("entry.js", { isEntry: true, imports: ["shared.js"] }),
+			b: chunk("shared.js", { imports: ["deep.js"] }),
+			c: chunk("deep.js"),
+		});
+		expect([...lazy]).toEqual([]);
+	});
+
+	it("drops a chunk only reachable through a dynamic import", () => {
+		const lazy = lazyOnlyChunkNames({
+			a: chunk("entry.js", { isEntry: true }),
+			b: chunk("mermaid.js", { isEntry: true, isDynamicEntry: true, imports: ["dagre.js"] }),
+			c: chunk("dagre.js"),
+		});
+		expect([...lazy].sort()).toEqual(["dagre.js", "mermaid.js"]);
+	});
+
+	// The case a name-based rule could never get right: marked is inside mermaid's dependency
+	// tree, but the issue and wiki views import it eagerly.
+	it("keeps a chunk shared between an eager and a lazy importer", () => {
+		const lazy = lazyOnlyChunkNames({
+			a: chunk("entry.js", { isEntry: true, imports: ["marked.js"] }),
+			b: chunk("mermaid.js", { isEntry: true, isDynamicEntry: true, imports: ["marked.js"] }),
+			c: chunk("marked.js"),
+		});
+		expect([...lazy]).toEqual(["mermaid.js"]);
+	});
+
+	it("does not fall over on a cycle between two chunks", () => {
+		const lazy = lazyOnlyChunkNames({
+			a: chunk("entry.js", { isEntry: true, imports: ["one.js"] }),
+			b: chunk("one.js", { imports: ["two.js"] }),
+			c: chunk("two.js", { imports: ["one.js"] }),
+		});
+		expect([...lazy]).toEqual([]);
+	});
+
+	it("ignores non-chunk outputs such as emitted assets", () => {
+		const lazy = lazyOnlyChunkNames({
+			a: chunk("entry.js", { isEntry: true }),
+			b: { type: "asset" as const, fileName: "styles.css" },
+		});
+		expect([...lazy]).toEqual([]);
+	});
+
+	it("is wired into the service worker's precache manifest", () => {
+		expect(configSource).toMatch(/manifestTransforms:/);
+		expect(configSource).toMatch(/lazyOnlyChunks\.has\(/);
+	});
+
+	// The derivation above is only as good as the bundle it is handed, so the byte budget
+	// asserted against the built sw.js stays the guard that actually holds. It runs as part
+	// of the build (astro build && node scripts/assert-sw.mjs) because CI runs unit tests
 	// before the build, so a dist-reading test here would just skip.
 	it("enforces the precache budget from the build, against the built sw.js", () => {
 		const pkg = JSON.parse(
