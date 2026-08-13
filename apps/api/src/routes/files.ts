@@ -103,6 +103,15 @@ router.post("/", async (c) => {
 	return c.json({ id, filename: file.name, contentType, size: file.size }, 201);
 });
 
+router.get("/:id/metadata", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await filesService.getAttachment(ctx, { id: c.req.param("id") }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
 router.get("/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	const { id } = c.req.param();

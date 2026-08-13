@@ -173,6 +173,27 @@ describe("Files API", () => {
 		expect(getRes.headers.get("Content-Disposition")).toContain("inline");
 	});
 
+	it("GET /api/files/:id/metadata returns the attachment metadata", async () => {
+		const uploadRes = await makeUploadRequest(token, slug, "meta content", "meta.txt");
+		const { id } = (await uploadRes.json()) as { id: string };
+
+		const res = await SELF.fetch(`http://localhost/api/files/${id}/metadata`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { id: string; filename: string; contentType: string };
+		expect(body.id).toBe(id);
+		expect(body.filename).toBe("meta.txt");
+		expect(body.contentType).toBe("text/plain");
+	});
+
+	it("GET /api/files/:id/metadata returns 404 for an unknown id", async () => {
+		const res = await SELF.fetch(`http://localhost/api/files/${crypto.randomUUID()}/metadata`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(404);
+	});
+
 	it("DELETE /api/files/:id removes the file", async () => {
 		const uploadRes = await makeUploadRequest(token, slug);
 		const { id } = (await uploadRes.json()) as { id: string };

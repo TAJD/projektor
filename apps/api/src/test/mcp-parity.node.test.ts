@@ -35,15 +35,8 @@ const SRC = join(import.meta.dirname, "..");
 
 /** MCP tools with no REST equivalent. Each is a real parity gap, tracked in PROJ-633. */
 const MCP_ONLY: Record<string, string> = {
-	"issues.ts:getPrioritizedIssues": "agent-facing ranking; no browser view consumes it yet",
-	"playbook-compose.ts:composePlaybook": "agent-facing template fill; no browser view yet",
 	"projects.ts:listProjects":
-		"REST serves the browser's project list via listAllProjects/getProjectBySlug instead",
-	"workspaces.ts:createWorkspace": "workspace creation over REST goes through /bootstrap and auth",
-	"workspaces.ts:listUserWorkspaces":
-		"REST serves the equivalent from user-tokens.getUserWorkspaces",
-	"files.ts:getAttachmentMetadata":
-		"REST exposes getAttachmentForDownload (streams bytes); metadata-only is agent-facing",
+		"workspace-scoped list; the REST surface serves the cross-workspace listProjectsAcrossWorkspaces instead",
 };
 
 /**
@@ -68,7 +61,8 @@ const REST_ONLY: Record<string, string> = {
 	"files.ts:storageQuotaBytes": "quota arithmetic used by the upload route",
 	"files.ts:assertUploadAllowed": "upload precondition check",
 	"files.ts:recordUpload": "second half of the multipart upload handshake",
-	"files.ts:getAttachmentForDownload": "streams bytes; agents use get_attachment metadata",
+	"files.ts:getAttachmentForDownload":
+		"streams bytes for the browser; the metadata-shaped read is getAttachment, on both surfaces",
 	// Feedback: public ingest is anonymous, triage is a human review queue.
 	"feedback.ts:hashFeedbackToken": "ingest token hashing",
 	"feedback.ts:submitFeedback": "anonymous public ingest, no workspace auth",
@@ -78,9 +72,16 @@ const REST_ONLY: Record<string, string> = {
 	"feedback.ts:bulkMarkReviewed": "human triage action (PROJ-634)",
 	"feedback.ts:bulkConvertToIssue": "human triage action (PROJ-634)",
 	"feedback.ts:getFeedbackSummary": "human triage dashboard (PROJ-634)",
+	// Bootstrap seeds — called by GET /bootstrap in index.ts to populate a new workspace's
+	// defaults. Not operations a client invokes; they only run as part of provisioning.
+	"custom-fields.ts:seedDefaultCustomFields": "bootstrap seed for a new workspace",
+	"task-statuses.ts:seedDefaultTaskStatuses": "bootstrap seed for a new workspace",
+	"task-types.ts:seedDefaultTaskTypes": "bootstrap seed for a new workspace",
 	// Misc.
 	"issues.ts:resolveIssueIdParam": "URL param coercion, not an operation",
 	"projects.ts:getProjectBySlug": "slug routing for the browser; agents address projects by id",
+	"projects.ts:listProjectsAcrossWorkspaces":
+		"cross-workspace summary for the browser's project switcher; MCP is scoped to one workspace per endpoint",
 	"wiki-export.ts:exportWiki": "file download response, not a JSON operation",
 };
 
@@ -97,8 +98,6 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
 	"wiki.ts:purgeExpiredWikiPages": "purge_wiki_trash",
 	"wiki.ts:getWikiTree": "wiki_tree",
 	"workspaces.ts:getWorkspaceWithMembers": "list_members",
-	"workspaces.ts:listUserWorkspaces": "list_workspaces",
-	"files.ts:getAttachmentMetadata": "get_attachment",
 };
 
 // ---------------------------------------------------------------------------
@@ -107,6 +106,11 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
 
 function tsFiles(dir: string): string[] {
 	return readdirSync(dir).filter((f) => f.endsWith(".ts"));
+}
+
+/** A directory expands to its .ts files; a file path is taken as-is. */
+function expandToFiles(path: string): string[] {
+	return path.endsWith(".ts") ? [path] : tsFiles(path).map((f) => join(path, f));
 }
 
 function snakeCase(name: string): string {
@@ -123,10 +127,10 @@ function snakeCase(name: string): string {
  * to a surface just as effectively as an import, and missing it would be a false
  * negative — the one failure mode this test cannot afford.
  */
-function serviceIdentifiersUsedIn(dir: string): Set<string> {
+function serviceIdentifiersUsedIn(...paths: string[]): Set<string> {
 	const names = new Set<string>();
-	for (const file of tsFiles(dir)) {
-		const src = readFileSync(join(dir, file), "utf8");
+	for (const path of paths.flatMap(expandToFiles)) {
+		const src = readFileSync(path, "utf8");
 		for (const m of src.matchAll(
 			/(?:import|export)\s*(?:type\s*)?\{([^}]+)\}\s*from\s*"[^"]*services\/[^"]+"/g
 		)) {
@@ -158,7 +162,12 @@ interface ServiceFn {
 	onRest: boolean;
 }
 
-const restIdentifiers = serviceIdentifiersUsedIn(join(SRC, "routes"));
+// index.ts is part of the REST surface, not just app wiring: it registers eight endpoints
+// directly, three of which call service functions (GET/POST /api/workspaces, GET
+// /api/projects). Scanning only routes/ made those read as unwired, which is how two
+// MCP_ONLY entries came to claim a REST equivalent was missing when one existed, and how
+// listAllProjects got swallowed by the internal-by-construction rule. PROJ-638.
+const restIdentifiers = serviceIdentifiersUsedIn(join(SRC, "routes"), join(SRC, "index.ts"));
 const mcpIdentifiers = serviceIdentifiersUsedIn(join(SRC, "mcp"));
 
 const serviceFns: ServiceFn[] = [];
@@ -188,6 +197,16 @@ describe("MCP surface parity (PROJ-623)", () => {
 		expect(restIdentifiers.size).toBeGreaterThan(50);
 		expect(mcpIdentifiers.size).toBeGreaterThan(50);
 		expect(catalogToolNames.length).toBeGreaterThan(100);
+	});
+
+	it("sees the REST surface registered in index.ts, not just routes/", () => {
+		// PROJ-638: listProjectsAcrossWorkspaces is wired only by GET /api/projects in
+		// index.ts. When the scan covered routes/ alone it read as unwired, so the
+		// internal-by-construction rule swallowed it and two MCP_ONLY entries wrongly
+		// claimed no REST equivalent existed. Naming a specific index.ts-only identifier
+		// makes that regression fail here rather than resurface as a false parity gap.
+		expect(restIdentifiers.has("listProjectsAcrossWorkspaces")).toBe(true);
+		expect(restIdentifiers.has("createWorkspace")).toBe(true);
 	});
 
 	it("has no service function name exported from two different files", () => {

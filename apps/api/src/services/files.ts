@@ -255,10 +255,7 @@ export async function getAttachmentForDownload(
 }
 
 /** Attachment metadata in the same shape `listAttachments` returns, for the MCP get_attachment tool. */
-export async function getAttachmentMetadata(
-	ctx: ServiceCtx,
-	input: unknown
-): Promise<AttachmentDto> {
+export async function getAttachment(ctx: ServiceCtx, input: unknown): Promise<AttachmentDto> {
 	const parsed = GetAttachmentSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 

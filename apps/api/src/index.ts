@@ -36,12 +36,12 @@ import { wikiRouter } from "./routes/wiki";
 import { workflowRouter } from "./routes/workflow";
 import { workspacesRouter } from "./routes/workspaces";
 import { seedDefaultCustomFields } from "./services/custom-fields";
-import { listAllProjects } from "./services/projects";
+import { listProjectsAcrossWorkspaces } from "./services/projects";
 import { seedDefaultTaskStatuses } from "./services/task-statuses";
 import { seedDefaultTaskTypes } from "./services/task-types";
 import type { ServiceCtx } from "./services/types";
 import { purgeExpiredWikiPages } from "./services/wiki";
-import { createWorkspace, listUserWorkspaces } from "./services/workspaces";
+import { createWorkspace, listWorkspaces } from "./services/workspaces";
 
 const app = new Hono<HonoEnv>();
 
@@ -201,7 +201,7 @@ app.route("/auth", authRouter);
 // Workspace list + create — auth only, no workspace context
 app.get("/api/workspaces", authMiddleware, async (c) => {
 	const user = c.get("user") as { id: string };
-	return c.json(await listUserWorkspaces(c.env.DB, user.id));
+	return c.json(await listWorkspaces(c.env.DB, user.id));
 });
 
 app.post("/api/workspaces", authMiddleware, async (c) => {
@@ -220,7 +220,7 @@ app.use("/api/workspaces/:slug/*", authMiddleware, workspaceMiddleware);
 app.get("/api/projects", authMiddleware, etagMiddleware, async (c) => {
 	const user = c.get("user") as { id: string };
 	try {
-		return c.json(await listAllProjects(user.id, c.env.DB));
+		return c.json(await listProjectsAcrossWorkspaces(user.id, c.env.DB));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -267,6 +267,13 @@ app.use("/api/workflow", authMiddleware);
 app.use("/api/workflow/*", authMiddleware);
 app.use("/api/playbooks", authMiddleware);
 app.use("/api/playbooks/*", authMiddleware);
+// PROJ-633: compose is the one exception to the line above. Reading a playbook is a pure
+// function of static templates, but composing one resolves a live epic, so it needs
+// workspace context. Scoped to this single path rather than the whole prefix: applying
+// workspaceMiddleware to `/api/playbooks/*` would make GET /api/playbooks and
+// GET /api/playbooks/:name start returning 400 without an X-Workspace-Slug header, which
+// is a breaking change to two endpoints that are deliberately global.
+app.use("/api/playbooks/:name/compose", workspaceMiddleware);
 
 // PROJ-439: conditional GETs on the read-heavy JSON routes. Registered *after* the
 // auth/workspace .use() calls above so an unauthorised request short-circuits before

@@ -22,7 +22,7 @@ async function sha256hex(s: string): Promise<string> {
 		.join("");
 }
 
-export async function listUserWorkspaces(db: D1Database, userId: string) {
+export async function listWorkspaces(db: D1Database, userId: string) {
 	const orm = drizzle(db, { schema });
 	return orm
 		.select({
