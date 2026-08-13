@@ -97,10 +97,23 @@ router.post("/", async (c) => {
 			r2Key,
 		}));
 	} catch (e) {
+		// The bytes are already in R2 by this point, and PROJ-639 gave recordUpload a reason
+		// to reject after the fact (uploading onto an entity in a project the caller can't
+		// write). Drop the object rather than leaving it billable and unreferenced.
+		await c.env.R2.delete(r2Key);
 		return serviceErrToResponse(c, e);
 	}
 
 	return c.json({ id, filename: file.name, contentType, size: file.size }, 201);
+});
+
+router.get("/:id/metadata", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await filesService.getAttachment(ctx, { id: c.req.param("id") }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
 });
 
 router.get("/:id", async (c) => {

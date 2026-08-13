@@ -23,6 +23,20 @@ describe("Playbooks", () => {
 		expect(body.find((p) => p.name === "epic-goal")).toBeTruthy();
 	});
 
+	// PROJ-633: the playbook reads are deliberately global — no workspace. Adding the
+	// compose route required workspace context, and applying workspaceMiddleware to the
+	// whole /api/playbooks prefix to get it would make these two 400 without a slug.
+	// Every other test here sends one, so only this asserts the prefix stays global.
+	it("GET /api/playbooks and /:name work without an X-Workspace-Slug header", async () => {
+		const auth = { Authorization: `Bearer ${token}` };
+
+		const list = await SELF.fetch("http://localhost/api/playbooks", { headers: auth });
+		expect(list.status).toBe(200);
+
+		const one = await SELF.fetch("http://localhost/api/playbooks/epic-goal", { headers: auth });
+		expect(one.status).toBe(200);
+	});
+
 	it("MCP list_playbooks returns the same content as REST", async () => {
 		const restRes = await SELF.fetch("http://localhost/api/playbooks", {
 			headers: authHeaders(token, slug),

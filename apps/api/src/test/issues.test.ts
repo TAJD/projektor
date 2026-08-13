@@ -2105,3 +2105,60 @@ describe("get_prioritized_issues MCP tool", () => {
 		expect(titles).toContain("In other project");
 	});
 });
+
+// PROJ-633: REST parity for get_prioritized_issues
+describe("GET /api/issues/prioritized", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+	let userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
+	});
+
+	async function getPrioritized(query: Record<string, string> = {}) {
+		const qs = new URLSearchParams(query).toString();
+		const res = await SELF.fetch(`http://localhost/api/issues/prioritized${qs ? `?${qs}` : ""}`, {
+			headers: authHeaders(token, slug),
+		});
+		return { res, body: (await res.json()) as { issues: Array<{ title: string }> } };
+	}
+
+	it("ranks higher-priority issues first", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "Low prio", priority: "low" });
+		await seedIssue(workspaceId, projectId, userId, { title: "High prio", priority: "high" });
+
+		const { res, body } = await getPrioritized({ includeNotReady: "true" });
+		expect(res.status).toBe(200);
+		// Seeded low-first so a route that returned insertion order rather than the
+		// service's ranking would fail here instead of passing by coincidence.
+		expect(body.issues.map((i) => i.title)).toEqual(["High prio", "Low prio"]);
+	});
+
+	// Proves query-string coercion actually happens — a route that passed the raw
+	// string "3" through unparsed would fail `typeof input.limit === "number"` and
+	// silently fall back to the default of 10, returning all 5 seeded issues.
+	it("limit is honoured", async () => {
+		for (let i = 0; i < 5; i++) {
+			await seedIssue(workspaceId, projectId, userId, { title: `Issue ${i}` });
+		}
+
+		const { res, body } = await getPrioritized({ limit: "3", includeNotReady: "true" });
+		expect(res.status).toBe(200);
+		expect(body.issues).toHaveLength(3);
+	});
+
+	it("projectId scopes results to that project", async () => {
+		const otherProject = await seedProject(workspaceId, "OTHER");
+		await seedIssue(workspaceId, projectId, userId, { title: "In target project" });
+		await seedIssue(workspaceId, otherProject.id, userId, { title: "In other project" });
+
+		const { res, body } = await getPrioritized({ projectId, includeNotReady: "true" });
+		expect(res.status).toBe(200);
+		const titles = body.issues.map((i) => i.title);
+		expect(titles).toContain("In target project");
+		expect(titles).not.toContain("In other project");
+	});
+});

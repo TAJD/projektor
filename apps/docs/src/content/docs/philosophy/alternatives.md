@@ -36,7 +36,8 @@ than reading as marketing.
    can't coordinate a fleet across machines and CI; hosted tools can't be
    self-hosted. Projektor tries to sit in the quadrant that does both, which
    as far as this survey found is uncontested — nobody else in the list below
-   occupies it.
+   occupies it. This is also a scaling difference rather than a preference,
+   and the section below is specific about why.
 4. **Validated by use.** Projektor's own backlog is tracked in Projektor, and
    this comparison page is itself a PROJ ticket worked by an agent claiming
    it through the mechanism described above.
@@ -45,6 +46,57 @@ Claims 1 and 3 above are checked directly against
 `apps/api/src/services/issue-leases.ts`, `apps/api/src/services/file-claims.ts`,
 and `packages/db/migrations/0032_claim_conflicts.sql` as of this snapshot,
 not just asserted from documentation.
+
+## Local deployment is a ceiling, not a preference
+
+A tool that runs on one developer's machine is not a smaller version of a
+deployed one. It is a different shape, and the difference is a hard limit
+rather than a tuning problem.
+
+**Reach.** A local coordination store can only be consulted by processes on
+that machine. A CI runner cannot take a lease before it starts work. An agent
+on a second developer's laptop cannot see the first one's reservations. A
+hosted agent — one running in someone else's cloud, with no filesystem you
+share — cannot participate. This is not a matter of throughput; those
+participants are excluded by construction, and no amount of optimisation
+admits them. Every mechanism the local tool has works perfectly, for exactly
+the agents that happen to share a kernel.
+
+To be fair to the tools rather than the argument: several of them run a local
+MCP server, and a localhost server can be exposed to a network. But doing that
+means taking on TLS, authentication, an address other machines can resolve, and
+uptime — the deployment problem the local-first design exists to avoid. The
+option is real; it just converts the tool into a deployed one, badly, rather
+than showing the ceiling was never there.
+
+**Ceiling.** The local tool's concurrency limit is one machine's, and that
+machine is also running the agents. Every agent added competes with the
+coordination store for the same CPU and the same disk, so the coordination
+layer gets slower precisely as the fleet it coordinates grows. Projektor's
+request tier has no equivalent coupling: Workers isolates are created per
+request across Cloudflare's network, so a fleet of forty agents and a fleet of
+four cost the same per call, and none of them are contending with the
+machines running the work.
+
+**Where Projektor's own ceiling actually is.** Not the request tier — D1.
+It is one logical SQLite database, so writes serialise, and the
+[system design](/projektor/architecture/system-design/) documents the limits
+that follow: a 100-bound-parameter cap per statement, no interactive
+transactions, a compound-`SELECT` term limit, and a 128 MB isolate budget.
+A workspace whose write rate exceeds what one D1 database will take needs
+sharding by workspace, which is not built.
+
+So the honest form of the claim is narrow but strong: **Projektor's ceiling is
+a property of the deployment, and a local tool's ceiling is a property of
+somebody's laptop.** The first can be raised without changing how anything
+works. The second cannot be raised at all — and it sits well below the point
+where a fleet spanning CI, several machines, and hosted agents becomes
+possible, because that point is not on the local axis in the first place.
+
+This cuts the other way too, and the git-native section below says so: if
+every agent genuinely does share one machine, none of the above is a cost you
+are paying, and the local tool's zero-infrastructure story is a real
+advantage rather than a compromise.
 
 ## Contention telemetry: what "tracks conflicts" actually means
 

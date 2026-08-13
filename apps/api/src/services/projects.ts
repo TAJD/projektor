@@ -53,7 +53,10 @@ export interface ProjectSummary {
 	updated_at: number;
 }
 
-export async function listAllProjects(userId: string, db: D1Database): Promise<ProjectSummary[]> {
+export async function listProjectsAcrossWorkspaces(
+	userId: string,
+	db: D1Database
+): Promise<ProjectSummary[]> {
 	const rows = await db
 		.prepare(
 			`SELECT

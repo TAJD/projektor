@@ -8,7 +8,7 @@ import {
 	deleteWorkspace,
 	getWorkspaceWithMembers,
 	inviteMember,
-	listUserWorkspaces,
+	listWorkspaces,
 	removeMember,
 	updateMemberRole,
 	updateWorkspace,
@@ -20,7 +20,7 @@ export const workspacesTools: MCPTool[] = [
 		description: "List all workspaces the authenticated user belongs to, with their role in each",
 		inputSchema: { type: "object", properties: {} },
 		async handler(_input, ctx) {
-			return listUserWorkspaces(ctx.db, ctx.userId);
+			return listWorkspaces(ctx.db, ctx.userId);
 		},
 	},
 	{

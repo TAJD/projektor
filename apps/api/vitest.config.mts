@@ -47,6 +47,16 @@ export default defineConfig({
         test: {
           name: 'workers',
           include: ['src/**/*.test.ts'],
+          // PROJ-637: every test here drives a real Worker over miniflare against D1, so
+          // vitest's 5s default is the wrong order of magnitude. The three heaviest tests
+          // measure 562ms / 1051ms / 1675ms run in isolation (issues.test.ts PROJ-303 total
+          // match count, issues.test.ts chunked enrichment, custom-fields.test.ts chunk-size
+          // spanning) but were observed at 5266ms / 5606ms / 15766ms inside the full suite —
+          // 3-10x contention on under 2s of real work. So the timeout is set from the loaded
+          // figure plus headroom, not from a guess, and it is not hiding a slow query: the
+          // isolated measurements are the evidence that the work itself is fast.
+          testTimeout: 30_000,
+          hookTimeout: 30_000,
           // Spread the defaults: setting `exclude` replaces them wholesale, which
           // would drop node_modules/dist from the ignore list.
           exclude: [...configDefaults.exclude, 'src/**/*.node.test.ts'],

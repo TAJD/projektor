@@ -2,7 +2,7 @@ import type { MCPTool } from "@projektor/types";
 import {
 	createLinkAttachment,
 	deleteAttachment,
-	getAttachmentMetadata,
+	getAttachment,
 	listAttachments,
 } from "../services/files";
 import type { ServiceCtx } from "../services/types";
@@ -38,7 +38,7 @@ export const filesTools: MCPTool[] = [
 			properties: { id: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			return getAttachmentMetadata(ctx as unknown as ServiceCtx, input);
+			return getAttachment(ctx as unknown as ServiceCtx, input);
 		},
 	},
 	{

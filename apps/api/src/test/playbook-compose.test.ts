@@ -173,3 +173,44 @@ describe("compose_playbook", () => {
 		expect(json.error.data?.validNames).toContain("epic-goal");
 	});
 });
+
+// PROJ-633: REST parity for compose_playbook
+describe("POST /api/playbooks/:name/compose", () => {
+	let token: string;
+	let slug: string;
+	let epicNumber: number;
+
+	beforeEach(async () => {
+		const fixture = await seedIssueFixture({ issueTitle: "Ship the widget" });
+		token = fixture.token;
+		slug = fixture.slug;
+		const row = await env.DB.prepare("SELECT number FROM issues WHERE id = ?")
+			.bind(fixture.issueId)
+			.first<{ number: number }>();
+		epicNumber = row!.number;
+	});
+
+	it("returns 200 for epic-goal with a valid params body", async () => {
+		const res = await SELF.fetch("http://localhost/api/playbooks/epic-goal/compose", {
+			method: "POST",
+			headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+			body: JSON.stringify({ epicRef: `PROJ-${epicNumber}` }),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { name: string; variant: string; directive: string };
+		expect(body.name).toBe("epic-goal");
+		expect(body.directive).toContain("Ship the widget");
+	});
+
+	it("returns a 4xx via the service's validation for a bad body", async () => {
+		const res = await SELF.fetch("http://localhost/api/playbooks/epic-goal/compose", {
+			method: "POST",
+			headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
+			body: JSON.stringify({}),
+		});
+		// Specifically 400, not a 4xx range: an unregistered route would 404 and satisfy
+		// a range assertion, so the loose form cannot tell "validation rejected this"
+		// from "this endpoint does not exist".
+		expect(res.status).toBe(400);
+	});
+});

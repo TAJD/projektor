@@ -44,6 +44,16 @@ the claim is on the file, in one schema behind one auth boundary:
   [coordination model](https://tajd.github.io/projektor/philosophy/coordination-model/)
   is explicit about that asymmetry.
 
+And because it is deployed rather than local, the fleet is not limited to one machine.
+A coordination store on somebody's laptop can only be consulted by processes on that
+laptop: a CI runner cannot take a lease, an agent on a second machine cannot see the
+first one's claims, and a hosted agent cannot participate. Those participants are
+excluded by construction, not by throughput — and exposing a localhost server to fix it
+means taking on TLS, auth and uptime, which is the deployment problem you were avoiding.
+Projektor's ceiling is a property of the
+deployment — one that can be raised without changing how anything works — rather than a
+property of a laptop that also happens to be running the agents.
+
 Because it is one graph, "which issue is this claim for" is a join, not an integration.
 The [coordination model](https://tajd.github.io/projektor/philosophy/coordination-model/)
 documents the design. [How Projektor differs](https://tajd.github.io/projektor/philosophy/alternatives/)

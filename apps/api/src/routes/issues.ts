@@ -6,6 +6,7 @@ import {
 	createIssue,
 	deleteIssue,
 	getIssue,
+	getPrioritizedIssues,
 	ISSUE_REF_PATTERN,
 	listIssues,
 	searchIssues,
@@ -72,6 +73,24 @@ router.get("/", async (c) => {
 				includeBody,
 				cursor,
 				limit,
+			})
+		);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.get("/prioritized", async (c) => {
+	const ctx = ctxFromHono(c);
+	const { limit, includeBacklog, excludeClaimed, includeNotReady, projectId } = c.req.query();
+	try {
+		return c.json(
+			await getPrioritizedIssues(ctx, {
+				limit: limit !== undefined ? Number(limit) : undefined,
+				includeBacklog: includeBacklog !== undefined ? includeBacklog !== "false" : undefined,
+				excludeClaimed: excludeClaimed !== undefined ? excludeClaimed === "true" : undefined,
+				includeNotReady: includeNotReady !== undefined ? includeNotReady === "true" : undefined,
+				projectId,
 			})
 		);
 	} catch (e) {
