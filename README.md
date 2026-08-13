@@ -37,12 +37,12 @@ the claim is on the file, in one schema behind one auth boundary:
 - **File claims** — path-level claims stop two agents editing the same code. A refused
   claim is rejected whole and names the issue and agent already holding the path, so the
   blocked agent knows who to talk to, and every contended path is recorded.
-- **Liveness** — an issue lease is derived from its holder's heartbeat, so a lease whose
+- **Liveness** — both tiers derive from the holder's heartbeat, so a lease or claim whose
   agent stopped reporting is reclaimed by the next claim in the same call. An agent that
-  crashes mid-ticket does not deadlock the backlog behind it. File claims are released on
-  session end or explicitly, not by TTL — the
+  crashes mid-ticket does not deadlock the backlog, or the files, behind it. Reclaiming a
+  dead holder is not logged as contention — the
   [coordination model](https://tajd.github.io/projektor/philosophy/coordination-model/)
-  is explicit about that asymmetry.
+  covers why, and the one case that still needs a manual `force`.
 
 And because it is deployed rather than local, the fleet is not limited to one machine.
 A coordination store on somebody's laptop can only be consulted by processes on that

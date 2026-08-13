@@ -95,18 +95,38 @@ claim proceeds in the same call. There is no separate expiry job, no manual "for
 release" step, and no permanently stuck issue: a crashed agent can never leave a lease
 that outlives it by more than the TTL.
 
-**The two tiers are not symmetric here, and this is the layer's weakest point.** Issue
-leases are reclaimed from liveness, as above. File claims are not: there is no TTL-based
-expiry for them at all. A claim is released when the agent calls `release_files`, or when
-its session formally ends and `releaseClaimsForAgent` marks the rows
-`release_reason: "agent_ended"` (`file-claims.ts`, PROJ-334). An agent that dies without
-ending its session — the crash case the lease tier handles cleanly — leaves its file
-claims held indefinitely, and the only way out is a `force` claim by someone else. The
-comment on `releaseClaimsForAgent` says as much: agent-end is the only abandonment path
-today.
+**File claims work the same way** (`reclaimStaleClaims` in `file-claims.ts`, PROJ-636). The
+next `claim_files` on a contested path checks the holding claim's session the way the lease
+tier checks the holding lease's: if that session stopped heartbeating, the claim is released
+with `release_reason: "expired"` and the new claim proceeds. A crashed agent frees both its
+ticket and its files.
 
-So a crashed agent frees its ticket automatically but not its files. Worth knowing before
-relying on claims as the only guard in a long-running fleet.
+This was not always true, and the asymmetry is worth recording because it shaped the design.
+File claims originally had no expiry of any kind: they released on `release_files`, on a
+formal session end via `releaseClaimsForAgent` (`release_reason: "agent_ended"`, PROJ-334),
+or on someone else's `force`. An agent that died without ending its session — the crash case
+the lease tier already handled — held its paths indefinitely. For spawned workers, dying
+without a clean exit is the normal case rather than the exception, so the tier that was
+supposed to prevent deadlock was the one that could cause it.
+
+Two consequences of closing it that are easy to miss:
+
+- **`agent_ended` and `expired` mean different things, deliberately.** A clean `end_agent`
+  still releases eagerly and still records `agent_ended`; only an abandoned claim records
+  `expired`. Collapsing them would make a crash indistinguishable from a tidy exit in the
+  factory-health data, which is precisely the signal you want when a fleet is misbehaving.
+- **Reclaiming a dead holder is not recorded as contention.** No `claim_conflicts` row is
+  written when a claim supersedes a stale one. The contention log exists to say something
+  about how the work was sliced (see below); fleet mortality is not a collision between two
+  live agents, and counting it as one would inflate the heatmap with deaths rather than
+  disagreements.
+
+One case remains outside liveness: a claim with no `agent_id` — made without a session, or
+orphaned because the `agent_id` foreign key is `ON DELETE SET NULL`. There is no heartbeat to
+judge those by, so they are treated as held and `force` is still the only way past them.
+Falling back on claim age would work, but it would reintroduce exactly the wall-clock TTL
+this tier is built to avoid, and it would apply that TTL only to the minority of claims that
+happen to lack a session — an inconsistency worse than the gap it closes.
 
 ## Conflict routing
 

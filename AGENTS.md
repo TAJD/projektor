@@ -38,10 +38,12 @@ editing anything:
   `apps/api/src/services/issue-leases.ts`) is **120 seconds**. Register, then go quiet for
   two minutes without a `heartbeat_agent` call, and your session goes stale — you must
   heartbeat again before you can claim.
-- **Leases self-heal; file claims do not.** An issue lease held by a stale session is
-  reclaimed by the next claimer in the same call. File claims have no TTL: they release
-  only on `release_files`, on `end_agent`, or when someone claims with `force`. So call
-  `end_agent` when you finish, or your paths stay locked behind you.
+- **Both tiers self-heal.** An issue lease or file claim held by a stale session is
+  reclaimed by the next claimer in the same call (`release_reason: "expired"`). Still call
+  `release_files` and `end_agent` when you finish: reclaim only happens when someone else
+  wants the path, so until then your claims sit there looking held, and a clean exit is
+  what distinguishes you from a crash in the health data. A claim with no `agent_id` has no
+  heartbeat to judge and is never auto-reclaimed — `force` is the only way past it.
 - **There's a per-project cap on concurrently leased issues** —
   `DEFAULT_AGENT_WIP_LIMIT = 3` in `apps/api/src/services/issue-leases.ts`,
   overridable per project via `projects.agent_wip_limit`. It's admission control on
