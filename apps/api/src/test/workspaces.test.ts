@@ -213,6 +213,23 @@ describe("Workspaces MCP", () => {
 		expect(data.ok).toBe(true);
 	});
 
+	// The zero-project path above only proves the guard's count reads 0. This covers the
+	// other side of it, which nothing else exercised (PROJ-647 rewrote it to use $count).
+	it("delete_workspace refuses while the workspace still has projects", async () => {
+		const extra = await seedFixture({ role: "owner" });
+		const extraHeaders = authHeaders(extra.token, extra.workspace.slug);
+		await seedProject(extra.workspace.id, `P${crypto.randomUUID().slice(0, 6).toUpperCase()}`);
+
+		const res = (await mcpCall(
+			extra.workspace.id,
+			"delete_workspace",
+			{ workspaceSlug: extra.workspace.slug },
+			extraHeaders
+		)) as JsonRpcError;
+
+		expect(isMcpError(res)).toBe(true);
+	});
+
 	it("delete_workspace returns error for non-owner", async () => {
 		const ws = await seedWorkspace(`mcp-del-${crypto.randomUUID().slice(0, 8)}`);
 		const memberUser = await import("./helpers").then((h) =>

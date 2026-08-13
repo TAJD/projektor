@@ -261,12 +261,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		? [...conditions, sql`${schema.issues.createdAt} < ${filters.cursor}`]
 		: conditions;
 
-	const totalRow = await orm
-		.select({ count: sql<number>`count(*)` })
-		.from(schema.issues)
-		.where(and(...conditions))
-		.get();
-	const total = totalRow?.count ?? 0;
+	const total = await orm.$count(schema.issues, and(...conditions));
 
 	// Select with snake_case aliases to preserve the same response shape as the raw-SQL version.
 	// labels uses a raw SQL expression to return the stored JSON string (bypassing Drizzle's
@@ -1144,14 +1139,11 @@ async function assertNotDemotingEpicWithChildren(
 		.get();
 	if (currentType?.key !== "epic") return;
 
-	const childCount = await orm
-		.select({ count: sql<number>`count(*)` })
-		.from(schema.issues)
-		.where(
-			and(eq(schema.issues.parentId, existing.id), eq(schema.issues.workspaceId, ctx.workspaceId))
-		)
-		.get();
-	if ((childCount?.count ?? 0) > 0) {
+	const childCount = await orm.$count(
+		schema.issues,
+		and(eq(schema.issues.parentId, existing.id), eq(schema.issues.workspaceId, ctx.workspaceId))
+	);
+	if (childCount > 0) {
 		throw new ValidationError({
 			formErrors: [
 				"Cannot change type: this epic still has child issues — move or remove them first",

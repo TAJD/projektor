@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { IdSchema } from "../schemas/common";
 import {
 	CreateTokenSchema,
@@ -294,13 +294,12 @@ export async function deleteWorkspace(
 		});
 	}
 
-	const countRow = await orm
-		.select({ n: sql<number>`count(*)` })
-		.from(schema.projects)
-		.where(eq(schema.projects.workspaceId, ctx.workspaceId))
-		.get();
+	const projectCount = await orm.$count(
+		schema.projects,
+		eq(schema.projects.workspaceId, ctx.workspaceId)
+	);
 
-	if ((countRow?.n ?? 0) > 0) {
+	if (projectCount > 0) {
 		throw new ConflictError("Delete all projects before deleting the workspace");
 	}
 

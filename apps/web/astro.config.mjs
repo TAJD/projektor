@@ -23,6 +23,14 @@ function collectLazyOnlyChunks() {
 
 export default defineConfig({
   output: 'static',
+  // No `security.csp` here on purpose (PROJ-645). Astro's built-in CSP emits a <meta>
+  // tag and always appends a hash for every <style> block it inlines — including its own
+  // `astro-island{display:contents}`, which no config removes. CSP ignores 'unsafe-inline'
+  // in any directive that carries a hash, and mermaid and CodeMirror both inject styles at
+  // runtime that cannot be hashed at build time, so astro's mechanism cannot express a
+  // policy that leaves those two working. Measured, not inferred: with it enabled, mermaid
+  // renders an unstyled diagram and mounting the editor logs 15 violations.
+  // scripts/gen-csp-headers.mjs writes the policy as a real response header instead.
   redirects: {
     '/projects': '/',
   },
