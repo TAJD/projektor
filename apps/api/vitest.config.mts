@@ -48,13 +48,13 @@ export default defineConfig({
           name: 'workers',
           include: ['src/**/*.test.ts'],
           // PROJ-637: every test here drives a real Worker over miniflare against D1, so
-          // vitest's 5s default is the wrong order of magnitude — an individual test does
-          // ~10ms of work but pays for whatever workerd is doing under load. The result was
-          // a rolling handful of "Test timed out in 5000ms" failures that moved between
-          // files run to run and vanished when the file was run alone, which reads as a
-          // product bug and repeatedly cost real time to re-diagnose. Not a fix for a slow
-          // test: nothing here legitimately takes seconds, so a generous ceiling only
-          // changes which side of the line contention lands on.
+          // vitest's 5s default is the wrong order of magnitude. The three heaviest tests
+          // measure 562ms / 1051ms / 1675ms run in isolation (issues.test.ts PROJ-303 total
+          // match count, issues.test.ts chunked enrichment, custom-fields.test.ts chunk-size
+          // spanning) but were observed at 5266ms / 5606ms / 15766ms inside the full suite —
+          // 3-10x contention on under 2s of real work. So the timeout is set from the loaded
+          // figure plus headroom, not from a guess, and it is not hiding a slow query: the
+          // isolated measurements are the evidence that the work itself is fast.
           testTimeout: 30_000,
           hookTimeout: 30_000,
           // Spread the defaults: setting `exclude` replaces them wholesale, which
