@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import {
 	AddGroupMemberSchema,
 	CreateGroupSchema,
@@ -42,10 +42,14 @@ async function requireAdminGroup(ctx: ServiceCtx, groupId: string) {
  */
 export async function listGroups(ctx: ServiceCtx) {
 	const orm = drizzle(ctx.db, { schema });
-	const memberCount = sql<number>`(SELECT count(*) FROM user_group_members m
-		WHERE m.group_id = ${schema.userGroups.id})`;
-	const grantCount = sql<number>`(SELECT count(*) FROM group_project_grants g
-		WHERE g.group_id = ${schema.userGroups.id})`;
+	const memberCount = orm.$count(
+		schema.userGroupMembers,
+		eq(schema.userGroupMembers.groupId, schema.userGroups.id)
+	);
+	const grantCount = orm.$count(
+		schema.groupProjectGrants,
+		eq(schema.groupProjectGrants.groupId, schema.userGroups.id)
+	);
 	const cols = {
 		id: schema.userGroups.id,
 		name: schema.userGroups.name,

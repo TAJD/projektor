@@ -88,12 +88,11 @@ async function assertCustomFieldDefLimitNotReached(
 	orm: ReturnType<typeof drizzle>,
 	workspaceId: string
 ) {
-	const countRow = await orm
-		.select({ n: sql<number>`count(*)` })
-		.from(schema.customFieldDefinitions)
-		.where(eq(schema.customFieldDefinitions.workspaceId, workspaceId))
-		.get();
-	if ((countRow?.n ?? 0) >= 50) {
+	const count = await orm.$count(
+		schema.customFieldDefinitions,
+		eq(schema.customFieldDefinitions.workspaceId, workspaceId)
+	);
+	if (count >= 50) {
 		throw new ValidationError({
 			formErrors: ["Maximum of 50 custom field definitions per workspace"],
 			fieldErrors: {},
