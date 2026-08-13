@@ -1,7 +1,25 @@
 import { defineConfig } from 'astro/config';
 import preact from '@astrojs/preact';
-import tailwind from '@astrojs/tailwind';
+import tailwindcss from '@tailwindcss/vite';
 import VitePWA from '@vite-pwa/astro';
+import { lazyOnlyChunkNames } from './scripts/lazy-only-chunks.mjs';
+
+// Populated during the client build and read back when workbox generates its precache
+// manifest, which happens later in the same process (astro:build:done).
+let lazyOnlyChunks = new Set();
+
+function collectLazyOnlyChunks() {
+  return {
+    name: 'projektor:collect-lazy-only-chunks',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      // The prerender and SSR builds emit their own chunks; only the client bundle's
+      // graph says anything about what a browser loads eagerly.
+      if (this.environment?.name !== 'client') return;
+      lazyOnlyChunks = lazyOnlyChunkNames(bundle);
+    },
+  };
+}
 
 export default defineConfig({
   output: 'static',
@@ -10,7 +28,6 @@ export default defineConfig({
   },
   integrations: [
     preact(),
-    tailwind(),
     VitePWA({
       registerType: 'autoUpdate',
       manifest: false,
@@ -33,25 +50,14 @@ export default defineConfig({
         // never left the device — an expired tab just 401ed and reloaded forever.
         // Assets stay precached; navigations must hit the network.
         globPatterns: ['**/*.{css,js,svg,png,ico,json}'],
-        // PROJ-431: these are all dynamically imported and reached by a minority of
-        // sessions (mermaid/cytoscape/katex render wiki diagrams and maths; the editor
-        // only mounts on Edit). Precaching them cost 4.17 MiB on install and a
-        // re-download on every deploy. They still load on demand over the network —
-        // this only removes them from the install-time payload.
-        // The real guard against regression is the precache budget asserted in
-        // astro.config.precache.test.ts, not these patterns.
-        globIgnores: [
-          '**/mermaid*.js',
-          '**/cytoscape*.js',
-          '**/katex*.js',
-          '**/cynefin*.js',
-          '**/MarkdownEditor*.js',
-          '**/*Diagram-*.js',
-          '**/swimlanes-*.js',
-          '**/cose-bilkent-*.js',
-          '**/flow-charts*.js',
-          '**/dagre-*.js',
-          '**/ordinal-*.js',
+        // PROJ-431, rebuilt for PROJ-302: drop everything only reachable through a dynamic
+        // import. Those chunks cost 4.17 MiB on install and a re-download on every deploy;
+        // they still load on demand over the network. The regression guard is the precache
+        // budget asserted by scripts/assert-sw.mjs as a post-build step.
+        manifestTransforms: [
+          (entries) => ({
+            manifest: entries.filter((entry) => !lazyOnlyChunks.has(entry.url)),
+          }),
         ],
         runtimeCaching: [
           {
@@ -63,6 +69,9 @@ export default defineConfig({
     }),
   ],
   vite: {
+    // Tailwind v4 is a Vite plugin rather than an Astro integration; @astrojs/tailwind is
+    // deprecated and was the only thing pinning astro to 5 (PROJ-302).
+    plugins: [tailwindcss(), collectLazyOnlyChunks()],
     server: {
       proxy: {
         '/api': 'http://localhost:8787',

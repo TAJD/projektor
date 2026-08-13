@@ -11,6 +11,7 @@
 			"apps/web/src/**",
 			"!apps/web/src/pages/**/*.astro",
 			"!apps/web/src/layouts",
+			"!apps/web/src/styles/global.css",
 			"packages/**"
 		]
 	},

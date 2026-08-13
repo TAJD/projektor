@@ -5,6 +5,7 @@ import { GlossaryHelp } from '../islands/GlossaryHelp';
 import { OfflineBanner } from '../islands/OfflineBanner';
 import type { GlossaryTermId } from '../islands/glossary-definitions';
 import pkg from '../../package.json';
+import '../styles/global.css';
 
 interface Props {
   title?: string;
@@ -101,8 +102,12 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --sidebar-width: 220px;
         --sidebar-width-collapsed: 56px;
         --topbar-height: 56px;
-        /* Elevation */
-        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+        /* Elevation. Named --elevation-sm rather than --shadow-sm because Tailwind v4 emits
+           its own theme as real custom properties on :root, and global.css loads after this
+           block — so an app token sharing a Tailwind namespace loses the cascade silently
+           (PROJ-302). Dark mode was unaffected, since [data-theme] outranks :root, which is
+           exactly what would have made it hard to spot. */
+        --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
         /* Priority badge tokens (light) */
         --priority-urgent-text: #dc2626;
         --priority-urgent-bg: rgba(220, 38, 38, 0.15);
@@ -179,7 +184,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           --nav-bg: #12161f;          /* sits between bg and surface */
           --accent: #6366f1;          /* indigo-500 - distinctive on dark */
           --on-accent: #fff;
-          --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+          --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
           /* Priority badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
           --priority-urgent-text: #fca5a5;
           --priority-urgent-bg: rgba(248, 113, 113, 0.18);
@@ -249,7 +254,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         --nav-bg: #12161f;
         --accent: #6366f1;
         --on-accent: #fff;
-        --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+        --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
         --priority-urgent-text: #fca5a5;
         --priority-urgent-bg: rgba(248, 113, 113, 0.18);
         --priority-high-text: #fcd34d;
@@ -631,7 +636,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         background: var(--bg);
         border: 1px solid var(--border);
         border-radius: 6px;
-        box-shadow: var(--shadow-sm);
+        box-shadow: var(--elevation-sm);
       }
       .select-option {
         display: flex;
@@ -703,7 +708,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
       .popover {
         background: var(--bg);
         border: 1px solid var(--border);
-        box-shadow: var(--shadow-sm);
+        box-shadow: var(--elevation-sm);
         z-index: 200;
       }
       .popover-metric-help {
@@ -781,7 +786,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         z-index: 200;
         background: var(--bg);
         border: 1px solid var(--border);
-        box-shadow: var(--shadow-sm);
+        box-shadow: var(--elevation-sm);
         width: 14rem;
         max-width: min(14rem, 85vw);
         border-radius: 8px;

@@ -201,7 +201,7 @@ export function ShareButton({
 			{shareUrl && (
 				<div
 					class="absolute left-0 top-full mt-1 z-50 bg-[var(--bg)] border border-border rounded-md
-						shadow-[var(--shadow-sm)] p-3 w-72"
+						shadow-[var(--elevation-sm)] p-3 w-72"
 				>
 					<p class="text-xs text-text-muted mb-2">Share link · Expires in 3 days</p>
 					<div class="flex items-center gap-1">
@@ -316,7 +316,7 @@ export function TitleSection({
 					// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline editor opens
 					autoFocus
 					class="w-full text-2xl font-bold text-text-base bg-bg border border-border rounded-md px-3
-						py-1.5 mb-2 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+						py-1.5 mb-2 focus:outline-hidden focus:ring-1 focus:ring-[var(--accent)]"
 				/>
 				<div class="flex gap-2">
 					<Button onClick={saveTitle} disabled={savingTitle} variant="primary" size="sm">
@@ -1528,7 +1528,7 @@ function CommentItem({
 	}, [comment.body, isEditing]);
 
 	return (
-		<div class="px-4 py-3 border border-border rounded-lg mb-3 bg-surface shadow-[var(--shadow-sm)]">
+		<div class="px-4 py-3 border border-border rounded-lg mb-3 bg-surface shadow-[var(--elevation-sm)]">
 			<div class="flex justify-between mb-[0.375rem]">
 				<span class="font-semibold text-sm text-text-base">
 					{comment.author_name || comment.author_email}

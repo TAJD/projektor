@@ -250,14 +250,14 @@ function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boo
 					<div class="mt-3 flex gap-4 text-xs text-text-muted">
 						<span class="inline-flex items-center gap-1">
 							<span
-								class="inline-block w-3 h-2 rounded-sm"
+								class="inline-block w-3 h-2 rounded-xs"
 								style={{ background: "var(--status-done)", opacity: "0.8" }}
 							/>
 							Completed SP
 						</span>
 						<span class="inline-flex items-center gap-1">
 							<span
-								class="inline-block w-3 h-2 rounded-sm"
+								class="inline-block w-3 h-2 rounded-xs"
 								style={{ background: "var(--velocity-bar-bg)" }}
 							/>
 							Total SP

@@ -85,9 +85,10 @@ for (const e of entries.slice(0, 5)) {
 if (total > PRECACHE_BUDGET_BYTES) {
   failures.push(
     `precache is ${(total / 1024 / 1024).toFixed(2)} MiB, over the ` +
-      `${(PRECACHE_BUDGET_BYTES / 1024 / 1024).toFixed(2)} MiB budget. Heavy chunks that are ` +
-      `dynamically imported (mermaid, cytoscape, katex, the editor) belong in globIgnores ` +
-      `in astro.config.mjs — they still load on demand.`,
+      `${(PRECACHE_BUDGET_BYTES / 1024 / 1024).toFixed(2)} MiB budget. Only chunks statically ` +
+      `reachable from an entry are meant to be in here — see collectLazyOnlyChunks in ` +
+      `astro.config.mjs. If a heavy chunk above is genuinely eager, it wants splitting behind ` +
+      `a dynamic import rather than a bigger budget.`,
   );
 }
 

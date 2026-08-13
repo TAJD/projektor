@@ -29,7 +29,7 @@ function BoardCard({
 		<div
 			key={issue.id}
 			class={[
-				"bg-surface border border-border rounded-md px-3 py-2.5 shadow-sm select-none",
+				"bg-surface border border-border rounded-md px-3 py-2.5 shadow-xs select-none",
 				"transition-all duration-150 hover:shadow-md hover:border-accent hover:-translate-y-px",
 			].join(" ")}
 			style={{ opacity: dragIssueId === issue.id ? 0.4 : 1 }}

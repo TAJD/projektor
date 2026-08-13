@@ -211,7 +211,7 @@ export default function Toolbar(props: ToolbarProps) {
 		<div
 			class={[
 				"flex gap-2 flex-wrap items-center mb-4 p-3 bg-surface rounded-lg border border-border",
-				"shadow-[var(--shadow-sm)]",
+				"shadow-[var(--elevation-sm)]",
 			].join(" ")}
 		>
 			<SearchBox
