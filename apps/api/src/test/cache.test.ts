@@ -8,9 +8,7 @@ import {
 	seedTaskType,
 } from "./helpers";
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("KV caching", () => {
-	// cofferdam-ignore: Refactor.DuplicateBlock: shared seedProjectFixture beforeEach shape, intentional reuse
 	let token: string;
 	let slug: string;
 	let workspaceId: string;

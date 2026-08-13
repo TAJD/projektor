@@ -347,7 +347,6 @@ function useIssueCore({
 		return () => clearTimeout(t);
 	}, [fetchAttachments, issueId]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return {
 		issue,
 		setIssue,

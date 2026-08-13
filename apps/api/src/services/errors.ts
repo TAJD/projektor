@@ -9,7 +9,6 @@ export abstract class ServiceError extends Error {
 
 export class ValidationError extends ServiceError {
 	readonly kind = "validation" as const;
-	// cofferdam-ignore: Refactor.UnusedVariable: public ctor param, read at error-adapter.ts (err.issues) — CD-44
 	constructor(public readonly issues: ZodFlattenOutput) {
 		super("Validation failed");
 	}
@@ -23,7 +22,6 @@ export class NotFoundError extends ServiceError {
 	// NotFoundError is unaffected.
 	constructor(
 		message = "Not found",
-		// cofferdam-ignore: Refactor.UnusedVariable: public readonly property read by error-adapter.ts
 		public readonly details?: Record<string, unknown>
 	) {
 		super(message);
@@ -44,7 +42,6 @@ export class ConflictError extends ServiceError {
 	// message. Optional so every pre-existing plain-message ConflictError is unaffected.
 	constructor(
 		message = "Conflict",
-		// cofferdam-ignore: Refactor.UnusedVariable: public readonly property read by error-adapter.ts
 		public readonly details?: Record<string, unknown>
 	) {
 		super(message);

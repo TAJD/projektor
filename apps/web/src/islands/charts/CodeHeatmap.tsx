@@ -66,7 +66,6 @@ function useCodeHeatmap(
 			.finally(() => setLoading(false));
 	}, [workspaceSlug, projectId, since, until, prefix, mode]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { mode, setMode, prefix, setPrefix, data, loading, error };
 }
 

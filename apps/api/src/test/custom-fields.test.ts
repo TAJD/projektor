@@ -16,7 +16,6 @@ import {
 
 // ─── Definition CRUD ──────────────────────────────────────────────────────────
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Custom Field Definitions API", () => {
 	let token: string;
 	let slug: string;

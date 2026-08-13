@@ -2,7 +2,6 @@ import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, hashToken, seedFixture, seedIssueFixture } from "./helpers";
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Share tokens", () => {
 	let token: string;
 	let slug: string;

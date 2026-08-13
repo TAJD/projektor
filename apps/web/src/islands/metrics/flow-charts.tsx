@@ -22,12 +22,10 @@ export function readThemeColor(token: string, fallback: string): string {
 	return value || fallback;
 }
 
-// cofferdam-ignore: Design.OrphanExport: color helper kept exported for module API consistency
 export function hexToRgba(hex: string, alpha: number): string {
 	const match = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
 	if (!match) return hex;
 	const [r, g, b] = match.slice(1).map((h) => parseInt(h, 16));
-	// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 	return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
@@ -52,13 +50,9 @@ export function formatFullDate(iso: string): string {
 // read from the --chart-seq-* tokens (Base.astro) so the ramp repaints on theme toggle.
 export function readChartSeqColors() {
 	return {
-		// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 		backlogTodo: readThemeColor("--chart-seq-1", "#86b6ef"),
-		// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 		inProgress: readThemeColor("--chart-seq-2", "#5598e7"),
-		// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 		inReview: readThemeColor("--chart-seq-3", "#2a78d6"),
-		// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 		done: readThemeColor("--chart-seq-4", "#1c5cab"),
 	};
 }
@@ -74,7 +68,6 @@ export function tickIndices(width: number, labels: readonly string[]): number[] 
 	const maxTicks = Math.max(2, Math.floor(width / 70));
 	const stride = Math.max(1, Math.ceil(n / maxTicks));
 	const idxs: number[] = [];
-	// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: variable stride, not a 1:1 map over a fixed-length source
 	for (let i = 0; i < n; i += stride) idxs.push(i);
 	if (idxs[idxs.length - 1] !== n - 1) idxs.push(n - 1);
 	return idxs;
@@ -89,11 +82,8 @@ export function ThroughputChart({ data }: { data: ThroughputPoint[] }) {
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const accent = readThemeColor("--accent", "#4f46e5");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const border = readThemeColor("--border", "#e2e8f0");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
 			return {
@@ -152,9 +142,7 @@ export function CfdChart({ data }: { data: CfdPoint[] }) {
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const border = readThemeColor("--border", "#e2e8f0");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 			const seq = readChartSeqColors();
 

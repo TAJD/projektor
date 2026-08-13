@@ -190,7 +190,6 @@ function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
 			.finally(() => setLoading(false));
 	}, [projectId, workspaceSlug, range.since, range.until, range.granularity]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { projectId, metrics, loading, error };
 }
 
@@ -365,11 +364,8 @@ function BugShareChart({
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const accent = readThemeColor("--accent", "#4f46e5");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const border = readThemeColor("--border", "#e2e8f0");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
 			return {
@@ -424,11 +420,8 @@ function ReviewLatencyChart({ data }: { data: FlowMetrics["reviewLatencyOverTime
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const accent = readThemeColor("--accent", "#4f46e5");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const border = readThemeColor("--border", "#e2e8f0");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
 			return {
@@ -481,11 +474,8 @@ function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const accent = readThemeColor("--accent", "#4f46e5");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const border = readThemeColor("--border", "#e2e8f0");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
 			return {
@@ -541,13 +531,9 @@ function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsComple
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const accent = readThemeColor("--accent", "#4f46e5");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const chartSecondary = readThemeColor("--chart-secondary", "#d97706");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const border = readThemeColor("--border", "#e2e8f0");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
 			return {
@@ -628,9 +614,7 @@ function AgingWipScatter({
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const border = readThemeColor("--border", "#e2e8f0");
-			// cofferdam-ignore: Warning.DesignSystemConvention: canvas: CSS custom properties unreadable at draw time
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 			const seq = readChartSeqColors();
 

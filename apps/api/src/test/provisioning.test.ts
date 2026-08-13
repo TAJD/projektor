@@ -39,7 +39,6 @@ async function tombstoneRemoval(workspaceId: string, userId: string) {
 		.run();
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("login provisioning", () => {
 	it("first admin login creates the default workspace and makes them owner", async () => {
 		const slug = "prov-admin-create";

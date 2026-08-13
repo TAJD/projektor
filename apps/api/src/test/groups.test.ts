@@ -37,7 +37,6 @@ function mcpData<T>(r: JsonRpcResult<{ content: Array<{ text: string }> }> | Jso
 	return JSON.parse(r.result.content[0].text) as T;
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Groups REST", () => {
 	let roles: Awaited<ReturnType<typeof seedWorkspaceRoles>>;
 	let slug: string;

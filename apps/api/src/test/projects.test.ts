@@ -25,7 +25,6 @@ function isMcpError(r: JsonRpcResult | JsonRpcError): r is JsonRpcError {
 	return "error" in r;
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Projects REST", () => {
 	let ownerToken: string;
 	let memberToken: string;
@@ -246,7 +245,6 @@ describe("Projects REST", () => {
 	});
 });
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Projects MCP", () => {
 	let ownerToken: string;
 	let slug: string;

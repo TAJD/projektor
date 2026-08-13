@@ -37,5 +37,4 @@ const frontmatter = [
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, `${frontmatter}\n${WORKFLOW_SPEC.body}`, "utf8");
 
-// cofferdam-ignore: Warning.NoConsoleLog: CLI generator script output, not a debug leftover
 console.log(`Updated ${outPath}`);

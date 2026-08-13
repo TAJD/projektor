@@ -38,7 +38,6 @@ export async function inChunks<I, O>(
 ): Promise<O[]> {
 	if (items.length === 0) return [];
 	const out: O[] = [];
-	// cofferdam-ignore: Refactor.PreferArrayMethodOverLoop: sequential await per chunk; .map() would parallelize
 	for (let i = 0; i < items.length; i += CHUNK_SIZE) {
 		out.push(...(await op(items.slice(i, i + CHUNK_SIZE) as I[])));
 	}

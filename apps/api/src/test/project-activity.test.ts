@@ -96,7 +96,6 @@ async function seedWikiPage(
 	return { id, slug };
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("list_project_activity MCP tool", () => {
 	let token: string;
 	let slug: string;

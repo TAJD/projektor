@@ -9,9 +9,7 @@ import {
 	seedToken,
 } from "./helpers";
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Agent Messages API", () => {
-	// cofferdam-ignore: Refactor.DuplicateBlock: shared seedIssueFixture beforeEach shape, intentional reuse
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
@@ -158,7 +156,6 @@ describe("Agent Messages API", () => {
 
 	// C3: CAPSTONE — spans agents + file-claims + agent-messages
 	// Uses multiple tokens to stay within rate limit (5 per token)
-	// cofferdam-ignore: Readability.MaxFunctionLength: capstone test spans multiple API surfaces by design
 	it("C3: capstone — two agents coordinate via messages; force-claim posts override notice", async () => {
 		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Agent Issue" });
 		const scope = `issue:${issue2.id}`;

@@ -2,9 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedFixture, seedIssue, seedProjectFixture } from "./helpers";
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Agents API", () => {
-	// cofferdam-ignore: Refactor.DuplicateBlock: shared seedProjectFixture beforeEach shape, intentional reuse
 	let token: string;
 	let slug: string;
 	let workspaceId: string;

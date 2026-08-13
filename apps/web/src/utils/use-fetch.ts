@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
-// cofferdam-ignore: Design.OrphanExport: shared hook, not yet adopted by any island (PROJ-259)
 export function useFetch<T>(url: string | null, headers: Record<string, string>) {
 	const [data, setData] = useState<T | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -35,6 +34,5 @@ export function useFetch<T>(url: string | null, headers: Record<string, string>)
 		};
 	}, [url]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { data, loading, error };
 }

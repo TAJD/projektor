@@ -5,7 +5,6 @@ import { fetchAgentWipCap } from "../services/issue-leases";
 import type { ServiceCtx } from "../services/types";
 import { authHeaders, seedFixture, seedIssue, seedProjectFixture } from "./helpers";
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issue leases API (PROJ-184)", () => {
 	let token: string;
 	let slug: string;

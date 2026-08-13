@@ -237,7 +237,6 @@ function jsonRpcResult(id: unknown, result: unknown) {
 function jsonRpcError(id: unknown, code: number, message: string, data?: unknown) {
 	// `data` is the JSON-RPC 2.0 spec's optional error.data member — omitted entirely
 	// (not sent as `null`/`undefined`) when the error has no structured payload.
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: JSON-RPC 2.0 error object per spec, not a code-style return
 	return {
 		jsonrpc: "2.0",
 		id,

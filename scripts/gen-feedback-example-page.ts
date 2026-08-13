@@ -110,5 +110,4 @@ status/source, mark it reviewed, or convert it directly into an issue.
 `;
 
 writeFileSync(outPath, PAGE, "utf8");
-// cofferdam-ignore: Warning.NoConsoleLog: CLI generator script output, not a debug leftover
 console.log(`Updated ${outPath} from ${sourcePath}`);

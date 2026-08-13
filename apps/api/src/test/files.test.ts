@@ -65,7 +65,6 @@ function makeUploadRequest(
 	});
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Files API", () => {
 	let token: string;
 	let slug: string;
@@ -306,7 +305,6 @@ describe("Files API", () => {
 	it("POST /api/files rejects disallowed content type (text/html) → 415", async () => {
 		const form = new FormData();
 		form.append("file", new File(["<html>evil</html>"], "evil.html", { type: "text/html" }));
-		// cofferdam-ignore: Refactor.DuplicateBlock: mirrors the empty-content-type case below, distinct types under test
 		form.append("entityType", "issue");
 		form.append("entityId", ENTITY_ID);
 		const res = await SELF.fetch("http://localhost/api/files", {

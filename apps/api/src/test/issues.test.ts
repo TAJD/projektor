@@ -47,7 +47,6 @@ async function seedOwnerProjectFixture(): Promise<{
 	};
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issues API", () => {
 	let token: string;
 	let slug: string;
@@ -1905,7 +1904,6 @@ describe("Issues role guards", () => {
 	});
 });
 
-// cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
 describe("get_prioritized_issues MCP tool", () => {
 	let token: string;
 	let slug: string;

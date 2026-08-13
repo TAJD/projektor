@@ -4,7 +4,3 @@ pre-commit:
       run: pnpm turbo type-check
     lint:
       run: pnpm biome check --changed --no-errors-on-unmatched
-    island-api:
-      run: pnpm --filter @projektor/cofferdam-island-api build && npx --no-install cofferdam check apps/web/src/islands --only Warning.IslandApiConvention
-    design-system:
-      run: pnpm --filter @projektor/cofferdam-design-system build && npx --no-install cofferdam check apps/web/src --only Warning.DesignSystemConvention

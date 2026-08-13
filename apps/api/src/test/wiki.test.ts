@@ -70,7 +70,6 @@ async function seedWorkspaceFixture(): Promise<{
 	return { token: fixture.token, slug: fixture.workspace.slug, workspaceId: fixture.workspace.id };
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Wiki API", () => {
 	let token: string;
 	let slug: string;

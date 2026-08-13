@@ -389,7 +389,6 @@ async function sha256hex(s: string): Promise<string> {
 // ctx — there's no authenticated user in a cron invocation, so userId is a placeholder
 // (purgeExpiredWikiPages never reads it). A failure purging one workspace is logged and
 // does not stop the sweep over the rest.
-// cofferdam-ignore: Design.OrphanExport: Workers cron trigger — called by runtime, not imported
 export async function scheduled(
 	_event: ScheduledEvent,
 	env: Env,
@@ -420,7 +419,6 @@ export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void
 	}
 }
 
-// cofferdam-ignore: Design.OrphanExport: Cloudflare Workers entry point — loaded by the runtime, not a JS import
 export default {
 	fetch: app.fetch,
 	scheduled,
