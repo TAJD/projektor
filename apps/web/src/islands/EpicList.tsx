@@ -361,7 +361,6 @@ function useEpicsData({
 		if (projectIdReady) fetchEpics();
 	}, [fetchEpics, projectIdReady]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { epics, loading, error, fetchEpics };
 }
 

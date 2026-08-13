@@ -9,11 +9,9 @@
 import * as fs from "node:fs";
 import { CTX_FILE } from "./global-setup";
 
-// cofferdam-ignore: Design.OrphanExport: Playwright globalTeardown convention, referenced by file path
 export default async function globalTeardown(): Promise<void> {
 	if (fs.existsSync(CTX_FILE)) {
 		fs.unlinkSync(CTX_FILE);
-		// cofferdam-ignore: Warning.NoConsoleLog: CI-visible e2e teardown progress, not a debug leftover
 		console.log("[e2e teardown] Context file removed.");
 	}
 }

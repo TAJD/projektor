@@ -27,7 +27,6 @@ function expectAppsGroup<E extends { path: string; isLeaf: boolean }>(entries: r
 	return apps as E;
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
 describe("Code heatmap (PROJ-332)", () => {
 	let token: string;
 	let slug: string;

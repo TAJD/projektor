@@ -35,7 +35,6 @@ function isMcpError(r: JsonRpcResult | JsonRpcError): r is JsonRpcError {
 	return "error" in r;
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Workspaces MCP", () => {
 	let workspaceId: string;
 	let slug: string;

@@ -50,7 +50,6 @@ interface FlowMetrics {
 	};
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: one describe block, normal test style
 describe("Flow metrics (PROJ-252)", () => {
 	let token: string;
 	let slug: string;

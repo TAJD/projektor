@@ -93,7 +93,6 @@ describe("PROJ-79: token expiry", () => {
 // PROJ-79 §2: CF Access JWT — verifyJwtPayload (injectable keys, no network)
 // ---------------------------------------------------------------------------
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full test suite in one describe block, normal test style
 describe("PROJ-79: CF Access JWT verification (verifyJwtPayload unit tests)", () => {
 	// Generate RSA key pair once for the whole describe block
 	let privateKey: CryptoKey;

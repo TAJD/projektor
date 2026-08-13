@@ -107,5 +107,4 @@ writeFileSync(
 	"utf8",
 );
 
-// cofferdam-ignore: Warning.NoConsoleLog: CLI generator script output, not a debug leftover
 console.log(`Updated tool table in ${outPath} (${TOOL_COUNT} tools, ${domainCount} domains)`);

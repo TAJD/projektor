@@ -69,7 +69,6 @@ export interface FeedbackPayload {
  * meant to be embedded in client-side code, the same trust category as a
  * Sentry DSN or a Stripe publishable key.
  */
-// cofferdam-ignore: Design.DuplicateExportName: mirrors feedback.ts's submitFeedback name; never imported together
 export async function submitFeedback(
 	endpoint: string,
 	token: string,

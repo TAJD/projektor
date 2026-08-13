@@ -20,7 +20,6 @@ async function listIssues(token: string, slug: string) {
 	return (await res.json()) as { items: Array<{ id: string }> };
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: integration suite, one describe block
 describe("PROJ-311 group-based project access", () => {
 	it("a new member with no groups sees an empty 'pending' state", async () => {
 		const roles = await seedWorkspaceRoles();

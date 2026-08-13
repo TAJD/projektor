@@ -272,7 +272,6 @@ export async function buildWikiLinksReindexStatements(
  * patchWikiPage call buildWikiLinksReindexStatements directly instead, to include these
  * statements in the same batch as the content write/revision/FTS reindex (PROJ-511).
  */
-// cofferdam-ignore: Design.OrphanExport: available for direct use; prefer buildWikiLinksReindexStatements for batches
 export async function reindexWikiLinks(
 	ctx: ServiceCtx,
 	orm: Orm,

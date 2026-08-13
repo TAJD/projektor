@@ -66,7 +66,6 @@ function useProjectFlowCharts(workspaceSlug: string | undefined, projectId: stri
 			.finally(() => setLoading(false));
 	}, [projectId, workspaceSlug]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { metrics, loading, error };
 }
 

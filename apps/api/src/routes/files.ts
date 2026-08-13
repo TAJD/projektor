@@ -78,7 +78,6 @@ router.post("/", async (c) => {
 		return serviceErrToResponse(c, e);
 	}
 
-	// cofferdam-ignore: Refactor.PreferNullishCoalescing: file.type is "" for unknown types; `||` should catch that too
 	const contentType = file.type || "application/octet-stream";
 	const r2Key = `${ctx.workspaceId}/${crypto.randomUUID()}`;
 

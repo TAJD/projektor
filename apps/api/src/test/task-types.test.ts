@@ -11,7 +11,6 @@ import {
 	seedUser,
 } from "./helpers";
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Task Types API", () => {
 	let token: string;
 	let slug: string;
@@ -216,7 +215,6 @@ describe("Task Types API", () => {
 	});
 });
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Task Types — issue integration", () => {
 	let token: string;
 	let slug: string;

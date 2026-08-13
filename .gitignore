@@ -13,7 +13,6 @@ dist/
 # local dev / test artifacts
 .playwright-mcp/
 dev-server.log
-**/.cofferdam/cache/
 coverage/
 
 # npm lockfiles accidentally generated inside pnpm-workspace plugin dirs

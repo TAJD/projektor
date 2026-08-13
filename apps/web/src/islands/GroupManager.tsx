@@ -145,7 +145,6 @@ function useGroupManagerData(slug: string) {
 		void refetch();
 	}, [refetch]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { data, loading, error, setError, forbidden, refetch };
 }
 

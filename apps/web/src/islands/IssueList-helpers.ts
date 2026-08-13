@@ -109,16 +109,11 @@ const URL_SYNC_KEYS = [
 		"priority",
 		(f: UrlSyncFilters) => (f.filterPriorities.length > 0 ? f.filterPriorities.join(",") : null),
 	],
-	// cofferdam-ignore: Refactor.PreferNullishCoalescing: "" means "no filter" — `??` would keep it
 	["epic", (f: UrlSyncFilters) => f.filterEpicId || null],
-	// cofferdam-ignore: Refactor.PreferNullishCoalescing: "" means "no filter" — `??` would keep it
 	["sprintId", (f: UrlSyncFilters) => f.filterSprintId || null],
 	["hideEpics", (f: UrlSyncFilters) => (f.hideEpics ? "1" : null)],
-	// cofferdam-ignore: Refactor.PreferNullishCoalescing: "" means "no filter" — `??` would keep it
 	["dateField", (f: UrlSyncFilters) => f.filterDateField || null],
-	// cofferdam-ignore: Refactor.PreferNullishCoalescing: "" means "no filter" — `??` would keep it
 	["dateFrom", (f: UrlSyncFilters) => f.filterDateFrom || null],
-	// cofferdam-ignore: Refactor.PreferNullishCoalescing: "" means "no filter" — `??` would keep it
 	["dateTo", (f: UrlSyncFilters) => f.filterDateTo || null],
 ] as const satisfies ReadonlyArray<[string, (f: UrlSyncFilters) => string | null]>;
 
@@ -151,12 +146,9 @@ export function buildCreateIssuePayload(input: CreateIssueInput): Record<string,
 	return {
 		projectId: input.createProjectId,
 		title: input.createTitle.trim(),
-		// cofferdam-ignore: Refactor.PreferNullishCoalescing: "" means "unset" — `??` would send "" instead of omitting
 		body: input.createBody || undefined,
 		priority: input.createPriority,
-		// cofferdam-ignore: Refactor.PreferNullishCoalescing: "" means "unset" — `??` would send "" instead of omitting
 		statusId: input.createStatusId || undefined,
-		// cofferdam-ignore: Refactor.PreferNullishCoalescing: "" means "unset" — `??` would send "" instead of omitting
 		typeId: input.createTypeId || undefined,
 	};
 }

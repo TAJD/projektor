@@ -41,6 +41,5 @@ for (const playbook of PLAYBOOKS) {
 
 	const outPath = join(outDir, `${playbook.name}.md`);
 	writeFileSync(outPath, `${frontmatter}\n${playbook.body}`, "utf8");
-	// cofferdam-ignore: Warning.NoConsoleLog: CLI generator script output, not a debug leftover
 	console.log(`Updated ${outPath}`);
 }

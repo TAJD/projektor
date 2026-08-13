@@ -27,7 +27,6 @@ async function mcpCall<T>(
 	return res.json();
 }
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Comments REST API", () => {
 	let token: string;
 	let slug: string;

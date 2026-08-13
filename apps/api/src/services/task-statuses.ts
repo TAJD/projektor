@@ -11,7 +11,6 @@ const WS_META_TTL = 60;
 const TASK_STATUSES_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:task-statuses`;
 
 export async function listTaskStatuses(ctx: ServiceCtx) {
-	// cofferdam-ignore: Refactor.DuplicateBlock: mirrors task-types.ts's cache-read shape
 	const cacheKey = TASK_STATUSES_CACHE_KEY(ctx.workspaceId);
 	const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
 	if (cached) return cached;
@@ -33,7 +32,6 @@ export async function listTaskStatuses(ctx: ServiceCtx) {
 }
 
 export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
-	// cofferdam-ignore: Refactor.DuplicateBlock: mirrors task-types.ts's create-guard shape
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 	const result = CreateTaskStatusSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -85,7 +83,6 @@ function buildTaskStatusSetObj(data: TaskStatusUpdateData) {
 }
 
 export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown) {
-	// cofferdam-ignore: Refactor.DuplicateBlock: mirrors task-types.ts's update-guard shape
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 	const result = UpdateTaskStatusSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());

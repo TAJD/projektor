@@ -311,7 +311,6 @@ function useSprintData(workspaceSlug: string | undefined) {
 		if (projectId) fetchSprints(projectId);
 	}, [projectId, fetchSprints]);
 
-	// cofferdam-ignore: Consistency.ErrorHandlingIdiom: hook returns {data,error,loading} state, standard in this codebase
 	return { projectId, project, sprints, loading, error, fetchSprints };
 }
 

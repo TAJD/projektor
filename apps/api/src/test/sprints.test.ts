@@ -14,7 +14,6 @@ import {
 // viewer-role on the project so both can see it — the assertions then verify the
 // viewer's writes are still refused (read-only), not merely hidden.
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Sprints API", () => {
 	let token: string;
 	let slug: string;

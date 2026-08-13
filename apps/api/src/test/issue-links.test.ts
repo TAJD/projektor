@@ -2,7 +2,6 @@ import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedFixture, seedIssue, seedProject, seedWorkspaceRoles } from "./helpers";
 
-// cofferdam-ignore: Readability.MaxFunctionLength: full integration test suite in one describe block, normal test style
 describe("Issue Links API", () => {
 	let token: string;
 	let slug: string;
