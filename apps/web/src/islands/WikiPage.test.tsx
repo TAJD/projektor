@@ -373,7 +373,7 @@ describe("server-side draft autosave (PROJ-495)", () => {
 			([url, init]) => String(url).includes("/draft") && (init as RequestInit)?.method === "PUT"
 		);
 		expect(putCall).toBeTruthy();
-		const body = JSON.parse((putCall?.[1] as RequestInit).body as string);
+		const body = JSON.parse((putCall?.[1] as RequestInit | undefined)?.body as string);
 		expect(body.title).toBe("My Page Edited");
 		expect(body.content).toBe(PAGE.content);
 	});
@@ -424,7 +424,7 @@ describe("server-side draft autosave (PROJ-495)", () => {
 			([url, init]) => String(url).includes("/draft") && (init as RequestInit)?.method === "PUT"
 		);
 		expect(putCall).toBeTruthy();
-		const body = JSON.parse((putCall?.[1] as RequestInit).body as string);
+		const body = JSON.parse((putCall?.[1] as RequestInit | undefined)?.body as string);
 		expect(body.title).toBe("Typed just before navigating away");
 	});
 });
