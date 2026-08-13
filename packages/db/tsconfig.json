@@ -1,7 +1,12 @@
 {
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
-		"types": ["@cloudflare/workers-types"]
+		// "node" is here because src/test genuinely imports node:fs/path/sqlite/url and uses
+		// import.meta.url. It resolved without being declared only because drizzle-orm 0.33 shipped
+		// a `/// <reference types="node" />` in sqlite-core/columns/blob.d.ts, which pulled
+		// @types/node into the program as a side effect; 0.45 dropped that reference and every one
+		// of those imports stopped resolving (PROJ-302).
+		"types": ["@cloudflare/workers-types", "node"]
 	},
 	"include": ["src"]
 }

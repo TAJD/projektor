@@ -17,9 +17,9 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",
     "@biomejs/cli-win32-x64": "2.5.8",
-    "@cloudflare/workers-types": "^4.20250620.0",
+    "@cloudflare/workers-types": "^5.20260813.1",
     "@cofferdam/cofferdam": "^0.4.2",
-    "lefthook": "^1.11.0",
+    "lefthook": "^2.1.10",
     "tsx": "^4.23.12",
     "turbo": "^2.10.9",
     "typescript": "^5.5.0"
