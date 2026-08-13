@@ -35,16 +35,40 @@ async function assertAgentInWorkspace(
 	if (!agent) throw new NotFoundError("Agent session not found");
 }
 
+// PROJ-636: mirrors SESSION_TTL_SECONDS in services/issue-leases.ts, which in turn mirrors
+// ACTIVE_TTL in services/agents.ts. Kept local for the same reason theirs are: agents.ts
+// already imports releaseClaimsForAgent from here, so importing back would cycle.
+const SESSION_TTL_SECONDS = 120;
+
+const liveCutoff = () => Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
+
+type ActiveClaim = typeof schema.issueFileClaims.$inferSelect & { live: boolean };
+
 // inChunks keeps each query under D1's 100-bound-parameter cap. See services/sql.ts.
 async function loadActiveClaimsByPath(
 	orm: ReturnType<typeof drizzle>,
 	workspaceId: string,
-	paths: string[]
-) {
+	paths: string[],
+	cutoff: number
+): Promise<Map<string, ActiveClaim>> {
 	const activeClaims = await inChunks(paths, (chunk) =>
 		orm
-			.select()
+			// Columns enumerated rather than `.select()` because the session fields have to
+			// come along; LEFT JOIN, not INNER, so an agentless claim still appears.
+			.select({
+				id: schema.issueFileClaims.id,
+				workspaceId: schema.issueFileClaims.workspaceId,
+				issueId: schema.issueFileClaims.issueId,
+				agentId: schema.issueFileClaims.agentId,
+				path: schema.issueFileClaims.path,
+				claimedAt: schema.issueFileClaims.claimedAt,
+				releasedAt: schema.issueFileClaims.releasedAt,
+				releaseReason: schema.issueFileClaims.releaseReason,
+				sessionStatus: schema.agentSessions.status,
+				sessionHeartbeat: schema.agentSessions.lastHeartbeatAt,
+			})
 			.from(schema.issueFileClaims)
+			.leftJoin(schema.agentSessions, eq(schema.issueFileClaims.agentId, schema.agentSessions.id))
 			.where(
 				and(
 					eq(schema.issueFileClaims.workspaceId, workspaceId),
@@ -53,7 +77,52 @@ async function loadActiveClaimsByPath(
 				)
 			)
 	);
-	return new Map(activeClaims.map((c) => [c.path, c]));
+	return new Map(
+		activeClaims.map(({ sessionStatus, sessionHeartbeat, ...claim }) => [
+			claim.path,
+			{
+				...claim,
+				// agentId is nullable — a claim can be made without a session, and the
+				// agent_id FK is ON DELETE SET NULL. There is no heartbeat to judge those by,
+				// so they are treated as live and stay reclaimable only via `force`. Inferring
+				// staleness from claim age instead would reintroduce the TTL that this tier
+				// deliberately does not have.
+				live:
+					claim.agentId === null ||
+					(sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff),
+			},
+		])
+	);
+}
+
+/**
+ * Release claims whose holding session stopped heartbeating, and drop them from the map so
+ * every downstream step sees only genuinely-held paths.
+ *
+ * PROJ-636: this is the file-claim twin of `reclaimStaleLeaseOrThrow` in
+ * services/issue-leases.ts. Before it, an agent that died without calling `end_agent` —
+ * crash, OOM, killed terminal, closed worktree tab — held its paths forever, and for
+ * spawned workers dying without a clean exit is the normal case rather than the exception.
+ *
+ * Deliberately does NOT write to `claim_conflicts`. That log feeds the heatmap's contention
+ * mode, whose whole claim is that a repeatedly-contended path says something about how the
+ * work was sliced. Superseding a dead agent's abandoned claim is not two live agents
+ * colliding, and recording it as such would inflate the signal with fleet mortality.
+ */
+async function reclaimStaleClaims(
+	orm: ReturnType<typeof drizzle>,
+	claimsByPath: Map<string, ActiveClaim>,
+	now: number
+): Promise<ActiveClaim[]> {
+	const stale = [...claimsByPath.values()].filter((c) => !c.live);
+	for (const claim of stale) {
+		await orm
+			.update(schema.issueFileClaims)
+			.set({ releasedAt: now, releaseReason: "expired" })
+			.where(eq(schema.issueFileClaims.id, claim.id));
+		claimsByPath.delete(claim.path);
+	}
+	return stale.map((c) => ({ ...c, releasedAt: now, releaseReason: "expired" }));
 }
 
 async function assertNoConflicts(
@@ -186,9 +255,14 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	}
 
 	// Pre-check all paths for active claims — all-or-nothing on conflict.
-	const claimsByPath = await loadActiveClaimsByPath(orm, ctx.workspaceId, paths);
+	const claimsByPath = await loadActiveClaimsByPath(orm, ctx.workspaceId, paths, liveCutoff());
 
 	const now = Math.floor(Date.now() / 1000);
+
+	// Before conflict evaluation, so a dead holder neither blocks the claim nor lands in
+	// claim_conflicts. Removing them from the map is what keeps the two steps below
+	// unchanged — they only ever see live holders.
+	const reclaimed = await reclaimStaleClaims(orm, claimsByPath, now);
 
 	if (!force) {
 		await assertNoConflicts(orm, {
@@ -219,7 +293,7 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		now,
 	});
 
-	return { created, overridden };
+	return { created, overridden, reclaimed };
 }
 
 export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
@@ -302,19 +376,46 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	);
 	if (vis) conditions.push(vis);
 
-	const items = await orm
-		.select()
+	// PROJ-636: carries `live` for the same reason listIssueLeases does — false means the
+	// holder stopped heartbeating and the next claim on that path will reclaim it. Without
+	// it a reclaimable claim is indistinguishable from a held one, which would make the
+	// self-healing the docs now describe unobservable.
+	const cutoff = liveCutoff();
+	const rows = await orm
+		.select({
+			id: schema.issueFileClaims.id,
+			workspaceId: schema.issueFileClaims.workspaceId,
+			issueId: schema.issueFileClaims.issueId,
+			agentId: schema.issueFileClaims.agentId,
+			path: schema.issueFileClaims.path,
+			claimedAt: schema.issueFileClaims.claimedAt,
+			releasedAt: schema.issueFileClaims.releasedAt,
+			releaseReason: schema.issueFileClaims.releaseReason,
+			sessionStatus: schema.agentSessions.status,
+			sessionHeartbeat: schema.agentSessions.lastHeartbeatAt,
+		})
 		.from(schema.issueFileClaims)
+		.leftJoin(schema.agentSessions, eq(schema.issueFileClaims.agentId, schema.agentSessions.id))
 		.where(and(...conditions))
 		.orderBy(schema.issueFileClaims.claimedAt);
+
+	const items = rows.map(({ sessionStatus, sessionHeartbeat, ...claim }) => ({
+		...claim,
+		live:
+			claim.agentId === null || (sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff),
+	}));
 
 	return { items };
 }
 
 // PROJ-334: "abandoned claim" for the factory-health tile — released because the
-// agent's session ended, not because the work was released deliberately. There's no
-// separate expiry sweep for file claims (unlike issue_leases), so agent-end is the
-// only abandonment path today.
+// agent's session ended, not because the work was released deliberately.
+//
+// PROJ-636: this is no longer the only abandonment path. A claim whose holder stopped
+// heartbeating is reclaimed as `expired` by the next claim on the same path, so a crashed
+// agent no longer deadlocks its paths. Agent-end remains the *eager* path — it frees the
+// claim immediately rather than leaving it to the next claimant — and it is the one that
+// records `agent_ended` for the health tile, which distinguishes a clean exit from a crash.
 export async function releaseClaimsForAgent(ctx: ServiceCtx, agentId: string) {
 	const orm = drizzle(ctx.db, { schema });
 	const now = Math.floor(Date.now() / 1000);

@@ -355,4 +355,181 @@ describe("File Claims API", () => {
 		const priorHolderMessages = await listMessagesForScope(`issue:${issueId}`);
 		expect(priorHolderMessages.items).toHaveLength(0);
 	});
+
+	// PROJ-636: a claim whose holding session stopped heartbeating is reclaimed by the next
+	// claim on that path, the way issue leases already were.
+	//
+	// The distinction that matters throughout: a *crashed* agent keeps status 'active' with a
+	// stale heartbeat, because status only becomes 'ended' when it calls end_agent — which by
+	// definition it didn't. B4b above covers the clean-exit path; none of these do.
+	describe("PROJ-636: stale-holder reclaim", () => {
+		async function seedSession(
+			opts: Readonly<{ status?: string; heartbeatAgeSecs?: number; name?: string }> = {}
+		): Promise<string> {
+			const id = crypto.randomUUID();
+			const now = Math.floor(Date.now() / 1000);
+			await env.DB.prepare(
+				`INSERT INTO agent_sessions
+	         (id, workspace_id, issue_id, token_id, name, kind, status, started_at,
+	          last_heartbeat_at, ended_at)
+	       VALUES (?, ?, NULL, NULL, ?, 'agent', ?, ?, ?, NULL)`
+			)
+				.bind(
+					id,
+					workspaceId,
+					opts.name ?? "crashed-agent",
+					opts.status ?? "active",
+					now,
+					now - (opts.heartbeatAgeSecs ?? 0)
+				)
+				.run();
+			return id;
+		}
+
+		async function claimRow(path: string) {
+			return env.DB.prepare(
+				"SELECT released_at, release_reason FROM issue_file_claims WHERE path = ? AND workspace_id = ?"
+			)
+				.bind(path, workspaceId)
+				.first<{ released_at: number | null; release_reason: string | null }>();
+		}
+
+		it("a crashed agent's claim no longer blocks another issue", async () => {
+			// 200s > the 120s TTL. Status stays 'active' — that is the whole point.
+			const dead = await seedSession({ heartbeatAgeSecs: 200 });
+			expect(
+				(await claimFiles({ issueId, agentId: dead, paths: ["src/abandoned.ts"] })).status
+			).toBe(201);
+
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Takes over" });
+			const res = await claimFiles({ issueId: issue2.id, paths: ["src/abandoned.ts"] });
+			expect(res.status).toBe(201);
+
+			const body = (await res.json()) as {
+				created: Array<{ issueId: string }>;
+				reclaimed: Array<{ path: string; releaseReason: string }>;
+			};
+			expect(body.created[0].issueId).toBe(issue2.id);
+			// Reported, not silent: an agent that took over an abandoned path should be able to
+			// tell that from an uncontested first claim.
+			expect(body.reclaimed.map((r) => r.path)).toEqual(["src/abandoned.ts"]);
+			expect(body.reclaimed[0].releaseReason).toBe("expired");
+		});
+
+		it("marks the reclaimed claim expired, distinct from agent_ended", async () => {
+			const dead = await seedSession({ heartbeatAgeSecs: 200 });
+			await claimFiles({ issueId, agentId: dead, paths: ["src/reason.ts"] });
+
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Takes over" });
+			await claimFiles({ issueId: issue2.id, paths: ["src/reason.ts"] });
+
+			// Two rows now share this path; the released one is the original holder's.
+			const released = await env.DB.prepare(
+				"SELECT release_reason FROM issue_file_claims WHERE path = ? AND released_at IS NOT NULL"
+			)
+				.bind("src/reason.ts")
+				.first<{ release_reason: string }>();
+			// Not 'agent_ended' — the factory-health tile uses that to mean a clean exit, and a
+			// crash reported as a clean exit would hide exactly the failure this ticket is about.
+			expect(released?.release_reason).toBe("expired");
+		});
+
+		it("a live agent's claim still blocks, and is not silently expired", async () => {
+			// The control. Without this, a bug that expired every claim regardless of heartbeat
+			// would satisfy every other test in this block.
+			const live = await seedSession({ heartbeatAgeSecs: 5, name: "live-agent" });
+			await claimFiles({ issueId, agentId: live, paths: ["src/held.ts"] });
+
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Blocked" });
+			expect((await claimFiles({ issueId: issue2.id, paths: ["src/held.ts"] })).status).toBe(409);
+			expect((await claimRow("src/held.ts"))?.released_at).toBeNull();
+		});
+
+		it("an agentless claim is never auto-reclaimed", async () => {
+			// No session means no heartbeat to judge, so these stay held and `force` remains the
+			// only way past them. Guards the deliberate choice not to fall back on claim age.
+			await claimFiles({ issueId, paths: ["src/no-agent.ts"] });
+
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Blocked" });
+			expect((await claimFiles({ issueId: issue2.id, paths: ["src/no-agent.ts"] })).status).toBe(
+				409
+			);
+		});
+
+		it("does not record a conflict when superseding a dead holder", async () => {
+			const dead = await seedSession({ heartbeatAgeSecs: 200 });
+			await claimFiles({ issueId, agentId: dead, paths: ["src/no-conflict.ts"] });
+
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Takes over" });
+			await claimFiles({ issueId: issue2.id, paths: ["src/no-conflict.ts"] });
+
+			// claim_conflicts drives the heatmap's contention mode, whose argument is that a
+			// repeatedly-hot path says something about how the work was sliced. Fleet mortality
+			// is not contention, so counting it there would corrupt the signal.
+			const conflicts = await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM claim_conflicts WHERE path = ?"
+			)
+				.bind("src/no-conflict.ts")
+				.first<{ n: number }>();
+			expect(conflicts?.n).toBe(0);
+		});
+
+		it("still records a conflict when the holder is live", async () => {
+			// The paired control for the assertion above: proves the zero there comes from the
+			// holder being dead, not from conflict recording having been broken outright.
+			const live = await seedSession({ heartbeatAgeSecs: 5 });
+			await claimFiles({ issueId, agentId: live, paths: ["src/live-conflict.ts"] });
+
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Rejected" });
+			await claimFiles({ issueId: issue2.id, paths: ["src/live-conflict.ts"] });
+
+			const conflicts = await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM claim_conflicts WHERE path = ?"
+			)
+				.bind("src/live-conflict.ts")
+				.first<{ n: number }>();
+			expect(conflicts?.n).toBe(1);
+		});
+
+		it("reclaims only the stale paths in a mixed multi-path claim", async () => {
+			// Claims are all-or-nothing, so a request spanning a dead holder and a live one must
+			// still be refused whole — and must not expire the dead one as a side effect of a
+			// request that failed.
+			const dead = await seedSession({ heartbeatAgeSecs: 200 });
+			const live = await seedSession({ heartbeatAgeSecs: 5 });
+			await claimFiles({ issueId, agentId: dead, paths: ["src/dead-path.ts"] });
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Live holder" });
+			await claimFiles({ issueId: issue2.id, agentId: live, paths: ["src/live-path.ts"] });
+
+			const issue3 = await seedIssue(workspaceId, projectId, userId, { title: "Wants both" });
+			const res = await claimFiles({
+				issueId: issue3.id,
+				paths: ["src/dead-path.ts", "src/live-path.ts"],
+			});
+			expect(res.status).toBe(409);
+
+			// The live path is untouched.
+			expect((await claimRow("src/live-path.ts"))?.released_at).toBeNull();
+			// The dead one was released on the way through. Documenting the actual behaviour
+			// rather than asserting the tidier alternative: reclaim happens before conflict
+			// evaluation, so a refused request can still have freed an abandoned path. That is
+			// harmless — the path was reclaimable by anyone — but it is a real ordering
+			// consequence and worth pinning so a future change to it is a visible decision.
+			expect((await claimRow("src/dead-path.ts"))?.release_reason).toBe("expired");
+		});
+
+		it("list_file_claims flags a stale holder as not live", async () => {
+			const dead = await seedSession({ heartbeatAgeSecs: 200 });
+			await claimFiles({ issueId, agentId: dead, paths: ["src/listed-dead.ts"] });
+			const live = await seedSession({ heartbeatAgeSecs: 5 });
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Live" });
+			await claimFiles({ issueId: issue2.id, agentId: live, paths: ["src/listed-live.ts"] });
+
+			const listRes = await listFileClaims();
+			const body = (await listRes.json()) as { items: Array<{ path: string; live: boolean }> };
+			const byPath = new Map(body.items.map((i) => [i.path, i.live]));
+			expect(byPath.get("src/listed-dead.ts")).toBe(false);
+			expect(byPath.get("src/listed-live.ts")).toBe(true);
+		});
+	});
 });
