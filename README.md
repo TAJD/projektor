@@ -79,7 +79,7 @@ REST and MCP are two doors into one service layer:
 ```
 REST  /api/*         ─┐
                       ├─►  services/<domain>.ts  ─►  D1 (SQLite)
-MCP   /mcp/:wsId    ─┘
+MCP   /mcp/:wsId     ─┘
 ```
 
 Routes and MCP tools are thin wrappers; the business logic and the SQL live in
