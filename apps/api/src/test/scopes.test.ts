@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	capabilityForMcpTool,
 	capabilityForMethod,
+	capabilityForOAuthScope,
+	OAUTH_SCOPES_SUPPORTED,
 	parseScopes,
 	tokenAllows,
 } from "../auth/scopes";
@@ -283,5 +285,28 @@ describe("PROJ-17: POST /auth/tokens", () => {
 			body: JSON.stringify({ name: "bad", workspaceId, scopes: ["admin"] }),
 		});
 		expect(res.status).toBe(400);
+	});
+});
+
+// PROJ-655: the OAuth wire names are a public contract — they ship in
+// `scopes_supported` on the discovery documents, which Claude caches globally by
+// URL across every user of an instance. Pinning them in a test makes a rename a
+// deliberate act rather than a refactor's collateral damage.
+describe("OAuth wire scope names (PROJ-655)", () => {
+	it("advertises exactly the two namespaced scopes", () => {
+		expect([...OAUTH_SCOPES_SUPPORTED]).toEqual(["projektor:read", "projektor:write"]);
+	});
+
+	it("maps each wire scope to the capability it grants", () => {
+		expect(capabilityForOAuthScope("projektor:read")).toBe("read");
+		expect(capabilityForOAuthScope("projektor:write")).toBe("write");
+	});
+
+	it("fails closed on a scope it does not issue", () => {
+		// Notably the bare internal names: they are NOT valid on the wire, so a
+		// client that guesses them gets nothing rather than accidental read access.
+		for (const scope of ["read", "write", "*", "offline_access", "projektor:admin", ""]) {
+			expect(capabilityForOAuthScope(scope)).toBeNull();
+		}
 	});
 });

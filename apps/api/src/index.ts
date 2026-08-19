@@ -25,6 +25,7 @@ import { groupsRouter } from "./routes/groups";
 import { issueLinksRouter } from "./routes/issue-links";
 import { issuesRouter } from "./routes/issues";
 import { mcpRouter } from "./routes/mcp";
+import { oauthMetadataRouter } from "./routes/oauth-metadata";
 import { playbooksRouter } from "./routes/playbooks";
 import { projectActivityRouter } from "./routes/project-activity";
 import { projectsRouter } from "./routes/projects";
@@ -100,6 +101,11 @@ app.get("/api/health", (c) => c.json({ ok: true }));
 // Limits are read from RATE_LIMIT_AUTH_MAX / RATE_LIMIT_API_MAX env vars.
 app.use("/api/*", rateLimitMiddleware);
 app.use("/mcp/*", rateLimitMiddleware);
+// PROJ-655: the OAuth discovery documents are unauthenticated and are the first
+// thing every MCP client hits, so they get the same IP-keyed limiter. Mounted here,
+// above the auth/workspace middleware, because they must stay public.
+app.use("/.well-known/*", rateLimitMiddleware);
+app.route("/.well-known", oauthMetadataRouter);
 
 // Bootstrap — non-production only. Creates workspace + user + API token in one shot.
 // Returns everything needed to start using the MCP endpoint immediately.
