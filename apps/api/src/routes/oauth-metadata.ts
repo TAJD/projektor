@@ -1,5 +1,5 @@
 import type { HonoEnv } from "@projektor/types";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { OAUTH_SCOPES_SUPPORTED } from "../auth/scopes";
 
 // PROJ-655: the two public OAuth discovery documents, mounted under /.well-known.
@@ -112,5 +112,24 @@ router.get("/oauth-authorization-server", (c) => {
 // enters as an MCP URL (there is no MCP endpoint at the origin) and which would fail
 // the exact-match check anyway. A 404 sends the client back to the correct document
 // instead of handing it a wrong one.
+//
+// But "not served" has to be made explicit. PROJ-650 put `/.well-known/*` in
+// `run_worker_first`, so in a real deploy every path under it now reaches the Worker,
+// and an unmatched one falls through to the SPA catch-all at the bottom of index.ts —
+// which answers `200 text/html` with the app shell. For a client expecting discovery
+// JSON that is strictly worse than a clean 404: it is a success status carrying an
+// HTML page. Scoped to the `oauth-*` namespace on purpose, so unrelated well-known
+// paths a self-hoster may add (security.txt, ACME challenges) still fall through to
+// the static-asset handler.
+//
+// Note this is invisible under `wrangler dev` and in the test suite, neither of which
+// has an ASSETS binding — there, the catch-all already 404s. The regression test
+// asserts the *content type* rather than the status for exactly that reason.
+const discoveryNotFound = (c: Context<HonoEnv>) => c.json({ error: "Not Found" }, 404);
+
+router.all("/oauth-protected-resource", discoveryNotFound);
+router.all("/oauth-protected-resource/*", discoveryNotFound);
+router.all("/oauth-authorization-server", discoveryNotFound);
+router.all("/oauth-authorization-server/*", discoveryNotFound);
 
 export { router as oauthMetadataRouter };

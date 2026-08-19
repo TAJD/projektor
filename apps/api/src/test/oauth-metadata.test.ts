@@ -72,6 +72,34 @@ describe("RFC 9728 protected resource metadata", () => {
 	});
 });
 
+// PROJ-655: PROJ-650 routed /.well-known/* to the Worker, so an unmatched path under
+// it now reaches index.ts's SPA catch-all, which in a real deploy answers 200 with the
+// app shell — a success status carrying HTML to a client that asked for discovery JSON.
+//
+// The status alone cannot catch a regression here: the test runtime has no ASSETS
+// binding, so the catch-all already 404s and both the fixed and broken versions look
+// identical. The CONTENT TYPE is what distinguishes them — the explicit handlers
+// answer application/json, while falling through to the catch-all yields Hono's
+// text/plain "404 Not Found". Assert on that, or this test proves nothing.
+describe("unmatched OAuth discovery paths 404 as JSON, never the SPA shell", () => {
+	it.each([
+		"/.well-known/oauth-protected-resource",
+		"/.well-known/oauth-protected-resource/not-mcp",
+		"/.well-known/oauth-authorization-server/extra-segment",
+	])("%s", async (path) => {
+		const res = await SELF.fetch(`${HOST}${path}`);
+		expect(res.status).toBe(404);
+		expect(res.headers.get("Content-Type")).toContain("application/json");
+	});
+
+	it("leaves unrelated /.well-known paths alone for the asset handler", async () => {
+		// Scoping matters: a blanket catch-all on /.well-known would break a
+		// self-hoster's security.txt or ACME challenge, which must still fall through.
+		const res = await SELF.fetch(`${HOST}/.well-known/security.txt`);
+		expect(res.headers.get("Content-Type") ?? "").not.toContain("application/json");
+	});
+});
+
 describe("RFC 8414 authorization server metadata", () => {
 	it("advertises the OAuth 2.1 endpoints and grants", async () => {
 		const res = await SELF.fetch(AS_URL);
