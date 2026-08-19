@@ -1306,3 +1306,112 @@ describe("WikiPage — wide table scroll boundary (PROJ-612)", () => {
 		expect(rule).toContain("overflow-x: auto");
 	});
 });
+
+// PROJ-664: at ≤640px the page-tree sidebar becomes an off-canvas drawer and the
+// action row collapses [+ Child page]/[Move]/[Delete] behind a "More page
+// actions" menu, keeping only Edit inline. matchMedia is stubbed to matches:true
+// only for the "(max-width: 640px)" query, matching setup.ts's default mock
+// shape (matches: false) everywhere else so unrelated hooks (e.g. dark-mode
+// detection) are unaffected.
+function mockMobileViewport() {
+	const original = window.matchMedia;
+	window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+		matches: query === "(max-width: 640px)",
+		media: query,
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+	})) as unknown as typeof window.matchMedia;
+	return () => {
+		window.matchMedia = original;
+	};
+}
+
+describe("WikiPage — mobile drawer + action overflow (PROJ-664)", () => {
+	it("collapses the page action row to Edit + a 'More page actions' menu on mobile", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+			expect(screen.queryByRole("button", { name: "Move" })).toBeNull();
+			expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+			expect(screen.queryByRole("button", { name: "+ Child page" })).toBeNull();
+
+			const overflowTrigger = screen.getByRole("button", { name: "More page actions" });
+			fireEvent.click(overflowTrigger);
+
+			expect(await screen.findByRole("menuitem", { name: "Move" })).toBeTruthy();
+			expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+			expect(screen.getByRole("menuitem", { name: "+ Child page" })).toBeTruthy();
+		} finally {
+			restore();
+		}
+	});
+
+	it("keeps the desktop action row (no overflow menu) when not on a mobile viewport", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Move" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "+ Child page" })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: "More page actions" })).toBeNull();
+	});
+
+	it("toggles the page-tree drawer open/closed via the mobile 'Pages' trigger", async () => {
+		const restore = mockMobileViewport();
+		try {
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+			);
+			render(<WikiPage />);
+			await screen.findByText(/Select a page from the sidebar/i);
+
+			const trigger = screen.getByRole("button", { name: "Pages" });
+			expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+			fireEvent.click(trigger);
+			expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+			fireEvent.click(trigger);
+			expect(trigger.getAttribute("aria-expanded")).toBe("false");
+		} finally {
+			restore();
+		}
+	});
+
+	it("closes the drawer when a page in the tree is navigated to", async () => {
+		const restore = mockMobileViewport();
+		try {
+			const treeNode = { id: "w1", slug: "my-page", title: "My Page", type: null, children: [] };
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockImplementation((url: string) => {
+					const u = String(url);
+					if (u.includes("/tree")) {
+						return Promise.resolve({ ok: true, json: () => Promise.resolve([treeNode]) });
+					}
+					if (u.includes("/revisions")) {
+						return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+					}
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+				})
+			);
+			render(<WikiPage />);
+
+			const trigger = await screen.findByRole("button", { name: "Pages" });
+			fireEvent.click(trigger);
+			expect(trigger.getAttribute("aria-expanded")).toBe("true");
+
+			fireEvent.click(await screen.findByRole("button", { name: "My Page" }));
+			await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+		} finally {
+			restore();
+		}
+	});
+});
