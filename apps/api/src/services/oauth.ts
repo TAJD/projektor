@@ -199,14 +199,6 @@ export type ConnectorGrant = Readonly<{
 const GRANT_PAGE_SIZE = 100;
 const GRANT_MAX_PAGES = 5;
 
-// PROJ-660: how long an unredeemed grant is left alone before it is swept.
-//
-// A grant is written at consent time and only stamped with an expiry when the client
-// redeems the authorization code. Between those two moments it is legitimate, so the
-// sweep has to wait out the library's authorization-code lifetime — an hour is an
-// order of magnitude past it, and a client that has not come back by then never will.
-const ABANDONED_GRANT_GRACE_SECONDS = 3600;
-
 /**
  * Every live grant this user has issued for this workspace.
  *
@@ -221,13 +213,16 @@ export async function listConnectorGrants(
 	workspaceId: string
 ): Promise<ConnectorGrant[]> {
 	const grants: ConnectorGrant[] = [];
-	const abandoned: string[] = [];
-	const now = Math.floor(Date.now() / 1000);
 	let cursor: string | undefined;
 
 	for (let page = 0; page < GRANT_MAX_PAGES; page++) {
 		const result = await api.listUserGrants(userId, { limit: GRANT_PAGE_SIZE, cursor });
 		for (const grant of result.items) {
+			// The workspace a grant is bound to is the one recorded at consent time.
+			// A grant for another workspace belongs on that workspace's settings page.
+			if ((grant.metadata as { workspaceId?: string } | null)?.workspaceId !== workspaceId) {
+				continue;
+			}
 			// PROJ-660, found by walking the real flow: the library stamps expiresAt onto a
 			// grant only when the authorization code is redeemed for a refresh token. A
 			// grant with none is one where the person pressed "Allow access" and the client
@@ -235,26 +230,10 @@ export async function listConnectorGrants(
 			// that exists. Listing it says "claude.ai is connected" about a client holding
 			// no credential, and the Disconnect button beside it withdraws nothing.
 			//
-			// It is also the only kind of grant nothing ever cleans up: the library writes
-			// it to KV with no expiration, and its own purge pass skips records without an
-			// expiresAt. So an abandoned consent is swept here, where this user's grants are
-			// already being enumerated — there is no global enumeration to sweep from, and
-			// a user's own settings page is the one place their grants get walked.
-			//
-			// Both behaviours are safe only because projektor leaves refreshTokenTTL at its
+			// Safe as a liveness test only because projektor leaves refreshTokenTTL at its
 			// default; setting it to undefined would issue refresh tokens with no expiry and
-			// make every live grant look abandoned here. The tests below pin that.
-			if (grant.expiresAt === undefined) {
-				if (grant.createdAt < now - ABANDONED_GRANT_GRACE_SECONDS) abandoned.push(grant.id);
-				continue;
-			}
-			// The workspace a grant is bound to is the one recorded at consent time.
-			// A grant for another workspace belongs on that workspace's settings page.
-			// Checked after the sweep above: an abandoned grant is dead in every workspace,
-			// so leaving another workspace's stub behind would just leak it elsewhere.
-			if ((grant.metadata as { workspaceId?: string } | null)?.workspaceId !== workspaceId) {
-				continue;
-			}
+			// make every live grant look pending here. The test below pins that.
+			if (grant.expiresAt === undefined) continue;
 			grants.push({
 				id: grant.id,
 				client: relyingPartyHost(grant.clientId),
@@ -266,17 +245,6 @@ export async function listConnectorGrants(
 		}
 		if (!result.cursor) break;
 		cursor = result.cursor;
-	}
-
-	// Never let the sweep fail the page it is riding on: the user asked to see their
-	// connectors, not to garbage-collect KV.
-	for (const grantId of abandoned) {
-		try {
-			await api.revokeGrant(grantId, userId);
-		} catch {
-			// Another request swept it first, or KV is unhappy. Either way it will be
-			// picked up next time this list is loaded.
-		}
 	}
 
 	return grants.sort((a, b) => b.grantedAt - a.grantedAt);
