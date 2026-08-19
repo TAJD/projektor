@@ -35,6 +35,18 @@ function helpers(c: Context<HonoEnv>): OAuthHelpers {
 	return (c.env as unknown as { OAUTH_PROVIDER: OAuthHelpers }).OAUTH_PROVIDER;
 }
 
+// PROJ-660, seen on a real deployment: Cloudflare's Email Address Obfuscation is a
+// zone setting, on by default, and it rewrites any address it finds in an HTML response
+// into a placeholder plus a `/cdn-cgi/` script that decodes it. This page's CSP is
+// `default-src 'none'` with no script-src, so that script never runs and the one line
+// telling the user *which account* they are about to hand out reads "[email protected]".
+//
+// `<!--email_off-->` is Cloudflare's documented opt-out and is an ordinary HTML comment
+// everywhere else, so it costs nothing on a deployment that never sees the rewriter.
+function emailOff(escaped: string): string {
+	return `<!--email_off-->${escaped}<!--/email_off-->`;
+}
+
 function escapeHtml(value: string): string {
 	return value
 		.replace(/&/g, "&amp;")
@@ -258,7 +270,7 @@ oauthRouter.get("/authorize", async (c) => {
 		`<h1>Connect ${escapeHtml(name)}?</h1>
        <p><strong>${escapeHtml(name)}</strong> is asking to access the
        <strong>${escapeHtml(workspace.name)}</strong> workspace as
-       <strong>${escapeHtml(user.email)}</strong>.</p>
+       <strong>${emailOff(escapeHtml(user.email))}</strong>.</p>
        ${loopbackWarning}
        <p>It will be able to:</p>
        <ul>${scopeItems}</ul>

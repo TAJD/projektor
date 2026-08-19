@@ -376,7 +376,10 @@ describe("the consent screen", () => {
 
 		expect(res.status).toBe(200);
 		expect(res.headers.get("Content-Type")).toContain("text/html");
-		expect(body).toContain(email);
+		// PROJ-660: wrapped so Cloudflare's Email Address Obfuscation leaves it alone.
+		// Rewritten, it becomes a placeholder plus a /cdn-cgi/ script this page's CSP
+		// blocks, and the line naming the account being handed out reads as a redaction.
+		expect(body).toContain(`<!--email_off-->${email}<!--/email_off-->`);
 		expect(body).toContain("Test Connector");
 		expect(body).toContain("Read issues");
 		expect(body).toContain("Create and change issues");
