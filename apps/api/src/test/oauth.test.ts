@@ -719,6 +719,94 @@ describe("the token endpoint is rate-limited", () => {
 	});
 });
 
+describe("hardening the consent screen itself", () => {
+	let workspaceId: string;
+	let email: string;
+
+	beforeEach(async () => {
+		const workspace = await seedWorkspace();
+		workspaceId = workspace.id;
+		email = `hardening-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspaceId, user.id, "member");
+	});
+
+	async function consentPage(): Promise<Response> {
+		const { clientId } = await seedOAuthClient();
+		const { challenge } = await pkce();
+		return SELF.fetch(
+			authorizeUrl({ clientId, challenge, resource: `${HOST}/mcp/${workspaceId}` }),
+			{
+				headers: browserHeaders({ "Cf-Access-Jwt-Assertion": await accessJwt(email) }),
+			}
+		);
+	}
+
+	it("cannot be framed, and its form cannot be retargeted", async () => {
+		// Clickjacking is the attack a consent screen exists to be protected from:
+		// frame it invisibly under something the user wants to click and "Allow access"
+		// gets pressed on their behalf.
+		const res = await consentPage();
+		const csp = res.headers.get("Content-Security-Policy") ?? "";
+
+		expect(csp).toContain("frame-ancestors 'none'");
+		expect(csp).toContain("form-action 'self'");
+		expect(res.headers.get("X-Frame-Options")).toBe("DENY");
+		expect(res.headers.get("Cache-Control")).toBe("no-store");
+	});
+
+	it("refuses to process consent at all when JWT_SECRET is unset", async () => {
+		// Without this the secret stringifies into the HMAC key as "undefined", which
+		// is the same key on every deployment that skipped `wrangler secret put` — and
+		// a forgeable consent token is a working CSRF against the one screen that
+		// grants standing access.
+		const saved = env.JWT_SECRET;
+		env.JWT_SECRET = "" as unknown as string;
+		try {
+			const res = await consentPage();
+			expect(res.status).toBe(500);
+			expect(await res.text()).toContain("JWT_SECRET");
+		} finally {
+			env.JWT_SECRET = saved;
+		}
+	});
+});
+
+describe("workspace confinement survives a header that says otherwise", () => {
+	it("403s an OAuth token aimed at its own workspace but labelled as another", async () => {
+		// The provider's audience check looks at the URL path, and workspaceMiddleware
+		// resolves the workspace from X-Workspace-Slug in preference to that path. A
+		// token for workspace A on /mcp/A carrying `X-Workspace-Slug: B` therefore
+		// passes the audience check and lands in B — unless the grant's workspace is
+		// also enforced independently, which is what tokenWorkspaceId is for.
+		const first = await seedWorkspace();
+		const second = await seedWorkspace();
+		const email = `confined-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(first.id, user.id, "admin");
+		await seedMember(second.id, user.id, "admin");
+
+		const { tokens } = await connect({ email, workspaceId: first.id });
+
+		const res = await SELF.fetch(`${HOST}/mcp/${first.id}`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${tokens.access_token}`,
+				"Content-Type": "application/json",
+				"X-Workspace-Slug": second.slug,
+			},
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "list_projects", arguments: {} },
+			}),
+		});
+
+		expect(res.status).toBe(403);
+	});
+});
+
 describe("existing credentials are untouched by the provider", () => {
 	it("a pk_ API token still reaches the MCP endpoint", async () => {
 		// The regression this guards: declaring /mcp/ an apiRoute makes the provider

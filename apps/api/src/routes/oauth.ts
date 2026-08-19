@@ -77,12 +77,56 @@ function page(title: string, body: string): string {
 <body><main>${body}</main></body></html>`;
 }
 
+// A consent screen is the canonical clickjacking target: frame it invisibly over
+// something the user wants to click and the "Allow access" button gets pressed for
+// them. `frame-ancestors 'none'` is the control that stops it, with X-Frame-Options
+// alongside for anything that predates CSP level 2. `form-action 'self'` keeps the
+// decision POST from being retargeted, and `default-src 'none'` means the page cannot
+// pull in anything at all — it needs nothing beyond its own inline stylesheet.
+const CONSENT_HEADERS = {
+	"Content-Security-Policy":
+		"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+	"X-Frame-Options": "DENY",
+	"Referrer-Policy": "no-referrer",
+	// The URL carries the authorization request; nothing about it should be cached.
+	"Cache-Control": "no-store",
+} as const;
+
+function consentHtml(
+	c: Context<HonoEnv>,
+	title: string,
+	body: string,
+	status: 200 | 400 | 403 | 500 = 200
+) {
+	return c.html(page(title, body), status, { ...CONSENT_HEADERS });
+}
+
 function errorPage(c: Context<HonoEnv>, status: 400 | 403 | 500, heading: string, detail: string) {
-	return c.html(
-		page(heading, `<h1>${escapeHtml(heading)}</h1><p>${escapeHtml(detail)}</p>`),
+	return consentHtml(
+		c,
+		heading,
+		`<h1>${escapeHtml(heading)}</h1><p>${escapeHtml(detail)}</p>`,
 		status
 	);
 }
+
+/**
+ * The key the consent token is signed with.
+ *
+ * Fails closed when JWT_SECRET is unset. Falling back to a default — or letting
+ * `undefined` stringify into the key material, which is what happens if this is not
+ * checked — would make the signing key identical on every deployment that skipped the
+ * secret, and a forgeable consent token is a working CSRF against the one screen in
+ * projektor that grants standing access.
+ */
+function consentSigningKey(c: Context<HonoEnv>): string | null {
+	const secret = c.env.JWT_SECRET;
+	return secret && secret.length > 0 ? secret : null;
+}
+
+const NO_SIGNING_KEY =
+	"This projektor instance has no JWT_SECRET configured, so it cannot safely process " +
+	"a consent request. Set it with `wrangler secret put JWT_SECRET` and try again.";
 
 /**
  * Report an authorization failure the way OAuth expects.
@@ -133,6 +177,9 @@ const NO_CONSENTER =
 oauthRouter.get("/authorize", async (c) => {
 	const user = consentingUser(c);
 	if (!user) return errorPage(c, 403, "Sign-in required", NO_CONSENTER);
+
+	const signingKey = consentSigningKey(c);
+	if (!signingKey) return errorPage(c, 500, "Not configured", NO_SIGNING_KEY);
 
 	// parseAuthRequest is also the client and redirect-URI validator: it resolves the
 	// client (fetching and checking the CIMD document for a URL client_id) and rejects
@@ -193,7 +240,7 @@ oauthRouter.get("/authorize", async (c) => {
 
 	const token = await signConsentToken(
 		{ userId: user.id, workspaceId: workspace.id, scopes: consent.scopes, authRequest },
-		c.env.JWT_SECRET
+		signingKey
 	);
 
 	const host = relyingPartyHost(authRequest.clientId);
@@ -205,10 +252,10 @@ oauthRouter.get("/authorize", async (c) => {
        local program that is — only continue if you started this yourself.</div>`
 		: "";
 
-	return c.html(
-		page(
-			"Connect an application",
-			`<h1>Connect ${escapeHtml(name)}?</h1>
+	return consentHtml(
+		c,
+		"Connect an application",
+		`<h1>Connect ${escapeHtml(name)}?</h1>
        <p><strong>${escapeHtml(name)}</strong> is asking to access the
        <strong>${escapeHtml(workspace.name)}</strong> workspace as
        <strong>${escapeHtml(user.email)}</strong>.</p>
@@ -226,7 +273,6 @@ oauthRouter.get("/authorize", async (c) => {
        </form>
        <p class="meta">Verified identity: <strong>${escapeHtml(host)}</strong>. The
        application's name is self-declared; the address above is not.</p>`
-		)
 	);
 });
 
@@ -234,9 +280,12 @@ oauthRouter.post("/authorize", async (c) => {
 	const user = consentingUser(c);
 	if (!user) return errorPage(c, 403, "Sign-in required", NO_CONSENTER);
 
+	const signingKey = consentSigningKey(c);
+	if (!signingKey) return errorPage(c, 500, "Not configured", NO_SIGNING_KEY);
+
 	const form = await c.req.parseBody();
 	const submitted = typeof form.consent_token === "string" ? form.consent_token : "";
-	const payload = await verifyConsentToken(submitted, user.id, c.env.JWT_SECRET);
+	const payload = await verifyConsentToken(submitted, user.id, signingKey);
 	if (!payload) {
 		return errorPage(
 			c,
