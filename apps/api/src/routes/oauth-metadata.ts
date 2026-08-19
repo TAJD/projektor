@@ -1,6 +1,7 @@
 import type { HonoEnv } from "@projektor/types";
 import { type Context, Hono } from "hono";
 import { OAUTH_SCOPES_SUPPORTED } from "../auth/scopes";
+import { AUTHORIZE_ENDPOINT, TOKEN_ENDPOINT } from "../oauth/provider";
 
 // PROJ-655: the two public OAuth discovery documents, mounted under /.well-known.
 //
@@ -78,9 +79,14 @@ router.get("/oauth-authorization-server", (c) => {
 	return c.json(
 		{
 			issuer: origin,
-			authorization_endpoint: `${origin}/oauth/authorize`,
-			token_endpoint: `${origin}/oauth/token`,
-			revocation_endpoint: `${origin}/oauth/revoke`,
+			authorization_endpoint: `${origin}${AUTHORIZE_ENDPOINT}`,
+			token_endpoint: `${origin}${TOKEN_ENDPOINT}`,
+			// Same URL as the token endpoint, not a separate /oauth/revoke: the
+			// provider answers RFC 7009 revocation on the token endpoint itself.
+			// Advertising a path nothing serves would send every revocation to the
+			// SPA fallback, which answers 200 — and a client reading that as success
+			// would report a token revoked that is still live.
+			revocation_endpoint: `${origin}${TOKEN_ENDPOINT}`,
 			response_types_supported: ["code"],
 			response_modes_supported: ["query"],
 			grant_types_supported: ["authorization_code", "refresh_token"],

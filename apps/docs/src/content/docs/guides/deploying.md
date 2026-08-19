@@ -80,8 +80,13 @@ cd projektor-deploy-example
 ```bash
 wrangler d1 create projektor
 wrangler kv namespace create projektor
+wrangler kv namespace create projektor-oauth
 wrangler r2 bucket create projektor-files
 ```
+
+`projektor-oauth` is a second, separate KV namespace holding OAuth grants and
+tokens for MCP connectors. Keeping it apart from the cache namespace means
+clearing the cache never signs every connector out.
 
 ### 3. Configure `wrangler.toml`
 
@@ -94,11 +99,14 @@ echo "v0.3.7" > projektor.version          # pin whichever tag you picked
 ./deploy.sh                                 # creates wrangler.toml, then asks you to fill it
 ```
 
-Fill in the `REPLACE_` values: D1 `database_id`, KV `id`, your Cloudflare Access
-team domain and audience, and `ADMIN_EMAILS`. The artifact-owned paths
-(`main = ./vendor/worker.js`, `[assets].directory = ./vendor/web`,
-`migrations_dir = ./vendor/migrations`) and `compatibility_flags = ["nodejs_compat"]`
-are already set — leave them.
+Fill in the `REPLACE_` values: D1 `database_id`, both KV `id`s (`KV` and
+`OAUTH_KV`), your Cloudflare Access team domain and audience, and `ADMIN_EMAILS`.
+The artifact-owned paths (`main = ./vendor/worker.js`,
+`[assets].directory = ./vendor/web`, `migrations_dir = ./vendor/migrations`) and
+`compatibility_flags` are already set — leave them. The flags are not decoration:
+dropping `global_fetch_strictly_public` or `cache_option_enabled` makes the server
+advertise OAuth client registration support it does not have, and every attempt to
+add it as a connector in Claude fails.
 
 ### 4. Cloudflare API token — include D1
 

@@ -109,7 +109,10 @@ describe("RFC 8414 authorization server metadata", () => {
 		expect(body.issuer).toBe(HOST);
 		expect(body.authorization_endpoint).toBe(`${HOST}/oauth/authorize`);
 		expect(body.token_endpoint).toBe(`${HOST}/oauth/token`);
-		expect(body.revocation_endpoint).toBe(`${HOST}/oauth/revoke`);
+		// Deliberately the token endpoint, not a distinct /oauth/revoke: the provider
+		// serves RFC 7009 revocation there. A separate path would 200 through the SPA
+		// fallback and report success for a revocation that never happened.
+		expect(body.revocation_endpoint).toBe(`${HOST}/oauth/token`);
 		expect(body.response_types_supported).toEqual(["code"]);
 		expect(body.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
 	});

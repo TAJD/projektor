@@ -16,6 +16,7 @@
     "gen:playbooks": "tsx scripts/gen-playbooks.ts"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "0.10.3",
     "@projektor/db": "workspace:*",
     "@projektor/plugin-sdk": "workspace:*",
     "@projektor/types": "workspace:*",

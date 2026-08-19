@@ -10,6 +10,12 @@ import { authMiddleware } from "./middleware/auth";
 import { etagMiddleware } from "./middleware/etag";
 import { rateLimitMiddleware } from "./middleware/rate-limit";
 import { workspaceMiddleware } from "./middleware/workspace";
+import {
+	createOAuthProvider,
+	isOAuthAccessToken,
+	isOAuthProviderPath,
+	tokenEndpointRateLimited,
+} from "./oauth/provider";
 import { agentMessagesRouter } from "./routes/agent-messages";
 import { agentsRouter } from "./routes/agents";
 import { authRouter } from "./routes/auth";
@@ -25,6 +31,7 @@ import { groupsRouter } from "./routes/groups";
 import { issueLinksRouter } from "./routes/issue-links";
 import { issuesRouter } from "./routes/issues";
 import { mcpRouter } from "./routes/mcp";
+import { oauthRouter } from "./routes/oauth";
 import { oauthMetadataRouter } from "./routes/oauth-metadata";
 import { playbooksRouter } from "./routes/playbooks";
 import { projectActivityRouter } from "./routes/project-activity";
@@ -106,6 +113,13 @@ app.use("/mcp/*", rateLimitMiddleware);
 // above the auth/workspace middleware, because they must stay public.
 app.use("/.well-known/*", rateLimitMiddleware);
 app.route("/.well-known", oauthMetadataRouter);
+// PROJ-656: the consent screen. authMiddleware runs so the page knows who is
+// consenting — but no workspaceMiddleware: the workspace comes from the request's
+// RFC 8707 `resource` parameter, not from a header or a path prefix, and the route
+// resolves and authorises it itself (services/oauth.ts).
+app.use("/oauth/*", rateLimitMiddleware);
+app.use("/oauth/*", authMiddleware);
+app.route("/oauth", oauthRouter);
 
 // Bootstrap — non-production only. Creates workspace + user + API token in one shot.
 // Returns everything needed to start using the MCP endpoint immediately.
@@ -429,7 +443,29 @@ export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void
 // default export is an unconstrained object literal, so a handler whose signature
 // drifts from the Workers contract (this file typed `scheduled`'s first parameter as
 // ScheduledEvent — the service-worker type — for its whole life) still typechecks.
+// PROJ-656/657: the OAuth provider wraps the app rather than replacing it as the
+// entrypoint, and this dispatcher is the reason.
+//
+// Declaring `/mcp/` an `apiRoute` makes the provider answer 401 to any request there
+// without a bearer token — which is every request from the Cloudflare Access cookie,
+// the local dev bypass, and the PUBLIC_READ_ONLY viewer that powers the live demo.
+// Routing into the provider only for the two OAuth endpoints and for bearers that have
+// the provider's own `<userId>:<grantId>:<secret>` shape leaves every other credential
+// on exactly the path it takes today.
+const oauthProvider = createOAuthProvider(app as unknown as ExportedHandler<Env>);
+
 export default {
-	fetch: app.fetch,
+	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		const { pathname } = new URL(request.url);
+		if (isOAuthProviderPath(pathname)) {
+			// The token endpoint is served by the provider and never reaches Hono, so the
+			// /oauth/* limiter mounted above does not cover it. It is unauthenticated by
+			// definition (public clients, no secret), so it gets its own IP-keyed bound.
+			const limited = await tokenEndpointRateLimited(request, env);
+			return limited ?? oauthProvider.fetch(request, env, ctx);
+		}
+		if (isOAuthAccessToken(request)) return oauthProvider.fetch(request, env, ctx);
+		return app.fetch(request, env, ctx);
+	},
 	scheduled,
 } satisfies ExportedHandler<Env>;
