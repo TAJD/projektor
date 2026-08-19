@@ -128,6 +128,11 @@ audits:
   approves one. `middleware/auth.ts` fails the route closed for API tokens and for the
   shared PUBLIC_READ_ONLY viewer for the same reason. `/oauth/token` is not a projektor
   route at all — the OAuth library serves it before Hono sees the request.
+- **Connector grants (`GET/DELETE /api/workspaces/:slug/connectors`)** — REST-only, for
+  the same reason token minting is: withdrawing a credential is a sensitive operation, and
+  a connector should not be able to enumerate or revoke credentials — least of all its
+  own siblings. The list is scoped to the requesting user, not the workspace: a grant is a
+  personal credential, so unlike `pk_` tokens no admin can see or revoke someone else's.
 
 ### The security invariant: always scope by workspace
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked — e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.

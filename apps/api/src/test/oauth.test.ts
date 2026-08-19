@@ -1,6 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resetAuthCachesForTests } from "../middleware/auth";
+import { relyingPartyHost } from "../services/oauth";
 import { seedFixture, seedMember, seedToken, seedUser, seedWorkspace } from "./helpers";
 
 // PROJ-656/657: the OAuth 2.1 authorization code flow, end to end.
@@ -91,6 +92,8 @@ async function accessJwt(email: string): Promise<string> {
 async function seedOAuthClient(
 	redirectUris: string[] = [CLIENT_REDIRECT]
 ): Promise<{ clientId: string }> {
+	// Opaque, i.e. a DCR-registered client. A CIMD client's id is an HTTPS URL the
+	// provider fetches over the network, which is not seedable from a test.
 	const clientId = `test-client-${crypto.randomUUID().slice(0, 8)}`;
 	await env.OAUTH_KV.put(
 		`client:${clientId}`,
@@ -793,6 +796,105 @@ describe("the request limiter keys on the grant, not the token (PROJ-658)", () =
 		expect((await mcpCall(workspace.id, second.tokens.access_token, "list_projects")).status).toBe(
 			200
 		);
+	});
+});
+
+describe("Settings lists and withdraws connectors (PROJ-659)", () => {
+	function settings(slug: string, jwt: string, path = "", init: RequestInit = {}) {
+		return SELF.fetch(`${HOST}/api/workspaces/${slug}/connectors${path}`, {
+			...init,
+			headers: browserHeaders({ "Cf-Access-Jwt-Assertion": jwt, "X-Workspace-Slug": slug }),
+		});
+	}
+
+	it("shows the grant by the host of its client_id, not a name the client chose", async () => {
+		const workspace = await seedWorkspace();
+		const email = `settings-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "member");
+
+		const { clientId } = await connect({
+			email,
+			workspaceId: workspace.id,
+			scope: "projektor:read",
+		});
+
+		clientIp = "203.0.113.240";
+		const res = await settings(workspace.slug, await accessJwt(email));
+		expect(res.status).toBe(200);
+		const grants =
+			await res.json<Array<{ id: string; client: string; clientId: string; scopes: string[] }>>();
+		expect(grants).toHaveLength(1);
+		expect(grants[0].clientId).toBe(clientId);
+		expect(grants[0].scopes).toEqual(["projektor:read"]);
+		// This client's id is opaque, so it is shown verbatim. A CIMD client's id is a
+		// URL, and only its host is shown — never the client_name, which the client
+		// asserts about itself and nothing verifies.
+		expect(grants[0].client).toBe(clientId);
+		expect(relyingPartyHost("https://claude.ai/.well-known/oauth-client")).toBe("claude.ai");
+	});
+
+	it("withdrawing a connector kills its token on the next request", async () => {
+		const workspace = await seedWorkspace();
+		const email = `withdraw-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "member");
+
+		const { tokens } = await connect({ email, workspaceId: workspace.id });
+		expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(200);
+
+		clientIp = "203.0.113.241";
+		const jwt = await accessJwt(email);
+		const listed = await settings(workspace.slug, jwt);
+		const [grant] = await listed.json<Array<{ id: string }>>();
+
+		const revoked = await settings(workspace.slug, jwt, `/${grant.id}`, { method: "DELETE" });
+		expect(revoked.status).toBe(200);
+
+		// No cache extends a revoked grant: middleware/auth.ts caches the *user*, but the
+		// grant lookup that produces the props is per-request, in the provider.
+		expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(401);
+		expect(await (await settings(workspace.slug, jwt)).json()).toEqual([]);
+	});
+
+	it("keeps grants for another workspace off this workspace's page, and out of its reach", async () => {
+		const email = `two-ws-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		const first = await seedWorkspace();
+		const second = await seedWorkspace();
+		await seedMember(first.id, user.id, "member");
+		await seedMember(second.id, user.id, "member");
+
+		await connect({ email, workspaceId: second.id });
+
+		clientIp = "203.0.113.242";
+		const jwt = await accessJwt(email);
+		const listed = await settings(second.slug, jwt);
+		const [grant] = await listed.json<Array<{ id: string }>>();
+		expect(grant).toBeTruthy();
+
+		expect(await (await settings(first.slug, jwt)).json()).toEqual([]);
+		// Revoking it from the wrong workspace would disconnect a client this page never
+		// showed the user.
+		const crossed = await settings(first.slug, jwt, `/${grant.id}`, { method: "DELETE" });
+		expect(crossed.status).toBe(404);
+	});
+
+	it("does not show one member's connectors to another", async () => {
+		const workspace = await seedWorkspace();
+		const owner = `grantee-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const other = `bystander-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const granteeUser = await seedUser(owner);
+		const otherUser = await seedUser(other);
+		await seedMember(workspace.id, granteeUser.id, "member");
+		await seedMember(workspace.id, otherUser.id, "admin");
+
+		await connect({ email: owner, workspaceId: workspace.id });
+
+		clientIp = "203.0.113.243";
+		// An admin, deliberately: a grant is a personal credential, so seniority in the
+		// workspace does not confer visibility into it.
+		expect(await (await settings(workspace.slug, await accessJwt(other))).json()).toEqual([]);
 	});
 });
 

@@ -1,6 +1,8 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
+import { oauthApi } from "../oauth/provider";
+import { listConnectorGrants, revokeConnectorGrant } from "../services/oauth";
 import { ctxFromHono } from "../services/types";
 import {
 	createToken,
@@ -87,6 +89,33 @@ router.delete("/:slug/tokens/:tokenId", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(await revokeToken(ctx, c.req.param("tokenId")));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+// PROJ-659. Deliberately not mirrored as MCP tools: withdrawing a credential is a
+// sensitive operation, and one a connector should not be able to perform on itself.
+router.get("/:slug/connectors", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await listConnectorGrants(oauthApi(c.env), ctx.userId, ctx.workspaceId));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.delete("/:slug/connectors/:grantId", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(
+			await revokeConnectorGrant(
+				oauthApi(c.env),
+				ctx.userId,
+				ctx.workspaceId,
+				c.req.param("grantId")
+			)
+		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

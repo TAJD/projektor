@@ -84,6 +84,8 @@ const REST_ONLY: Record<string, string> = {
 	"oauth.ts:describeScope": "consent-screen copy",
 	"oauth.ts:relyingPartyHost": "consent-screen copy",
 	"oauth.ts:isLoopbackOnlyClient": "consent-screen warning",
+	"oauth.ts:listConnectorGrants": "settings-only: a connector must not enumerate credentials",
+	"oauth.ts:revokeConnectorGrant": "settings-only: revoking a credential is a browser action",
 	// Misc.
 	"issues.ts:resolveIssueIdParam": "URL param coercion, not an operation",
 	"projects.ts:getProjectBySlug": "slug routing for the browser; agents address projects by id",

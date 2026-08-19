@@ -1,5 +1,6 @@
-import type { AuthRequest } from "@cloudflare/workers-oauth-provider";
+import type { AuthRequest, OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import { OAUTH_SCOPE_READ, OAUTH_SCOPE_WRITE, OAUTH_SCOPES_SUPPORTED } from "../auth/scopes";
+import { NotFoundError } from "./errors";
 
 // PROJ-656: the parts of the authorization request that are projektor's business
 // rather than the OAuth library's.
@@ -175,4 +176,87 @@ export async function lookupConsentWorkspace(
 
 	if (!row?.role) return null;
 	return { id: row.id, name: row.name, slug: row.slug, role: row.role };
+}
+
+// PROJ-659: the connector grants a user has issued, for Settings.
+//
+// Read from the OAuth library's KV store rather than a projektor table, because that is
+// where grants live — see PROJ-658 for why there is no api_tokens row to mirror them into.
+
+export type ConnectorGrant = Readonly<{
+	id: string;
+	/** Host of the client_id URL — see relyingPartyHost for why not client_name. */
+	client: string;
+	clientId: string;
+	scopes: string[];
+	grantedAt: number;
+	expiresAt: number | null;
+}>;
+
+// A person accumulates a handful of connectors, not thousands. The page walk is bounded
+// so a corrupt or hostile cursor cannot turn one settings request into an unbounded KV
+// scan; if a user somehow exceeds it, the list truncates rather than hanging.
+const GRANT_PAGE_SIZE = 100;
+const GRANT_MAX_PAGES = 5;
+
+/**
+ * Every live grant this user has issued for this workspace.
+ *
+ * Scoped to the requesting user, not the workspace: a grant is a personal credential, so
+ * any member can hold one and no admin can enumerate someone else's. That is the opposite
+ * of `pk_` API tokens, which are workspace property and admin-only — the two lists sit
+ * side by side in Settings and are deliberately governed differently.
+ */
+export async function listConnectorGrants(
+	api: OAuthHelpers,
+	userId: string,
+	workspaceId: string
+): Promise<ConnectorGrant[]> {
+	const grants: ConnectorGrant[] = [];
+	let cursor: string | undefined;
+
+	for (let page = 0; page < GRANT_MAX_PAGES; page++) {
+		const result = await api.listUserGrants(userId, { limit: GRANT_PAGE_SIZE, cursor });
+		for (const grant of result.items) {
+			// The workspace a grant is bound to is the one recorded at consent time.
+			// A grant for another workspace belongs on that workspace's settings page.
+			if ((grant.metadata as { workspaceId?: string } | null)?.workspaceId !== workspaceId) {
+				continue;
+			}
+			grants.push({
+				id: grant.id,
+				client: relyingPartyHost(grant.clientId),
+				clientId: grant.clientId,
+				scopes: grant.scope,
+				grantedAt: grant.createdAt,
+				expiresAt: grant.expiresAt ?? null,
+			});
+		}
+		if (!result.cursor) break;
+		cursor = result.cursor;
+	}
+
+	return grants.sort((a, b) => b.grantedAt - a.grantedAt);
+}
+
+/**
+ * Withdraw one connector.
+ *
+ * `revokeGrant` already refuses a grant belonging to a different user, so the ownership
+ * check is the library's. The lookup here is for workspace scoping: revoking from
+ * workspace A's settings page must not reach into a grant the same person holds for
+ * workspace B, which would silently disconnect a client the page never showed them.
+ */
+export async function revokeConnectorGrant(
+	api: OAuthHelpers,
+	userId: string,
+	workspaceId: string,
+	grantId: string
+): Promise<{ ok: true }> {
+	const grants = await listConnectorGrants(api, userId, workspaceId);
+	if (!grants.some((grant) => grant.id === grantId)) {
+		throw new NotFoundError("Connector not found");
+	}
+	await api.revokeGrant(grantId, userId);
+	return { ok: true };
 }
