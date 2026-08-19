@@ -871,6 +871,41 @@ describe("Settings lists and withdraws connectors (PROJ-659)", () => {
 		expect(grants[0].expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
 	});
 
+	it("sweeps an abandoned consent instead of leaking it in KV forever", async () => {
+		const workspace = await seedWorkspace();
+		const email = `leak-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "member");
+
+		const jwt = await accessJwt(email);
+		const { clientId } = await seedOAuthClient();
+		const { challenge } = await pkce();
+		const consentPage = await SELF.fetch(
+			authorizeUrl({ clientId, resource: `${HOST}/mcp/${workspace.id}`, challenge }),
+			{ headers: browserHeaders({ "Cf-Access-Jwt-Assertion": jwt }) }
+		);
+		expect(
+			(await postConsent(consentTokenFrom(await consentPage.text()), "approve", jwt)).status
+		).toBe(302);
+
+		// The library writes the grant with no KV expiration and its purge pass skips
+		// records without an expiresAt, so nothing but this sweep ever removes it.
+		const { keys } = await env.OAUTH_KV.list({ prefix: `grant:${user.id}:` });
+		expect(keys).toHaveLength(1);
+		const key = keys[0].name;
+
+		// Age it past the grace period; a fresh one must survive, which the test above pins.
+		const grant = await env.OAUTH_KV.get<{ createdAt: number }>(key, { type: "json" });
+		if (!grant) throw new Error("grant vanished");
+		grant.createdAt -= 7200;
+		await env.OAUTH_KV.put(key, JSON.stringify(grant));
+
+		clientIp = "203.0.113.247";
+		expect(await (await settings(workspace.slug, jwt)).json()).toEqual([]);
+
+		expect((await env.OAUTH_KV.list({ prefix: `grant:${user.id}:` })).keys).toHaveLength(0);
+	});
+
 	it("withdrawing a connector kills its token on the next request", async () => {
 		const workspace = await seedWorkspace();
 		const email = `withdraw-${crypto.randomUUID().slice(0, 8)}@example.com`;
