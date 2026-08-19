@@ -1,5 +1,5 @@
 import type { RefObject } from "preact";
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { slugify } from "../lib/slugify";
 import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
@@ -9,7 +9,27 @@ import AccessPending from "./AccessPending";
 import type { ProjectLookup as ProjectOption } from "./board-utils";
 import MarkdownEditor from "./LazyMarkdownEditor";
 import { Button } from "./ui/Button";
+import { Popover } from "./ui/Popover";
 import Select, { type SelectOption } from "./ui/Select";
+
+/** Matches Base.astro's mobile `@media (max-width: 640px)` breakpoint. */
+const WIKI_MOBILE_QUERY = "(max-width: 640px)";
+
+// PROJ-664: reactive (unlike Select.tsx's imperative isMobileMenu() check) since
+// the wiki reader switches whole sections of the layout on crossing the
+// breakpoint, not just a menu opened on demand.
+function useIsMobileViewport(): boolean {
+	const [isMobile, setIsMobile] = useState(
+		() => typeof window !== "undefined" && window.matchMedia?.(WIKI_MOBILE_QUERY).matches === true
+	);
+	useEffect(() => {
+		const mq = window.matchMedia(WIKI_MOBILE_QUERY);
+		const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+		mq.addEventListener("change", onChange);
+		return () => mq.removeEventListener("change", onChange);
+	}, []);
+	return isMobile;
+}
 
 // PROJ-491 (R9): the create-form's template picker draws from list_wiki_templates.
 interface TemplateOption {
@@ -721,6 +741,8 @@ function WikiSidebar({
 	onToggleStale,
 	stalePages,
 	staleLoading,
+	drawerOpen,
+	sidebarRef,
 }: {
 	workspaceSlug: string | undefined;
 	projectId: string;
@@ -747,13 +769,18 @@ function WikiSidebar({
 	onToggleStale: (open: boolean) => void;
 	stalePages: StalePageItem[];
 	staleLoading: boolean;
+	// PROJ-664: below 640px this aside becomes an off-canvas drawer (see
+	// WikiPageShell) instead of stacking full-width in flow above the article.
+	drawerOpen: boolean;
+	sidebarRef: RefObject<HTMLElement>;
 }) {
 	const asideClass = [
 		"w-[240px] shrink-0 bg-surface border-r border-border p-4 overflow-y-auto",
-		"max-sm:w-full max-sm:border-r-0 max-sm:border-b",
+		"wiki-sidebar",
+		drawerOpen ? "wiki-sidebar-open" : "",
 	].join(" ");
 	return (
-		<aside class={asideClass}>
+		<aside id="wiki-page-tree" class={asideClass} aria-label="Wiki pages" ref={sidebarRef}>
 			<ScopeControl workspaceSlug={workspaceSlug} projectId={projectId} />
 			<Button variant="primary" onClick={onCreate} class="w-full mb-4 max-sm:min-h-[44px]">
 				+ New page
@@ -1038,6 +1065,117 @@ function TocList({
 	);
 }
 
+// PROJ-664: on mobile the [+ Child page]/[Move]/[Delete] buttons that used to
+// sit inline (326px, shrink-0, no scrolling ancestor) pushed scrollWidth past
+// the viewport and crushed the title. Below 640px only Edit stays inline;
+// the rest move behind this menu. Mirrors AccountMenu's trigger+Popover shape.
+function PageActionOverflowMenu({
+	pageId,
+	onStartCreateChild,
+	onStartMove,
+	onDelete,
+}: {
+	pageId: string;
+	onStartCreateChild: (pageId: string) => void;
+	onStartMove: () => void;
+	onDelete: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+	const rootRef = useRef<HTMLDivElement>(null);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const popoverRef = useRef<HTMLDivElement>(null);
+	const menuId = useId();
+
+	function isInside(node: Node) {
+		return !!(rootRef.current?.contains(node) || popoverRef.current?.contains(node));
+	}
+
+	function openMenu() {
+		const rect = triggerRef.current?.getBoundingClientRect();
+		if (rect) {
+			setPos({ top: rect.bottom + 4, right: Math.max(8, window.innerWidth - rect.right) });
+		}
+		setOpen(true);
+	}
+
+	useEffect(() => {
+		if (!open) return;
+		function onPointerDown(e: MouseEvent) {
+			if (!(e.target instanceof Node) || !isInside(e.target)) setOpen(false);
+		}
+		function onKeyDown(e: KeyboardEvent) {
+			if (e.key === "Escape") {
+				setOpen(false);
+				triggerRef.current?.focus();
+			}
+		}
+		document.addEventListener("mousedown", onPointerDown);
+		document.addEventListener("keydown", onKeyDown);
+		return () => {
+			document.removeEventListener("mousedown", onPointerDown);
+			document.removeEventListener("keydown", onKeyDown);
+		};
+	}, [open]);
+
+	function runAndClose(fn: () => void) {
+		setOpen(false);
+		fn();
+	}
+
+	return (
+		<div class="relative" ref={rootRef}>
+			<button
+				ref={triggerRef}
+				type="button"
+				class="btn btn-outline btn-sm"
+				aria-haspopup="menu"
+				aria-expanded={open}
+				aria-controls={open ? menuId : undefined}
+				aria-label="More page actions"
+				onClick={() => (open ? setOpen(false) : openMenu())}
+			>
+				⋯
+			</button>
+			{open && pos && (
+				<Popover
+					id={menuId}
+					role="menu"
+					ariaLabel="More page actions"
+					strategy="portal-fixed"
+					elementRef={popoverRef}
+					position={pos}
+				>
+					<button
+						type="button"
+						role="menuitem"
+						class="page-action-menu-item"
+						onClick={() => runAndClose(() => onStartCreateChild(pageId))}
+					>
+						+ Child page
+					</button>
+					<button
+						type="button"
+						role="menuitem"
+						class="page-action-menu-item"
+						onClick={() => runAndClose(onStartMove)}
+					>
+						Move
+					</button>
+					<button
+						type="button"
+						role="menuitem"
+						class="page-action-menu-item page-action-menu-item-danger"
+						onClick={() => runAndClose(onDelete)}
+					>
+						Delete
+					</button>
+				</Popover>
+			)}
+		</div>
+	);
+}
+
 function PageHeader({
 	editing,
 	pageId,
@@ -1065,8 +1203,9 @@ function PageHeader({
 	onStartMove: () => void;
 	onDelete: () => void;
 }) {
+	const isMobile = useIsMobileViewport();
 	return (
-		<header class="flex items-start justify-between gap-4 mb-1">
+		<header class="wiki-page-header flex items-start justify-between gap-4 mb-1">
 			{editing ? (
 				<input
 					id="wiki-title"
@@ -1080,7 +1219,7 @@ function PageHeader({
 				<h1 class="m-0 text-[1.75rem] font-bold text-text-base">{title}</h1>
 			)}
 
-			<div class="flex gap-2 shrink-0">
+			<div class="flex gap-2 shrink-0 max-sm:shrink">
 				{editing ? (
 					<>
 						<Button variant="primary" onClick={onSave} disabled={saving}>
@@ -1089,6 +1228,18 @@ function PageHeader({
 						<Button variant="outline" onClick={onCancelEdit} disabled={saving}>
 							Cancel
 						</Button>
+					</>
+				) : isMobile ? (
+					<>
+						<Button variant="outline" onClick={onStartEdit}>
+							Edit
+						</Button>
+						<PageActionOverflowMenu
+							pageId={pageId}
+							onStartCreateChild={onStartCreateChild}
+							onStartMove={onStartMove}
+							onDelete={onDelete}
+						/>
 					</>
 				) : (
 					<>
@@ -2877,7 +3028,157 @@ const WIKI_PAGE_STYLES = `
 			text-overflow: ellipsis;
 		}
 	}
+
+	/* PROJ-664: the page tree/filters sidebar becomes an off-canvas drawer below
+	 * 640px instead of stacking full-width above the article — mirrors the
+	 * app-wide sidebar drawer in Base.astro (hamburger + overlay + transform),
+	 * scoped here to the wiki page tree only. The trigger button's presence is
+	 * gated in JS (useIsMobileViewport), not CSS display:none — matchMedia is
+	 * mockable in tests, but jsdom's own @media evaluation isn't. */
+	.wiki-drawer-trigger {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		min-height: 44px;
+		margin: 0.5rem 0.5rem 0;
+		padding: 0.5rem 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: var(--surface);
+		color: var(--text-base);
+		font-size: 0.875rem;
+		cursor: pointer;
+	}
+	.wiki-drawer-overlay { display: none; }
+	@media (max-width: 640px) {
+		.wiki-sidebar {
+			position: fixed;
+			top: var(--topbar-height, 0px);
+			left: 0;
+			bottom: 0;
+			width: min(82vw, 280px);
+			max-width: 280px;
+			transform: translateX(-100%);
+			transition: transform 0.22s ease;
+			z-index: 105;
+			box-shadow: none;
+		}
+		.wiki-sidebar.wiki-sidebar-open {
+			transform: translateX(0);
+			box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
+		}
+		.wiki-drawer-overlay {
+			display: block;
+			position: fixed;
+			inset: 0;
+			background: rgba(0, 0, 0, 0.45);
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 0.22s ease;
+			z-index: 104;
+		}
+		.wiki-drawer-overlay.wiki-drawer-overlay-open {
+			opacity: 1;
+			pointer-events: auto;
+		}
+	}
+
+	/* PROJ-664: action row no longer force-shrinks the title on mobile — the
+	 * overflow menu keeps it to two buttons (Edit + ⋯), so it can wrap onto
+	 * its own line instead of crushing the h1. */
+	@media (max-width: 640px) {
+		.wiki-page-header {
+			flex-wrap: wrap;
+		}
+	}
+
+	.page-action-menu-item {
+		display: block;
+		width: 100%;
+		text-align: left;
+		padding: 0.5rem 0.75rem;
+		min-height: 44px;
+		border: none;
+		background: none;
+		color: var(--text-base);
+		font-size: 0.875rem;
+		cursor: pointer;
+		border-radius: 4px;
+	}
+	.page-action-menu-item:hover { background: var(--surface); }
+	.page-action-menu-item-danger { color: var(--danger-text); }
 `;
+
+// PROJ-664: owns the off-canvas page-tree drawer's open state, Esc-to-close,
+// reset-on-resize-past-breakpoint, and a focus trap scoped to when the drawer
+// is actually acting as a drawer (mobile) — on desktop the sidebar stays in
+// normal flow, so trapping focus there would break ordinary tabbing.
+function useWikiSidebarDrawer() {
+	const [open, setOpen] = useState(false);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const sidebarRef = useRef<HTMLElement>(null);
+
+	const close = useCallback(() => setOpen(false), []);
+
+	useEffect(() => {
+		if (!open) return;
+		function onKeyDown(e: KeyboardEvent) {
+			if (e.key === "Escape") close();
+		}
+		document.addEventListener("keydown", onKeyDown);
+		const mq = window.matchMedia("(min-width: 641px)");
+		const onGrow = (e: MediaQueryListEvent) => {
+			if (e.matches) close();
+		};
+		mq.addEventListener("change", onGrow);
+		return () => {
+			document.removeEventListener("keydown", onKeyDown);
+			mq.removeEventListener("change", onGrow);
+		};
+	}, [open, close]);
+
+	useEffect(() => {
+		if (!window.matchMedia(WIKI_MOBILE_QUERY).matches) return;
+		if (open) {
+			sidebarRef.current
+				?.querySelector<HTMLElement>(
+					'a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+				)
+				?.focus();
+		} else {
+			triggerRef.current?.focus();
+		}
+	}, [open]);
+
+	useEffect(() => {
+		if (!open) return;
+		function onTrapTab(e: KeyboardEvent) {
+			if (e.key !== "Tab") return;
+			if (!window.matchMedia(WIKI_MOBILE_QUERY).matches) return;
+			const container = sidebarRef.current;
+			if (!container) return;
+			const focusables = Array.from(
+				container.querySelectorAll<HTMLElement>(
+					'a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+				)
+			).filter((el) => !el.hasAttribute("disabled"));
+			if (focusables.length === 0) return;
+			const first = focusables[0];
+			const last = focusables[focusables.length - 1];
+			if (e.shiftKey && document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			} else if (!e.shiftKey && document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
+		document.addEventListener("keydown", onTrapTab);
+		return () => document.removeEventListener("keydown", onTrapTab);
+	}, [open]);
+
+	return { open, setOpen, close, triggerRef, sidebarRef };
+}
 
 function WikiPageShell(
 	props: Readonly<{
@@ -2905,9 +3206,57 @@ function WikiPageShell(
 		};
 	}>
 ) {
+	const drawer = useWikiSidebarDrawer();
+	const isMobile = useIsMobileViewport();
+	// PROJ-664: picking a page or starting a create must close the drawer, or
+	// tapping a page in the tree leaves the drawer covering the page just opened.
+	const navigateAndClose = useCallback(
+		(s: string) => {
+			drawer.close();
+			props.onNavigate(s);
+		},
+		[drawer.close, props.onNavigate]
+	);
+	const createAndClose = useCallback(() => {
+		drawer.close();
+		props.onCreate();
+	}, [drawer.close, props.onCreate]);
+
 	return (
 		<div class="flex min-h-screen max-sm:flex-col">
 			<style>{WIKI_PAGE_STYLES}</style>
+			{isMobile && (
+				<button
+					type="button"
+					ref={drawer.triggerRef}
+					class="wiki-drawer-trigger"
+					aria-expanded={drawer.open}
+					aria-controls="wiki-page-tree"
+					onClick={() => drawer.setOpen((o) => !o)}
+				>
+					<svg
+						width="16"
+						height="16"
+						viewBox="0 0 24 24"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						stroke-linecap="round"
+						stroke-linejoin="round"
+						aria-hidden="true"
+					>
+						<line x1="3" y1="6" x2="21" y2="6" />
+						<line x1="3" y1="12" x2="21" y2="12" />
+						<line x1="3" y1="18" x2="21" y2="18" />
+					</svg>
+					Pages
+				</button>
+			)}
+			<div
+				class={`wiki-drawer-overlay ${drawer.open ? "wiki-drawer-overlay-open" : ""}`}
+				aria-hidden="true"
+				onClick={drawer.close}
+			/>
 			<WikiSidebar
 				workspaceSlug={props.workspaceSlug}
 				projectId={props.projectId}
@@ -2918,8 +3267,8 @@ function WikiPageShell(
 				treeLoading={props.treeLoading}
 				pageTree={props.pageTree}
 				slug={props.slug}
-				onNavigate={props.onNavigate}
-				onCreate={props.onCreate}
+				onNavigate={navigateAndClose}
+				onCreate={createAndClose}
 				filterType={props.filters.filterType}
 				onFilterTypeChange={props.filters.setFilterType}
 				typeOptions={props.filters.typeOptions}
@@ -2934,9 +3283,11 @@ function WikiPageShell(
 				onToggleStale={props.stale.setStaleOpen}
 				stalePages={props.stale.stalePages}
 				staleLoading={props.stale.staleLoading}
+				drawerOpen={drawer.open}
+				sidebarRef={drawer.sidebarRef}
 			/>
 
-			<main class="flex-1 p-8 min-w-0">
+			<main class="flex-1 p-8 max-sm:p-4 min-w-0">
 				<WikiMainContent {...props.mainContentProps} />
 			</main>
 		</div>

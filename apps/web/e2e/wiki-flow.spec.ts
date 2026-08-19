@@ -155,3 +155,149 @@ test.describe("Wiki editor — mobile layout (375×812)", () => {
 		expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
 	});
 });
+
+// PROJ-664: wiki reader mobile layout regression coverage. Reproduced at 375px:
+// (1) the page-tree sidebar went full-width and stacked 572px above the
+// article, pushing the h1 below the fold; (2) the page action row
+// ([+ Child page]/[Move]/[Edit]/[Delete], shrink-0, no scrolling ancestor)
+// spilled the document 153px past the viewport; (3) the h1 was squeezed to
+// one word per line by that same row. Fix: the sidebar became an off-canvas
+// drawer behind a "Pages" trigger, and the action row collapsed to
+// Edit + a "More page actions" overflow menu below 640px.
+test.describe("Wiki reader — mobile layout (PROJ-664)", () => {
+	test("article renders without horizontal scroll and the h1 is visible without scrolling, at 375×667 and 390×844", async ({
+		page,
+	}) => {
+		test.skip(!process.env.E2E_BASE_URL, "E2E_BASE_URL not set — skipping live deployment test");
+
+		const ctx = readCtx();
+
+		for (const viewport of [
+			{ width: 375, height: 667 },
+			{ width: 390, height: 844 },
+		]) {
+			await page.setViewportSize(viewport);
+			await openWiki(page, ctx);
+
+			// Wiki index route (no page selected) — must not be a blank screen
+			// behind a full-height sidebar.
+			await expect(
+				page.locator("text=/Select a page from the sidebar/i")
+			).toBeInViewport({ timeout: 15_000 });
+
+			let scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+			expect(scrollWidth).toBeLessThanOrEqual(viewport.width);
+
+			// Create a page with enough action buttons (owner-level permissions via
+			// the dev-bypass user) to reproduce the action-row overflow if it regressed.
+			// The page tree (and its "+ New page" button) lives in the off-canvas
+			// drawer on mobile — open it via the "Pages" trigger first.
+			await page.locator('button[aria-controls="wiki-page-tree"]', { hasText: "Pages" }).click();
+
+			const newPageBtn = page.locator("button", { hasText: "+ New page" });
+			await expect(newPageBtn).toBeVisible({ timeout: 15_000 });
+			await newPageBtn.click();
+			await page
+				.locator("#create-title")
+				.fill(
+					`PROJ-664 ${viewport.width}x${viewport.height} ${ctx.workspaceSlug} ${test.info().project.name}`
+				);
+			await page.locator("button", { hasText: "Create page" }).click();
+
+			const h1 = page.locator("h1");
+			await expect(h1).toBeVisible({ timeout: 15_000 });
+			await expect(h1).toBeInViewport();
+
+			// Before the fix this was crushed to ~154px (one word per line).
+			const h1Box = await h1.boundingBox();
+			if (!h1Box) throw new Error("h1 boundingBox() null");
+			expect(h1Box.width).toBeGreaterThan(200);
+
+			scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+			expect(scrollWidth).toBeLessThanOrEqual(viewport.width);
+		}
+	});
+
+	test("page action row shows Edit + overflow menu on mobile, not the full desktop row", async ({
+		page,
+	}) => {
+		test.skip(!process.env.E2E_BASE_URL, "E2E_BASE_URL not set — skipping live deployment test");
+
+		await page.setViewportSize({ width: 375, height: 667 });
+		const ctx = readCtx();
+		await openWiki(page, ctx);
+
+		await page.locator('button[aria-controls="wiki-page-tree"]', { hasText: "Pages" }).click();
+
+		const newPageBtn = page.locator("button", { hasText: "+ New page" });
+		await expect(newPageBtn).toBeVisible({ timeout: 15_000 });
+		await newPageBtn.click();
+		await page
+			.locator("#create-title")
+			.fill(`PROJ-664 action row ${ctx.workspaceSlug} ${test.info().project.name}`);
+		await page.locator("button", { hasText: "Create page" }).click();
+		await expect(page.locator("h1")).toBeVisible({ timeout: 15_000 });
+
+		await expect(page.locator("button", { hasText: "Edit" })).toBeVisible();
+		await expect(page.locator("button", { hasText: "Move" })).toBeHidden();
+		await expect(page.locator("button", { hasText: "Delete" })).toBeHidden();
+		await expect(page.locator("button", { hasText: "+ Child page" })).toBeHidden();
+
+		const overflowTrigger = page.locator('button[aria-label="More page actions"]');
+		await expect(overflowTrigger).toBeVisible();
+		await overflowTrigger.click();
+
+		const menu = page.locator('[role="menu"][aria-label="More page actions"]');
+		await expect(menu).toBeVisible();
+		await expect(menu.locator('[role="menuitem"]', { hasText: "Move" })).toBeVisible();
+		await expect(menu.locator('[role="menuitem"]', { hasText: "Delete" })).toBeVisible();
+		await expect(menu.locator('[role="menuitem"]', { hasText: "+ Child page" })).toBeVisible();
+	});
+
+	test("'Pages' drawer opens, closes via scrim/Esc/navigation, and doesn't cover the article when closed", async ({
+		page,
+	}) => {
+		test.skip(!process.env.E2E_BASE_URL, "E2E_BASE_URL not set — skipping live deployment test");
+
+		await page.setViewportSize({ width: 375, height: 667 });
+		const ctx = readCtx();
+		await openWiki(page, ctx);
+
+		await page.locator('button[aria-controls="wiki-page-tree"]', { hasText: "Pages" }).click();
+
+		const newPageBtn = page.locator("button", { hasText: "+ New page" });
+		await expect(newPageBtn).toBeVisible({ timeout: 15_000 });
+		await newPageBtn.click();
+		const pageTitle = `PROJ-664 drawer nav target ${ctx.workspaceSlug} ${test.info().project.name}`;
+		await page.locator("#create-title").fill(pageTitle);
+		await page.locator("button", { hasText: "Create page" }).click();
+		await expect(page.locator("h1")).toContainText(pageTitle, {
+			timeout: 15_000,
+		});
+
+		const trigger = page.locator('button[aria-controls="wiki-page-tree"]', { hasText: "Pages" });
+		await expect(trigger).toBeVisible();
+		const sidebar = page.locator("#wiki-page-tree");
+		await expect(sidebar).not.toBeInViewport();
+
+		// Open via the trigger, close via Esc.
+		await trigger.click();
+		await expect(sidebar).toBeInViewport();
+		await page.keyboard.press("Escape");
+		await expect(sidebar).not.toBeInViewport();
+
+		// Open again, close via tapping the scrim.
+		await trigger.click();
+		await expect(sidebar).toBeInViewport();
+		const viewport = page.viewportSize();
+		if (!viewport) throw new Error("viewportSize() null");
+		await page.mouse.click(viewport.width - 4, 100);
+		await expect(sidebar).not.toBeInViewport();
+
+		// Open again, close via navigating to a page in the tree.
+		await trigger.click();
+		await expect(sidebar).toBeInViewport();
+		await sidebar.locator("button", { hasText: pageTitle }).first().click();
+		await expect(sidebar).not.toBeInViewport();
+	});
+});
