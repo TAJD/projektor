@@ -86,6 +86,9 @@ describe("unmatched OAuth discovery paths 404 as JSON, never the SPA shell", () 
 		"/.well-known/oauth-protected-resource",
 		"/.well-known/oauth-protected-resource/not-mcp",
 		"/.well-known/oauth-authorization-server/extra-segment",
+		// PROJ-660: OIDC Discovery is an alternative route to the same metadata, so a
+		// client may probe here. Found serving 200 text/html on a real deployment.
+		"/.well-known/openid-configuration",
 	])("%s", async (path) => {
 		const res = await SELF.fetch(`${HOST}${path}`);
 		expect(res.status).toBe(404);

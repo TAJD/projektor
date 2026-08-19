@@ -138,4 +138,13 @@ router.all("/oauth-protected-resource/*", discoveryNotFound);
 router.all("/oauth-authorization-server", discoveryNotFound);
 router.all("/oauth-authorization-server/*", discoveryNotFound);
 
+// PROJ-660, found on a real deployment rather than in a test: the MCP spec lets a
+// client discover the authorization server through OIDC Discovery *instead of* RFC
+// 8414, so `openid-configuration` is a discovery path even though projektor is not an
+// OIDC provider and never serves one. Left to fall through it answered 200 text/html
+// with the app shell — the exact failure this file exists to prevent, just at a URL
+// outside the `oauth-*` namespace. It gets the same clean 404.
+router.all("/openid-configuration", discoveryNotFound);
+router.all("/openid-configuration/*", discoveryNotFound);
+
 export { router as oauthMetadataRouter };

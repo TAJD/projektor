@@ -134,6 +134,13 @@ The connector flow needs three things in the Worker configuration; a deployment 
 - `/.well-known/*` routed to the Worker ahead of static assets. Without it the discovery documents return the site's HTML shell, and the client reads a `200` as a valid document rather than as a failure.
 - The `global_fetch_strictly_public` and `cache_option_enabled` compatibility flags.
 
+If the instance sits behind **Cloudflare Access**, two paths must bypass the Access policy or the flow cannot start:
+
+- `/.well-known/*` — discovery is unauthenticated by specification. Behind Access it answers `302` to a login page, and the client reports that the authorization server never received any traffic. This is the single most common way the connector fails to appear at all.
+- `/oauth/token` — the client exchanges its authorization code here with no browser session to present.
+
+`/oauth/authorize` must stay **behind** Access: that redirect is what signs the user in before the consent screen decides anything.
+
 ---
 
 ## 4. Verify the connection
