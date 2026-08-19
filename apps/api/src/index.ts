@@ -390,7 +390,7 @@ async function sha256hex(s: string): Promise<string> {
 // (purgeExpiredWikiPages never reads it). A failure purging one workspace is logged and
 // does not stop the sweep over the rest.
 export async function scheduled(
-	_event: ScheduledEvent,
+	_controller: ScheduledController,
 	env: Env,
 	ctx: ExecutionContext
 ): Promise<void> {
@@ -419,7 +419,11 @@ export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void
 	}
 }
 
+// `satisfies ExportedHandler<Env>` is load-bearing, not decoration: without it the
+// default export is an unconstrained object literal, so a handler whose signature
+// drifts from the Workers contract (this file typed `scheduled`'s first parameter as
+// ScheduledEvent — the service-worker type — for its whole life) still typechecks.
 export default {
 	fetch: app.fetch,
 	scheduled,
-};
+} satisfies ExportedHandler<Env>;
