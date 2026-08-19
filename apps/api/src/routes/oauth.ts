@@ -72,7 +72,7 @@ p { margin:0 0 1rem; color:var(--muted); }
 strong { color:var(--fg); }
 ul { margin:0 0 1.25rem; padding-left:1.25rem; }
 li { margin-bottom:.35rem; }
-.meta { font-size:.85rem; border-top:1px solid var(--line); padding-top:1rem; word-break:break-all; }
+.meta { font-size:.85rem; border-top:1px solid var(--line); padding-top:1rem; overflow-wrap:anywhere; }
 .warn { background:rgba(240,170,20,.12); border:1px solid rgba(240,170,20,.4);
   border-radius:8px; padding:.75rem 1rem; margin-bottom:1.25rem; font-size:.9rem; color:var(--fg); }
 .actions { display:flex; flex-wrap:wrap; gap:.75rem; }
