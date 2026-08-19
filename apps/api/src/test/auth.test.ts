@@ -567,6 +567,42 @@ describe("PROJ-274: read-scoped token is denied write on every request", () => {
 });
 
 // ---------------------------------------------------------------------------
+// PROJ-660: the dev bypass must not cover the MCP endpoint
+// ---------------------------------------------------------------------------
+
+describe("PROJ-660: dev bypass and /mcp/", () => {
+	afterEach(() => {
+		env.DEV_USER_EMAIL = "";
+	});
+
+	// A remote MCP client only learns it needs a credential from the 401 and the
+	// challenge on it. If the bypass answered here the server would be claiming it
+	// wants no credential at all, and no connector flow could ever start.
+	it("still 401s with the RFC 9728 challenge when DEV_USER_EMAIL is set", async () => {
+		const ws = await seedWorkspace();
+		env.DEV_USER_EMAIL = "dev@projektor.dev";
+
+		const res = await SELF.fetch(`http://localhost/mcp/${ws.id}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+
+		expect(res.status).toBe(401);
+		expect(res.headers.get("WWW-Authenticate")).toContain("resource_metadata=");
+	});
+
+	it("still logs a browser request in, which is what the bypass is for", async () => {
+		env.DEV_USER_EMAIL = "dev@projektor.dev";
+
+		const res = await SELF.fetch("http://localhost/auth/me");
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { user: { email: string } };
+		expect(body.user.email).toBe("dev@projektor.dev");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // PROJ-373: opt-in anonymous public-viewer fallback
 // ---------------------------------------------------------------------------
 

@@ -224,6 +224,16 @@ async function tryBearerTokenAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 // 3. Local dev bypass
 async function tryDevBypassAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	if (c.env.ENVIRONMENT !== "development" || !c.env.DEV_USER_EMAIL) return { kind: "skip" };
+	// PROJ-660: never on /mcp/. A remote MCP client learns it needs to authenticate by
+	// getting a 401 with the RFC 9728 challenge on it; answering 200 instead tells the
+	// client the server wants no credential at all, so the whole connector flow is
+	// silently unreachable on any instance with the bypass on. That is precisely the
+	// configuration an Access-free test instance has to run in.
+	//
+	// Nothing is lost: a `pk_` bearer token is strategy 2 and still authenticates MCP
+	// here, and the bypass exists for browsing the UI without a login (README, e2e),
+	// which is untouched.
+	if (mcpWorkspaceIdFromPath(c.req.path)) return { kind: "skip" };
 
 	const user = await upsertUserByEmail(c.env.DEV_USER_EMAIL, c.env.DB);
 	await ensureUserProvisioned(c.env, user);
