@@ -191,9 +191,14 @@ Verify before adding the connector — both should return `200` with JSON, not
 `302`:
 
 ```bash
-curl -si https://projektor.example.com/.well-known/oauth-protected-resource | head -1
 curl -si https://projektor.example.com/.well-known/oauth-authorization-server | head -1
+curl -si https://projektor.example.com/.well-known/oauth-protected-resource/mcp/<workspace-id> | head -1
 ```
+
+The bare `/.well-known/oauth-protected-resource` (no workspace suffix) returns
+`404` on purpose — a projektor instance hosts many workspaces, so there is no
+single resource to describe at the origin. Only the RFC 9728 §3.1 path-suffixed
+form is served.
 
 Also confirm your `wrangler.toml` `run_worker_first` includes `/.well-known/*`
 alongside `/api/*`, `/mcp/*` and `/wiki`. Without it the static-asset handler
