@@ -1,6 +1,7 @@
 import type { HonoEnv, MCPTool, PluginContext, Role } from "@projektor/types";
-import { Hono } from "hono";
-import { capabilityForMcpTool, tokenAllows } from "../auth/scopes";
+import { type Context, Hono } from "hono";
+import { insufficientScopeChallenge } from "../auth/challenge";
+import { type Capability, capabilityForMcpTool, tokenAllows } from "../auth/scopes";
 import { agentMessagesTools } from "../mcp/agent-messages";
 import { agentsTools } from "../mcp/agents";
 import { codeHeatmapTools } from "../mcp/code-heatmap";
@@ -148,7 +149,7 @@ router.post("/:workspaceId", async (c) => {
 			if (scopes) {
 				const required = capabilityForMcpTool(name);
 				if (!tokenAllows(scopes, required)) {
-					return c.json(jsonRpcError(body.id, -32003, `Token lacks '${required}' scope`));
+					return insufficientScope(c, workspace.id, body.id, required);
 				}
 			}
 
@@ -180,7 +181,7 @@ router.post("/:workspaceId", async (c) => {
 			if (scopes) {
 				const required = capabilityForMcpTool("compose_playbook");
 				if (!tokenAllows(scopes, required)) {
-					return c.json(jsonRpcError(body.id, -32003, `Token lacks '${required}' scope`));
+					return insufficientScope(c, workspace.id, body.id, required);
 				}
 			}
 
@@ -197,6 +198,23 @@ router.post("/:workspaceId", async (c) => {
 			return c.json(jsonRpcError(body.id, -32601, "Method not found"));
 	}
 });
+
+// PROJ-651: insufficient scope is an HTTP 403 with an RFC 9728 challenge, not a
+// JSON-RPC error inside a 200. A 200 is invisible to a client's step-up flow —
+// Claude hands the error text to the model as a tool result and moves on, so the
+// user reads "please sign in" prose in the chat instead of being offered a Connect
+// button. The JSON-RPC body is kept alongside the status so non-OAuth callers
+// (the existing `pk_` token fleet) still get the same structured -32003 they did
+// before; only the transport-level status and the header are new.
+function insufficientScope(
+	c: Context<HonoEnv>,
+	workspaceId: string,
+	id: unknown,
+	required: Capability
+) {
+	c.header("WWW-Authenticate", insufficientScopeChallenge(c.req.url, workspaceId));
+	return c.json(jsonRpcError(id, -32003, `Token lacks '${required}' scope`), 403);
+}
 
 function getAllTools(workspaceId: string): MCPTool[] {
 	return [...coreMCPTools, ...pluginRegistry.getToolsForWorkspace(workspaceId)];

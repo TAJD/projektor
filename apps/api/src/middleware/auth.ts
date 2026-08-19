@@ -1,8 +1,10 @@
 import type { Env, HonoEnv } from "@projektor/types";
 import type { Context, Next } from "hono";
+import { unauthorizedChallenge } from "../auth/challenge";
 import { capabilityForMethod, parseScopes, tokenAllows } from "../auth/scopes";
 import { ensureUserProvisioned, provisionPublicViewer } from "../services/provisioning";
 import { bumpRateCounter } from "./rate-limit";
+import { mcpWorkspaceIdFromPath } from "./workspace";
 
 // PROJ-373: the shared identity anonymous requests are provisioned as when
 // PUBLIC_READ_ONLY is on. Fixed and well-known — there's exactly one, since
@@ -176,6 +178,23 @@ async function tryPublicViewerAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	return { kind: "allow" };
 }
 
+// PROJ-651: attach the RFC 9728 challenge to MCP 401s. Applied once here rather than
+// at each of the three deny sites (invalid CF Access JWT, failed bearer, nothing
+// matched) so a future deny path cannot silently ship without it.
+//
+// Narrow by design: only status 401, and only on /mcp/<workspaceId>. /api/* 401s stay
+// byte-identical — the frontend reloads the page to re-authenticate on a 401 and that
+// is load-bearing (PROJ-430) — and the 429 from the failed-auth throttle and the 503
+// from an unreachable JWKS endpoint are left alone, since neither is an invitation to
+// authenticate.
+function withMcpAuthChallenge(c: Context<HonoEnv>, response: Response): Response {
+	if (response.status !== 401) return response;
+	const workspaceId = mcpWorkspaceIdFromPath(c.req.path);
+	if (!workspaceId) return response;
+	response.headers.set("WWW-Authenticate", unauthorizedChallenge(c.req.url, workspaceId));
+	return response;
+}
+
 export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
 	// tryPublicViewerAuth is last: a real CF Access session, bearer token, or dev
 	// bypass always wins so a logged-in user is never demoted to the anonymous
@@ -187,11 +206,11 @@ export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
 		tryPublicViewerAuth,
 	]) {
 		const outcome = await attempt(c);
-		if (outcome.kind === "deny") return outcome.response;
+		if (outcome.kind === "deny") return withMcpAuthChallenge(c, outcome.response);
 		if (outcome.kind === "allow") return next();
 	}
 
-	return c.json({ error: "Unauthorized" }, 401);
+	return withMcpAuthChallenge(c, c.json({ error: "Unauthorized" }, 401));
 }
 
 /**
