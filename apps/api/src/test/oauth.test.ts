@@ -383,6 +383,11 @@ describe("the consent screen", () => {
 		expect(body).toContain("Test Connector");
 		expect(body).toContain("Read issues");
 		expect(body).toContain("Create and change issues");
+		// The footer has to wrap the long client_id and resource URLs, but `break-all`
+		// does it to ordinary prose too — on a phone the sentence beside them breaks
+		// mid-word. `anywhere` only breaks a token that cannot fit on its own.
+		expect(body).toContain("overflow-wrap:anywhere");
+		expect(body).not.toContain("word-break:break-all");
 	});
 
 	it("warns when the client collects its response on the user's own machine", async () => {
