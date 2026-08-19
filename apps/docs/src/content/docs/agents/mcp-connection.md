@@ -84,24 +84,64 @@ Token minting is one of a handful of REST-only endpoints — see [REST endpoints
 
 ## 3b. Connect the Claude app
 
-The Claude app (desktop and web, at claude.ai) doesn't use the `claude mcp add` CLI command — it connects to remote MCP servers through **Connectors** in Settings.
+The Claude app (desktop, web at claude.ai, and mobile) doesn't use the `claude mcp add` CLI command — it connects to remote MCP servers through **Connectors** in Settings.
+
+**Add it by URL and sign in.** No token to mint, paste, or rotate.
 
 1. **Free / Pro / Max plans:** go to **Settings → Connectors** and click **"Add custom connector."**
    **Team / Enterprise plans:** an owner adds it once for the org via **Admin settings → Connectors → Add custom connector**; members then connect to it from **Settings → Connectors**.
-2. **Server URL:** paste `https://<your-worker>.workers.dev/mcp/<workspace-uuid>` — the same URL shape used in §3, with the workspace UUID (not the slug) in the path.
-3. **Headers:** open the **Request headers** section of the dialog and add:
-   - `Authorization` → `Bearer pk_<64 hex chars>` (enter the scheme yourself — Claude sends the value verbatim, it does not prepend `Bearer`).
-   - **No `X-Workspace-Slug` needed.** The MCP endpoint resolves the workspace from the UUID already in the server URL's path, so the app connects with the `Authorization` header alone. The token stays workspace-scoped — a token minted for another workspace is still rejected regardless of the path.
-   - If the instance is behind Cloudflare Access, also add `CF-Access-Client-Id` / `CF-Access-Client-Secret` as described in [§7](#7-cloudflare-access-note).
-4. Click **Add**. Claude calls `initialize` against the URL to confirm the connection before tools become available in a conversation.
+2. **Server URL:** paste `https://<your-worker>.workers.dev/mcp/<workspace-uuid>` — the same URL shape used in §3, with the workspace UUID (not the slug) in the path. Leave the request-headers section empty.
+3. Click **Add**. Claude discovers that the endpoint needs authorization, opens projektor's sign-in, and shows a consent screen naming **the workspace, your identity, and the permissions being granted**.
+4. Approve. Claude receives its own credential; tools become available in a conversation.
 
-For minting the `pk_...` token itself, use the same Settings → Tokens → "New token" flow described in [§1](#1-prerequisites) / [§3](#3-manual-connect-production) — there's nothing app-specific about token creation.
+Each person who connects gets their own grant. It is scoped to one workspace, it can never exceed the role that person holds there, and if they leave the workspace it stops working on the next request with nothing to clean up.
+
+### Scopes
+
+| Scope | What it allows |
+| --- | --- |
+| `projektor:read` | Read issues, wiki pages, projects and comments |
+| `projektor:write` | Create and change issues, wiki pages, projects and comments |
+
+A connector that requests no scopes is granted both. Your workspace role is still the ceiling: a `viewer` who grants `projektor:write` gets a connector that can read, because the service layer checks the role on every call.
+
+### Reviewing and withdrawing access
+
+**Settings → API Tokens → Connected applications** lists the connectors you have authorized for the workspace, and disconnects any of them. Revocation takes effect on the next request — nothing is cached that would keep a withdrawn connector alive. Claude reports it as "authentication required" and offers to reconnect, rather than failing silently.
+
+A grant expires 30 days after it is issued, shown in the **Expires** column. Reconnecting from Claude issues a fresh one; there is nothing to rotate in the meantime.
+
+The list is yours alone. Unlike API tokens, which are workspace property and managed by admins, a connector grant is a personal credential: no one else can see or revoke yours, and you cannot see theirs.
+
+### Fallback: a pasted API token
+
+If your projektor instance predates OAuth support, or the connector fails to discover the authorization server, you can still connect with a `pk_` token in a request header.
+
+1. Mint a token via **Settings → Tokens → "New token"**, as in [§1](#1-prerequisites) / [§3](#3-manual-connect-production).
+2. In the connector dialog, open **Request headers** and add `Authorization` → `Bearer pk_<64 hex chars>` (enter the scheme yourself — Claude sends the value verbatim, it does not prepend `Bearer`).
+3. **No `X-Workspace-Slug` needed.** The MCP endpoint resolves the workspace from the UUID already in the URL path.
+4. If the instance is behind Cloudflare Access, also add `CF-Access-Client-Id` / `CF-Access-Client-Secret` as described in [§7](#7-cloudflare-access-note).
 
 :::caution
-**Request headers are a beta feature**, rolled out gradually — if you don't see a **Request headers** section in the dialog, contact Anthropic to request access.
+**This is a worse credential than the OAuth flow, not merely a less convenient one.** Request headers on a connector are a beta feature, and on Team/Enterprise plans they are set by an org admin and **shared by everyone in the organisation** — one credential for the whole org, not one per person. That means no per-user attribution, and no way to withdraw one person's access without withdrawing everyone's. Prefer the sign-in flow above wherever the instance supports it.
 
-Header *names* are restricted to an allowlist (`authorization`, `x-api-key`, `x-auth-token`, and similar standard names) — Claude rejects arbitrary custom header names for security reasons. `Authorization` is allowlisted, so the standard connection works out of the box. The one exception is a Cloudflare Access-protected instance: the `CF-Access-Client-*` header names are non-standard and may be rejected unless Anthropic has added them to the allowlist for your organization. If the connector fails with a `403` on such an instance, ask your Anthropic representative to allowlist those two headers, or use the Claude Code CLI path (§2/§3) instead, which sends arbitrary headers with no such restriction.
+Header *names* are also restricted to an allowlist (`authorization`, `x-api-key`, `x-auth-token`, and similar standard names). `Authorization` is allowlisted. The `CF-Access-Client-*` names are not, and may be rejected unless Anthropic has added them for your organization — if the connector fails with a `403` on an Access-protected instance, use the Claude Code CLI path (§2/§3) instead, which sends arbitrary headers with no such restriction.
 :::
+
+### For operators
+
+The connector flow needs three things in the Worker configuration; a deployment missing any of them will still serve `pk_` tokens but cannot complete a sign-in. See the [deployment guide](/projektor/guides/deploying/) for the full setup.
+
+- An `OAUTH_KV` namespace binding. The name is fixed and cannot be changed.
+- `/.well-known/*` routed to the Worker ahead of static assets. Without it the discovery documents return the site's HTML shell, and the client reads a `200` as a valid document rather than as a failure.
+- The `global_fetch_strictly_public` and `cache_option_enabled` compatibility flags.
+
+If the instance sits behind **Cloudflare Access**, two paths must bypass the Access policy or the flow cannot start:
+
+- `/.well-known/*` — discovery is unauthenticated by specification. Behind Access it answers `302` to a login page, and the client reports that the authorization server never received any traffic. This is the single most common way the connector fails to appear at all.
+- `/oauth/token` — the client exchanges its authorization code here with no browser session to present.
+
+`/oauth/authorize` must stay **behind** Access: that redirect is what signs the user in before the consent screen decides anything.
 
 ---
 

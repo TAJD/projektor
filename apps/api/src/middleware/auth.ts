@@ -1,13 +1,28 @@
 import type { Env, HonoEnv } from "@projektor/types";
 import type { Context, Next } from "hono";
-import { capabilityForMethod, parseScopes, tokenAllows } from "../auth/scopes";
+import { unauthorizedChallenge } from "../auth/challenge";
+import type { Capability } from "../auth/scopes";
+import {
+	capabilityForMethod,
+	capabilityForOAuthScope,
+	parseScopes,
+	tokenAllows,
+} from "../auth/scopes";
 import { ensureUserProvisioned, provisionPublicViewer } from "../services/provisioning";
 import { bumpRateCounter } from "./rate-limit";
+import { mcpWorkspaceIdFromPath } from "./workspace";
 
 // PROJ-373: the shared identity anonymous requests are provisioned as when
 // PUBLIC_READ_ONLY is on. Fixed and well-known — there's exactly one, since
 // anonymous callers share no session to distinguish them by.
 const PUBLIC_VIEWER_EMAIL = "public-viewer@projektor.local";
+
+// PROJ-656: the shared viewer is one identity for every anonymous visitor on the
+// internet, so it must never be treated as a person who can agree to something —
+// notably, it cannot consent to an OAuth grant (routes/oauth.ts).
+export function isPublicViewer(user: Readonly<{ email: string }>): boolean {
+	return user.email === PUBLIC_VIEWER_EMAIL;
+}
 
 // Matches the truthy-string convention used by WORKSPACE_SUBDOMAIN_ROUTING (PROJ-296).
 function isTruthy(v: string | undefined): boolean {
@@ -40,6 +55,58 @@ type AuthOutcome = { kind: "skip" } | { kind: "deny"; response: Response } | { k
 // unreachable JWKS endpoint as 401 sends the user through a login round-trip
 // that cannot fix it — and reloading on a still-broken backend loops.
 class AuthUnavailableError extends Error {}
+
+// 0. OAuth 2.1 grant (PROJ-656/657). The provider has already verified the access
+// token, checked its RFC 8707 audience against this exact URL, and decrypted the props
+// recorded at consent onto the execution context — there is nothing left to
+// authenticate here, only to translate into projektor's own request context.
+//
+// First in the chain, ahead of tryBearerTokenAuth: an OAuth access token is also a
+// `Bearer`, and the API-token strategy would hash it, find no row, and deny before this
+// ever ran.
+type OAuthGrantProps = {
+	userId: string;
+	email: string;
+	name: string;
+	workspaceId: string;
+	scopes: string[];
+};
+
+function oauthGrantProps(c: Context<HonoEnv>): OAuthGrantProps | null {
+	const props = (c.executionCtx as { props?: unknown } | undefined)?.props as
+		| Partial<OAuthGrantProps>
+		| undefined;
+	if (!props?.userId || !props.workspaceId || !Array.isArray(props.scopes)) return null;
+	return props as OAuthGrantProps;
+}
+
+async function tryOAuthGrantAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
+	const props = oauthGrantProps(c);
+	if (!props) return { kind: "skip" };
+
+	const scopes = props.scopes
+		.map(capabilityForOAuthScope)
+		.filter((cap): cap is Capability => cap !== null);
+
+	const scopeError = checkTokenScope(c, scopes);
+	if (scopeError) return { kind: "deny", response: scopeError };
+
+	c.set("user", { id: props.userId, email: props.email, name: props.name } satisfies AuthUser);
+	// The audience check the provider already made confines the token to this
+	// workspace's MCP path. Setting this makes workspaceMiddleware enforce the same
+	// confinement independently, so a routing mistake that lands an OAuth request on
+	// another workspace is a 403 rather than a cross-tenant read.
+	c.set("tokenWorkspaceId", props.workspaceId);
+	c.set("tokenScopes", scopes);
+	// "agent", not "human", even though a person consented (PROJ-658). Two reasons, and
+	// they point the same way. What lands on a comment or issue through this token was
+	// written by a model, not typed by the person — the same thing a pk_ token from
+	// Claude Code already records. And consentingUser() in routes/oauth.ts gates on
+	// authKind === "human": calling this human would let an OAuth token approve further
+	// grants, so a connector could quietly widen its own access.
+	c.set("authKind", "agent");
+	return { kind: "allow" };
+}
 
 // 1. Cloudflare Access JWT (header or cookie)
 async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
@@ -157,6 +224,16 @@ async function tryBearerTokenAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 // 3. Local dev bypass
 async function tryDevBypassAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	if (c.env.ENVIRONMENT !== "development" || !c.env.DEV_USER_EMAIL) return { kind: "skip" };
+	// PROJ-660: never on /mcp/. A remote MCP client learns it needs to authenticate by
+	// getting a 401 with the RFC 9728 challenge on it; answering 200 instead tells the
+	// client the server wants no credential at all, so the whole connector flow is
+	// silently unreachable on any instance with the bypass on. That is precisely the
+	// configuration an Access-free test instance has to run in.
+	//
+	// Nothing is lost: a `pk_` bearer token is strategy 2 and still authenticates MCP
+	// here, and the bypass exists for browsing the UI without a login (README, e2e),
+	// which is untouched.
+	if (mcpWorkspaceIdFromPath(c.req.path)) return { kind: "skip" };
 
 	const user = await upsertUserByEmail(c.env.DEV_USER_EMAIL, c.env.DB);
 	await ensureUserProvisioned(c.env, user);
@@ -176,22 +253,40 @@ async function tryPublicViewerAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	return { kind: "allow" };
 }
 
+// PROJ-651: attach the RFC 9728 challenge to MCP 401s. Applied once here rather than
+// at each of the three deny sites (invalid CF Access JWT, failed bearer, nothing
+// matched) so a future deny path cannot silently ship without it.
+//
+// Narrow by design: only status 401, and only on /mcp/<workspaceId>. /api/* 401s stay
+// byte-identical — the frontend reloads the page to re-authenticate on a 401 and that
+// is load-bearing (PROJ-430) — and the 429 from the failed-auth throttle and the 503
+// from an unreachable JWKS endpoint are left alone, since neither is an invitation to
+// authenticate.
+function withMcpAuthChallenge(c: Context<HonoEnv>, response: Response): Response {
+	if (response.status !== 401) return response;
+	const workspaceId = mcpWorkspaceIdFromPath(c.req.path);
+	if (!workspaceId) return response;
+	response.headers.set("WWW-Authenticate", unauthorizedChallenge(c.req.url, workspaceId));
+	return response;
+}
+
 export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
 	// tryPublicViewerAuth is last: a real CF Access session, bearer token, or dev
 	// bypass always wins so a logged-in user is never demoted to the anonymous
 	// viewer just because PUBLIC_READ_ONLY happens to be on too.
 	for (const attempt of [
+		tryOAuthGrantAuth,
 		tryCfAccessAuth,
 		tryBearerTokenAuth,
 		tryDevBypassAuth,
 		tryPublicViewerAuth,
 	]) {
 		const outcome = await attempt(c);
-		if (outcome.kind === "deny") return outcome.response;
+		if (outcome.kind === "deny") return withMcpAuthChallenge(c, outcome.response);
 		if (outcome.kind === "allow") return next();
 	}
 
-	return c.json({ error: "Unauthorized" }, 401);
+	return withMcpAuthChallenge(c, c.json({ error: "Unauthorized" }, 401));
 }
 
 /**

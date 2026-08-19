@@ -1,6 +1,11 @@
 export interface Env {
 	DB: D1Database;
 	KV: KVNamespace;
+	// PROJ-656/657: OAuth grants, authorization codes and access/refresh tokens.
+	// The name is fixed by @cloudflare/workers-oauth-provider, which reads
+	// env.OAUTH_KV directly rather than taking a binding as an option. Kept separate
+	// from KV so clearing the cache namespace never revokes everyone's connectors.
+	OAUTH_KV: KVNamespace;
 	R2: R2Bucket;
 	JWT_SECRET: string;
 	ENVIRONMENT: "development" | "staging" | "production";

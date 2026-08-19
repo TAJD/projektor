@@ -46,9 +46,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # A hyphen in the version means a pre-release (v1.2.0-rc.1). Marking it
+          # as such keeps it out of "latest", so a deploy repo pinned to latest
+          # never picks up a release candidate by accident.
+          PRERELEASE=""
+          case "$VERSION" in *-*) PRERELEASE="--prerelease" ;; esac
           gh release create "$VERSION" "dist/projektor-$VERSION.tar.gz" \
             --title "$VERSION" \
-            --generate-notes
+            --generate-notes $PRERELEASE
 
       # Optionally notify a downstream deploy repo so it can auto-deploy this
       # release. Stays generic: only fires if the DEPLOY_DISPATCH_REPO repo

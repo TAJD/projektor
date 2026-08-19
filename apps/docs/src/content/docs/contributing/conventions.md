@@ -130,6 +130,17 @@ audits:
   Feedback *source management* (create/list/update/rotate/revoke) has full REST+MCP
   parity, same as every other admin-facing domain; only the anonymous submit endpoint
   itself is the exception.
+- **OAuth consent (`GET/POST /oauth/authorize`, `services/oauth.ts`)** — REST-only, and
+  browser-only. The whole point of the consent screen is that a *human* decides which
+  client may act as them; an agent is the subject of a grant, never the party that
+  approves one. `middleware/auth.ts` fails the route closed for API tokens and for the
+  shared PUBLIC_READ_ONLY viewer for the same reason. `/oauth/token` is not a projektor
+  route at all — the OAuth library serves it before Hono sees the request.
+- **Connector grants (`GET/DELETE /api/workspaces/:slug/connectors`)** — REST-only, for
+  the same reason token minting is: withdrawing a credential is a sensitive operation, and
+  a connector should not be able to enumerate or revoke credentials — least of all its
+  own siblings. The list is scoped to the requesting user, not the workspace: a grant is a
+  personal credential, so unlike `pk_` tokens no admin can see or revoke someone else's.
 
 ### The security invariant: always scope by workspace
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked — e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
@@ -182,7 +193,7 @@ When adding/changing a domain (issues, projects, wiki, comments, …):
 - **Timestamps** are unix seconds: `Math.floor(Date.now() / 1000)`.
 - **IDs** are `crypto.randomUUID()`.
 - **Issue numbers** use `COALESCE(MAX(number),0)+1` per project — known race under concurrency (tracked as a follow-up).
-- **Auth** (`middleware/auth.ts`): Cloudflare Access JWT (browser) OR `Authorization: Bearer <token>` (agents) OR a dev bypass (`DEV_USER_EMAIL`, non-prod only). API tokens are workspace-scoped — don't widen that.
+- **Auth** (`middleware/auth.ts`): Cloudflare Access JWT (browser) OR `Authorization: Bearer <token>` (agents) OR a dev bypass (`DEV_USER_EMAIL`, non-prod only, and never on `/mcp/` — a remote MCP client learns it must authenticate from the 401 challenge, so answering 200 makes the connector flow unreachable). API tokens are workspace-scoped — don't widen that.
 - **Login provisioning** (`services/provisioning.ts`): runs on every CF Access / dev-bypass login (not the token path). Cloudflare Access is the gate; config decides what a user gets inside — `ADMIN_EMAILS` → `owner` (first admin login also creates the `DEFAULT_WORKSPACE_SLUG` workspace), everyone else → `AUTO_JOIN_ROLE` (default `none` = invite-only; set it, e.g. `viewer`, to auto-join). Idempotent; safe to run per request.
 - **Roles** (`owner`/`admin`/`member`/`viewer`) are enforced in services via `ctx.role`. Mutations generally block `viewer`; destructive ops may require `owner`.
 - **Group-based project access** is the authorization model for project-scoped data. Access is **default-deny**: owner/admin see everything, but everyone else sees a project only if one of their **groups** holds a `(project, role)` grant. The effective in-project role is the strongest grant across the user's groups and *replaces* their workspace role inside that project (so a workspace `viewer` with a `member` grant can write there). Enforce it through `services/access.ts`: `visibleProjectPredicate` (an indexed `EXISTS` subquery — filter every project-scoped **list** query with it), `effectiveProjectRole`/`requireProjectAccess` (resolve a single resource; `null` → 404 to hide existence), and `canWriteProject`. Membership is read per-request, so grant/revoke takes effect on the next request with no session state. The `groups` domain (service/routes/mcp) is owner/admin-only CRUD over groups, members, and grants.

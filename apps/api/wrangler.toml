@@ -5,7 +5,18 @@
 name = "projektor-api"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = [
+	"nodejs_compat",
+	# PROJ-656: required by @cloudflare/workers-oauth-provider for Client ID Metadata
+	# Documents. `global_fetch_strictly_public` stops the outbound CIMD fetch using
+	# legacy same-zone origin routing (SSRF protection); `cache_option_enabled` allows
+	# the `cache` option that fetch uses, which would otherwise need a compatibility
+	# date of 2024-11-11 or later. Both must be present or the
+	# `client_id_metadata_document_supported: true` we advertise in
+	# /.well-known/oauth-authorization-server is a lie.
+	"global_fetch_strictly_public",
+	"cache_option_enabled",
+]
 account_id = "REPLACE_WITH_YOUR_CLOUDFLARE_ACCOUNT_ID"
 
 [dev]
@@ -25,6 +36,13 @@ migrations_dir = "../../packages/db/migrations"
 [[kv_namespaces]]
 binding = "KV"
 id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+[[kv_namespaces]]
+# PROJ-656/657: OAuth grants, authorization codes and access/refresh tokens. The
+# binding name is fixed by the library, which reads env.OAUTH_KV directly. Separate
+# from KV so a namespace wipe of one cache never silently signs everyone out.
+binding = "OAUTH_KV"
+id = "REPLACE_WITH_YOUR_OAUTH_KV_NAMESPACE_ID"
 
 [[r2_buckets]]
 binding = "R2"

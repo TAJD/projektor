@@ -71,3 +71,39 @@ export function parseScopes(raw: string | null | undefined): string[] {
 			.filter((s) => s.length > 0);
 	}
 }
+
+/**
+ * OAuth wire scope names (PROJ-655).
+ *
+ * These are a PUBLIC CONTRACT, not an internal detail: they appear in
+ * `scopes_supported` on the discovery documents and in the `scope` value of the
+ * `WWW-Authenticate` challenge, and Claude caches discovery documents globally
+ * by URL (~5 minutes) across every user of an instance. Renaming one later
+ * propagates lazily and inconsistently, so they are chosen once and pinned here.
+ *
+ * Deliberately namespaced rather than reusing the bare "read"/"write" strings
+ * above. Two reasons: OAuth scope names are shown to the human on the consent
+ * screen and in Claude's connector UI, where an unqualified "write" says nothing
+ * about what it writes; and keeping the wire names distinct from the values
+ * stored in `api_tokens.scopes` leaves the internal representation free to
+ * change without breaking a contract we cannot recall.
+ *
+ * Exactly two, mirroring `Capability`. No per-tool or per-project granularity:
+ * the live `workspace_members` role and group-grant check remains the real
+ * authority on every request, and a token can never exceed it, so finer scopes
+ * would imply a precision the authorization model does not actually have.
+ */
+export const OAUTH_SCOPE_READ = "projektor:read";
+export const OAUTH_SCOPE_WRITE = "projektor:write";
+export const OAUTH_SCOPES_SUPPORTED = [OAUTH_SCOPE_READ, OAUTH_SCOPE_WRITE] as const;
+
+/**
+ * Map an OAuth wire scope to the capability it grants, or null if it is not one
+ * we issue. Fail-closed, same as tokenAllows(): an unrecognized scope grants
+ * nothing rather than being silently treated as read.
+ */
+export function capabilityForOAuthScope(scope: string): Capability | null {
+	if (scope === OAUTH_SCOPE_READ) return "read";
+	if (scope === OAUTH_SCOPE_WRITE) return "write";
+	return null;
+}

@@ -8,7 +8,17 @@
 name = "projektor"
 main = "./vendor/worker.js"
 compatibility_date = "__COMPAT_DATE__"
-compatibility_flags = ["nodejs_compat"]   # required: the bundled worker imports node:stream / node:events
+compatibility_flags = [
+  "nodejs_compat",          # required: the bundled worker imports node:stream / node:events
+  # Both required for OAuth Client ID Metadata Documents, which is how Claude
+  # registers itself as a connector (PROJ-656). global_fetch_strictly_public keeps
+  # the outbound CIMD fetch off legacy same-zone origin routing (SSRF protection);
+  # cache_option_enabled permits the `cache` option that fetch uses. Remove either
+  # and the authorization server metadata advertises CIMD support the server does
+  # not actually have, and every Claude connection fails at registration.
+  "global_fetch_strictly_public",
+  "cache_option_enabled",
+]
 
 # ─── Static Assets (pre-built Astro frontend, shipped in the artifact) ─────────
 #   - /api/*, /mcp/*  → always the Worker (run_worker_first)
@@ -17,11 +27,18 @@ compatibility_flags = ["nodejs_compat"]   # required: the bundled worker imports
 #     `?slug=` query param could never become a real HTTP redirect. /wiki/:slug
 #     subpaths don't need to be listed here — they have no matching static asset,
 #     so Cloudflare already falls through to the Worker for those.
+#   - /.well-known/*  → always the Worker (PROJ-650). OAuth discovery metadata
+#     (RFC 9728 protected resource metadata, RFC 8414 authorization server
+#     metadata) is served by the Worker and there is no static asset to fall
+#     through from, so without this the SPA fallback answers instead and every
+#     MCP client's discovery probe 404s. Do not prune this as unused: nothing in
+#     the test suite or `wrangler dev` can catch its absence, because neither has
+#     an [assets] binding — the failure only appears in a real deploy.
 #   - everything else  → static assets, asset-first
 [assets]
 directory = "./vendor/web"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/mcp/*", "/wiki"]
+run_worker_first = ["/api/*", "/mcp/*", "/wiki", "/.well-known/*"]
 
 # ─── Cron Triggers ─────────────────────────────────────────────
 # Daily sweep for the 30-day wiki trash purge (see `scheduled` in src/index.ts).
@@ -42,6 +59,16 @@ migrations_dir = "./vendor/migrations"
 [[kv_namespaces]]
 binding = "KV"
 id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# --- OAuth KV Namespace ----------------------------------------
+# Create with: wrangler kv namespace create projektor-oauth
+# Holds OAuth grants, authorization codes and access/refresh tokens (PROJ-656/657).
+# The binding name is fixed - the OAuth library reads env.OAUTH_KV directly - and it
+# is deliberately a SEPARATE namespace from KV above: clearing the cache namespace
+# must never revoke everyone's connectors.
+[[kv_namespaces]]
+binding = "OAUTH_KV"
+id = "REPLACE_WITH_YOUR_OAUTH_KV_NAMESPACE_ID"
 
 # ─── R2 Bucket ─────────────────────────────────────────────────
 # Create with: wrangler r2 bucket create projektor-files

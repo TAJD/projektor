@@ -44,7 +44,10 @@ async function warnIfIgnoredSubdomain(
 // in its path, so it can resolve the workspace without an X-Workspace-Slug header.
 // The Claude app's Connectors UI restricts custom request headers to a fixed
 // allowlist that excludes X-Workspace-Slug, so header-only resolution blocks it.
-function mcpWorkspaceIdFromPath(path: string): string | undefined {
+// Exported so middleware/auth.ts can build the RFC 9728 challenge for the same
+// workspace it is refusing access to (PROJ-651), without a second copy of the
+// path shape drifting away from this one.
+export function mcpWorkspaceIdFromPath(path: string): string | undefined {
 	return /^\/mcp\/([^/]+)$/.exec(path)?.[1];
 }
 

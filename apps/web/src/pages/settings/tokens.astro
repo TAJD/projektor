@@ -1,6 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro';
 import TokenManager from '../../islands/TokenManager';
+import ConnectorManager from '../../islands/ConnectorManager';
 
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
@@ -15,5 +16,15 @@ const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefine
       </p>
     </header>
     <TokenManager client:load workspaceSlug={workspaceSlug} />
+
+    <header style="margin: 2.5rem 0 1.5rem;">
+      <h2 style="margin: 0 0 .25rem; font-size: 1.25rem; font-weight: 700; color: var(--text);">
+        Connected applications
+      </h2>
+      <p style="margin: 0; font-size: .875rem; color: var(--text-muted);">
+        Applications you have authorized to reach this workspace on your behalf. Yours only &mdash; other members manage their own.
+      </p>
+    </header>
+    <ConnectorManager client:load workspaceSlug={workspaceSlug} />
   </div>
 </Base>
