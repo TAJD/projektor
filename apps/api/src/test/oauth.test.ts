@@ -1002,6 +1002,31 @@ describe("hardening the consent screen itself", () => {
 		expect(res.headers.get("Cache-Control")).toBe("no-store");
 	});
 
+	it("lets the approval reach the client's redirect origin, and nowhere else", async () => {
+		// form-action is enforced on the redirect the POST lands on, not just the URL
+		// the form names. With 'self' alone the browser blocks the submission and
+		// reports it against /oauth/authorize — which is same-origin, so the report
+		// reads as a false positive while the connector flow is dead in every browser.
+		const csp = (await consentPage()).headers.get("Content-Security-Policy") ?? "";
+
+		expect(csp).toContain(`form-action 'self' ${new URL(CLIENT_REDIRECT).origin}`);
+		// The origin, not the callback path, and nothing wildcarded.
+		expect(csp).not.toContain(CLIENT_REDIRECT);
+		expect(csp).not.toContain("*");
+	});
+
+	it("does not name a redirect origin on a page with no form to submit", async () => {
+		// An error page carries no consent form, so widening its policy would grant
+		// reach that nothing on the page needs.
+		const res = await SELF.fetch(authorizeUrl({ clientId: "nope", challenge: "x" }), {
+			headers: browserHeaders({ "Cf-Access-Jwt-Assertion": await accessJwt(email) }),
+		});
+		const csp = res.headers.get("Content-Security-Policy") ?? "";
+
+		expect(res.status).not.toBe(200);
+		expect(csp).toContain("form-action 'self';");
+	});
+
 	it("refuses to process consent at all when JWT_SECRET is unset", async () => {
 		// Without this the secret stringifies into the HMAC key as "undefined", which
 		// is the same key on every deployment that skipped `wrangler secret put` — and

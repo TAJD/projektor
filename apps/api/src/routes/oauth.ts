@@ -95,9 +95,28 @@ function page(title: string, body: string): string {
 // alongside for anything that predates CSP level 2. `form-action 'self'` keeps the
 // decision POST from being retargeted, and `default-src 'none'` means the page cannot
 // pull in anything at all — it needs nothing beyond its own inline stylesheet.
+// `form-action` is enforced on the redirect the POST lands on, not only on the URL
+// the form names. Approving sends the browser to the client's redirect_uri — another
+// origin — so 'self' alone blocks the submission outright, and the browser reports it
+// against /oauth/authorize, which is genuinely same-origin and looks like a false
+// positive. The client's redirect origin therefore has to be named here.
+//
+// It is the origin only, and only the one this request already validated: the library
+// checked redirect_uri against the client's registered URIs before this page rendered,
+// so nothing widens the policy that was not already the approved destination.
+function consentCsp(redirectUri?: string): string {
+	let formAction = "'self'";
+	if (redirectUri) {
+		try {
+			formAction += ` ${new URL(redirectUri).origin}`;
+		} catch {
+			// Unparseable means it never passed validation; leave the policy at 'self'.
+		}
+	}
+	return `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; frame-ancestors 'none'; base-uri 'none'`;
+}
+
 const CONSENT_HEADERS = {
-	"Content-Security-Policy":
-		"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
 	"X-Frame-Options": "DENY",
 	"Referrer-Policy": "no-referrer",
 	// The URL carries the authorization request; nothing about it should be cached.
@@ -108,9 +127,13 @@ function consentHtml(
 	c: Context<HonoEnv>,
 	title: string,
 	body: string,
-	status: 200 | 400 | 403 | 500 = 200
+	status: 200 | 400 | 403 | 500 = 200,
+	redirectUri?: string
 ) {
-	return c.html(page(title, body), status, { ...CONSENT_HEADERS });
+	return c.html(page(title, body), status, {
+		...CONSENT_HEADERS,
+		"Content-Security-Policy": consentCsp(redirectUri),
+	});
 }
 
 function errorPage(c: Context<HonoEnv>, status: 400 | 403 | 500, heading: string, detail: string) {
@@ -284,7 +307,9 @@ oauthRouter.get("/authorize", async (c) => {
          </div>
        </form>
        <p class="meta">Verified identity: <strong>${escapeHtml(host)}</strong>. The
-       application's name is self-declared; the address above is not.</p>`
+       application's name is self-declared; the address above is not.</p>`,
+		200,
+		authRequest.redirectUri
 	);
 });
 
