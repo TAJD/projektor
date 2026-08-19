@@ -230,6 +230,9 @@ export async function listConnectorGrants(
 			// that exists. Listing it says "claude.ai is connected" about a client holding
 			// no credential, and the Disconnect button beside it withdraws nothing.
 			//
+			// Only a display concern: the library writes the unredeemed record with a ten
+			// minute KV expiry, so it clears itself and there is nothing here to sweep.
+			//
 			// Safe as a liveness test only because projektor leaves refreshTokenTTL at its
 			// default; setting it to undefined would issue refresh tokens with no expiry and
 			// make every live grant look pending here. The test below pins that.
