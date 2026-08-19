@@ -107,7 +107,9 @@ A connector that requests no scopes is granted both. Your workspace role is stil
 
 ### Reviewing and withdrawing access
 
-**Settings → API Tokens → Connected applications** lists the connectors you have authorized for the workspace, and disconnects any of them. Revocation takes effect on the next request — nothing is cached that would keep a withdrawn connector alive.
+**Settings → API Tokens → Connected applications** lists the connectors you have authorized for the workspace, and disconnects any of them. Revocation takes effect on the next request — nothing is cached that would keep a withdrawn connector alive. Claude reports it as "authentication required" and offers to reconnect, rather than failing silently.
+
+A grant expires 30 days after it is issued, shown in the **Expires** column. Reconnecting from Claude issues a fresh one; there is nothing to rotate in the meantime.
 
 The list is yours alone. Unlike API tokens, which are workspace property and managed by admins, a connector grant is a personal credential: no one else can see or revoke yours, and you cannot see theirs.
 
