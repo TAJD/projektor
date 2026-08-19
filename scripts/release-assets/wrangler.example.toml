@@ -17,11 +17,18 @@ compatibility_flags = ["nodejs_compat"]   # required: the bundled worker imports
 #     `?slug=` query param could never become a real HTTP redirect. /wiki/:slug
 #     subpaths don't need to be listed here — they have no matching static asset,
 #     so Cloudflare already falls through to the Worker for those.
+#   - /.well-known/*  → always the Worker (PROJ-650). OAuth discovery metadata
+#     (RFC 9728 protected resource metadata, RFC 8414 authorization server
+#     metadata) is served by the Worker and there is no static asset to fall
+#     through from, so without this the SPA fallback answers instead and every
+#     MCP client's discovery probe 404s. Do not prune this as unused: nothing in
+#     the test suite or `wrangler dev` can catch its absence, because neither has
+#     an [assets] binding — the failure only appears in a real deploy.
 #   - everything else  → static assets, asset-first
 [assets]
 directory = "./vendor/web"
 binding = "ASSETS"
-run_worker_first = ["/api/*", "/mcp/*", "/wiki"]
+run_worker_first = ["/api/*", "/mcp/*", "/wiki", "/.well-known/*"]
 
 # ─── Cron Triggers ─────────────────────────────────────────────
 # Daily sweep for the 30-day wiki trash purge (see `scheduled` in src/index.ts).
