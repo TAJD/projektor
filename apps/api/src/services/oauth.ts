@@ -190,7 +190,7 @@ export type ConnectorGrant = Readonly<{
 	clientId: string;
 	scopes: string[];
 	grantedAt: number;
-	expiresAt: number | null;
+	expiresAt: number;
 }>;
 
 // A person accumulates a handful of connectors, not thousands. The page walk is bounded
@@ -223,13 +223,24 @@ export async function listConnectorGrants(
 			if ((grant.metadata as { workspaceId?: string } | null)?.workspaceId !== workspaceId) {
 				continue;
 			}
+			// PROJ-660, found by walking the real flow: the library stamps expiresAt onto a
+			// grant only when the authorization code is redeemed for a refresh token. A
+			// grant with none is one where the person pressed "Allow access" and the client
+			// then never came back — an authorization that was started, not a connection
+			// that exists. Listing it says "claude.ai is connected" about a client holding
+			// no credential, and the Disconnect button beside it withdraws nothing.
+			//
+			// Safe as a liveness test only because projektor leaves refreshTokenTTL at its
+			// default; setting it to undefined would issue refresh tokens with no expiry and
+			// make every live grant look pending here. The test below pins that.
+			if (grant.expiresAt === undefined) continue;
 			grants.push({
 				id: grant.id,
 				client: relyingPartyHost(grant.clientId),
 				clientId: grant.clientId,
 				scopes: grant.scope,
 				grantedAt: grant.createdAt,
-				expiresAt: grant.expiresAt ?? null,
+				expiresAt: grant.expiresAt,
 			});
 		}
 		if (!result.cursor) break;

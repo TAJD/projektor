@@ -14,7 +14,7 @@ interface ConnectorGrant {
 	clientId: string;
 	scopes: string[];
 	grantedAt: number;
-	expiresAt: number | null;
+	expiresAt: number;
 }
 
 interface Props {
@@ -26,8 +26,7 @@ const TD_MUTED = `${TD_BASE} font-mono text-[0.8rem] text-text-muted`;
 const TH_CLASS =
 	"text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap";
 
-function formatDate(ts: number | null): string {
-	if (ts === null) return "Never";
+function formatDate(ts: number): string {
 	return new Date(ts * 1000).toLocaleDateString();
 }
 
@@ -101,9 +100,7 @@ function ConnectorTable({ grants, state }: { grants: ConnectorGrant[]; state: Re
 							<td class={`${TD_BASE} text-text-base font-medium`}>{grant.client}</td>
 							<td class={TD_MUTED}>{formatScopes(grant.scopes)}</td>
 							<td class={TD_MUTED}>{formatDate(grant.grantedAt)}</td>
-							<td class={TD_MUTED}>
-								{grant.expiresAt === null ? "No expiry" : formatDate(grant.expiresAt)}
-							</td>
+							<td class={TD_MUTED}>{formatDate(grant.expiresAt)}</td>
 							<td class={`${TD_BASE} whitespace-nowrap`}>
 								<RevokeControl id={grant.id} state={state} />
 							</td>
@@ -127,9 +124,7 @@ function ConnectorCards({ grants, state }: { grants: ConnectorGrant[]; state: Re
 						<dt class="font-semibold">Connected</dt>
 						<dd class="m-0">{formatDate(grant.grantedAt)}</dd>
 						<dt class="font-semibold">Expires</dt>
-						<dd class="m-0">
-							{grant.expiresAt === null ? "No expiry" : formatDate(grant.expiresAt)}
-						</dd>
+						<dd class="m-0">{formatDate(grant.expiresAt)}</dd>
 					</dl>
 					<RevokeControl id={grant.id} state={state} />
 				</div>

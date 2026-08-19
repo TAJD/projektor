@@ -8,7 +8,7 @@ const GRANT = {
 	clientId: "https://claude.ai/.well-known/oauth-client",
 	scopes: ["projektor:read", "projektor:write"],
 	grantedAt: 1_700_000_000,
-	expiresAt: null,
+	expiresAt: 1_702_592_000,
 };
 
 function stubFetch(grants: unknown[] = [GRANT]) {

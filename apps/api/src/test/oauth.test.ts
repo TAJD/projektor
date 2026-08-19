@@ -836,6 +836,38 @@ describe("Settings lists and withdraws connectors (PROJ-659)", () => {
 		expect(relyingPartyHost("https://claude.ai/.well-known/oauth-client")).toBe("claude.ai");
 	});
 
+	// PROJ-660. The library stamps expiresAt when the code is redeemed, so an abandoned
+	// consent leaves a grant with none. Listing it would tell the user an application is
+	// connected when it holds no credential, and the Disconnect beside it withdraws
+	// nothing. This also pins the assumption the filter rests on: a grant that did
+	// complete always has an expiry, because refreshTokenTTL is left at its default.
+	it("hides a consent the client never came back to redeem", async () => {
+		const workspace = await seedWorkspace();
+		const email = `abandoned-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "member");
+
+		const jwt = await accessJwt(email);
+		const { clientId } = await seedOAuthClient();
+		const { challenge } = await pkce();
+		const consentPage = await SELF.fetch(
+			authorizeUrl({ clientId, resource: `${HOST}/mcp/${workspace.id}`, challenge }),
+			{ headers: browserHeaders({ "Cf-Access-Jwt-Assertion": jwt }) }
+		);
+		const approved = await postConsent(consentTokenFrom(await consentPage.text()), "approve", jwt);
+		expect(approved.status).toBe(302);
+
+		clientIp = "203.0.113.244";
+		expect(await (await settings(workspace.slug, jwt)).json()).toEqual([]);
+
+		clientIp = "203.0.113.245";
+		await connect({ email, workspaceId: workspace.id });
+		clientIp = "203.0.113.246";
+		const grants = await (await settings(workspace.slug, jwt)).json<Array<{ expiresAt: number }>>();
+		expect(grants).toHaveLength(1);
+		expect(grants[0].expiresAt).toBeGreaterThan(Math.floor(Date.now() / 1000));
+	});
+
 	it("withdrawing a connector kills its token on the next request", async () => {
 		const workspace = await seedWorkspace();
 		const email = `withdraw-${crypto.randomUUID().slice(0, 8)}@example.com`;
