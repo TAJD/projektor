@@ -1,5 +1,7 @@
 import { env, SELF } from "cloudflare:test";
+import type { Env } from "@projektor/types";
 import { beforeEach, describe, expect, it } from "vitest";
+import { purgeExpiredOAuthData } from "../index";
 import { resetAuthCachesForTests } from "../middleware/auth";
 import { relyingPartyHost } from "../services/oauth";
 import { seedFixture, seedMember, seedToken, seedUser, seedWorkspace } from "./helpers";
@@ -912,6 +914,20 @@ describe("Settings lists and withdraws connectors (PROJ-659)", () => {
 		// An admin, deliberately: a grant is a personal credential, so seniority in the
 		// workspace does not confer visibility into it.
 		expect(await (await settings(workspace.slug, await accessJwt(other))).json()).toEqual([]);
+	});
+});
+
+describe("the scheduled purge", () => {
+	it("clears dead OAuth records without touching a live grant", async () => {
+		const workspace = await seedWorkspace();
+		const email = `purge-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "member");
+		const { tokens } = await connect({ email, workspaceId: workspace.id });
+
+		await purgeExpiredOAuthData(env as unknown as Env);
+
+		expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(200);
 	});
 });
 

@@ -415,6 +415,22 @@ export async function scheduled(
 	ctx: ExecutionContext
 ): Promise<void> {
 	ctx.waitUntil(purgeAllWorkspacesExpiredWikiPages(env));
+	ctx.waitUntil(purgeExpiredOAuthData(env));
+}
+
+// PROJ-659 review checkpoint: KV keeps a record per authorization code, access token and
+// refresh token. Codes are spent in seconds and tokens rotate roughly hourly, so without
+// this the namespace grows forever with material that is already dead. Runs on the same
+// schedule as the wiki trash purge and swallows its own failure — a housekeeping pass is
+// never a reason to fail the cron and skip the work after it.
+export async function purgeExpiredOAuthData(env: Env): Promise<void> {
+	try {
+		await oauthProvider.purgeExpiredData(env);
+	} catch (err) {
+		console.error("scheduled OAuth purge failed", {
+			err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+		});
+	}
 }
 
 export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void> {
