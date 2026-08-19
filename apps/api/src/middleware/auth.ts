@@ -98,6 +98,12 @@ async function tryOAuthGrantAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	// another workspace is a 403 rather than a cross-tenant read.
 	c.set("tokenWorkspaceId", props.workspaceId);
 	c.set("tokenScopes", scopes);
+	// "agent", not "human", even though a person consented (PROJ-658). Two reasons, and
+	// they point the same way. What lands on a comment or issue through this token was
+	// written by a model, not typed by the person — the same thing a pk_ token from
+	// Claude Code already records. And consentingUser() in routes/oauth.ts gates on
+	// authKind === "human": calling this human would let an OAuth token approve further
+	// grants, so a connector could quietly widen its own access.
 	c.set("authKind", "agent");
 	return { kind: "allow" };
 }

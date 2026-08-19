@@ -719,6 +719,83 @@ describe("the token endpoint is rate-limited", () => {
 	});
 });
 
+describe("a grant is only as live as the membership behind it (PROJ-658)", () => {
+	it("stops working the moment the user is removed from the workspace", async () => {
+		// The property that makes a connector token safe to hold for a long time: role
+		// and membership are read from D1 on every request, so offboarding someone kills
+		// their connectors with no token bookkeeping at all.
+		const workspace = await seedWorkspace();
+		const email = `offboard-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "member");
+
+		const { tokens } = await connect({ email, workspaceId: workspace.id });
+		expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(200);
+
+		await env.DB.prepare("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?")
+			.bind(workspace.id, user.id)
+			.run();
+
+		expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(403);
+	});
+
+	it("revoking the refresh token takes the access token with it", async () => {
+		// RFC 7009 §2.1: revoking a refresh token invalidates the access tokens issued
+		// from the same grant. Without the cascade a user who clicks "disconnect" would
+		// still be reachable for up to the access token's remaining lifetime.
+		const workspace = await seedWorkspace();
+		const email = `cascade-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "member");
+
+		const { tokens, clientId } = await connect({ email, workspaceId: workspace.id });
+		expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(200);
+
+		const revoked = await exchange({ token: tokens.refresh_token, client_id: clientId });
+		expect(revoked.status).toBe(200);
+
+		expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(401);
+	});
+});
+
+describe("the request limiter keys on the grant, not the token (PROJ-658)", () => {
+	// RATE_LIMIT_API_MAX in wrangler.test.toml.
+	const API_LIMIT = 5;
+
+	it("survives a token rotation, and does not spill onto the user's other grants", async () => {
+		const workspace = await seedWorkspace();
+		const email = `limited-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "member");
+
+		const { tokens, clientId } = await connect({ email, workspaceId: workspace.id });
+		for (let i = 0; i < API_LIMIT; i++) {
+			expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(200);
+		}
+
+		// A rotated access token carries the same <userId>:<grantId> prefix, so it lands in
+		// the bucket the previous one filled. Keyed on the whole token, an hourly refresh
+		// would reset the budget and the limit would mean nothing.
+		const refreshed = await exchange({
+			grant_type: "refresh_token",
+			refresh_token: tokens.refresh_token,
+			client_id: clientId,
+		});
+		expect(refreshed.status).toBe(200);
+		const rotated = await refreshed.json<TokenResponse>();
+		expect(rotated.access_token).not.toBe(tokens.access_token);
+		expect((await mcpCall(workspace.id, rotated.access_token, "list_projects")).status).toBe(429);
+
+		// And the other direction: a second connector for the same person gets its own
+		// budget, so one noisy client cannot lock the user out of the rest.
+		clientIp = "203.0.113.251"; // the consent screen's own IP budget is 3 per window
+		const second = await connect({ email, workspaceId: workspace.id });
+		expect((await mcpCall(workspace.id, second.tokens.access_token, "list_projects")).status).toBe(
+			200
+		);
+	});
+});
+
 describe("hardening the consent screen itself", () => {
 	let workspaceId: string;
 	let email: string;

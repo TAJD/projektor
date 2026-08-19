@@ -39,8 +39,7 @@ export async function rateLimitMiddleware(
 
 	if (authHeader?.startsWith("Bearer ")) {
 		const token = authHeader.slice(7);
-		const fingerprint = await sha256Prefix(token);
-		key = `tok:${fingerprint}`;
+		key = `tok:${oauthGrantKey(token) ?? (await sha256Prefix(token))}`;
 		limit = parseInt(c.env.RATE_LIMIT_API_MAX ?? "600", 10);
 	} else {
 		const ip = c.req.header("CF-Connecting-IP") ?? "127.0.0.1";
@@ -68,6 +67,21 @@ export async function rateLimitMiddleware(
 	}
 
 	await next();
+}
+
+// PROJ-658: an OAuth access token is `<userId>:<grantId>:<secret>` and rotates roughly
+// hourly. Fingerprinting the whole token would hand every connector a fresh budget on
+// each rotation, which is most of the way to no limit at all. The user and grant halves
+// are stable for the life of the grant, so they are what the bucket is keyed on.
+//
+// Deliberately not keyed on the user alone. The limiter runs before authentication, so
+// the key comes from an unverified string — and a bucket a stranger can name is a bucket
+// a stranger can exhaust. The grant id is 16 random characters and appears nowhere but
+// inside the token, so it cannot be guessed the way a user id could be.
+function oauthGrantKey(token: string): string | null {
+	const parts = token.split(":");
+	if (parts.length !== 3 || !parts[0] || !parts[1]) return null;
+	return `grant:${parts[0]}:${parts[1]}`;
 }
 
 /**
