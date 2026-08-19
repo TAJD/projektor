@@ -600,6 +600,110 @@ describe("the issued token is bound to the workspace it was granted for", () => 
 	});
 });
 
+describe("the token endpoint's failure modes", () => {
+	let workspaceId: string;
+	let email: string;
+
+	beforeEach(async () => {
+		const workspace = await seedWorkspace();
+		workspaceId = workspace.id;
+		email = `token-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspaceId, user.id, "member");
+	});
+
+	it("replaying an authorization code revokes everything the grant produced", async () => {
+		// OAuth 2.1's response to a stolen code: a second presentation means either the
+		// client or an attacker is replaying, and the safe reading is that the code
+		// leaked. Both parties lose the grant rather than one of them keeping it.
+		const jwt = await accessJwt(email);
+		const { clientId } = await seedOAuthClient();
+		const { verifier, challenge } = await pkce();
+		const resource = `${HOST}/mcp/${workspaceId}`;
+
+		const consentPage = await SELF.fetch(authorizeUrl({ clientId, resource, challenge }), {
+			headers: browserHeaders({ "Cf-Access-Jwt-Assertion": jwt }),
+		});
+		const approved = await postConsent(consentTokenFrom(await consentPage.text()), "approve", jwt);
+		const code = new URL(approved.headers.get("Location") as string).searchParams.get(
+			"code"
+		) as string;
+		const body = {
+			grant_type: "authorization_code",
+			code,
+			redirect_uri: CLIENT_REDIRECT,
+			client_id: clientId,
+			code_verifier: verifier,
+			resource,
+		};
+
+		const first = await exchange(body);
+		expect(first.status).toBe(200);
+		const tokens = await first.json<TokenResponse>();
+
+		const replay = await exchange(body);
+		expect(replay.status).toBe(400);
+		// RFC 6749 §5.2 wire shape. Claude's refresh path keys off this exact code.
+		expect(await replay.json()).toMatchObject({ error: "invalid_grant" });
+
+		// The access token already handed out is gone too — that is what makes this a
+		// revocation rather than just a rejected second exchange.
+		expect((await mcpCall(workspaceId, tokens.access_token, "list_projects")).status).toBe(401);
+	});
+
+	it("rejects an authorization request that omits code_challenge_method", async () => {
+		// RFC 7636 says an absent method means `plain`. OAuth 2.1 does not offer plain,
+		// and the metadata document advertises S256 only, so this must be refused
+		// rather than silently downgraded.
+		const jwt = await accessJwt(email);
+		const { clientId } = await seedOAuthClient();
+		const { challenge } = await pkce();
+		const url = new URL(
+			authorizeUrl({ clientId, challenge, resource: `${HOST}/mcp/${workspaceId}` })
+		);
+		url.searchParams.delete("code_challenge_method");
+
+		const res = await SELF.fetch(url.toString(), {
+			headers: browserHeaders({ "Cf-Access-Jwt-Assertion": jwt }),
+			redirect: "manual",
+		});
+
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.get("Location") as string).searchParams.get("error")).toBe(
+			"invalid_request"
+		);
+	});
+
+	it("rejects a code exchanged with the wrong PKCE verifier", async () => {
+		const jwt = await accessJwt(email);
+		const { clientId } = await seedOAuthClient();
+		const { challenge } = await pkce();
+		const resource = `${HOST}/mcp/${workspaceId}`;
+
+		const consentPage = await SELF.fetch(authorizeUrl({ clientId, resource, challenge }), {
+			headers: browserHeaders({ "Cf-Access-Jwt-Assertion": jwt }),
+		});
+		const approved = await postConsent(consentTokenFrom(await consentPage.text()), "approve", jwt);
+		const code = new URL(approved.headers.get("Location") as string).searchParams.get(
+			"code"
+		) as string;
+
+		// A code intercepted from the redirect is worthless without the verifier that
+		// only the client that started the flow holds.
+		const res = await exchange({
+			grant_type: "authorization_code",
+			code,
+			redirect_uri: CLIENT_REDIRECT,
+			client_id: clientId,
+			code_verifier: (await pkce()).verifier,
+			resource,
+		});
+
+		expect(res.status).toBe(400);
+		expect(await res.json()).toMatchObject({ error: "invalid_grant" });
+	});
+});
+
 describe("the token endpoint is rate-limited", () => {
 	it("429s once the per-IP limit is exceeded", async () => {
 		// It never passes through Hono, so rateLimitMiddleware does not cover it — and
