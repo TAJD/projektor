@@ -156,7 +156,51 @@ wrangler secret put JWT_SECRET     # any long random string, used to sign API to
 CI never manages runtime secrets — it only needs the deploy token. Rotating
 `JWT_SECRET` invalidates existing API tokens, so set it once and leave it.
 
-### 6. Deploy
+### 6. Cloudflare Access carve-outs for OAuth
+
+Skip this if your instance isn't behind Cloudflare Access. If it is, MCP
+connectors will not work until you do it, and the failures are confusing
+because Access answers with a *redirect to a login page*, not an error.
+
+Two of the OAuth endpoints are machine-to-machine and are never fetched by the
+browser that holds your Access session:
+
+| Path | Fetched by | Must be |
+|------|-----------|---------|
+| `/.well-known/*` | the client, before any sign-in exists | bypassed |
+| `/oauth/token` | the client's server, with no cookies | bypassed |
+| `/oauth/authorize` | your browser, to press "Allow access" | **left protected** |
+
+`/oauth/authorize` is where the human consents, so it needs the Access identity
+— that's the whole point of it. Bypassing it would let anyone reach the consent
+screen.
+
+An Access policy applies to a whole application, and applications are scoped by
+hostname *plus path*, so a carve-out means **separate applications**, one per
+path, each with a single Bypass / Everyone policy. More specific paths win over
+less specific ones, so these sit alongside your existing app without changing it:
+
+- `projektor.example.com/.well-known` → self-hosted app, policy: Bypass, Everyone
+- `projektor.example.com/oauth/token` → self-hosted app, policy: Bypass, Everyone
+
+There is no `/oauth/revoke` to bypass. RFC 7009 revocation is served on the
+token endpoint itself, which is why the metadata advertises
+`revocation_endpoint` equal to `token_endpoint`.
+
+Verify before adding the connector — both should return `200` with JSON, not
+`302`:
+
+```bash
+curl -si https://projektor.example.com/.well-known/oauth-protected-resource | head -1
+curl -si https://projektor.example.com/.well-known/oauth-authorization-server | head -1
+```
+
+Also confirm your `wrangler.toml` `run_worker_first` includes `/.well-known/*`
+alongside `/api/*`, `/mcp/*` and `/wiki`. Without it the static-asset handler
+answers discovery requests with the SPA shell and the client reports the server
+as not supporting OAuth at all.
+
+### 7. Deploy
 
 ```bash
 ./deploy.sh          # locally (wrangler OAuth), or
@@ -242,6 +286,10 @@ commit, and push.
 | Symptom | Cause / fix |
 |---------|-------------|
 | `wrangler d1 migrations apply` fails with an auth error | The API token is missing **D1: Edit** (the "Edit Cloudflare Workers" template omits it). Recreate as a custom token; verify with `wrangler d1 list`. |
+| Adding the MCP connector fails with "does not support OAuth" / discovery 404s | `/.well-known/*` is missing from `run_worker_first`, so the SPA fallback answers discovery instead of the Worker. |
+| Connector fails with "CIMD is enabled but `global_fetch_strictly_public` compatibility flag is not set" | The deployed Worker is running without the flag. It is in the template, but a config edit only takes effect on the next `wrangler deploy` — redeploy. |
+| Discovery or token requests return `302` to a Cloudflare login page | Cloudflare Access is in front of them. Add the two bypass applications from step 6 — and leave `/oauth/authorize` protected. |
+| Consent screen renders but pressing **Allow access** is blocked by CSP | You are on a build before v0.6.2: `form-action 'self'` blocked the redirect to the client, and Chrome reports it against `/oauth/authorize`, which looks like a false positive. Upgrade. |
 | `Wrangler requires at least Node.js v22` | Your workflow uses an older Node. wrangler 4.x needs **Node ≥ 22** — set `node-version: '22'` in `setup-node`. |
 | Release published but the instance didn't auto-deploy | The `DEPLOY_DISPATCH_REPO` variable is unset, or `WORKSPACE_PAT` can't dispatch to the deploy repo. The dispatch step fails with **HTTP 404** (GitHub masks a permission failure as "Not Found"). Fix: a fine-grained `WORKSPACE_PAT` needs the deploy repo selected in *Repository access* **and** *Contents: Read and write*. |
 | `gh release download` 404 in CI | `projektor` is private and `PROJEKTOR_RELEASE_PAT` (with `Contents: Read`) is missing or expired. |

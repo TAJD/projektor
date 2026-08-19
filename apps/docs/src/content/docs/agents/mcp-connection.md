@@ -224,6 +224,8 @@ claude mcp add projektor \
   --header "CF-Access-Client-Secret: <client-secret>"
 ```
 
+For the **OAuth connector** path (§3b) the operator has separate work to do: Access also sits in front of the OAuth discovery and token endpoints, which no browser session ever reaches. Bypass applications for `/.well-known` and `/oauth/token` are required, and `/oauth/authorize` must stay protected — see [Deploying → Cloudflare Access](/projektor/guides/deploying/#6-cloudflare-access-carve-outs-for-oauth).
+
 Without a valid CF Access service token, the Worker returns a `403` before it reaches the MCP layer — the agent connection fails silently. The bootstrap flow bypasses Access; agent workflows in production need both headers.
 
 ---
