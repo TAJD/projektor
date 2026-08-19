@@ -880,6 +880,23 @@ describe("Settings lists and withdraws connectors (PROJ-659)", () => {
 		expect(crossed.status).toBe(404);
 	});
 
+	it("refuses the shared PUBLIC_READ_ONLY viewer outright", async () => {
+		// Not "returns an empty list": the shared viewer is one identity for every
+		// anonymous visitor, so "your connectors" has no meaning for it. It cannot
+		// consent today, which makes the list empty anyway — this asserts the endpoint
+		// does not rely on that.
+		const workspace = await seedWorkspace();
+		env.PUBLIC_READ_ONLY = "true";
+		try {
+			const res = await SELF.fetch(`${HOST}/api/workspaces/${workspace.slug}/connectors`, {
+				headers: browserHeaders({ "X-Workspace-Slug": workspace.slug }),
+			});
+			expect(res.status).toBe(403);
+		} finally {
+			env.PUBLIC_READ_ONLY = undefined as unknown as string;
+		}
+	});
+
 	it("does not show one member's connectors to another", async () => {
 		const workspace = await seedWorkspace();
 		const owner = `grantee-${crypto.randomUUID().slice(0, 8)}@example.com`;

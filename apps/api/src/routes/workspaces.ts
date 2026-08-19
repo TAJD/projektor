@@ -1,6 +1,7 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
+import { isPublicViewer } from "../middleware/auth";
 import { oauthApi } from "../oauth/provider";
 import { listConnectorGrants, revokeConnectorGrant } from "../services/oauth";
 import { ctxFromHono } from "../services/types";
@@ -96,7 +97,23 @@ router.delete("/:slug/tokens/:tokenId", async (c) => {
 
 // PROJ-659. Deliberately not mirrored as MCP tools: withdrawing a credential is a
 // sensitive operation, and one a connector should not be able to perform on itself.
+//
+// The shared PUBLIC_READ_ONLY viewer is one identity for every anonymous visitor on the
+// internet and a real `viewer` member of the default workspace, so "your own grants"
+// would mean "everyone's grants" for it. It cannot consent to a grant in the first place
+// (routes/oauth.ts), which makes the list provably empty today — but that is an
+// invariant enforced two files away, and this endpoint should not depend on it.
+function connectorsDenied(c: Parameters<typeof ctxFromHono>[0]): Response | null {
+	const user = c.get("user") as { email: string } | undefined;
+	if (!user || isPublicViewer(user)) {
+		return c.json({ error: "Connectors are personal credentials and need a signed-in user" }, 403);
+	}
+	return null;
+}
+
 router.get("/:slug/connectors", async (c) => {
+	const denied = connectorsDenied(c);
+	if (denied) return denied;
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(await listConnectorGrants(oauthApi(c.env), ctx.userId, ctx.workspaceId));
@@ -106,6 +123,8 @@ router.get("/:slug/connectors", async (c) => {
 });
 
 router.delete("/:slug/connectors/:grantId", async (c) => {
+	const denied = connectorsDenied(c);
+	if (denied) return denied;
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(
