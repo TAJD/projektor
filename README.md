@@ -20,6 +20,26 @@ It holds issues, boards, sprints and a wiki, and it exposes
 so the agent files the ticket, moves it and writes the page instead of asking you to.
 The whole thing is one Cloudflare Worker in your own account.
 
+## Connect it to Claude
+
+Add your instance as a connector in Claude — web, desktop, mobile, or Claude Code —
+and sign in with the account you already use for the web UI. There is no token to
+copy into a config file.
+
+Projektor is an OAuth 2.1 authorization server: discovery over RFC 9728 / RFC 8414,
+client identity via CIMD rather than dynamic registration, PKCE throughout, and an
+RFC 8707 `resource` parameter that binds every grant to exactly one workspace — so a
+token minted for one workspace is not a credential for another. Each authorization is
+personal, expires on its own, and appears in your settings with a Disconnect beside
+it.
+
+A grant never exceeds what you can already do. Your live workspace role is checked on
+every call, so the connector inherits your ceiling rather than the scopes it asked
+for. See
+[connecting an agent](https://tajd.github.io/projektor/agents/mcp-connection/) for the
+flow and [deploying](https://tajd.github.io/projektor/guides/deploying/) for the
+Cloudflare Access carve-outs it needs.
+
 ## One work graph, not a tracker plus a sidecar
 
 Running a fleet of agents normally means assembling three things: a tracker for the
