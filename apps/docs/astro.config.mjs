@@ -17,6 +17,15 @@ export default defineConfig({
 			description:
 				"A self-hosted, MCP-native Jira + wiki that runs in a single Cloudflare Worker.",
 			customCss: ["./src/styles/projektor.css"],
+			head: [
+				{
+					tag: "meta",
+					attrs: {
+						name: "google-site-verification",
+						content: "ZfOIYTNW_MPgzvPKsmWx2GIYCAOzVdWi5QXcNL4ihT4",
+					},
+				},
+			],
 			components: {
 				Footer: "./src/components/Footer.astro",
 			},
