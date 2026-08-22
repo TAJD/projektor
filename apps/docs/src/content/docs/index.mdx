@@ -1,8 +1,31 @@
 ---
-title: Projektor
+title: AI-native project management on Cloudflare
 description: AI-native project management, self-hosted on Cloudflare. An issue tracker and wiki where every action a person takes in the browser, an agent takes over MCP.
 template: splash
+head:
+  - tag: script
+    attrs:
+      type: application/ld+json
+    content: |
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "Projektor",
+        "description": "A self-hosted, MCP-native issue tracker and wiki that runs in a single Cloudflare Worker. Every action a person takes in the browser, an agent takes over MCP.",
+        "url": "https://tajd.github.io/projektor/",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Cloudflare Workers",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "license": "https://github.com/TAJD/projektor/blob/main/LICENSE",
+        "codeRepository": "https://github.com/TAJD/projektor",
+        "sameAs": ["https://github.com/TAJD/projektor"]
+      }
 hero:
+  title: Projektor
   tagline: AI-native project management, self-hosted on Cloudflare. An issue tracker and wiki your coding agent runs as well as you do — one Worker, in your own account.
   actions:
     - text: Connect an agent

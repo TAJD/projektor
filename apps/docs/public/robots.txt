@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://tajd.github.io/projektor/sitemap-index.xml

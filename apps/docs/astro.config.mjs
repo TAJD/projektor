@@ -25,6 +25,40 @@ export default defineConfig({
 						content: "ZfOIYTNW_MPgzvPKsmWx2GIYCAOzVdWi5QXcNL4ihT4",
 					},
 				},
+				// Single site-wide social share card — Starlight otherwise emits
+				// twitter:card=summary_large_image with no image to back it.
+				{
+					tag: "meta",
+					attrs: { property: "og:image", content: "https://tajd.github.io/projektor/og.png" },
+				},
+				{
+					tag: "meta",
+					attrs: { property: "og:image:width", content: "1200" },
+				},
+				{
+					tag: "meta",
+					attrs: { property: "og:image:height", content: "630" },
+				},
+				{
+					tag: "meta",
+					attrs: { property: "og:image:alt", content: "Projektor — AI-native project management on Cloudflare" },
+				},
+				{
+					tag: "meta",
+					attrs: { name: "twitter:image", content: "https://tajd.github.io/projektor/og.png" },
+				},
+				// The body font is a 500KB variable woff2 loaded via @font-face in
+				// projektor.css; preloading avoids the late-discovery flash.
+				{
+					tag: "link",
+					attrs: {
+						rel: "preload",
+						href: "/projektor/fonts/MonaspaceNeon-Variable.woff2",
+						as: "font",
+						type: "font/woff2",
+						crossorigin: "anonymous",
+					},
+				},
 			],
 			components: {
 				Footer: "./src/components/Footer.astro",
