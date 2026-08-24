@@ -146,6 +146,10 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 	useLayoutEffect(() => {
 		if (!project) return;
 		if (tabRefs.current.length !== TABS.length) return;
+		// Only measure while every tab is rendered (none collapsed into the "More" menu yet) -
+		// collapsed tabs' refs go null, which would otherwise read as 0-width and make
+		// computeVisibleCount think everything fits again, re-expanding and re-collapsing forever.
+		if (tabRefs.current.some((el) => el == null)) return;
 		const widths = tabRefs.current.map((el) => el?.offsetWidth ?? 0);
 		if (widths.every((w) => w === 0)) return;
 		if (tabWidths && widths.every((w, i) => w === tabWidths[i])) return;
