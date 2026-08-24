@@ -153,12 +153,11 @@ any) render as an expandable context panel — useful for passing app-specific s
 know what the params mean.
 
 The same read/triage actions (\`list_feedback\`, \`update_feedback_status\`,
-\`convert_feedback_to_issue\`, and their bulk equivalents) are landing as MCP tools so
-an agent can triage conversationally instead of using the web UI; until then, use the
-REST endpoints (\`GET\`/\`PATCH .../feedback\`, \`POST .../feedback/:id/convert-to-issue\`,
-\`POST .../feedback/bulk-mark-reviewed\`, \`POST .../feedback/bulk-convert-to-issue\`) or
-the web UI. Feedback source *management* (create/list/update/rotate/revoke, used
-above) already has full MCP parity.
+\`convert_feedback_to_issue\`) are also available as MCP tools, so an agent can triage
+conversationally instead of using the web UI. Their bulk equivalents are REST-only for
+now (\`POST .../feedback/bulk-mark-reviewed\`, \`POST .../feedback/bulk-convert-to-issue\`);
+use those endpoints or the web UI for bulk triage. Feedback source *management*
+(create/list/update/rotate/revoke, used above) already has full MCP parity too.
 
 ## See also
 
