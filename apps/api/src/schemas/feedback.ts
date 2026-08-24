@@ -68,13 +68,15 @@ export const ListFeedbackSchema = z.object({
 });
 
 export const UpdateFeedbackSchema = z.object({
-	projectId: z.string().min(1, "projectId is required"),
+	// Optional: REST routes always pass the URL path's projectId (scoping the
+	// lookup to that project); MCP tools omit it and resolve it from the feedback row.
+	projectId: z.string().min(1).optional(),
 	feedbackId: z.string(),
 	status: FeedbackStatusEnum,
 });
 
 export const ConvertFeedbackSchema = z.object({
-	projectId: z.string().min(1, "projectId is required"),
+	projectId: z.string().min(1).optional(),
 	feedbackId: z.string(),
 });
 

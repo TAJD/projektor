@@ -1,4 +1,5 @@
 import type { MCPTool } from "@projektor/types";
+import { convertFeedbackToIssue, listFeedback, updateFeedbackStatus } from "../services/feedback";
 import {
 	createFeedbackSource,
 	listFeedbackSources,
@@ -103,6 +104,59 @@ export const feedbackTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			return revokeFeedbackSource(ctx as unknown as ServiceCtx, input);
+		},
+	},
+	{
+		name: "list_feedback",
+		description:
+			"List a project's submitted feedback (read/triage, not source management). Each entry " +
+			"includes rating, ratingScale, body, submitterLabel, sourceUrl, appVersion, status " +
+			"('new'/'reviewed'/'actioned'), linkedIssueId (set once converted to an issue), and " +
+			"createdAt. Optionally filter by status or sourceId. Any project member (including " +
+			"viewer) can read.",
+		inputSchema: {
+			type: "object",
+			required: ["projectId"],
+			properties: {
+				projectId: { type: "string" },
+				status: { type: "string", enum: ["new", "reviewed", "actioned"] },
+				sourceId: { type: "string" },
+			},
+		},
+		async handler(input, ctx) {
+			return listFeedback(ctx as unknown as ServiceCtx, input);
+		},
+	},
+	{
+		name: "update_feedback_status",
+		description:
+			"Update a feedback item's triage status ('new'/'reviewed'/'actioned'). Member+ (not viewer).",
+		inputSchema: {
+			type: "object",
+			required: ["feedbackId", "status"],
+			properties: {
+				feedbackId: { type: "string" },
+				status: { type: "string", enum: ["new", "reviewed", "actioned"] },
+			},
+		},
+		async handler(input, ctx) {
+			return updateFeedbackStatus(ctx as unknown as ServiceCtx, input);
+		},
+	},
+	{
+		name: "convert_feedback_to_issue",
+		description:
+			"Convert a feedback item into a tracked issue. The issue title comes from the feedback " +
+			"body (or a rating-based fallback when there's no body); the feedback item is stamped " +
+			"linkedIssueId and its status set to 'actioned'. Rejects (409) if the item was already " +
+			"converted. Member+ (not viewer).",
+		inputSchema: {
+			type: "object",
+			required: ["feedbackId"],
+			properties: { feedbackId: { type: "string" } },
+		},
+		async handler(input, ctx) {
+			return convertFeedbackToIssue(ctx as unknown as ServiceCtx, input);
 		},
 	},
 ];
