@@ -39,6 +39,8 @@ jobs:
       # see apps/api and apps/web vitest configs for the ratchet levels, PROJ-223).
       - run: pnpm --filter @projektor/api test:coverage
       - run: pnpm --filter @projektor/web test:coverage
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
       - run: pnpm --filter @projektor/web build
       - run: pnpm --filter @projektor/docs build
 # E2E tests: run manually with 'pnpm --filter @projektor/web test:e2e'
