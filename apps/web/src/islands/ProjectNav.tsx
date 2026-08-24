@@ -20,8 +20,8 @@ const TABS: Array<{ label: string; path: string; glossaryId?: GlossaryTermId }> 
 	{ label: "Overview", path: "/projects/view" },
 	{ label: "Issues", path: "/issues" },
 	{ label: "Wiki", path: "/wiki" },
-	{ label: "Sprints", path: "/sprints", glossaryId: "sprint" },
-	{ label: "Epics", path: "/epics", glossaryId: "epic" },
+	{ label: "Sprints", path: "/sprints" },
+	{ label: "Epics", path: "/epics" },
 	{ label: "Metrics", path: "/metrics" },
 	{ label: "Feedback", path: "/feedback" },
 ];

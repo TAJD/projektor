@@ -137,6 +137,15 @@ describe("ProjectNav", () => {
 		expect(overviewTab.getAttribute("aria-current")).toBe("page");
 	});
 
+	it("renders no GlossaryHelp icon next to the Sprints or Epics tabs", async () => {
+		window.history.pushState({}, "", "/issues?id=p1");
+		mockFetchProject(PROJECT);
+		render(<ProjectNav />);
+		await screen.findByText("Projektor");
+		expect(screen.queryByRole("button", { name: /about sprint/i })).toBeNull();
+		expect(screen.queryByRole("button", { name: /about epic/i })).toBeNull();
+	});
+
 	it("renders a Feedback tab linking to /feedback?projectId", async () => {
 		vi.stubGlobal(
 			"fetch",
@@ -222,6 +231,19 @@ describe("ProjectNav — Priority+ overflow menu", () => {
 
 		fireEvent.click(wikiItem);
 		expect(screen.queryByRole("menu")).toBeNull();
+	});
+
+	it("renders no GlossaryHelp icon for Sprints or Epics inside the More menu", async () => {
+		window.history.pushState({}, "", "/issues?id=p1");
+		mockFetchProject(PROJECT);
+		stubNavMeasurements(340, 90);
+		render(<ProjectNav />);
+		await screen.findByText("Projektor");
+
+		fireEvent.click(screen.getByRole("button", { name: /more/i }));
+		expect(screen.getByRole("menu")).toBeTruthy();
+		expect(screen.queryByRole("button", { name: /about sprint/i })).toBeNull();
+		expect(screen.queryByRole("button", { name: /about epic/i })).toBeNull();
 	});
 
 	it("closes the menu on Escape and on an outside click", async () => {
