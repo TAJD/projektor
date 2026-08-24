@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { IdSchema } from "../schemas/common";
 import { CreateProjectSchema, UpdateProjectSchema } from "../schemas/projects";
 import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
@@ -11,31 +11,41 @@ import type { ServiceCtx } from "./types";
 const WS_META_TTL = 60;
 const PROJECTS_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:projects`;
 
-export async function listProjects(ctx: ServiceCtx) {
+export async function listProjects(ctx: ServiceCtx, opts: { includeArchived?: boolean } = {}) {
 	const orm = drizzle(ctx.db, { schema });
 
-	// PROJ-311: owner/admin see every project and share the workspace cache. A
-	// non-admin sees only granted projects; that set is per-user and access can be
-	// revoked at any time, so it is computed per-request (uncached) to keep the
-	// "effective on next request" guarantee — no stale project can linger.
+	// PROJ-311: owner/admin share the cached workspace list; others get an uncached per-user set.
 	const visible = visibleProjectPredicate(ctx, schema.projects.id);
+	const includeArchived = opts.includeArchived ?? false;
 	if (!visible) {
+		if (includeArchived) {
+			return orm
+				.select()
+				.from(schema.projects)
+				.where(eq(schema.projects.workspaceId, ctx.workspaceId))
+				.orderBy(asc(schema.projects.name));
+		}
 		const cacheKey = PROJECTS_CACHE_KEY(ctx.workspaceId);
 		const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
 		if (cached) return cached;
 		const result = await orm
 			.select()
 			.from(schema.projects)
-			.where(eq(schema.projects.workspaceId, ctx.workspaceId))
+			.where(
+				and(eq(schema.projects.workspaceId, ctx.workspaceId), isNull(schema.projects.archivedAt))
+			)
 			.orderBy(asc(schema.projects.name));
 		await cache.set(ctx.kv, cacheKey, result, WS_META_TTL);
 		return result;
 	}
 
+	const conditions = [eq(schema.projects.workspaceId, ctx.workspaceId), visible];
+	if (!includeArchived) conditions.push(isNull(schema.projects.archivedAt));
+
 	return orm
 		.select()
 		.from(schema.projects)
-		.where(and(eq(schema.projects.workspaceId, ctx.workspaceId), visible))
+		.where(and(...conditions))
 		.orderBy(asc(schema.projects.name));
 }
 
@@ -49,13 +59,15 @@ export interface ProjectSummary {
 	workspace_name: string;
 	workspace_slug: string;
 	open_issue_count: number;
+	archived_at: number | null;
 	created_at: number;
 	updated_at: number;
 }
 
 export async function listProjectsAcrossWorkspaces(
 	userId: string,
-	db: D1Database
+	db: D1Database,
+	includeArchived = false
 ): Promise<ProjectSummary[]> {
 	const rows = await db
 		.prepare(
@@ -65,6 +77,7 @@ export async function listProjectsAcrossWorkspaces(
         p.key,
         p.slug,
         p.description,
+        p.archived_at,
         p.created_at,
         p.updated_at,
         w.id   AS workspace_id,
@@ -78,12 +91,13 @@ export async function listProjectsAcrossWorkspaces(
       LEFT JOIN issues i        ON i.project_id = p.id
       -- PROJ-311: in each workspace the user sees all projects if owner/admin there,
       -- otherwise only projects their groups grant (indexed EXISTS).
-      WHERE wm.role IN ('owner','admin')
+      WHERE (wm.role IN ('owner','admin')
          OR EXISTS (
               SELECT 1 FROM user_group_members ugm
               JOIN group_project_grants gpg ON gpg.group_id = ugm.group_id
-              WHERE ugm.user_id = ? AND gpg.project_id = p.id)
-      GROUP BY p.id, p.name, p.key, p.slug, p.description, p.created_at, p.updated_at,
+              WHERE ugm.user_id = ? AND gpg.project_id = p.id))
+        ${includeArchived ? "" : "AND p.archived_at IS NULL"}
+      GROUP BY p.id, p.name, p.key, p.slug, p.description, p.archived_at, p.created_at, p.updated_at,
                w.id, w.name, w.slug
       ORDER BY w.slug, p.name`
 		)
@@ -198,16 +212,18 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 	const parsed = UpdateProjectSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 
+	const now = Math.floor(Date.now() / 1000);
+
 	const setObj: Record<string, unknown> = {};
 	if (parsed.data.name !== undefined) setObj.name = parsed.data.name;
 	if (parsed.data.key !== undefined) setObj.key = parsed.data.key;
 	if (parsed.data.description !== undefined) setObj.description = parsed.data.description;
 	if (parsed.data.agentWipLimit !== undefined) setObj.agentWipLimit = parsed.data.agentWipLimit;
+	if (parsed.data.archived !== undefined) setObj.archivedAt = parsed.data.archived ? now : null;
 
 	if (Object.keys(setObj).length === 0)
 		throw new ValidationError({ formErrors: ["Nothing to update"], fieldErrors: {} });
 
-	const now = Math.floor(Date.now() / 1000);
 	setObj.updatedAt = now;
 
 	const orm = drizzle(ctx.db, { schema });

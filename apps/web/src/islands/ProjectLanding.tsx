@@ -11,6 +11,7 @@ interface Project {
 	key: string;
 	slug: string | null;
 	description: string | null;
+	archivedAt: number | null;
 	workspaceId: string;
 	createdAt: number;
 	updatedAt: number;
@@ -365,6 +366,25 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 		setProject((prev) => (prev ? { ...prev, description } : prev))
 	);
 
+	const [archiving, setArchiving] = useState(false);
+	const toggleArchived = useCallback(async () => {
+		if (!project || archiving) return;
+		setArchiving(true);
+		try {
+			const archived = project.archivedAt == null;
+			await apiFetch(`/api/projects/${project.id}`, {
+				method: "PATCH",
+				workspaceSlug,
+				body: { archived },
+			});
+			setProject((prev) =>
+				prev ? { ...prev, archivedAt: archived ? Math.floor(Date.now() / 1000) : null } : prev
+			);
+		} finally {
+			setArchiving(false);
+		}
+	}, [project, archiving, workspaceSlug]);
+
 	const fetchData = useCallback(
 		async (id: string) => {
 			setLoading(true);
@@ -412,6 +432,16 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 				<div class="flex items-center gap-3 mb-2">
 					<h1 class="m-0 text-2xl font-bold text-text-base">{project.name}</h1>
 					<span class={KEY_BADGE_CLASS}>{project.key}</span>
+					{project.archivedAt != null && <span class={KEY_BADGE_CLASS}>Archived</span>}
+					<Button
+						type="button"
+						variant="outline"
+						size="sm"
+						onClick={toggleArchived}
+						disabled={archiving}
+					>
+						{project.archivedAt != null ? "Unarchive" : "Archive"}
+					</Button>
 				</div>
 
 				{/* Editable description */}

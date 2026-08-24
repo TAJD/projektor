@@ -15,6 +15,7 @@ interface Project {
 	workspace_name: string;
 	workspace_slug: string;
 	open_issue_count: number;
+	archived_at: number | null;
 	created_at: number;
 	updated_at: number;
 }
@@ -224,6 +225,7 @@ function useProjectCreateForm(workspaceSlug: string | undefined, onCreated: (p: 
 				key: created.key,
 				slug: created.slug,
 				description: description ?? null,
+				archived_at: null,
 				workspace_id: "",
 				workspace_name: "",
 				workspace_slug: workspaceSlug ?? "",
@@ -260,6 +262,7 @@ function ProjectCard({ project }: { project: Project }) {
 	const count = project.open_issue_count ?? 0;
 	const countLabel =
 		count === 0 ? "No open issues" : `${count} open issue${count !== 1 ? "s" : ""}`;
+	const archived = project.archived_at != null;
 
 	return (
 		<a
@@ -268,11 +271,16 @@ function ProjectCard({ project }: { project: Project }) {
 					? `/projects/view/${encodeURIComponent(project.slug)}`
 					: `/projects/view?id=${project.id}`
 			}
-			class={PROJECT_CARD_CLASS}
+			class={`${PROJECT_CARD_CLASS}${archived ? " opacity-60" : ""}`}
 		>
 			<div class="flex items-center gap-2">
 				<span class="font-bold text-[var(--text)] text-base">{project.name}</span>
 				<span class={KEY_BADGE_CLASS}>{project.key}</span>
+				{archived && (
+					<span class={KEY_BADGE_CLASS} style={{ color: "var(--text-muted)" }}>
+						Archived
+					</span>
+				)}
 			</div>
 			<span class="text-xs text-[var(--text-muted)]">{countLabel}</span>
 			{project.description && (
@@ -311,16 +319,18 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 	const [projects, setProjects] = useState<Project[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [showArchived, setShowArchived] = useState(false);
 
 	useEffect(() => {
 		setLoading(true);
 		setError(null);
 
-		apiFetch<Project[]>("/api/projects", { workspaceSlug })
+		const path = showArchived ? "/api/projects?includeArchived=true" : "/api/projects";
+		apiFetch<Project[]>(path, { workspaceSlug })
 			.then((data) => setProjects(Array.isArray(data) ? data : []))
 			.catch((e) => setError(String(e)))
 			.finally(() => setLoading(false));
-	}, [workspaceSlug]);
+	}, [workspaceSlug, showArchived]);
 
 	const gate = useAccessGate(workspaceSlug);
 	const isPublicViewer = usePublicViewer(workspaceSlug);
@@ -340,7 +350,15 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 
 	return (
 		<>
-			<div class="flex justify-end mb-4">
+			<div class="flex justify-between items-center mb-4">
+				<label class="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+					<input
+						type="checkbox"
+						checked={showArchived}
+						onChange={(e) => setShowArchived((e.target as HTMLInputElement).checked)}
+					/>
+					Show archived
+				</label>
 				{isPublicViewer ? (
 					<p class="text-xs text-[var(--text-muted)] m-0">
 						Read-only demo — projects can't be created here.

@@ -4,7 +4,7 @@
 // populated states. The pattern: override the default fetch stub from setup.ts per
 // case with vi.stubGlobal, then await findBy* for the async state transition.
 // A never-resolving fetch lets us assert the synchronous loading state.
-import { render, screen } from "@testing-library/preact";
+import { fireEvent, render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 import ProjectList from "./ProjectList";
 
@@ -39,6 +39,7 @@ const PROJECT = {
 	workspace_name: "WS",
 	workspace_slug: "ws",
 	open_issue_count: 3,
+	archived_at: null,
 	created_at: 0,
 	updated_at: 0,
 };
@@ -68,6 +69,35 @@ describe("ProjectList", () => {
 		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500 }));
 		render(<ProjectList />);
 		expect(await screen.findByText(/Failed to load projects/i)).toBeTruthy();
+	});
+});
+
+describe("ProjectList — archived projects (PROJ-649)", () => {
+	it("does not request archived projects by default", async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
+		vi.stubGlobal("fetch", fetchMock);
+		render(<ProjectList />);
+		await screen.findByText(/No projects yet/i);
+		expect(fetchMock).toHaveBeenCalledWith("/api/projects", expect.anything());
+	});
+
+	it("refetches with includeArchived when the toggle is checked", async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
+		vi.stubGlobal("fetch", fetchMock);
+		render(<ProjectList />);
+		await screen.findByText(/No projects yet/i);
+
+		fireEvent.click(screen.getByLabelText(/Show archived/i));
+
+		await screen.findByText(/No projects yet/i);
+		expect(fetchMock).toHaveBeenCalledWith("/api/projects?includeArchived=true", expect.anything());
+	});
+
+	it("shows an Archived badge for an archived project", async () => {
+		mockFetchOk([{ ...PROJECT, archived_at: 1700000000 }]);
+		render(<ProjectList />);
+		expect(await screen.findByText("Projektor")).toBeTruthy();
+		expect(screen.getByText("Archived")).toBeTruthy();
 	});
 });
 

@@ -239,8 +239,9 @@ app.use("/api/workspaces/:slug/*", authMiddleware, workspaceMiddleware);
 // Cross-workspace project list — auth only, no workspace context needed
 app.get("/api/projects", authMiddleware, etagMiddleware, async (c) => {
 	const user = c.get("user") as { id: string };
+	const includeArchived = c.req.query("includeArchived") === "true";
 	try {
-		return c.json(await listProjectsAcrossWorkspaces(user.id, c.env.DB));
+		return c.json(await listProjectsAcrossWorkspaces(user.id, c.env.DB, includeArchived));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

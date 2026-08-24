@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, type JsonRpcError, type JsonRpcResult, seedWorkspaceRoles } from "./helpers";
 
@@ -214,6 +214,53 @@ describe("Projects REST", () => {
 		expect(patchRes.status).toBe(403);
 	});
 
+	it("PATCH /api/projects/:id archives and unarchives a project", async () => {
+		const createRes = await SELF.fetch("http://localhost/api/projects", {
+			method: "POST",
+			headers: ownerHeaders,
+			body: JSON.stringify({ name: "Archivable", key: "ARCH1" }),
+		});
+		const { id } = (await createRes.json()) as { id: string };
+
+		const archiveRes = await SELF.fetch(`http://localhost/api/projects/${id}`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ archived: true }),
+		});
+		expect(archiveRes.status).toBe(200);
+
+		const listRes = await SELF.fetch("http://localhost/api/projects", { headers: ownerHeaders });
+		const keys = ((await listRes.json()) as Array<{ key: string }>).map((p) => p.key);
+		expect(keys).not.toContain("ARCH1");
+
+		const includeArchivedRes = await SELF.fetch(
+			"http://localhost/api/projects?includeArchived=true",
+			{ headers: ownerHeaders }
+		);
+		const withArchived = (await includeArchivedRes.json()) as Array<{
+			key: string;
+			archived_at: number | null;
+		}>;
+		const archived = withArchived.find((p) => p.key === "ARCH1");
+		expect(archived).toBeTruthy();
+		expect(archived!.archived_at).not.toBeNull();
+
+		await env.DB.prepare("DELETE FROM rate_limit").run();
+
+		const unarchiveRes = await SELF.fetch(`http://localhost/api/projects/${id}`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ archived: false }),
+		});
+		expect(unarchiveRes.status).toBe(200);
+
+		const afterUnarchive = await SELF.fetch("http://localhost/api/projects", {
+			headers: ownerHeaders,
+		});
+		const afterKeys = ((await afterUnarchive.json()) as Array<{ key: string }>).map((p) => p.key);
+		expect(afterKeys).toContain("ARCH1");
+	});
+
 	it("DELETE /api/projects/:id works for owner", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/projects", {
 			method: "POST",
@@ -417,6 +464,48 @@ describe("Projects MCP", () => {
 		const mcpProjects = JSON.parse(mcpRes.result.content[0].text) as Array<{ key: string }>;
 
 		expect(restProjects.map((p) => p.key)).toEqual(mcpProjects.map((p) => p.key));
+	});
+
+	it("update_project archives a project and list_projects excludes it by default", async () => {
+		const createRes = await mcpCall(
+			workspaceId,
+			"create_project",
+			{ name: "MCP Archivable", key: "MARCH" },
+			ownerHeaders
+		);
+		const { id } = JSON.parse(
+			(createRes as JsonRpcResult<{ content: Array<{ text: string }> }>).result.content[0].text
+		) as { id: string };
+
+		const updateRes = await mcpCall(
+			workspaceId,
+			"update_project",
+			{ id, archived: true },
+			ownerHeaders
+		);
+		expect(isMcpError(updateRes)).toBe(false);
+
+		const listRes = (await mcpCall<{ content: Array<{ text: string }> }>(
+			workspaceId,
+			"list_projects",
+			{},
+			ownerHeaders
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const keys = (JSON.parse(listRes.result.content[0].text) as Array<{ key: string }>).map(
+			(p) => p.key
+		);
+		expect(keys).not.toContain("MARCH");
+
+		const includeArchivedRes = (await mcpCall<{ content: Array<{ text: string }> }>(
+			workspaceId,
+			"list_projects",
+			{ includeArchived: true },
+			ownerHeaders
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const includeArchivedKeys = (
+			JSON.parse(includeArchivedRes.result.content[0].text) as Array<{ key: string }>
+		).map((p) => p.key);
+		expect(includeArchivedKeys).toContain("MARCH");
 	});
 
 	it("REST create_project and MCP create_project enforce the same role guard", async () => {

@@ -15,4 +15,6 @@ export const CreateProjectSchema = z.object({
 	agentWipLimit: z.number().int().min(1).max(100).nullable().optional(),
 });
 
-export const UpdateProjectSchema = CreateProjectSchema.partial();
+export const UpdateProjectSchema = CreateProjectSchema.partial().extend({
+	archived: z.boolean().optional(),
+});

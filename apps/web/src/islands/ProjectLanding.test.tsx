@@ -4,7 +4,7 @@
 // and its wiki pages in parallel via raw fetch + buildHeaders.
 // loading starts true, so the loading state appears immediately.
 // The pattern: set the URL, override the stub, await findBy*.
-import { render, screen } from "@testing-library/preact";
+import { fireEvent, render, screen } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ProjectLanding from "./ProjectLanding";
 
@@ -14,6 +14,7 @@ const PROJECT = {
 	key: "PROJ",
 	slug: "projektor",
 	description: "An issue tracker.",
+	archivedAt: null,
 	workspaceId: "w1",
 	createdAt: 0,
 	updatedAt: 0,
@@ -40,25 +41,28 @@ const WIKI_PAGE = {
 function mockFetchProject(
 	issues: readonly (typeof ISSUE)[] = [ISSUE],
 	wiki: readonly unknown[] = [],
-	flowMetrics: unknown = { throughputOverTime: [], cfdOverTime: [] }
+	flowMetrics: unknown = { throughputOverTime: [], cfdOverTime: [] },
+	project: unknown = PROJECT
 ) {
-	vi.stubGlobal(
-		"fetch",
-		vi.fn().mockImplementation((url: string) => {
-			const u = String(url);
-			if (u.includes("/api/issues")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: issues }) });
-			}
-			if (u.includes("/api/wiki")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve(wiki) });
-			}
-			if (u.includes("/flow-metrics")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve(flowMetrics) });
-			}
-			// project fetch
-			return Promise.resolve({ ok: true, json: () => Promise.resolve(PROJECT) });
-		})
-	);
+	const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+		const u = String(url);
+		if (u.includes("/api/issues")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: issues }) });
+		}
+		if (u.includes("/api/wiki")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(wiki) });
+		}
+		if (u.includes("/flow-metrics")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(flowMetrics) });
+		}
+		if (opts?.method === "PATCH") {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+		}
+		// project fetch
+		return Promise.resolve({ ok: true, json: () => Promise.resolve(project) });
+	});
+	vi.stubGlobal("fetch", fetchMock);
+	return fetchMock;
 }
 
 beforeEach(() => {
@@ -154,5 +158,31 @@ describe("ProjectLanding", () => {
 		await screen.findByRole("heading", { name: "Projektor" });
 		const nav = screen.getByRole("navigation");
 		expect(nav.textContent?.trim()).toBe("Projects/Projektor");
+	});
+});
+
+describe("ProjectLanding — archive/unarchive (PROJ-649)", () => {
+	it("shows an Archive button and archives the project on click", async () => {
+		history.replaceState(null, "", "?id=p1");
+		const fetchMock = mockFetchProject([]);
+		render(<ProjectLanding />);
+		await screen.findByRole("heading", { name: "Projektor" });
+
+		const archiveButton = screen.getByRole("button", { name: "Archive" });
+		fireEvent.click(archiveButton);
+
+		expect(await screen.findByRole("button", { name: "Unarchive" })).toBeTruthy();
+		expect(screen.getByText("Archived")).toBeTruthy();
+		expect(fetchMock).toHaveBeenCalledWith(
+			"/api/projects/p1",
+			expect.objectContaining({ method: "PATCH", body: JSON.stringify({ archived: true }) })
+		);
+	});
+
+	it("shows Unarchive for an already-archived project", async () => {
+		history.replaceState(null, "", "?id=p1");
+		mockFetchProject([], [], undefined, { ...PROJECT, archivedAt: 1700000000 });
+		render(<ProjectLanding />);
+		expect(await screen.findByRole("button", { name: "Unarchive" })).toBeTruthy();
 	});
 });
