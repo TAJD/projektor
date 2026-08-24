@@ -20,6 +20,7 @@ export const projects = sqliteTable(
 		// by a partial index (see migrations/0035_project_slug.sql) so NULLs don't
 		// collide.
 		slug: text("slug"),
+		archivedAt: integer("archived_at"),
 	},
 	(t) => ({
 		wsIdx: index("projects_workspace_idx").on(t.workspaceId),

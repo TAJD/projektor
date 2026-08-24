@@ -95,10 +95,10 @@ running server.
 
 | Tool | Description |
 |------|-------------|
-| `list_projects` | List all projects in the workspace |
+| `list_projects` | List projects in the workspace. Archived projects are excluded by default. |
 | `create_project` | Create a new project in the workspace |
 | `get_project` | Get a project by ID |
-| `update_project` | Update a project name or description (owner/admin only) |
+| `update_project` | Update a project name, description, or archived state (owner/admin only). Set archived: true to hide it from the default project list, false to restore it. |
 | `delete_project` | Delete a project and all its issues (owner only) |
 
 ### Project activity

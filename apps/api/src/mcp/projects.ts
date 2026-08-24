@@ -11,10 +11,19 @@ import type { ServiceCtx } from "../services/types";
 export const projectsTools: MCPTool[] = [
 	{
 		name: "list_projects",
-		description: "List all projects in the workspace",
-		inputSchema: { type: "object", properties: {} },
-		async handler(_input, ctx) {
-			return listProjects(ctx as ServiceCtx);
+		description: "List projects in the workspace. Archived projects are excluded by default.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				includeArchived: {
+					type: "boolean",
+					description: "Include archived projects in the results (default false)",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			const { includeArchived } = (input ?? {}) as { includeArchived?: boolean };
+			return listProjects(ctx as ServiceCtx, { includeArchived });
 		},
 	},
 	{
@@ -51,7 +60,8 @@ export const projectsTools: MCPTool[] = [
 	},
 	{
 		name: "update_project",
-		description: "Update a project name or description (owner/admin only)",
+		description:
+			"Update a project name, description, or archived state (owner/admin only). Set archived: true to hide it from the default project list, false to restore it.",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
@@ -59,6 +69,7 @@ export const projectsTools: MCPTool[] = [
 				id: { type: "string", description: "Project ID" },
 				name: { type: "string", description: "New project name" },
 				description: { type: "string", description: "New description" },
+				archived: { type: "boolean", description: "Archive (true) or unarchive (false)" },
 			},
 		},
 		async handler(input, ctx) {
