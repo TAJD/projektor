@@ -50,25 +50,33 @@ function isTabActive(path: string, activePath: string): boolean {
 	return activePath === path;
 }
 
-// Reserved for the "More ▾" trigger's own width — not measured (it's static-content and
-// only ever appears once other tabs are already hidden), just budgeted for up front.
-const MORE_TRIGGER_RESERVE_PX = 72;
+const MORE_TRIGGER_RESERVE_PX = 84;
+const TAB_GAP_PX = 2;
 
 function computeVisibleCount(
 	containerWidth: number,
 	tabWidths: number[],
-	moreReserve: number
+	moreReserve: number,
+	gapPx: number
 ): number {
-	const total = tabWidths.reduce((sum, w) => sum + w, 0);
+	const total =
+		tabWidths.reduce((sum, w) => sum + w, 0) + gapPx * Math.max(tabWidths.length - 1, 0);
 	if (total <= containerWidth) return tabWidths.length;
 	let sum = 0;
 	let count = 0;
 	for (; count < tabWidths.length; count++) {
-		const next = sum + tabWidths[count];
-		if (next + moreReserve > containerWidth) break;
+		const next = sum + tabWidths[count] + (count > 0 ? gapPx : 0);
+		if (next + gapPx + moreReserve > containerWidth) break;
 		sum = next;
 	}
 	return count;
+}
+
+function measureContentWidth(el: HTMLElement): number {
+	const style = getComputedStyle(el);
+	const paddingX =
+		Number.parseFloat(style.paddingLeft || "0") + Number.parseFloat(style.paddingRight || "0");
+	return Math.max(el.clientWidth - paddingX, 0);
 }
 
 export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
@@ -135,18 +143,31 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 		}
 	}, [workspaceSlug]);
 
-	// Measures each tab's natural width once (labels are static), so later resizes only
-	// need to re-run computeVisibleCount against the container's current width.
 	useLayoutEffect(() => {
-		if (!project || tabWidths) return;
+		if (!project) return;
 		if (tabRefs.current.length !== TABS.length) return;
-		setTabWidths(tabRefs.current.map((el) => el?.offsetWidth ?? 0));
+		// Only measure while every tab is rendered (none collapsed into the "More" menu yet) -
+		// collapsed tabs' refs go null, which would otherwise read as 0-width and make
+		// computeVisibleCount think everything fits again, re-expanding and re-collapsing forever.
+		if (tabRefs.current.some((el) => el == null)) return;
+		const widths = tabRefs.current.map((el) => el?.offsetWidth ?? 0);
+		if (widths.every((w) => w === 0)) return;
+		if (tabWidths && widths.every((w, i) => w === tabWidths[i])) return;
+		setTabWidths(widths);
 	});
+
+	useEffect(() => {
+		if (!project || typeof document === "undefined" || !document.fonts?.ready) return;
+		document.fonts.ready.then(() => {
+			if (tabRefs.current.length !== TABS.length) return;
+			setTabWidths(tabRefs.current.map((el) => el?.offsetWidth ?? 0));
+		});
+	}, [project]);
 
 	useLayoutEffect(() => {
 		const el = containerRef.current;
 		if (!el) return;
-		setContainerWidth(el.clientWidth);
+		setContainerWidth(measureContentWidth(el));
 		if (typeof ResizeObserver === "undefined") return;
 		const observer = new ResizeObserver((entries) => {
 			const width = entries[0]?.contentRect.width;
@@ -177,7 +198,7 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 
 	const visibleCount = useMemo(() => {
 		if (!tabWidths || containerWidth <= 0) return TABS.length;
-		return computeVisibleCount(containerWidth, tabWidths, MORE_TRIGGER_RESERVE_PX);
+		return computeVisibleCount(containerWidth, tabWidths, MORE_TRIGGER_RESERVE_PX, TAB_GAP_PX);
 	}, [tabWidths, containerWidth]);
 
 	if (!project) return null;
