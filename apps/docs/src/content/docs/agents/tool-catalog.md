@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**113 tools across 22 domains.**
+**116 tools across 22 domains.**
 
 ## Coordination
 
@@ -227,6 +227,9 @@ running server.
 | `update_feedback_source` | Update a feedback source's name, description, or active state. Setting isActive to false is a kill switch: submissions against the source's token are immediately rejected (this is reversible — set it back to true to resume; contrast with revoke_feedback_source, which is permanent). Admin/owner only. |
 | `rotate_feedback_source_token` | Generate a new token for a feedback source. Returns the new raw token once; the old token stops working immediately. The source's identity (id), name, description, and all its historical feedback are preserved — use this when a token has leaked or needs periodic rotation. Relay the new token to the user so they can update their product code. Admin/owner only. |
 | `revoke_feedback_source` | Permanently revoke a feedback source. Its token stops working for good and it can never accept another submission (its historical feedback is retained for reference). To replace a revoked source, create a new one. Admin/owner only. |
+| `list_feedback` | List a project's submitted feedback (read/triage, not source management). Each entry includes rating, ratingScale, body, submitterLabel, sourceUrl, appVersion, status ('new'/'reviewed'/'actioned'), linkedIssueId (set once converted to an issue), and createdAt. Optionally filter by status or sourceId. Any project member (including viewer) can read. |
+| `update_feedback_status` | Update a feedback item's triage status ('new'/'reviewed'/'actioned'). Member+ (not viewer). |
+| `convert_feedback_to_issue` | Convert a feedback item into a tracked issue. The issue title comes from the feedback body (or a rating-based fallback when there's no body); the feedback item is stamped linkedIssueId and its status set to 'actioned'. Rejects (409) if the item was already converted. Member+ (not viewer). |
 
 ### Flow metrics
 

@@ -923,3 +923,181 @@ describe("PROJ-390: mutating a revoked feedback source", () => {
 		expect(res.status).toBe(200);
 	});
 });
+
+describe("Feedback read/triage MCP tools", () => {
+	it("list_feedback matches REST shape and supports status/sourceId filters", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f, { name: "Onboarding" });
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		await seedFeedbackRow(src!.id, f.workspaceId, f.projectId, { body: "new one" });
+		await seedFeedbackRow(src!.id, f.workspaceId, f.projectId, {
+			body: "reviewed one",
+			status: "reviewed",
+		});
+
+		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"list_feedback",
+			{ projectId: f.projectId },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const all = mcpText<Array<{ status: string; sourceId: string }>>(res);
+		expect(all).toHaveLength(2);
+
+		const filtered = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"list_feedback",
+			{ projectId: f.projectId, status: "reviewed" },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const reviewed = mcpText<Array<{ status: string }>>(filtered);
+		expect(reviewed).toHaveLength(1);
+		expect(reviewed[0].status).toBe("reviewed");
+
+		const bySource = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"list_feedback",
+			{ projectId: f.projectId, sourceId: src!.id },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		expect(mcpText<Array<unknown>>(bySource)).toHaveLength(2);
+	});
+
+	it("list_feedback is readable by a viewer", async () => {
+		const roles = await seedWorkspaceRoles();
+		const proj = await seedProject(roles.workspace.id, "LFV");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, proj.id, "viewer");
+		const create = await SELF.fetch(`http://localhost/api/projects/${proj.id}/feedback-sources`, {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ name: "S" }),
+		});
+		const { id: sourceId } = (await create.json()) as { id: string };
+		await seedFeedbackRow(sourceId, roles.workspace.id, proj.id);
+
+		const res = (await mcpCall(
+			roles.workspace.id,
+			"list_feedback",
+			{ projectId: proj.id },
+			authHeaders(roles.viewer.token, roles.workspace.slug)
+		)) as JsonRpcResult;
+		expect(res.result).toBeDefined();
+	});
+
+	it("update_feedback_status updates the row without a projectId argument (member+)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, f.workspaceId, f.projectId);
+
+		const res = (await mcpCall(
+			f.workspaceId,
+			"update_feedback_status",
+			{ feedbackId: fbId, status: "reviewed" },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult;
+		expect(res.result).toBeDefined();
+
+		const row = await env.DB.prepare("SELECT status FROM feedback WHERE id = ?")
+			.bind(fbId)
+			.first<{ status: string }>();
+		expect(row?.status).toBe("reviewed");
+	});
+
+	it("update_feedback_status is forbidden for a viewer (-32000)", async () => {
+		const roles = await seedWorkspaceRoles();
+		const proj = await seedProject(roles.workspace.id, "UFV");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, proj.id, "viewer");
+		const create = await SELF.fetch(`http://localhost/api/projects/${proj.id}/feedback-sources`, {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ name: "S" }),
+		});
+		const { id: sourceId } = (await create.json()) as { id: string };
+		const fbId = await seedFeedbackRow(sourceId, roles.workspace.id, proj.id);
+
+		const res = (await mcpCall(
+			roles.workspace.id,
+			"update_feedback_status",
+			{ feedbackId: fbId, status: "reviewed" },
+			authHeaders(roles.viewer.token, roles.workspace.slug)
+		)) as JsonRpcError;
+		expect(res.error).toBeDefined();
+		expect(res.error.code).toBe(-32000);
+	});
+
+	it("convert_feedback_to_issue creates and links an issue without a projectId argument (member+)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, f.workspaceId, f.projectId, {
+			body: "The export button is broken",
+		});
+
+		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+			f.workspaceId,
+			"convert_feedback_to_issue",
+			{ feedbackId: fbId },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const issue = mcpText<{ id: string }>(res);
+		expect(issue.id).toBeTruthy();
+
+		const row = await env.DB.prepare("SELECT status, linked_issue_id FROM feedback WHERE id = ?")
+			.bind(fbId)
+			.first<{ status: string; linked_issue_id: string | null }>();
+		expect(row?.status).toBe("actioned");
+		expect(row?.linked_issue_id).toBe(issue.id);
+	});
+
+	it("convert_feedback_to_issue rejects re-conversion (conflict)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		await mintSource(f);
+		const src = await env.DB.prepare("SELECT id FROM feedback_sources WHERE project_id = ?")
+			.bind(f.projectId)
+			.first<{ id: string }>();
+		const fbId = await seedFeedbackRow(src!.id, f.workspaceId, f.projectId, { body: "Repeat me" });
+
+		await mcpCall(
+			f.workspaceId,
+			"convert_feedback_to_issue",
+			{ feedbackId: fbId },
+			authHeaders(f.token, f.slug)
+		);
+		const second = (await mcpCall(
+			f.workspaceId,
+			"convert_feedback_to_issue",
+			{ feedbackId: fbId },
+			authHeaders(f.token, f.slug)
+		)) as JsonRpcError;
+		expect(second.error).toBeDefined();
+	});
+
+	it("convert_feedback_to_issue is forbidden for a viewer (-32000)", async () => {
+		const roles = await seedWorkspaceRoles();
+		const proj = await seedProject(roles.workspace.id, "CFV");
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, proj.id, "viewer");
+		const create = await SELF.fetch(`http://localhost/api/projects/${proj.id}/feedback-sources`, {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ name: "S" }),
+		});
+		const { id: sourceId } = (await create.json()) as { id: string };
+		const fbId = await seedFeedbackRow(sourceId, roles.workspace.id, proj.id, { body: "x" });
+
+		const res = (await mcpCall(
+			roles.workspace.id,
+			"convert_feedback_to_issue",
+			{ feedbackId: fbId },
+			authHeaders(roles.viewer.token, roles.workspace.slug)
+		)) as JsonRpcError;
+		expect(res.error).toBeDefined();
+		expect(res.error.code).toBe(-32000);
+	});
+});

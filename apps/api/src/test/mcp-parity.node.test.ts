@@ -66,9 +66,6 @@ const REST_ONLY: Record<string, string> = {
 	// Feedback: public ingest is anonymous, triage is a human review queue.
 	"feedback.ts:hashFeedbackToken": "ingest token hashing",
 	"feedback.ts:submitFeedback": "anonymous public ingest, no workspace auth",
-	"feedback.ts:listFeedback": "human triage queue (PROJ-634 considers agent access)",
-	"feedback.ts:updateFeedbackStatus": "human triage action (PROJ-634)",
-	"feedback.ts:convertFeedbackToIssue": "human triage action (PROJ-634)",
 	"feedback.ts:bulkMarkReviewed": "human triage action (PROJ-634)",
 	"feedback.ts:bulkConvertToIssue": "human triage action (PROJ-634)",
 	"feedback.ts:getFeedbackSummary": "human triage dashboard (PROJ-634)",
