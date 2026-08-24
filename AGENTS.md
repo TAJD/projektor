@@ -119,9 +119,10 @@ audits:
 - **Public feedback submission (`POST /api/feedback/submit`)** — REST-only.
   Anonymous end-user feedback from a third-party product, authenticated by a per-source
   bearer token, not a session — there's no ServiceCtx user/role for an MCP tool to act as.
-  Feedback *source management* (create/list/update/rotate/revoke) has full REST+MCP
-  parity, same as every other admin-facing domain; only the anonymous submit endpoint
-  itself is the exception.
+  Feedback *source management* (create/list/update/rotate/revoke) and authenticated
+  *read/triage* (`list_feedback`, `update_feedback_status`, `convert_feedback_to_issue`)
+  both have full REST+MCP parity, same as every other domain; only the anonymous submit
+  endpoint itself is the exception (PROJ-668).
 - **OAuth consent (`GET/POST /oauth/authorize`, `services/oauth.ts`)** — REST-only, and
   browser-only. The whole point of the consent screen is that a *human* decides which
   client may act as them; an agent is the subject of a grant, never the party that

@@ -186,18 +186,38 @@ export async function listFeedback(ctx: ServiceCtx, input: unknown): Promise<Fee
 	}));
 }
 
+interface FeedbackScopeRow {
+	project_id: string;
+}
+
+// REST always passes the URL path's projectId (scoping the lookup, 404 on mismatch);
+// MCP omits it and the row's own project_id is used instead.
+async function requireFeedbackScope(
+	ctx: ServiceCtx,
+	feedbackId: string,
+	projectId: string | undefined
+): Promise<string> {
+	const clauses = ["id = ?", "workspace_id = ?"];
+	const binds: unknown[] = [feedbackId, ctx.workspaceId];
+	if (projectId) {
+		clauses.push("project_id = ?");
+		binds.push(projectId);
+	}
+	const row = await ctx.db
+		.prepare(`SELECT project_id FROM feedback WHERE ${clauses.join(" AND ")}`)
+		.bind(...binds)
+		.first<FeedbackScopeRow>();
+	if (!row) throw new NotFoundError("Feedback not found");
+	return row.project_id;
+}
+
 export async function updateFeedbackStatus(ctx: ServiceCtx, input: unknown): Promise<{ ok: true }> {
 	const parsed = UpdateFeedbackSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { projectId, feedbackId, status } = parsed.data;
 
-	await requireProjectWriteAccess(ctx, projectId);
-
-	const row = await ctx.db
-		.prepare("SELECT id FROM feedback WHERE id = ? AND project_id = ? AND workspace_id = ?")
-		.bind(feedbackId, projectId, ctx.workspaceId)
-		.first<{ id: string }>();
-	if (!row) throw new NotFoundError("Feedback not found");
+	const resolvedProjectId = await requireFeedbackScope(ctx, feedbackId, projectId);
+	await requireProjectWriteAccess(ctx, resolvedProjectId);
 
 	await ctx.db
 		.prepare("UPDATE feedback SET status = ? WHERE id = ? AND workspace_id = ?")
@@ -230,14 +250,15 @@ export async function convertFeedbackToIssue(
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { projectId, feedbackId } = parsed.data;
 
-	await requireProjectWriteAccess(ctx, projectId);
+	const resolvedProjectId = await requireFeedbackScope(ctx, feedbackId, projectId);
+	await requireProjectWriteAccess(ctx, resolvedProjectId);
 
 	const fb = await ctx.db
 		.prepare(
 			`SELECT rating, rating_scale, body, submitter_label, status, linked_issue_id
        FROM feedback WHERE id = ? AND project_id = ? AND workspace_id = ?`
 		)
-		.bind(feedbackId, projectId, ctx.workspaceId)
+		.bind(feedbackId, resolvedProjectId, ctx.workspaceId)
 		.first<ConvertFeedbackRow>();
 	if (!fb) throw new NotFoundError("Feedback not found");
 	// Already converted — reject re-conversion rather than silently creating a
@@ -252,7 +273,7 @@ export async function convertFeedbackToIssue(
 		(fb.rating !== null ? `, rating: ${fb.rating} (${fb.rating_scale})` : "");
 
 	const issue = await createIssue(ctx, {
-		projectId,
+		projectId: resolvedProjectId,
 		title,
 		body: [fb.body ?? "", "", footer].join("\n"),
 		priority: "medium",
