@@ -33,11 +33,22 @@ const CARD_CLASS =
 	"flex flex-col gap-2 p-4 bg-surface border border-border rounded-lg no-underline shadow-xs " +
 	"transition-all duration-150 hover:border-accent hover:-translate-y-px";
 
-function SourceCard({ source, summary }: { source: FeedbackSource; summary?: SourceSummary }) {
+function SourceCard({
+	source,
+	summary,
+	projectId,
+}: {
+	source: FeedbackSource;
+	summary?: SourceSummary;
+	projectId: string;
+}) {
 	const total = summary?.totalCount ?? 0;
 	const lastSeenAt = summary?.versions.reduce((max, v) => Math.max(max, v.lastSeenAt), 0) ?? 0;
 	return (
-		<a href={`/feedback/${source.id}`} class={`${CARD_CLASS} ${statusClass(source)}`}>
+		<a
+			href={`/feedback/${source.id}${projectId ? `?projectId=${projectId}` : ""}`}
+			class={`${CARD_CLASS} ${statusClass(source)}`}
+		>
 			<div class="flex items-center justify-between gap-2">
 				<span class="font-bold text-text-base">{source.name}</span>
 				<span class="text-[0.7rem] font-medium px-1.5 py-0.5 rounded bg-bg border border-border text-text-muted">
@@ -69,10 +80,33 @@ function NewSourceCard({ onClick }: { onClick: () => void }) {
 export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectIdProp }: Props) {
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	useEffect(() => {
-		if (projectIdProp) return;
+		if (projectIdProp) {
+			setProjectId(projectIdProp);
+			return;
+		}
 		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
-		if (fromUrl) setProjectId(fromUrl);
-	}, [projectIdProp]);
+		if (fromUrl) {
+			setProjectId(fromUrl);
+			localStorage.setItem("projektor-last-project-id", fromUrl);
+			return;
+		}
+		const storedId = localStorage.getItem("projektor-last-project-id");
+		if (storedId) {
+			setProjectId(storedId);
+		} else {
+			apiFetch<Array<{ id: string }>>("/api/projects", { workspaceSlug })
+				.then((list) => {
+					if (Array.isArray(list) && list.length > 0) {
+						setProjectId(list[0].id);
+					} else {
+						setLoading(false);
+					}
+				})
+				.catch(() => {
+					setLoading(false);
+				});
+		}
+	}, [projectIdProp, workspaceSlug]);
 
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [summaries, setSummaries] = useState<SourceSummary[]>([]);
@@ -139,7 +173,12 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 				style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}
 			>
 				{sources.map((s) => (
-					<SourceCard key={s.id} source={s} summary={summaryBySource.get(s.id)} />
+					<SourceCard
+						key={s.id}
+						source={s}
+						summary={summaryBySource.get(s.id)}
+						projectId={projectId}
+					/>
 				))}
 				<NewSourceCard onClick={() => setShowCreate(true)} />
 			</div>

@@ -152,10 +152,33 @@ export default function FeedbackSourceDetail({
 }: Props) {
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	useEffect(() => {
-		if (projectIdProp) return;
+		if (projectIdProp) {
+			setProjectId(projectIdProp);
+			return;
+		}
 		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
-		if (fromUrl) setProjectId(fromUrl);
-	}, [projectIdProp]);
+		if (fromUrl) {
+			setProjectId(fromUrl);
+			localStorage.setItem("projektor-last-project-id", fromUrl);
+			return;
+		}
+		const storedId = localStorage.getItem("projektor-last-project-id");
+		if (storedId) {
+			setProjectId(storedId);
+		} else {
+			apiFetch<Array<{ id: string }>>("/api/projects", { workspaceSlug })
+				.then((list) => {
+					if (Array.isArray(list) && list.length > 0) {
+						setProjectId(list[0].id);
+					} else {
+						setLoading(false);
+					}
+				})
+				.catch(() => {
+					setLoading(false);
+				});
+		}
+	}, [projectIdProp, workspaceSlug]);
 
 	// Static output can't serve the dynamic /feedback/[sourceId] route directly, so
 	// FeedbackSourceDetail is also rendered by the static /feedback/view?sourceId= page (mirrors
@@ -191,13 +214,39 @@ export default function FeedbackSourceDetail({
 			const data = await apiFetch<FeedbackSource[]>(`/api/projects/${projectId}/feedback-sources`, {
 				workspaceSlug,
 			});
-			setSources(Array.isArray(data) ? data : []);
+			const list = Array.isArray(data) ? data : [];
+			if (sourceId && !list.some((s) => s.id === sourceId)) {
+				// The source may belong to another project in the workspace
+				const allProjects = await apiFetch<Array<{ id: string }>>("/api/projects", {
+					workspaceSlug,
+				});
+				if (Array.isArray(allProjects)) {
+					for (const p of allProjects) {
+						if (p.id === projectId) continue;
+						try {
+							const otherSources = await apiFetch<FeedbackSource[]>(
+								`/api/projects/${p.id}/feedback-sources`,
+								{ workspaceSlug }
+							);
+							if (Array.isArray(otherSources) && otherSources.some((s) => s.id === sourceId)) {
+								setProjectId(p.id);
+								localStorage.setItem("projektor-last-project-id", p.id);
+								setSources(otherSources);
+								return;
+							}
+						} catch {
+							// continue search
+						}
+					}
+				}
+			}
+			setSources(list);
 		} catch (e) {
 			setError(String(e));
 		} finally {
 			setLoading(false);
 		}
-	}, [projectId, workspaceSlug]);
+	}, [projectId, sourceId, workspaceSlug]);
 
 	useEffect(() => {
 		fetchSources();

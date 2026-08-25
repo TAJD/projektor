@@ -38,6 +38,12 @@ function stubFetch(sources = [SOURCE_A, SOURCE_B]) {
 			if (u.includes("/feedback")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 			}
+			if (u.includes("/api/projects")) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve([{ id: "p1", name: "Project 1" }]),
+				});
+			}
 			return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 		})
 	);
@@ -95,6 +101,19 @@ describe("FeedbackSourceDetail", () => {
 		try {
 			render(<FeedbackSourceDetail workspaceSlug="my-ws" projectId="p1" />);
 			expect(await screen.findByRole("heading", { name: "Widget" })).toBeTruthy();
+		} finally {
+			window.history.pushState({}, "", originalPath);
+		}
+	});
+
+	it("resolves projectId from localStorage or /api/projects when no projectId prop or query param is present", async () => {
+		stubFetch();
+		const originalPath = window.location.pathname;
+		window.history.pushState({}, "", "/feedback/s1");
+		localStorage.removeItem("projektor-last-project-id");
+		try {
+			render(<FeedbackSourceDetail workspaceSlug="my-ws" />);
+			expect(await screen.findByRole("heading", { name: "Onboarding survey" })).toBeTruthy();
 		} finally {
 			window.history.pushState({}, "", originalPath);
 		}
