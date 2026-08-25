@@ -1,7 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
-import { GlossaryHelp } from "./GlossaryHelp";
-import type { GlossaryTermId } from "./glossary-definitions";
 
 interface Project {
 	id: string;
@@ -15,8 +13,7 @@ interface Props {
 	pageLabel?: string;
 }
 
-// PROJ-395: glossaryId marks tabs whose label is SDLC jargon (Sprints, Epics) for an inline GlossaryHelp toggletip.
-const TABS: Array<{ label: string; path: string; glossaryId?: GlossaryTermId }> = [
+const TABS: Array<{ label: string; path: string }> = [
 	{ label: "Overview", path: "/projects/view" },
 	{ label: "Issues", path: "/issues" },
 	{ label: "Wiki", path: "/wiki" },
@@ -259,7 +256,6 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 							>
 								{tab.label}
 							</a>
-							{tab.glossaryId && <GlossaryHelp id={tab.glossaryId} />}
 						</span>
 					);
 				})}
@@ -296,7 +292,6 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 											onClick={() => setMoreOpen(false)}
 										>
 											{tab.label}
-											{tab.glossaryId && <GlossaryHelp id={tab.glossaryId} />}
 										</a>
 									);
 								})}
