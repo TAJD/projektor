@@ -48,6 +48,15 @@ id = "REPLACE_WITH_YOUR_OAUTH_KV_NAMESPACE_ID"
 binding = "R2"
 bucket_name = "projektor-files"
 
+# [durable_objects]
+# bindings = [
+#   { name = "WORKSPACE_HUB", class_name = "WorkspaceHub" }
+# ]
+#
+# [[migrations]]
+# tag = "v1"
+# new_classes = ["WorkspaceHub"]
+
 [vars]
 ENVIRONMENT = "development"
 CF_ACCESS_TEAM_DOMAIN = ""

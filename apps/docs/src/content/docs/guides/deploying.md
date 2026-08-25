@@ -205,7 +205,24 @@ alongside `/api/*`, `/mcp/*` and `/wiki`. Without it the static-asset handler
 answers discovery requests with the SPA shell and the client reports the server
 as not supporting OAuth at all.
 
-### 7. Deploy
+### 7. Realtime WebSockets (Optional, Workers Paid)
+
+To enable live event streaming over `/api/workspaces/:slug/realtime` (for external dashboards and status boards), bind the `WorkspaceHub` Durable Object in your `wrangler.toml`:
+
+```toml
+[durable_objects]
+bindings = [
+  { name = "WORKSPACE_HUB", class_name = "WorkspaceHub" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["WorkspaceHub"]
+```
+
+If omitted, the Worker operates in standard polling mode with zero overhead.
+
+### 8. Deploy
 
 ```bash
 ./deploy.sh          # locally (wrangler OAuth), or
