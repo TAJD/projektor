@@ -11,6 +11,8 @@ export interface ServiceCtx {
 	// PROJ-328: which auth path authenticated this request ("human" = Cloudflare Access
 	// JWT / dev bypass, "agent" = Bearer API token). See middleware/auth.ts.
 	authKind?: "human" | "agent";
+	workspaceHub?: DurableObjectNamespace;
+	waitUntil?: (promise: Promise<unknown>) => void;
 }
 
 export function ctxFromHono(c: Context<HonoEnv>): ServiceCtx {
@@ -26,5 +28,7 @@ export function ctxFromHono(c: Context<HonoEnv>): ServiceCtx {
 		userId: user.id,
 		role,
 		authKind,
+		workspaceHub: c.env.WORKSPACE_HUB,
+		waitUntil: c.executionCtx?.waitUntil ? (p) => c.executionCtx.waitUntil(p) : undefined,
 	};
 }
