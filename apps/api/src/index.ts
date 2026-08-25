@@ -1,4 +1,5 @@
 import type { Env, HonoEnv } from "@projektor/types";
+import { buildMcpAddCommand } from "@projektor/types";
 import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -206,9 +207,7 @@ app.get("/bootstrap", async (c) => {
 		user,
 		token,
 		mcpUrl,
-		mcpAddCommand:
-			`claude mcp add --transport http --header "Authorization: Bearer ${token}" ` +
-			`--header "X-Workspace-Slug: ${ws?.slug}" projektor "${mcpUrl}"`,
+		mcpAddCommand: buildMcpAddCommand({ workspaceSlug: ws?.slug ?? "", mcpUrl, token }),
 	});
 });
 

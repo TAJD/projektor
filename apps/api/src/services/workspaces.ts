@@ -1,4 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
+import { buildMcpAddCommand } from "@projektor/types";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { IdSchema } from "../schemas/common";
 import {
@@ -318,11 +319,11 @@ export async function getWorkspaceMcpInfo(
 	mcpAddCommandTemplate: string;
 }> {
 	const mcpUrl = `${origin}/mcp/${workspace.id}`;
-	const mcpAddCommandTemplate =
-		`claude mcp add projektor "${mcpUrl}" ` +
-		`--transport http ` +
-		`--header "Authorization: Bearer {{TOKEN}}" ` +
-		`--header "X-Workspace-Slug: ${workspace.slug}"`;
+	const mcpAddCommandTemplate = buildMcpAddCommand({
+		workspaceSlug: workspace.slug,
+		mcpUrl,
+		token: "{{TOKEN}}",
+	});
 	return {
 		mcpUrl,
 		workspaceId: workspace.id,
