@@ -217,7 +217,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["WorkspaceHub"]
+new_sqlite_classes = ["WorkspaceHub"]
 ```
 
 If omitted, the Worker operates in standard polling mode with zero overhead.

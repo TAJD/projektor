@@ -55,7 +55,7 @@ bucket_name = "projektor-files"
 #
 # [[migrations]]
 # tag = "v1"
-# new_classes = ["WorkspaceHub"]
+# new_sqlite_classes = ["WorkspaceHub"]
 
 [vars]
 ENVIRONMENT = "development"
