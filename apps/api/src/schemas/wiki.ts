@@ -172,6 +172,24 @@ const PatchBaseFields = {
 	summary: z.string().max(2000).optional(),
 };
 
+export const WikiFrontmatterPatchValuesSchema = z
+	.object({
+		type: z.string().min(1).max(50).nullable().optional(),
+		tags: z.array(z.string().min(1).max(50)).max(50).nullable().optional(),
+		status: z.enum(["draft", "current", "stale", "deprecated"]).nullable().optional(),
+		verified_at: z.union([z.number(), z.string()]).nullable().optional(),
+		verified_by: z.string().min(1).max(200).nullable().optional(),
+		owners: z.array(z.string().min(1).max(200)).max(50).nullable().optional(),
+		verify_interval: z.number().int().positive().max(3650).nullable().optional(),
+		template: z.boolean().nullable().optional(),
+	})
+	.strict()
+	.refine((v) => Object.keys(v).length > 0, {
+		message: "values must include at least one frontmatter key",
+	});
+
+export type WikiFrontmatterPatchValues = z.infer<typeof WikiFrontmatterPatchValuesSchema>;
+
 export const PatchWikiPageInputSchema = z.discriminatedUnion("op", [
 	z.object({
 		op: z.literal("append_to_section"),
@@ -194,6 +212,11 @@ export const PatchWikiPageInputSchema = z.discriminatedUnion("op", [
 	z.object({
 		op: z.literal("append_to_page"),
 		text: z.string().min(1).max(500000),
+		...PatchBaseFields,
+	}),
+	z.object({
+		op: z.literal("set_frontmatter"),
+		values: WikiFrontmatterPatchValuesSchema,
 		...PatchBaseFields,
 	}),
 ]);

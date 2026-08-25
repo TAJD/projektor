@@ -145,13 +145,29 @@ export function stripTemplateFlag(content: string): string {
 	return `---\n${yamlText}\n---\n${rest}`;
 }
 
-// PROJ-489 (R7): markdown + frontmatter is the canonical source (PRD principle 1) — the
-// denormalized wiki_pages.verified_at/verified_by columns exist purely for filtering, so
-// verify_wiki_page must stamp the *content's* frontmatter block, not just those columns.
-// Otherwise the next content-only edit would re-parse the page's still-stale frontmatter
-// (parseWikiFrontmatter above) and silently wipe out the verification stamp. Preserves
-// every other existing frontmatter key untouched; adds a frontmatter block (with only
-// verified_at/verified_by) to a page that previously had none at all.
+export function setWikiFrontmatterFields(content: string, values: Record<string, unknown>): string {
+	const match = FRONTMATTER_RE.exec(content);
+	const rest = match ? content.slice(match[0].length) : content;
+
+	let raw: Record<string, unknown> = {};
+	if (match) {
+		const parsedRaw = parseYaml(match[1]);
+		if (parsedRaw && typeof parsedRaw === "object" && !Array.isArray(parsedRaw)) {
+			raw = { ...(parsedRaw as Record<string, unknown>) };
+		}
+	}
+
+	for (const [key, value] of Object.entries(values)) {
+		if (value === null) delete raw[key];
+		else raw[key] = value;
+	}
+
+	if (Object.keys(raw).length === 0) return rest;
+
+	const yamlText = stringifyYaml(raw).trimEnd();
+	return `---\n${yamlText}\n---\n${rest}`;
+}
+
 export function stampWikiFrontmatterVerification(
 	content: string,
 	verifiedAtSeconds: number,

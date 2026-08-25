@@ -32,6 +32,7 @@ import { deleteWikiDraftsForPages } from "./wiki-drafts";
 import { computeFreshness } from "./wiki-freshness";
 import {
 	parseWikiFrontmatter,
+	setWikiFrontmatterFields,
 	stampWikiFrontmatterVerification,
 	stripTemplateFlag,
 	type WikiFrontmatterMeta,
@@ -1841,6 +1842,9 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 	if (data.op === "append_to_page") {
 		await assertRevisionBelongsToPage(ctx.db, page.id, data.baseRevisionId);
 		newContent = appendToPageEnd(currentContent, data.text);
+	} else if (data.op === "set_frontmatter") {
+		await assertRevisionBelongsToPage(ctx.db, page.id, data.baseRevisionId);
+		newContent = setWikiFrontmatterFields(currentContent, data.values);
 	} else {
 		newContent = await resolveSectionPatchContent(ctx, page, currentContent, data);
 	}
