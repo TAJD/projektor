@@ -8,10 +8,7 @@ const router = new Hono<HonoEnv>();
 
 router.get("/login", (c) => {
 	const redirectUrl = c.req.query("redirect_url") ?? "/";
-	return c.redirect(
-		`https://${c.env.CF_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/login?redirect_url=${encodeURIComponent(redirectUrl)}`,
-		302
-	);
+	return c.redirect(redirectUrl, 302);
 });
 
 router.get("/me", authMiddleware, async (c) => {

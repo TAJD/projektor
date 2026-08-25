@@ -1101,4 +1101,25 @@ describe("PROJ-430: CF Access certs fetch failure", () => {
 			error: "Authentication temporarily unavailable",
 		});
 	});
+
+	describe("GET /auth/login", () => {
+		it("redirects to default root / with 302 when redirect_url query is omitted", async () => {
+			const res = await SELF.fetch("http://localhost/auth/login", {
+				redirect: "manual",
+			});
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/");
+		});
+
+		it("redirects to specified redirect_url with 302", async () => {
+			const res = await SELF.fetch(
+				"http://localhost/auth/login?redirect_url=/projects/view/proj-1",
+				{
+					redirect: "manual",
+				}
+			);
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/projects/view/proj-1");
+		});
+	});
 });
