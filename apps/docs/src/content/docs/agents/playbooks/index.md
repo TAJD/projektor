@@ -7,9 +7,11 @@ sidebar:
 
 A playbook is a generic, reusable working pattern — not specific to projektor's own
 rules (that's [the workflow spec](/projektor/agents/workflow-spec/)), but a prompt
-pattern for how an agent should approach a class of task. The first one,
-[`epic-goal`](/projektor/agents/playbooks/epic-goal/), is a template for pointing an
-agent at an epic and having it work autonomously to completion.
+pattern for how an agent should approach a class of task.
+[`epic-goal`](/projektor/agents/playbooks/epic-goal/) is a template for pointing an
+agent at an epic and having it work autonomously to completion;
+[`idea-discovery`](/projektor/agents/playbooks/idea-discovery/) is a research process
+for turning a domain description into a sequenced list of product ideas.
 
 ## Why playbooks, not just prompts you copy-paste
 
@@ -61,6 +63,7 @@ request time. See the full ingredient list and both template variants on the
 | Playbook | What it's for |
 |---|---|
 | [`epic-goal`](/projektor/agents/playbooks/epic-goal/) | Work through an epic (or ticket list) autonomously until it's fully done. |
+| [`idea-discovery`](/projektor/agents/playbooks/idea-discovery/) | Turn a domain description into a sequenced, falsification-tested list of product ideas. |
 
 More will land here as they're extracted from real working sessions — the whole
 point of a playbook is that it started as something that actually worked, not a

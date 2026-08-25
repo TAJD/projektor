@@ -21,6 +21,7 @@ describe("Playbooks", () => {
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as Array<{ name: string; title: string }>;
 		expect(body.find((p) => p.name === "epic-goal")).toBeTruthy();
+		expect(body.find((p) => p.name === "idea-discovery")).toBeTruthy();
 	});
 
 	// PROJ-633: the playbook reads are deliberately global — no workspace. Adding the
@@ -69,6 +70,18 @@ describe("Playbooks", () => {
 		expect(body.content).toContain("bounded variant");
 		expect(body.content).toContain("full variant");
 		expect(body.content).toContain("Audit first");
+	});
+
+	it("GET /api/playbooks/idea-discovery returns the full playbook", async () => {
+		const res = await SELF.fetch("http://localhost/api/playbooks/idea-discovery", {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { name: string; content: string };
+		expect(body.name).toBe("idea-discovery");
+		expect(body.content).toContain("Research frontier");
+		expect(body.content).toContain("Gap hypotheses");
+		expect(body.content).toContain("Free/open data sources only");
 	});
 
 	it("MCP get_playbook returns the same content as REST", async () => {
