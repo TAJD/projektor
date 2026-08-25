@@ -2998,6 +2998,216 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(page.content.trim().endsWith("Appended after stale base.")).toBe(true);
 	});
 
+	it("REST: set_frontmatter adds a frontmatter block to a page that had none", async () => {
+		await createPage("patch-frontmatter-new", "Patch Frontmatter New", TWO_SECTIONS);
+		const res = await req("http://localhost/api/wiki/patch-frontmatter-new", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "set_frontmatter",
+				values: { status: "current" },
+				baseRevisionId: null,
+			}),
+		});
+		expect(res.status).toBe(200);
+		const page = (await (
+			await req("http://localhost/api/wiki/patch-frontmatter-new", {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as { content: string; status: string };
+		expect(page.status).toBe("current");
+		expect(page.content).toMatch(/^---\nstatus: current\n---\n/);
+		expect(page.content).toContain(TWO_SECTIONS.trim());
+	});
+
+	it("REST: set_frontmatter preserves other existing frontmatter keys", async () => {
+		await createPage(
+			"patch-frontmatter-preserve",
+			"Patch Frontmatter Preserve",
+			`---\ntype: runbook\ntags:\n  - ops\nstatus: draft\n---\n${TWO_SECTIONS}`
+		);
+		const res = await req("http://localhost/api/wiki/patch-frontmatter-preserve", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "set_frontmatter",
+				values: { status: "deprecated" },
+				baseRevisionId: null,
+			}),
+		});
+		expect(res.status).toBe(200);
+		const page = (await (
+			await req("http://localhost/api/wiki/patch-frontmatter-preserve", {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as { type: string; tags: string[]; status: string };
+		expect(page.status).toBe("deprecated");
+		expect(page.type).toBe("runbook");
+		expect(page.tags).toEqual(["ops"]);
+	});
+
+	it("REST: set_frontmatter with a null value removes that key", async () => {
+		await createPage(
+			"patch-frontmatter-remove",
+			"Patch Frontmatter Remove",
+			`---\ntype: runbook\nstatus: draft\n---\n${TWO_SECTIONS}`
+		);
+		const res = await req("http://localhost/api/wiki/patch-frontmatter-remove", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "set_frontmatter",
+				values: { type: null },
+				baseRevisionId: null,
+			}),
+		});
+		expect(res.status).toBe(200);
+		const page = (await (
+			await req("http://localhost/api/wiki/patch-frontmatter-remove", {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as { type: string | null; status: string };
+		expect(page.type).toBeNull();
+		expect(page.status).toBe("draft");
+	});
+
+	it("REST: set_frontmatter rejects an invalid value with a structured validation error", async () => {
+		await createPage("patch-frontmatter-invalid", "Patch Frontmatter Invalid", TWO_SECTIONS);
+		const res = await req("http://localhost/api/wiki/patch-frontmatter-invalid", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "set_frontmatter",
+				values: { status: "not-a-real-status" },
+				baseRevisionId: null,
+			}),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { fieldErrors: Record<string, string[]> } };
+		expect(body.error.fieldErrors.values?.length).toBeGreaterThan(0);
+	});
+
+	it("REST: set_frontmatter rejects an empty values map", async () => {
+		await createPage("patch-frontmatter-empty", "Patch Frontmatter Empty", TWO_SECTIONS);
+		const res = await req("http://localhost/api/wiki/patch-frontmatter-empty", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ op: "set_frontmatter", values: {}, baseRevisionId: null }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("REST: set_frontmatter flips status to deprecated in one call and search demotes it", async () => {
+		await createPage(
+			"patch-frontmatter-demote",
+			"Patch Frontmatter Demote",
+			`${TWO_SECTIONS}\nuniquedemotekeyword`
+		);
+		await req("http://localhost/api/wiki/patch-frontmatter-demote", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "set_frontmatter",
+				values: { status: "deprecated" },
+				baseRevisionId: null,
+			}),
+		});
+		await createPage(
+			"patch-frontmatter-current",
+			"Patch Frontmatter Current",
+			"uniquedemotekeyword"
+		);
+
+		const searchRes = await req("http://localhost/api/wiki/search?q=uniquedemotekeyword", {
+			headers: authHeaders(token, slug),
+		});
+		const results = (await searchRes.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toEqual([
+			"Patch Frontmatter Current",
+			"Patch Frontmatter Demote",
+		]);
+	});
+
+	it("REST: set_frontmatter accepts a stale baseRevisionId belonging to the page", async () => {
+		await createPage("patch-frontmatter-stale-base", "Patch Frontmatter Stale Base", TWO_SECTIONS);
+		await req("http://localhost/api/wiki/patch-frontmatter-stale-base", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "append_to_section",
+				heading: "Alpha",
+				text: "First edit.",
+				baseRevisionId: null,
+			}),
+		});
+		const revisions = (await (
+			await req("http://localhost/api/wiki/patch-frontmatter-stale-base/revisions", {
+				headers: authHeaders(token, slug),
+			})
+		).json()) as Array<{ id: string }>;
+
+		const res = await req("http://localhost/api/wiki/patch-frontmatter-stale-base", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "set_frontmatter",
+				values: { status: "current" },
+				baseRevisionId: revisions[0].id,
+			}),
+		});
+		expect(res.status).toBe(200);
+	});
+
+	it("REST: set_frontmatter rejects a baseRevisionId that doesn't belong to the page", async () => {
+		await createPage(
+			"patch-frontmatter-garbage-base",
+			"Patch Frontmatter Garbage Base",
+			TWO_SECTIONS
+		);
+		const res = await req("http://localhost/api/wiki/patch-frontmatter-garbage-base", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				op: "set_frontmatter",
+				values: { status: "current" },
+				baseRevisionId: crypto.randomUUID(),
+			}),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("MCP: set_frontmatter parity — sets a key, preserves others, over MCP", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcp("create_wiki_page", {
+				title: "MCP Frontmatter Doc",
+				content: `---\ntype: runbook\n---\n${TWO_SECTIONS}`,
+			})
+		);
+
+		const ok = await mcp("patch_wiki_page", {
+			slug: created.slug,
+			op: "set_frontmatter",
+			values: { status: "deprecated" },
+			baseRevisionId: null,
+		});
+		expect(isMcpError(ok)).toBe(false);
+
+		const invalid = await mcp("patch_wiki_page", {
+			slug: created.slug,
+			op: "set_frontmatter",
+			values: { status: "not-a-real-status" },
+			baseRevisionId: null,
+		});
+		expect(isMcpError(invalid)).toBe(true);
+		if (isMcpError(invalid)) expect(invalid.error.code).toBe(-32602);
+
+		const page = mcpData<{ type: string; status: string }>(
+			await mcp("get_wiki_page", { slug: created.slug })
+		);
+		expect(page.type).toBe("runbook");
+		expect(page.status).toBe("deprecated");
+	});
+
 	it("MCP: patch_wiki_page parity — disjoint sections don't conflict, same section does", async () => {
 		const created = mcpData<{ slug: string }>(
 			await mcp("create_wiki_page", { title: "MCP Patch Doc", content: TWO_SECTIONS })

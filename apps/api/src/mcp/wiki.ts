@@ -228,16 +228,21 @@ export const wikiTools: MCPTool[] = [
 			"section's body), replace_section (replace the section's body, heading kept), " +
 			"insert_after_heading (insert text directly under the heading, before the " +
 			"existing body), append_to_page (append at the very end of the document, no " +
-			"heading needed). baseRevisionId is required (the current revision id from " +
+			"heading needed), set_frontmatter (merge `values` into the page's YAML " +
+			"frontmatter block without touching the rest of the content — a key set to " +
+			"null is removed; a page with no frontmatter block gains one). " +
+			"baseRevisionId is required (the current revision id from " +
 			"list_wiki_revisions/get_wiki_revision, or null if the page has never been " +
 			"revised) — conflict detection is SECTION-scoped, not whole-page: two agents " +
 			"patching two different sections never conflict with each other even if the " +
 			"page's overall revision advanced between their reads, only if the SAME section " +
-			"changed underneath the caller. On a heading miss (never existed, or was " +
+			"changed underneath the caller (append_to_page and set_frontmatter skip this " +
+			"section check entirely — baseRevisionId is only validated as belonging to the " +
+			"page). On a heading miss (never existed, or was " +
 			"deleted/renamed since baseRevisionId) the error lists the page's current " +
 			"headings so a caller can retry against reality. Creates a revision, same as " +
-			"update_wiki_page; does not touch the page's existing frontmatter metadata beyond " +
-			"reparsing it (never stamps verified_at).",
+			"update_wiki_page; ops other than set_frontmatter do not touch the page's " +
+			"existing frontmatter metadata beyond reparsing it (never stamps verified_at).",
 		inputSchema: {
 			type: "object",
 			required: ["op", "baseRevisionId"],
@@ -246,14 +251,31 @@ export const wikiTools: MCPTool[] = [
 				slug: { type: "string", description: "Page slug (alternative to id)" },
 				op: {
 					type: "string",
-					enum: ["append_to_section", "replace_section", "insert_after_heading", "append_to_page"],
+					enum: [
+						"append_to_section",
+						"replace_section",
+						"insert_after_heading",
+						"append_to_page",
+						"set_frontmatter",
+					],
 				},
 				heading: {
 					type: "string",
 					description:
-						"Target section's heading text (required for every op except append_to_page)",
+						"Target section's heading text (required for append_to_section, " +
+						"replace_section, insert_after_heading)",
 				},
-				text: { type: "string", description: "Text to add/replace" },
+				text: {
+					type: "string",
+					description: "Text to add/replace (required for every op except set_frontmatter)",
+				},
+				values: {
+					type: "object",
+					description:
+						"set_frontmatter only: frontmatter keys to set (type, tags, status, " +
+						"verified_at, verified_by, owners, verify_interval, template). A key set " +
+						"to null is removed from the page's frontmatter.",
+				},
 				baseRevisionId: {
 					type: ["string", "null"],
 					description:
