@@ -20,8 +20,12 @@ export async function broadcastWorkspaceEvent(ctx: ServiceCtx, event: EventInput
 
 	try {
 		const stub = ctx.workspaceHub.get(ctx.workspaceHub.idFromName(ctx.workspaceId));
-		const sendPromise = (stub as unknown as { broadcast: (e: RealtimeEvent) => Promise<unknown> })
-			.broadcast(fullEvent)
+		const sendPromise = stub
+			.fetch("http://do/broadcast", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(fullEvent),
+			})
 			.catch(() => {
 				// Prevent broadcast errors from affecting the calling service
 			});

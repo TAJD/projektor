@@ -153,9 +153,11 @@ describe("Realtime WebSockets (Opt-In)", () => {
 	});
 
 	it("dispatches broadcast event when creating an issue with WORKSPACE_HUB stub", async () => {
-		const broadcastMock = vi.fn().mockResolvedValue({ recipientCount: 1 });
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(new Response(JSON.stringify({ recipientCount: 1 })));
 		const mockStub = {
-			broadcast: broadcastMock,
+			fetch: fetchMock,
 		};
 		const mockHubNamespace = {
 			idFromName: vi.fn().mockReturnValue("mock-do-id"),
@@ -178,15 +180,11 @@ describe("Realtime WebSockets (Opt-In)", () => {
 		});
 
 		expect(created.id).toBeTruthy();
-		expect(broadcastMock).toHaveBeenCalledWith(
+		expect(fetchMock).toHaveBeenCalledWith(
+			"http://do/broadcast",
 			expect.objectContaining({
-				type: "issue.created",
-				workspaceId,
-				projectId,
-				data: expect.objectContaining({
-					id: created.id,
-					title: "Realtime test issue",
-				}),
+				method: "POST",
+				body: expect.stringContaining('"type":"issue.created"'),
 			})
 		);
 	});

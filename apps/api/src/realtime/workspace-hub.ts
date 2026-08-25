@@ -20,6 +20,22 @@ export class WorkspaceHub {
 	}
 
 	async fetch(request: Request): Promise<Response> {
+		const url = new URL(request.url);
+		if (url.pathname === "/broadcast" && request.method === "POST") {
+			try {
+				const event = (await request.json()) as RealtimeEvent;
+				const result = await this.broadcast(event);
+				return new Response(JSON.stringify(result), {
+					headers: { "Content-Type": "application/json" },
+				});
+			} catch {
+				return new Response(JSON.stringify({ error: "Invalid broadcast payload" }), {
+					status: 400,
+					headers: { "Content-Type": "application/json" },
+				});
+			}
+		}
+
 		const upgradeHeader = request.headers.get("Upgrade");
 		if (upgradeHeader !== "websocket") {
 			return new Response("Expected Upgrade: websocket", { status: 426 });
