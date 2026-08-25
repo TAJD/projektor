@@ -6,16 +6,9 @@ it, modify it, learn from it.
 
 ## Issues and pull requests
 
-**External issues and pull requests are automatically closed.** This isn't
-hostility - it's how a solo project stays sustainable. But **everything is
-read.** If you open an issue or PR:
-
-- it will be closed automatically, and
-- the maintainer will still review it, and may act on it (fix the bug, adopt the
-  idea, reply) on their own schedule.
-
-So: a closed issue is not an ignored issue. If something is broken or you have an
-idea, you're welcome to file it - just don't expect a back-and-forth thread.
+**Pull requests, issues, and feature requests are all welcome.** projektor is
+maintained by one person (with AI agents), so review happens on their own
+schedule rather than a fixed SLA - but everything is read and considered.
 
 For security issues, follow [SECURITY.md](./SECURITY.md) (report privately, not
 via a public issue).
