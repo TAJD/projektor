@@ -37,6 +37,7 @@ import { oauthMetadataRouter } from "./routes/oauth-metadata";
 import { playbooksRouter } from "./routes/playbooks";
 import { projectActivityRouter } from "./routes/project-activity";
 import { projectsRouter } from "./routes/projects";
+import { realtimeRouter } from "./routes/realtime";
 import { shareIssuesRouter, sharePublicRouter } from "./routes/share";
 import { sprintsRouter } from "./routes/sprints";
 import { taskStatusesRouter } from "./routes/task-statuses";
@@ -330,6 +331,7 @@ app.route("/api/file-claims", fileClaimsRouter);
 app.route("/api/agent-messages", agentMessagesRouter);
 app.route("/api/workflow", workflowRouter);
 app.route("/api/playbooks", playbooksRouter);
+app.route("/api", realtimeRouter);
 
 // PROJ-487 fix-up: /wiki is a static asset (wiki/index.html) that Cloudflare serves
 // directly without ever invoking the Worker — so the legacy `?slug=` query param can
@@ -485,3 +487,5 @@ export default {
 	},
 	scheduled,
 } satisfies ExportedHandler<Env>;
+
+export { WorkspaceHub } from "./realtime/workspace-hub";
