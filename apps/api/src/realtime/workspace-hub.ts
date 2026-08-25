@@ -1,4 +1,3 @@
-import { DurableObject } from "cloudflare:workers";
 import type { Env, RealtimeEvent } from "@projektor/types";
 
 export interface SubscriptionFilters {
@@ -11,7 +10,15 @@ export interface SocketAttachment {
 	filters?: SubscriptionFilters;
 }
 
-export class WorkspaceHub extends DurableObject<Env> {
+export class WorkspaceHub {
+	ctx: DurableObjectState;
+	env: Env;
+
+	constructor(ctx: DurableObjectState, env: Env) {
+		this.ctx = ctx;
+		this.env = env;
+	}
+
 	async fetch(request: Request): Promise<Response> {
 		const upgradeHeader = request.headers.get("Upgrade");
 		if (upgradeHeader !== "websocket") {
