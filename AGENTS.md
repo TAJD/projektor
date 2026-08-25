@@ -369,8 +369,8 @@ and in the fleet manifest.
 All tools are available via `POST /mcp/<workspaceId>` (JSON-RPC 2.0). Connect with:
 
 ```bash
-claude mcp add projektor --transport http https://<host>/mcp/<workspaceId> \
-  --header "Authorization: Bearer <token>"
+claude mcp add --transport http --header "Authorization: Bearer <token>" \
+  projektor https://<host>/mcp/<workspaceId>
 ```
 
 **The full tool list is generated from source — do not hand-maintain a copy here.**

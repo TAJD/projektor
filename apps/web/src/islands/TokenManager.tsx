@@ -1,3 +1,4 @@
+import { buildMcpAddCommandMultiline } from "@projektor/types";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { resolveWorkspaceSlug } from "../utils/workspace";
@@ -73,13 +74,7 @@ function buildMcpCommand(
 		return mcpCommandTemplate.replace("{{TOKEN}}", token);
 	}
 	if (!mcpUrl) return "";
-	const lines = [
-		`claude mcp add projektor "${mcpUrl}" \\`,
-		"  --transport http \\",
-		`  --header "Authorization: Bearer ${token}" \\`,
-		`  --header "X-Workspace-Slug: ${workspaceSlug}"`,
-	];
-	return lines.join("\n");
+	return buildMcpAddCommandMultiline({ workspaceSlug, mcpUrl, token });
 }
 
 async function copyToClipboard(text: string) {

@@ -52,11 +52,11 @@ The bootstrap endpoint is enabled only when `ENVIRONMENT=development` — any ot
 Mint a token from the UI (Settings → Tokens) or via the API, then add the MCP server:
 
 ```bash
-claude mcp add projektor \
-  "https://<your-worker>.workers.dev/mcp/<workspace-uuid>" \
+claude mcp add \
   --transport http \
   --header "Authorization: Bearer pk_<64 hex chars>" \
-  --header "X-Workspace-Slug: <slug>"
+  --header "X-Workspace-Slug: <slug>" \
+  projektor "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
 ```
 
 **Finding the workspace ID:** it is returned by `GET /api/workspaces` or shown in the bootstrap response. The slug is the short identifier you chose when creating the workspace (e.g. `projektor`).
@@ -215,13 +215,13 @@ If your projektor instance is behind Cloudflare Access (which it should be in pr
 Pass the service token credentials alongside the API token:
 
 ```bash
-claude mcp add projektor \
-  "https://<your-worker>.workers.dev/mcp/<workspace-uuid>" \
+claude mcp add \
   --transport http \
   --header "Authorization: Bearer pk_<token>" \
   --header "X-Workspace-Slug: <slug>" \
   --header "CF-Access-Client-Id: <client-id>" \
-  --header "CF-Access-Client-Secret: <client-secret>"
+  --header "CF-Access-Client-Secret: <client-secret>" \
+  projektor "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
 ```
 
 For the **OAuth connector** path (§3b) the operator has separate work to do: Access also sits in front of the OAuth discovery and token endpoints, which no browser session ever reaches. Bypass applications for `/.well-known` and `/oauth/token` are required, and `/oauth/authorize` must stay protected — see [Deploying → Cloudflare Access](/projektor/guides/deploying/#6-cloudflare-access-carve-outs-for-oauth).

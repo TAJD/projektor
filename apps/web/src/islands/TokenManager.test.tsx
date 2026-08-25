@@ -4,6 +4,7 @@
 // workspace configured." fallback immediately. When the slug is present it
 // fetches the workspace info and token list via apiFetch (→ global fetch).
 // The pattern: provide workspaceSlug prop, override the stub, await findBy*.
+import { buildMcpAddCommandMultiline } from "@projektor/types";
 import { fireEvent, render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 import TokenManager from "./TokenManager";
@@ -85,5 +86,21 @@ describe("TokenManager", () => {
 		fireEvent.click(screen.getByRole("button", { name: /New token/i }));
 		expect(await screen.findByText("New API token")).toBeTruthy();
 		expect(screen.getByRole("button", { name: /Create token/i })).toBeTruthy();
+	});
+
+	it("mcpAddCommandMultiline puts flags before the name/url positionals (PROJ-620)", () => {
+		const command = buildMcpAddCommandMultiline({
+			workspaceSlug: "my-ws",
+			mcpUrl: "https://example.com/mcp/w1",
+			token: "tok123",
+		});
+		expect(command).toBe(
+			[
+				"claude mcp add --transport http \\",
+				'  --header "Authorization: Bearer tok123" \\',
+				'  --header "X-Workspace-Slug: my-ws" \\',
+				'  projektor "https://example.com/mcp/w1"',
+			].join("\n")
+		);
 	});
 });
