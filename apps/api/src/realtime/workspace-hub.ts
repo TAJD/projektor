@@ -77,11 +77,16 @@ export class WorkspaceHub extends DurableObject<Env> {
 		}
 	}
 
-	async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+	async webSocketClose(
+		ws: WebSocket,
+		code: number,
+		_reason: string,
+		_wasClean: boolean
+	): Promise<void> {
 		ws.close(code, "Closed");
 	}
 
-	async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
+	async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
 		ws.close(1011, "Internal error");
 	}
 

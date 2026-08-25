@@ -4,6 +4,7 @@ import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../s
 import { visibleProjectPredicate } from "./access";
 import { postMessage } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -293,6 +294,11 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		now,
 	});
 
+	await broadcastWorkspaceEvent(ctx, {
+		type: "claims.created",
+		data: { issueId, agentId, paths, count: created.length },
+	});
+
 	return { created, overridden, reclaimed };
 }
 
@@ -345,6 +351,11 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	const released = await inChunks(releaseIds, (chunk) =>
 		orm.select().from(schema.issueFileClaims).where(inArray(schema.issueFileClaims.id, chunk))
 	);
+
+	await broadcastWorkspaceEvent(ctx, {
+		type: "claims.released",
+		data: { issueId, paths, count: released.length },
+	});
 
 	return { released, count: released.length };
 }

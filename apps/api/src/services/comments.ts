@@ -8,6 +8,7 @@ import {
 } from "../schemas/comments";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { broadcastWorkspaceEvent } from "./realtime";
 import type { ServiceCtx } from "./types";
 
 interface CommentRow {
@@ -91,6 +92,11 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 		authorKind: ctx.authKind ?? null,
 	});
 
+	await broadcastWorkspaceEvent(ctx, {
+		type: "comment.created",
+		data: { id, issueId, authorId: ctx.userId },
+	});
+
 	return { id };
 }
 
@@ -116,6 +122,11 @@ export async function updateComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 		.set({ body, updatedAt: Math.floor(Date.now() / 1000) })
 		.where(eq(schema.issueComments.id, commentId));
 
+	await broadcastWorkspaceEvent(ctx, {
+		type: "comment.updated",
+		data: { id: commentId, issueId },
+	});
+
 	return { ok: true };
 }
 
@@ -139,6 +150,11 @@ export async function deleteComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 	if (!canDelete) throw new ForbiddenError("Forbidden");
 
 	await orm.delete(schema.issueComments).where(eq(schema.issueComments.id, commentId));
+
+	await broadcastWorkspaceEvent(ctx, {
+		type: "comment.deleted",
+		data: { id: commentId, issueId },
+	});
 
 	return { ok: true };
 }

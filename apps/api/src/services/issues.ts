@@ -49,6 +49,7 @@ import {
 	liveLeasedIssueIds,
 } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
+import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks, sanitizeFtsQuery } from "./sql";
 import { resolveStatus } from "./task-statuses";
 import type { ServiceCtx } from "./types";
@@ -805,6 +806,12 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const row = await finalizeCreateIssue(ctx, orm, id, parentId, cfWrites);
 
+	await broadcastWorkspaceEvent(ctx, {
+		type: "issue.created",
+		projectId: data.projectId,
+		data: { id, number: row?.number, title: data.title, status: resolvedStatusKey ?? "todo" },
+	});
+
 	return { id, number: row?.number };
 }
 
@@ -1317,6 +1324,13 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 
 	await invalidateUpdateCaches(ctx, id, data, existing);
 
+	const isStatusChange = data.status !== undefined || data.statusId !== undefined;
+	await broadcastWorkspaceEvent(ctx, {
+		type: isStatusChange ? "issue.status_changed" : "issue.updated",
+		projectId: existing.projectId ?? undefined,
+		data: { id, updates: data },
+	});
+
 	return { ok: true };
 }
 
@@ -1352,6 +1366,12 @@ export async function deleteIssue(ctx: ServiceCtx, id: string) {
 	if (existing?.parentId) {
 		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.parentId}`);
 	}
+
+	await broadcastWorkspaceEvent(ctx, {
+		type: "issue.deleted",
+		projectId: existing?.projectId ?? undefined,
+		data: { id },
+	});
 
 	return { ok: true };
 }
