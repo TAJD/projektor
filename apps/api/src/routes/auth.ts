@@ -6,8 +6,13 @@ import { createUserToken, deleteUserToken, getUserWorkspaces } from "../services
 
 const router = new Hono<HonoEnv>();
 
+function isSafeRedirectPath(url: string): boolean {
+	return url.startsWith("/") && !url.startsWith("//");
+}
+
 router.get("/login", (c) => {
-	const redirectUrl = c.req.query("redirect_url") ?? "/";
+	const requested = c.req.query("redirect_url") ?? "/";
+	const redirectUrl = isSafeRedirectPath(requested) ? requested : "/";
 	return c.redirect(redirectUrl, 302);
 });
 

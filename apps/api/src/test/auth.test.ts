@@ -1121,5 +1121,31 @@ describe("PROJ-430: CF Access certs fetch failure", () => {
 			expect(res.status).toBe(302);
 			expect(res.headers.get("location")).toBe("/projects/view/proj-1");
 		});
+
+		it("falls back to / for an absolute-URL redirect_url", async () => {
+			const res = await SELF.fetch(
+				"http://localhost/auth/login?redirect_url=https://evil.example.com",
+				{ redirect: "manual" }
+			);
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/");
+		});
+
+		it("falls back to / for a protocol-relative redirect_url", async () => {
+			const res = await SELF.fetch("http://localhost/auth/login?redirect_url=//evil.example.com", {
+				redirect: "manual",
+			});
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/");
+		});
+
+		it("falls back to / for a javascript: redirect_url", async () => {
+			const res = await SELF.fetch(
+				`http://localhost/auth/login?redirect_url=${encodeURIComponent("javascript:alert(1)")}`,
+				{ redirect: "manual" }
+			);
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/");
+		});
 	});
 });
