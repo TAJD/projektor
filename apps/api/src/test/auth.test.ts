@@ -1101,4 +1101,51 @@ describe("PROJ-430: CF Access certs fetch failure", () => {
 			error: "Authentication temporarily unavailable",
 		});
 	});
+
+	describe("GET /auth/login", () => {
+		it("redirects to default root / with 302 when redirect_url query is omitted", async () => {
+			const res = await SELF.fetch("http://localhost/auth/login", {
+				redirect: "manual",
+			});
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/");
+		});
+
+		it("redirects to specified redirect_url with 302", async () => {
+			const res = await SELF.fetch(
+				"http://localhost/auth/login?redirect_url=/projects/view/proj-1",
+				{
+					redirect: "manual",
+				}
+			);
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/projects/view/proj-1");
+		});
+
+		it("falls back to / for an absolute-URL redirect_url", async () => {
+			const res = await SELF.fetch(
+				"http://localhost/auth/login?redirect_url=https://evil.example.com",
+				{ redirect: "manual" }
+			);
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/");
+		});
+
+		it("falls back to / for a protocol-relative redirect_url", async () => {
+			const res = await SELF.fetch("http://localhost/auth/login?redirect_url=//evil.example.com", {
+				redirect: "manual",
+			});
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/");
+		});
+
+		it("falls back to / for a javascript: redirect_url", async () => {
+			const res = await SELF.fetch(
+				`http://localhost/auth/login?redirect_url=${encodeURIComponent("javascript:alert(1)")}`,
+				{ redirect: "manual" }
+			);
+			expect(res.status).toBe(302);
+			expect(res.headers.get("location")).toBe("/");
+		});
+	});
 });
