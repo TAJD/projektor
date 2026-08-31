@@ -11,6 +11,7 @@ import {
 import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { resolveIssueIdParam } from "./issues";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -63,7 +64,17 @@ export async function createLink(ctx: ServiceCtx, raw: unknown) {
 	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 	const result = CreateIssueLinkSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { sourceIssueId, targetIssueId, type } = result.data;
+	const { type } = result.data;
+	const sourceIssueId = await resolveIssueIdParam(
+		ctx,
+		result.data.sourceIssueId,
+		"Source issue not found"
+	);
+	const targetIssueId = await resolveIssueIdParam(
+		ctx,
+		result.data.targetIssueId,
+		"Target issue not found"
+	);
 
 	if (sourceIssueId === targetIssueId) {
 		throw new ValidationError({ formErrors: ["An issue cannot link to itself"], fieldErrors: {} });
@@ -182,7 +193,7 @@ interface LinkedIssueRow {
 export async function listLinksForIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = ListIssueLinksSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId } = result.data;
+	const issueId = await resolveIssueIdParam(ctx, result.data.issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 

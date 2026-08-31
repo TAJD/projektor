@@ -49,6 +49,7 @@ import {
 	liveLeasedIssueIds,
 } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
+import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { inChunks, sanitizeFtsQuery } from "./sql";
 import { resolveStatus } from "./task-statuses";
 import type { ServiceCtx } from "./types";
@@ -75,12 +76,22 @@ async function validateParent(
 	const orm = drizzle(ctx.db, { schema });
 
 	const parentRow = await orm
-		.select({ id: schema.issues.id, parentId: schema.issues.parentId })
+		.select({
+			id: schema.issues.id,
+			parentId: schema.issues.parentId,
+			projectId: schema.issues.projectId,
+		})
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, parentId), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
 
 	if (!parentRow) throw new NotFoundError("Parent issue not found");
+	if (
+		!isWorkspaceAdmin(ctx.role) &&
+		(await effectiveProjectRole(ctx, parentRow.projectId)) === null
+	) {
+		throw new NotFoundError("Parent issue not found");
+	}
 
 	// Walk up the ancestor chain: count how many ancestors the parent has.
 	// If the parent already has 5 ancestors, the child would be at depth 6 — exceeds the cap.
@@ -249,7 +260,15 @@ async function buildListIssuesConditions(
 export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	const result = ListIssuesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const filters = result.data;
+	const filters = {
+		...result.data,
+		projectId: result.data.projectId
+			? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
+			: result.data.projectId,
+		parentId: result.data.parentId
+			? await resolveIssueIdParam(ctx, result.data.parentId)
+			: result.data.parentId,
+	};
 	const { limit } = filters;
 
 	const orm = drizzle(ctx.db, { schema });
@@ -445,7 +464,11 @@ export const ISSUE_REF_PATTERN = /^([A-Z][A-Z0-9]*)-(\d{1,9})$/;
  * second place to get it wrong. If you add a caller, confirm that holds for yours too —
  * an id from this function is workspace-scoped and nothing more.
  */
-export async function resolveIssueIdParam(ctx: ServiceCtx, param: string): Promise<string> {
+export async function resolveIssueIdParam(
+	ctx: ServiceCtx,
+	param: string,
+	notFoundMessage = "Issue not found"
+): Promise<string> {
 	const m = param.match(ISSUE_REF_PATTERN);
 	if (!m) return param;
 
@@ -462,7 +485,7 @@ export async function resolveIssueIdParam(ctx: ServiceCtx, param: string): Promi
 			)
 		)
 		.get();
-	if (!row) throw new NotFoundError("Issue not found");
+	if (!row) throw new NotFoundError(notFoundMessage);
 	return row.id;
 }
 
@@ -764,8 +787,12 @@ async function finalizeCreateIssue(
 export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = CreateIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const data = result.data;
-	const { projectId, title, body, priority, assigneeId, labels, parentId } = data;
+	const projectId = await resolveProjectIdParam(ctx, result.data.projectId);
+	const parentId = result.data.parentId
+		? await resolveIssueIdParam(ctx, result.data.parentId)
+		: result.data.parentId;
+	const data = { ...result.data, projectId, parentId };
+	const { title, body, priority, assigneeId, labels } = data;
 
 	// PROJ-389: confirm projectId belongs to this workspace BEFORE the admin-bypass
 	// check below, so an owner/admin can't write into another workspace's project.
@@ -1251,10 +1278,14 @@ async function invalidateUpdateCaches(
 	}
 }
 
-export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
+export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) {
+	const id = await resolveIssueIdParam(ctx, rawId);
 	const result = UpdateIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const data = result.data;
+	const data =
+		"parentId" in result.data && result.data.parentId
+			? { ...result.data, parentId: await resolveIssueIdParam(ctx, result.data.parentId) }
+			: result.data;
 
 	if ("parentId" in data && data.parentId) {
 		await validateParent(ctx, data.parentId, id);
@@ -1320,7 +1351,8 @@ export async function updateIssue(ctx: ServiceCtx, id: string, raw: unknown) {
 	return { ok: true };
 }
 
-export async function deleteIssue(ctx: ServiceCtx, id: string) {
+export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
+	const id = await resolveIssueIdParam(ctx, rawId);
 	const idCheck = IdSchema.safeParse(id);
 	if (!idCheck.success)
 		throw new ValidationError({ formErrors: idCheck.error.flatten().formErrors, fieldErrors: {} });
@@ -1516,8 +1548,11 @@ function scoreOpenIssues(
 }
 
 export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
-	const { limit, includeBacklog, excludeClaimed, includeNotReady, projectId } =
-		parsePrioritizedFilters(raw);
+	const parsed = parsePrioritizedFilters(raw);
+	const { limit, includeBacklog, excludeClaimed, includeNotReady } = parsed;
+	const projectId = parsed.projectId
+		? await resolveVisibleProjectIdParam(ctx, parsed.projectId)
+		: parsed.projectId;
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -1561,7 +1596,10 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 	const result = SearchIssuesInputSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { query, projectId, limit } = result.data;
+	const { query, limit } = result.data;
+	const projectId = result.data.projectId
+		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
+		: result.data.projectId;
 
 	const ftsQuery = sanitizeFtsQuery(query);
 	if (!ftsQuery) return [];

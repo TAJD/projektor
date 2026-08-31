@@ -95,7 +95,7 @@ describe("Issues API", () => {
 		const res = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
 			headers: authHeaders(token, slug),
-			body: JSON.stringify({ projectId, title: "Author kind test", authorKind: "human" }),
+			body: JSON.stringify({ projectId, title: "Author kind test" }),
 		});
 		expect(res.status).toBe(201);
 		const body = (await res.json()) as { id: string };
@@ -104,6 +104,15 @@ describe("Issues API", () => {
 			.bind(body.id)
 			.first<{ author_kind: string | null }>();
 		expect(row?.author_kind).toBe("agent");
+	});
+
+	it("PROJ-712: rejects an unrecognized field (e.g. a spoofed authorKind) instead of silently ignoring it", async () => {
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Author kind test", authorKind: "human" }),
+		});
+		expect(res.status).toBe(400);
 	});
 
 	it("POST then GET returns the created issue", async () => {
@@ -2158,5 +2167,258 @@ describe("GET /api/issues/prioritized", () => {
 		const titles = body.issues.map((i) => i.title);
 		expect(titles).toContain("In target project");
 		expect(titles).not.toContain("In other project");
+	});
+});
+
+describe("PROJ-712 — unrecognized MCP params are rejected, not silently dropped", () => {
+	let token: string, slug: string, workspaceId: string, projectId: string, userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({
+			role: "owner",
+		}));
+	});
+
+	async function mcpCall(params: unknown) {
+		return callMcpTool(workspaceId, token, slug, params);
+	}
+
+	it("list_issues rejects an unknown param instead of ignoring it", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "Some issue" });
+		const res = await mcpCall({ name: "list_issues", arguments: { projectKey: projectId } });
+		expect(res.error).toBeDefined();
+	});
+
+	it("get_issue rejects an unknown param instead of ignoring it", async () => {
+		const createResp = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "For get_issue" },
+		});
+		const { id } = JSON.parse(createResp.result!.content[0].text) as { id: string };
+
+		const res = await mcpCall({ name: "get_issue", arguments: { id, bogus: "x" } });
+		expect(res.error).toBeDefined();
+	});
+
+	it("create_issue_link rejects an unknown param instead of ignoring it", async () => {
+		const a = await mcpCall({ name: "create_issue", arguments: { projectId, title: "A" } });
+		const b = await mcpCall({ name: "create_issue", arguments: { projectId, title: "B" } });
+		const { id: aId } = JSON.parse(a.result!.content[0].text) as { id: string };
+		const { id: bId } = JSON.parse(b.result!.content[0].text) as { id: string };
+
+		const res = await mcpCall({
+			name: "create_issue_link",
+			arguments: { sourceIssueId: aId, targetIssueId: bId, type: "blocks", extra: "x" },
+		});
+		expect(res.error).toBeDefined();
+	});
+});
+
+describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
+	let token: string,
+		slug: string,
+		workspaceId: string,
+		projectId: string,
+		userId: string,
+		projectKey: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({
+			role: "owner",
+		}));
+		const row = await env.DB.prepare("SELECT key FROM projects WHERE id = ?")
+			.bind(projectId)
+			.first<{ key: string }>();
+		projectKey = row!.key;
+	});
+
+	async function mcpCall(params: unknown) {
+		return callMcpTool(workspaceId, token, slug, params);
+	}
+
+	it("update_issue accepts a ref in place of id", async () => {
+		const { number } = await seedIssue(workspaceId, projectId, userId, { title: "Ref update" });
+		const ref = `${projectKey}-${number}`;
+
+		const res = await mcpCall({
+			name: "update_issue",
+			arguments: { id: ref, title: "Renamed via ref" },
+		});
+		expect(res.error).toBeUndefined();
+
+		const getRes = await mcpCall({ name: "get_issue", arguments: { ref } });
+		const issue = JSON.parse(getRes.result!.content[0].text) as { title: string };
+		expect(issue.title).toBe("Renamed via ref");
+	});
+
+	it("delete_issue accepts a ref in place of id", async () => {
+		const { number } = await seedIssue(workspaceId, projectId, userId, { title: "Ref delete" });
+		const ref = `${projectKey}-${number}`;
+
+		const res = await mcpCall({ name: "delete_issue", arguments: { id: ref } });
+		expect(res.error).toBeUndefined();
+
+		const getRes = await mcpCall({ name: "get_issue", arguments: { ref } });
+		expect(getRes.error).toBeDefined();
+	});
+
+	it("create_issue_link accepts refs for sourceIssueId/targetIssueId", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "B" });
+
+		const res = await mcpCall({
+			name: "create_issue_link",
+			arguments: {
+				sourceIssueId: `${projectKey}-${a.number}`,
+				targetIssueId: `${projectKey}-${b.number}`,
+				type: "blocks",
+			},
+		});
+		expect(res.error).toBeUndefined();
+
+		const linksRes = await mcpCall({ name: "list_issue_links", arguments: { issueId: a.id } });
+		const links = JSON.parse(linksRes.result!.content[0].text) as Array<{ linkedIssueId: string }>;
+		expect(links.map((l) => l.linkedIssueId)).toEqual([b.id]);
+	});
+
+	it("create_issue accepts a project key in place of projectId", async () => {
+		const res = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId: projectKey, title: "Via project key" },
+		});
+		expect(res.error).toBeUndefined();
+		const { id } = JSON.parse(res.result!.content[0].text) as { id: string };
+
+		const getRes = await mcpCall({ name: "get_issue", arguments: { id } });
+		const issue = JSON.parse(getRes.result!.content[0].text) as { project_id: string };
+		expect(issue.project_id).toBe(projectId);
+	});
+
+	it("list_issues accepts a project key in place of projectId", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "In project" });
+
+		const res = await mcpCall({ name: "list_issues", arguments: { projectId: projectKey } });
+		expect(res.error).toBeUndefined();
+		const page = JSON.parse(res.result!.content[0].text) as { items: Array<{ title: string }> };
+		expect(page.items.map((i) => i.title)).toContain("In project");
+	});
+
+	it("an unresolvable ref returns NotFoundError, not a silent empty result", async () => {
+		const res = await mcpCall({ name: "update_issue", arguments: { id: "NOPE-1", title: "x" } });
+		expect(res.error).toBeDefined();
+	});
+
+	it("an unresolvable project key returns NotFoundError, not a silent empty result", async () => {
+		const res = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId: "NOPE", title: "x" },
+		});
+		expect(res.error).toBeDefined();
+	});
+
+	it("update_issue with a parentId ref to an invisible project fails the same as an unresolvable ref", async () => {
+		const roles = await seedWorkspaceRoles();
+		const writableProject = await seedProject(roles.workspace.id, "WRIT");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, writableProject.id, "member");
+		const hiddenProject = await seedProject(roles.workspace.id, "HIDE");
+
+		const mine = await seedIssue(roles.workspace.id, writableProject.id, roles.owner.user.id, {
+			title: "Mine",
+		});
+		const hidden = await seedIssue(roles.workspace.id, hiddenProject.id, roles.owner.user.id, {
+			title: "Hidden",
+		});
+
+		const missingRes = await callMcpTool(
+			roles.workspace.id,
+			roles.member.token,
+			roles.workspace.slug,
+			{
+				name: "update_issue",
+				arguments: { id: mine.id, parentId: crypto.randomUUID() },
+			}
+		);
+		const invisibleRes = await callMcpTool(
+			roles.workspace.id,
+			roles.member.token,
+			roles.workspace.slug,
+			{ name: "update_issue", arguments: { id: mine.id, parentId: hidden.id } }
+		);
+
+		expect(missingRes.error).toBeDefined();
+		expect(invisibleRes.error).toBeDefined();
+		expect(invisibleRes.error?.message).toBe(missingRes.error?.message);
+	});
+
+	it("list_issues with a project key the caller can't see returns an empty page, not a 404, same as a nonexistent key", async () => {
+		const roles = await seedWorkspaceRoles();
+		const hiddenProject = await seedProject(roles.workspace.id, "HIDE");
+		await seedIssue(roles.workspace.id, hiddenProject.id, roles.owner.user.id, {
+			title: "Hidden",
+		});
+
+		const nonexistentRes = await callMcpTool(
+			roles.workspace.id,
+			roles.member.token,
+			roles.workspace.slug,
+			{ name: "list_issues", arguments: { projectId: "NOPE" } }
+		);
+		const invisibleRes = await callMcpTool(
+			roles.workspace.id,
+			roles.member.token,
+			roles.workspace.slug,
+			{ name: "list_issues", arguments: { projectId: "HIDE" } }
+		);
+
+		expect(nonexistentRes.error).toBeUndefined();
+		expect(invisibleRes.error).toBeUndefined();
+		const nonexistentPage = JSON.parse(nonexistentRes.result!.content[0].text) as {
+			items: unknown[];
+		};
+		const invisiblePage = JSON.parse(invisibleRes.result!.content[0].text) as { items: unknown[] };
+		expect(nonexistentPage.items).toEqual([]);
+		expect(invisiblePage.items).toEqual([]);
+	});
+
+	it("search_issues with a visible project key returns matching results", async () => {
+		const createRes = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Findable via key search" },
+		});
+		expect(createRes.error).toBeUndefined();
+
+		const res = await mcpCall({
+			name: "search_issues",
+			arguments: { query: "Findable", projectId: projectKey },
+		});
+		expect(res.error).toBeUndefined();
+		const results = JSON.parse(res.result!.content[0].text) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toContain("Findable via key search");
+	});
+
+	it("get_prioritized_issues with a visible project key returns results", async () => {
+		await seedIssue(workspaceId, projectId, userId, {
+			title: "Prioritizable",
+			priority: "urgent",
+		});
+
+		const res = await mcpCall({
+			name: "get_prioritized_issues",
+			arguments: { projectId: projectKey, includeNotReady: true },
+		});
+		expect(res.error).toBeUndefined();
+		const { issues } = JSON.parse(res.result!.content[0].text) as {
+			issues: Array<{ title: string }>;
+		};
+		expect(issues.map((i) => i.title)).toContain("Prioritizable");
+	});
+
+	it("list_issues rejects an unrecognized param with the field name in the error", async () => {
+		const res = await mcpCall({
+			name: "list_issues",
+			arguments: { parentRef: "PROJ-1" },
+		});
+		expect(res.error).toBeDefined();
+		expect(res.error?.message).toContain("parentRef");
 	});
 });

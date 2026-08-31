@@ -11,8 +11,14 @@ export const issueLinksTools: MCPTool[] = [
 			type: "object",
 			required: ["sourceIssueId", "targetIssueId", "type"],
 			properties: {
-				sourceIssueId: { type: "string", description: "UUID of the source issue" },
-				targetIssueId: { type: "string", description: "UUID of the target issue" },
+				sourceIssueId: {
+					type: "string",
+					description: "UUID of the source issue, or a ref like PROJ-42",
+				},
+				targetIssueId: {
+					type: "string",
+					description: "UUID of the target issue, or a ref like PROJ-42",
+				},
 				type: {
 					type: "string",
 					enum: ["blocks", "blocked_by", "relates_to", "duplicates"],
@@ -49,7 +55,7 @@ export const issueLinksTools: MCPTool[] = [
 			type: "object",
 			required: ["issueId"],
 			properties: {
-				issueId: { type: "string", description: "UUID of the issue" },
+				issueId: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
 			},
 		},
 		handler(input, ctx) {
