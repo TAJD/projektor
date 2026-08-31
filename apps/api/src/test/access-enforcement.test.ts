@@ -1,5 +1,6 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { visibleProjectIds } from "../services/access";
 import { authHeaders, seedGroupGrant, seedIssue, seedProject, seedWorkspaceRoles } from "./helpers";
 
 // PROJ-311: group-based project access. Authorization lives entirely in projektor:
@@ -151,5 +152,64 @@ describe("PROJ-311 group-based project access", () => {
 			headers: authHeaders(roles.member.token, slug),
 		});
 		expect(getRes.status).toBe(200);
+	});
+});
+
+describe("visibleProjectIds helper", () => {
+	it("returns every project for owner and admin", async () => {
+		const roles = await seedWorkspaceRoles();
+		const p1 = await seedProject(roles.workspace.id, "P1");
+		const p2 = await seedProject(roles.workspace.id, "P2");
+
+		const ownerCtx = {
+			db: env.DB,
+			kv: env.KV,
+			r2: env.R2,
+			workspaceId: roles.workspace.id,
+			userId: roles.owner.user.id,
+			role: "owner" as const,
+		};
+
+		const ids = await visibleProjectIds(ownerCtx);
+		expect(ids.sort()).toEqual([p1.id, p2.id].sort());
+
+		const adminCtx = { ...ownerCtx, userId: roles.owner.user.id, role: "admin" as const };
+		expect((await visibleProjectIds(adminCtx)).sort()).toEqual([p1.id, p2.id].sort());
+	});
+
+	it("returns only granted projects for a non-admin member", async () => {
+		const roles = await seedWorkspaceRoles();
+		const granted = await seedProject(roles.workspace.id, "SEEN");
+		await seedProject(roles.workspace.id, "HID");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, granted.id, "member");
+
+		const ctx = {
+			db: env.DB,
+			kv: env.KV,
+			r2: env.R2,
+			workspaceId: roles.workspace.id,
+			userId: roles.member.user.id,
+			role: "member" as const,
+		};
+
+		const ids = await visibleProjectIds(ctx);
+		expect(ids).toEqual([granted.id]);
+	});
+
+	it("returns an empty list for a member with no grants", async () => {
+		const roles = await seedWorkspaceRoles();
+		await seedProject(roles.workspace.id, "LONE");
+
+		const ctx = {
+			db: env.DB,
+			kv: env.KV,
+			r2: env.R2,
+			workspaceId: roles.workspace.id,
+			userId: roles.member.user.id,
+			role: "member" as const,
+		};
+
+		const ids = await visibleProjectIds(ctx);
+		expect(ids).toEqual([]);
 	});
 });

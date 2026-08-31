@@ -1,4 +1,6 @@
-import type { Env, RealtimeEvent } from "@projektor/types";
+import type { Env, RealtimeEvent, Role } from "@projektor/types";
+import { visibleProjectIds } from "../services/access";
+import type { ServiceCtx } from "../services/types";
 
 export interface SubscriptionFilters {
 	projects?: string[];
@@ -6,8 +8,20 @@ export interface SubscriptionFilters {
 }
 
 export interface SocketAttachment {
+	userId: string;
+	workspaceId: string;
+	role: Role;
+	visibleProjectIds: string[];
 	subscribedAt: number;
 	filters?: SubscriptionFilters;
+}
+
+const INTERNAL_USER_ID_HEADER = "X-Internal-User-Id";
+const INTERNAL_WORKSPACE_ID_HEADER = "X-Internal-Workspace-Id";
+const INTERNAL_ROLE_HEADER = "X-Internal-Role";
+
+function isWorkspaceAdmin(role: Role | undefined): boolean {
+	return role === "owner" || role === "admin";
 }
 
 export class WorkspaceHub {
@@ -41,12 +55,23 @@ export class WorkspaceHub {
 			return new Response("Expected Upgrade: websocket", { status: 426 });
 		}
 
+		const identity = this.resolveIdentity(request);
+		if (!identity) {
+			return new Response("Unauthorized", { status: 401 });
+		}
+
+		const visibleIds = await this.loadVisibleProjectIds(identity);
+
 		const pair = new WebSocketPair();
 		const [client, server] = Object.values(pair);
 
 		this.ctx.acceptWebSocket(server);
 
 		const initialAttachment: SocketAttachment = {
+			userId: identity.userId,
+			workspaceId: identity.workspaceId,
+			role: identity.role,
+			visibleProjectIds: visibleIds,
 			subscribedAt: Math.floor(Date.now() / 1000),
 		};
 		server.serializeAttachment(initialAttachment);
@@ -57,14 +82,40 @@ export class WorkspaceHub {
 		});
 	}
 
+	private resolveIdentity(
+		request: Request
+	): { userId: string; workspaceId: string; role: Role } | null {
+		const userId = request.headers.get(INTERNAL_USER_ID_HEADER);
+		const workspaceId = request.headers.get(INTERNAL_WORKSPACE_ID_HEADER);
+		const role = request.headers.get(INTERNAL_ROLE_HEADER) as Role | null;
+		if (!userId || !workspaceId || !role) return null;
+		return { userId, workspaceId, role };
+	}
+
+	private async loadVisibleProjectIds(identity: {
+		userId: string;
+		workspaceId: string;
+		role: Role;
+	}): Promise<string[]> {
+		const ctx: ServiceCtx = {
+			db: this.env.DB,
+			kv: this.env.KV,
+			r2: this.env.R2,
+			workspaceId: identity.workspaceId,
+			userId: identity.userId,
+			role: identity.role,
+		};
+		return visibleProjectIds(ctx);
+	}
+
 	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
 		if (typeof message !== "string") return;
 
 		try {
 			const data = JSON.parse(message) as {
 				action?: string;
-				projects?: string[];
-				eventTypes?: string[];
+				projects?: unknown[];
+				eventTypes?: unknown[];
 			};
 
 			if (data.action === "ping") {
@@ -73,13 +124,29 @@ export class WorkspaceHub {
 			}
 
 			if (data.action === "subscribe") {
-				const attachment = (ws.deserializeAttachment() as SocketAttachment | null) ?? {
-					subscribedAt: Math.floor(Date.now() / 1000),
-				};
+				const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+				if (!attachment) return;
+
+				const allowedProjects = new Set(attachment.visibleProjectIds);
+				const requestedProjects = Array.isArray(data.projects)
+					? data.projects.filter((id): id is string => typeof id === "string")
+					: undefined;
+
+				let effectiveProjects: string[] | undefined;
+				if (requestedProjects) {
+					// Intersect the client-supplied list with the server-side visible set.
+					effectiveProjects = requestedProjects.filter((id) => allowedProjects.has(id));
+				} else if (!isWorkspaceAdmin(attachment.role)) {
+					// Non-admin with no explicit filter defaults to their visible set,
+					// never "every project in the workspace".
+					effectiveProjects = attachment.visibleProjectIds;
+				}
 
 				const filters: SubscriptionFilters = {
-					projects: Array.isArray(data.projects) ? data.projects : undefined,
-					eventTypes: Array.isArray(data.eventTypes) ? data.eventTypes : undefined,
+					projects: effectiveProjects,
+					eventTypes: Array.isArray(data.eventTypes)
+						? data.eventTypes.filter((t): t is string => typeof t === "string")
+						: undefined,
 				};
 
 				ws.serializeAttachment({
@@ -121,8 +188,21 @@ export class WorkspaceHub {
 		for (const ws of sockets) {
 			try {
 				const attachment = ws.deserializeAttachment() as SocketAttachment | null;
-				const filters = attachment?.filters;
+				if (!attachment) continue;
 
+				// Server-side project visibility check: never broadcast project-scoped
+				// events to a socket that cannot see the project.
+				if (event.projectId && !isWorkspaceAdmin(attachment.role)) {
+					const visible = new Set(attachment.visibleProjectIds);
+					if (!visible.has(event.projectId)) {
+						continue;
+					}
+				}
+
+				const filters = attachment.filters;
+
+				// Apply the client-requested project filter (already intersected with
+				// visibility at subscribe time, but re-checking is cheap and robust).
 				if (filters?.projects && filters.projects.length > 0 && event.projectId) {
 					if (!filters.projects.includes(event.projectId)) {
 						continue;
