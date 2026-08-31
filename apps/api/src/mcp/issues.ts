@@ -20,7 +20,10 @@ export const issuesTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			properties: {
-				projectId: { type: "string" },
+				projectId: {
+					type: "string",
+					description: "UUID of the project, or a project key like PROJ",
+				},
 				status: {
 					type: "string",
 					enum: ["backlog", "todo", "in_progress", "in_review", "done", "cancelled"],
@@ -46,7 +49,8 @@ export const issuesTools: MCPTool[] = [
 				},
 				parentId: {
 					type: "string",
-					description: "Filter by parent issue ID (returns direct children only)",
+					description:
+						"Filter by parent issue ID, or a ref like PROJ-42 (returns direct children only)",
 				},
 				noParent: {
 					type: "boolean",
@@ -128,7 +132,10 @@ export const issuesTools: MCPTool[] = [
 			type: "object",
 			required: ["projectId", "title"],
 			properties: {
-				projectId: { type: "string" },
+				projectId: {
+					type: "string",
+					description: "UUID of the project, or a project key like PROJ",
+				},
 				title: { type: "string" },
 				body: { type: "string" },
 				priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
@@ -141,7 +148,7 @@ export const issuesTools: MCPTool[] = [
 				labels: { type: "array", items: { type: "string" } },
 				parentId: {
 					type: "string",
-					description: "UUID of the parent issue (optional; max depth 5)",
+					description: "UUID of the parent issue, or a ref like PROJ-42 (optional; max depth 5)",
 				},
 				typeId: { type: "string", description: "UUID of the task type to assign" },
 			},
@@ -162,7 +169,7 @@ export const issuesTools: MCPTool[] = [
 			type: "object",
 			required: ["id"],
 			properties: {
-				id: { type: "string" },
+				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
 				title: { type: "string" },
 				body: { type: "string" },
 				status: {
@@ -180,7 +187,7 @@ export const issuesTools: MCPTool[] = [
 				parentId: {
 					type: "string",
 					nullable: true,
-					description: "Set or clear the parent issue (null to remove)",
+					description: "Set or clear the parent issue — UUID or ref like PROJ-42 (null to remove)",
 				},
 				typeId: { type: "string", nullable: true },
 				agentSessionId: {
@@ -216,7 +223,10 @@ export const issuesTools: MCPTool[] = [
 			required: ["query"],
 			properties: {
 				query: { type: "string", minLength: 1 },
-				projectId: { type: "string", description: "Restrict search to a specific project" },
+				projectId: {
+					type: "string",
+					description: "Restrict search to a specific project — UUID or project key like PROJ",
+				},
 				limit: { type: "number", default: 20, description: "Max 50" },
 			},
 		},
@@ -226,11 +236,13 @@ export const issuesTools: MCPTool[] = [
 	},
 	{
 		name: "delete_issue",
-		description: "Delete an issue by ID",
+		description: "Delete an issue by ID or ref (e.g. PROJ-42)",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
-			properties: { id: { type: "string" } },
+			properties: {
+				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
+			},
 		},
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
