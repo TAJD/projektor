@@ -73,7 +73,7 @@ describe("FeedbackSourceGrid", () => {
 		stubFetch();
 		render(<FeedbackSourceGrid workspaceSlug="my-ws" projectId="p1" />);
 		const link = (await screen.findByText("Onboarding survey")).closest("a");
-		expect(link?.getAttribute("href")).toBe("/feedback/s1");
+		expect(link?.getAttribute("href")).toBe("/feedback/s1?projectId=p1");
 	});
 
 	it("marks a revoked source as Revoked", async () => {
