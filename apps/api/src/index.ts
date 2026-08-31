@@ -376,9 +376,11 @@ app.get("*", async (c) => {
 			? "/projects/view/index.html"
 			: /^\/share\//.test(pathname)
 				? "/share/view/index.html"
-				: wikiSlugMatch
-					? "/wiki/view/index.html"
-					: "/index.html";
+				: /^\/feedback\/[^/]+/.test(pathname)
+					? "/feedback/view/index.html"
+					: wikiSlugMatch
+						? "/wiki/view/index.html"
+						: "/index.html";
 	const response = await c.env.ASSETS.fetch(
 		new Request(new URL(fallbackPath, c.req.url).toString())
 	);

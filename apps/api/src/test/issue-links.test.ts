@@ -1,6 +1,13 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedProject, seedWorkspaceRoles } from "./helpers";
+import {
+	authHeaders,
+	seedFixture,
+	seedGroupGrant,
+	seedIssue,
+	seedProject,
+	seedWorkspaceRoles,
+} from "./helpers";
 
 describe("Issue Links API", () => {
 	let token: string;
@@ -316,8 +323,7 @@ describe("PROJ-438 — links accept an issue ref", () => {
 		expect(res.status).toBe(404);
 	});
 
-	// Writes were deliberately left UUID-only — they're never on a first-paint path.
-	it("POST /:ref/links is still rejected — writes did not widen", async () => {
+	it("POST /:ref/links accepts a ref (PROJ-713: write tools resolve refs too)", async () => {
 		const fixture = await seedFixture({ role: "owner" });
 		const project = await seedProject(fixture.workspace.id);
 		await seedIssue(fixture.workspace.id, project.id, fixture.user.id, { title: "A" });
@@ -329,6 +335,40 @@ describe("PROJ-438 — links accept an issue ref", () => {
 			body: JSON.stringify({ targetIssueId: b.id, type: "blocks" }),
 		});
 
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(201);
+	});
+});
+
+describe("createLink target-visibility existence oracle", () => {
+	it("an unresolvable target ref and a target in an unwritable project give the same message", async () => {
+		const roles = await seedWorkspaceRoles();
+		const writableProject = await seedProject(roles.workspace.id, "WRIT");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, writableProject.id, "member");
+		const hiddenProject = await seedProject(roles.workspace.id, "HIDE");
+
+		const source = await seedIssue(roles.workspace.id, writableProject.id, roles.owner.user.id, {
+			title: "Source",
+		});
+		const hiddenTarget = await seedIssue(
+			roles.workspace.id,
+			hiddenProject.id,
+			roles.owner.user.id,
+			{ title: "Hidden target" }
+		);
+
+		const missingRes = await SELF.fetch(`http://localhost/api/issues/${source.id}/links`, {
+			method: "POST",
+			headers: authHeaders(roles.member.token, roles.workspace.slug),
+			body: JSON.stringify({ targetIssueId: "NOPE-1", type: "blocks" }),
+		});
+		const unwritableRes = await SELF.fetch(`http://localhost/api/issues/${source.id}/links`, {
+			method: "POST",
+			headers: authHeaders(roles.member.token, roles.workspace.slug),
+			body: JSON.stringify({ targetIssueId: hiddenTarget.id, type: "blocks" }),
+		});
+
+		expect(missingRes.status).toBe(404);
+		expect(unwritableRes.status).toBe(404);
+		expect(await missingRes.json()).toEqual(await unwritableRes.json());
 	});
 });

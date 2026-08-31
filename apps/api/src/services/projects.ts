@@ -106,6 +106,40 @@ export async function listProjectsAcrossWorkspaces(
 	return rows.results;
 }
 
+const PROJECT_KEY_PATTERN = /^[A-Z][A-Z0-9]*$/;
+
+export async function resolveProjectIdParam(ctx: ServiceCtx, param: string): Promise<string> {
+	if (!PROJECT_KEY_PATTERN.test(param)) return param;
+
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ id: schema.projects.id })
+		.from(schema.projects)
+		.where(and(eq(schema.projects.key, param), eq(schema.projects.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!row) throw new NotFoundError("Project not found");
+	return row.id;
+}
+
+export async function resolveVisibleProjectIdParam(
+	ctx: ServiceCtx,
+	param: string
+): Promise<string> {
+	if (!PROJECT_KEY_PATTERN.test(param)) return param;
+
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ id: schema.projects.id })
+		.from(schema.projects)
+		.where(and(eq(schema.projects.key, param), eq(schema.projects.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!row) return crypto.randomUUID();
+	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, row.id)) === null) {
+		return crypto.randomUUID();
+	}
+	return row.id;
+}
+
 export async function getProject(ctx: ServiceCtx, id: string) {
 	const orm = drizzle(ctx.db, { schema });
 	const project = await orm

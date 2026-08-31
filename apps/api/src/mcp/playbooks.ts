@@ -1,4 +1,5 @@
 import type { MCPTool } from "@projektor/types";
+import { ValidationError } from "../services/errors";
 import { composePlaybook } from "../services/playbook-compose";
 import { getPlaybook, listPlaybooks } from "../services/playbooks";
 
@@ -27,7 +28,10 @@ export const playbooksTools: MCPTool[] = [
 			required: ["name"],
 		},
 		async handler(input) {
-			const { name } = input as { name: string };
+			const { name } = input as { name?: unknown };
+			if (!name || typeof name !== "string") {
+				throw new ValidationError({ formErrors: ["name is required"], fieldErrors: {} });
+			}
 			return getPlaybook(name);
 		},
 	},

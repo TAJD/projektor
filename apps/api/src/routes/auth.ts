@@ -6,12 +6,14 @@ import { createUserToken, deleteUserToken, getUserWorkspaces } from "../services
 
 const router = new Hono<HonoEnv>();
 
+function isSafeRedirectPath(url: string): boolean {
+	return url.startsWith("/") && !url.startsWith("//");
+}
+
 router.get("/login", (c) => {
-	const redirectUrl = c.req.query("redirect_url") ?? "/";
-	return c.redirect(
-		`https://${c.env.CF_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/login?redirect_url=${encodeURIComponent(redirectUrl)}`,
-		302
-	);
+	const requested = c.req.query("redirect_url") ?? "/";
+	const redirectUrl = isSafeRedirectPath(requested) ? requested : "/";
+	return c.redirect(redirectUrl, 302);
 });
 
 router.get("/me", authMiddleware, async (c) => {
