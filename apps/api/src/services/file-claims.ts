@@ -4,6 +4,7 @@ import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../s
 import { visibleProjectPredicate } from "./access";
 import { postMessage } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -11,13 +12,14 @@ async function assertIssueInWorkspace(
 	orm: ReturnType<typeof drizzle>,
 	workspaceId: string,
 	issueId: string
-) {
+): Promise<string> {
 	const issue = await orm
-		.select({ id: schema.issues.id })
+		.select({ projectId: schema.issues.projectId })
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, workspaceId)))
 		.get();
 	if (!issue) throw new NotFoundError("Issue not found");
+	return issue.projectId;
 }
 
 async function assertAgentInWorkspace(
@@ -249,7 +251,7 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 
-	await assertIssueInWorkspace(orm, ctx.workspaceId, issueId);
+	const projectId = await assertIssueInWorkspace(orm, ctx.workspaceId, issueId);
 	if (agentId) {
 		await assertAgentInWorkspace(orm, ctx.workspaceId, agentId);
 	}
@@ -291,6 +293,12 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		agentId: agentId ?? undefined,
 		paths,
 		now,
+	});
+
+	await broadcastWorkspaceEvent(ctx, {
+		type: "claims.created",
+		projectId,
+		data: { issueId, agentId, paths, count: created.length },
 	});
 
 	return { created, overridden, reclaimed };
@@ -345,6 +353,38 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	const released = await inChunks(releaseIds, (chunk) =>
 		orm.select().from(schema.issueFileClaims).where(inArray(schema.issueFileClaims.id, chunk))
 	);
+
+	// Stamp projectId on the broadcast. When issueId is provided there is exactly one
+	// project; otherwise released rows may span projects, so fan out one event per project.
+	if (issueId) {
+		const projectId = await assertIssueInWorkspace(orm, ctx.workspaceId, issueId);
+		await broadcastWorkspaceEvent(ctx, {
+			type: "claims.released",
+			projectId,
+			data: { issueId, paths, count: released.length },
+		});
+	} else {
+		const releasedByProject = await inChunks(releaseIds, (chunk) =>
+			orm
+				.select({ projectId: schema.issues.projectId, path: schema.issueFileClaims.path })
+				.from(schema.issueFileClaims)
+				.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
+				.where(inArray(schema.issueFileClaims.id, chunk))
+		);
+		const grouped = new Map<string, string[]>();
+		for (const row of releasedByProject) {
+			const list = grouped.get(row.projectId) ?? [];
+			list.push(row.path);
+			grouped.set(row.projectId, list);
+		}
+		for (const [projectId, projectPaths] of grouped) {
+			await broadcastWorkspaceEvent(ctx, {
+				type: "claims.released",
+				projectId,
+				data: { issueId, paths: projectPaths, count: projectPaths.length },
+			});
+		}
+	}
 
 	return { released, count: released.length };
 }

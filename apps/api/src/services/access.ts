@@ -154,3 +154,41 @@ export function visibleProjectSqlFragment(
 		params: [ctx.userId],
 	};
 }
+
+/**
+ * Return every project ID visible to the caller inside their workspace.
+ * - owner/admin: every project in the workspace.
+ * - everyone else: the union of project grants held by the caller's groups
+ *   (default-deny; scoped by workspace_id through both user_groups and projects).
+ */
+export async function visibleProjectIds(ctx: ServiceCtx): Promise<string[]> {
+	const orm = drizzle(ctx.db, { schema });
+
+	if (isWorkspaceAdmin(ctx.role)) {
+		const rows = await orm
+			.select({ id: schema.projects.id })
+			.from(schema.projects)
+			.where(eq(schema.projects.workspaceId, ctx.workspaceId))
+			.all();
+		return rows.map((r) => r.id);
+	}
+
+	const rows = await orm
+		.selectDistinct({ id: schema.groupProjectGrants.projectId })
+		.from(schema.groupProjectGrants)
+		.innerJoin(
+			schema.userGroupMembers,
+			eq(schema.userGroupMembers.groupId, schema.groupProjectGrants.groupId)
+		)
+		.innerJoin(schema.userGroups, eq(schema.userGroups.id, schema.groupProjectGrants.groupId))
+		.innerJoin(schema.projects, eq(schema.projects.id, schema.groupProjectGrants.projectId))
+		.where(
+			and(
+				eq(schema.userGroupMembers.userId, ctx.userId),
+				eq(schema.userGroups.workspaceId, ctx.workspaceId),
+				eq(schema.projects.workspaceId, ctx.workspaceId)
+			)
+		)
+		.all();
+	return rows.map((r) => r.id);
+}

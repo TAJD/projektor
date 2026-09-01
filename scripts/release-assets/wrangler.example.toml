@@ -76,6 +76,18 @@ id = "REPLACE_WITH_YOUR_OAUTH_KV_NAMESPACE_ID"
 binding = "R2"
 bucket_name = "projektor-files"
 
+# ─── Real-Time WebSocket Hub (Optional, requires Workers Paid) ─
+# Enables live event streaming across /api/workspaces/:slug/realtime (Durable Objects).
+# Uncomment these blocks if your Cloudflare account is on Workers Paid.
+# [durable_objects]
+# bindings = [
+#   { name = "WORKSPACE_HUB", class_name = "WorkspaceHub" }
+# ]
+#
+# [[migrations]]
+# tag = "v1"
+# new_sqlite_classes = ["WorkspaceHub"]
+
 # ─── Static vars (non-secret) ──────────────────────────────────
 [vars]
 ENVIRONMENT = "production"

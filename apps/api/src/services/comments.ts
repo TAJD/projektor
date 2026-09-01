@@ -8,6 +8,7 @@ import {
 } from "../schemas/comments";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { broadcastWorkspaceEvent } from "./realtime";
 import type { ServiceCtx } from "./types";
 
 interface CommentRow {
@@ -23,7 +24,7 @@ interface CommentRow {
 // PROJ-311: a comment is reachable only if its issue's project is visible to the
 // user (owner/admin bypass). Throw the issue-not-found error to avoid leaking that
 // an issue exists in a project the user was never granted.
-async function assertIssueVisible(ctx: ServiceCtx, issueId: string): Promise<void> {
+async function assertIssueVisible(ctx: ServiceCtx, issueId: string): Promise<string> {
 	const orm = drizzle(ctx.db, { schema });
 	const issue = await orm
 		.select({ projectId: schema.issues.projectId })
@@ -34,6 +35,7 @@ async function assertIssueVisible(ctx: ServiceCtx, issueId: string): Promise<voi
 	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, issue.projectId)) === null) {
 		throw new NotFoundError("Issue not found");
 	}
+	return issue.projectId;
 }
 
 export async function listComments(ctx: ServiceCtx, input: unknown): Promise<CommentRow[]> {
@@ -72,7 +74,7 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { issueId, body } = parsed.data;
 
-	await assertIssueVisible(ctx, issueId);
+	const projectId = await assertIssueVisible(ctx, issueId);
 	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 
 	const id = crypto.randomUUID();
@@ -91,6 +93,12 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 		authorKind: ctx.authKind ?? null,
 	});
 
+	await broadcastWorkspaceEvent(ctx, {
+		type: "comment.created",
+		projectId,
+		data: { id, issueId, authorId: ctx.userId },
+	});
+
 	return { id };
 }
 
@@ -99,7 +107,7 @@ export async function updateComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { issueId, commentId, body } = parsed.data;
 
-	await assertIssueVisible(ctx, issueId);
+	const projectId = await assertIssueVisible(ctx, issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const comment = await orm
@@ -116,6 +124,12 @@ export async function updateComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 		.set({ body, updatedAt: Math.floor(Date.now() / 1000) })
 		.where(eq(schema.issueComments.id, commentId));
 
+	await broadcastWorkspaceEvent(ctx, {
+		type: "comment.updated",
+		projectId,
+		data: { id: commentId, issueId },
+	});
+
 	return { ok: true };
 }
 
@@ -124,7 +138,7 @@ export async function deleteComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { issueId, commentId } = parsed.data;
 
-	await assertIssueVisible(ctx, issueId);
+	const projectId = await assertIssueVisible(ctx, issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const comment = await orm
@@ -139,6 +153,12 @@ export async function deleteComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 	if (!canDelete) throw new ForbiddenError("Forbidden");
 
 	await orm.delete(schema.issueComments).where(eq(schema.issueComments.id, commentId));
+
+	await broadcastWorkspaceEvent(ctx, {
+		type: "comment.deleted",
+		projectId,
+		data: { id: commentId, issueId },
+	});
 
 	return { ok: true };
 }

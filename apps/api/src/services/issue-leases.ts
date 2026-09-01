@@ -7,6 +7,7 @@ import {
 } from "../schemas/issue-leases";
 import { visibleProjectPredicate } from "./access";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { broadcastWorkspaceEvent } from "./realtime";
 import type { ServiceCtx } from "./types";
 
 // Mirrors ACTIVE_TTL in services/agents.ts: a session (and therefore its leases)
@@ -218,6 +219,13 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 		.from(schema.issueLeases)
 		.where(eq(schema.issueLeases.id, id))
 		.get();
+
+	await broadcastWorkspaceEvent(ctx, {
+		type: "lease.claimed",
+		projectId,
+		data: { issueId, agentId, id },
+	});
+
 	// biome-ignore lint/style/noNonNullAssertion: row was just inserted; SELECT immediately after guarantees it exists
 	return row!;
 }
@@ -245,10 +253,23 @@ export async function releaseIssue(ctx: ServiceCtx, raw: unknown) {
 		.get();
 	if (!active) throw new NotFoundError("No active lease on this issue");
 
+	const issue = await orm
+		.select({ projectId: schema.issues.projectId })
+		.from(schema.issues)
+		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!issue) throw new NotFoundError("Issue not found");
+
 	await orm
 		.update(schema.issueLeases)
 		.set({ releasedAt: now, releaseReason: "released" })
 		.where(eq(schema.issueLeases.id, active.id));
+
+	await broadcastWorkspaceEvent(ctx, {
+		type: "lease.released",
+		projectId: issue.projectId,
+		data: { issueId, agentId },
+	});
 
 	return { ok: true };
 }
