@@ -106,6 +106,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				role: "owner",
 				visibleProjectIds: [projectId],
 				subscribedAt: 12345,
+				snapshotAt: 12345,
 			}),
 			close: vi.fn(),
 		};
@@ -143,6 +144,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				role: "member",
 				visibleProjectIds: [projectId],
 				subscribedAt: 12345,
+				snapshotAt: 12345,
 			}),
 			close: vi.fn(),
 		};
@@ -184,6 +186,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				workspaceId,
 				role: "member",
 				visibleProjectIds: [projectId],
+				snapshotAt: 12345,
 				filters: {
 					projects: [projectId],
 					eventTypes: ["issue.*"],
@@ -198,6 +201,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				workspaceId,
 				role: "member",
 				visibleProjectIds: ["other-project-id"],
+				snapshotAt: 12345,
 				filters: {
 					projects: ["other-project-id"],
 					eventTypes: ["issue.*"],
@@ -212,6 +216,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				workspaceId,
 				role: "member",
 				visibleProjectIds: [projectId],
+				snapshotAt: 12345,
 				filters: {
 					projects: [projectId],
 					eventTypes: ["comment.*"],
@@ -248,6 +253,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				workspaceId,
 				role: "member",
 				visibleProjectIds: [projectId],
+				snapshotAt: 12345,
 				filters: {},
 			}),
 		};
@@ -259,6 +265,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				workspaceId,
 				role: "member",
 				visibleProjectIds: ["allowed-but-other"],
+				snapshotAt: 12345,
 				filters: {},
 			}),
 		};
@@ -270,6 +277,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				workspaceId,
 				role: "owner",
 				visibleProjectIds: [projectId],
+				snapshotAt: 12345,
 				filters: {},
 			}),
 		};
@@ -303,6 +311,7 @@ describe("Realtime WebSockets (Opt-In)", () => {
 				workspaceId,
 				role: "member",
 				visibleProjectIds: ["some-other-project"],
+				snapshotAt: 12345,
 				filters: {
 					projects: [projectId],
 				},
@@ -326,6 +335,86 @@ describe("Realtime WebSockets (Opt-In)", () => {
 
 		expect(result.recipientCount).toBe(0);
 		expect(spyWs.send).not.toHaveBeenCalled();
+	});
+
+	it("WorkspaceHub.broadcast fails closed for non-admins when projectId is missing", async () => {
+		const memberWs = {
+			send: vi.fn(),
+			deserializeAttachment: vi.fn().mockReturnValue({
+				userId,
+				workspaceId,
+				role: "member",
+				visibleProjectIds: [projectId],
+				snapshotAt: 12345,
+				filters: {},
+			}),
+		};
+
+		const adminWs = {
+			send: vi.fn(),
+			deserializeAttachment: vi.fn().mockReturnValue({
+				userId,
+				workspaceId,
+				role: "owner",
+				visibleProjectIds: [projectId],
+				snapshotAt: 12345,
+				filters: {},
+			}),
+		};
+
+		const state = {
+			acceptWebSocket: vi.fn(),
+			getWebSockets: vi.fn().mockReturnValue([memberWs, adminWs]),
+		};
+
+		const hub = new WorkspaceHub(state as unknown as DurableObjectState, env as unknown as Env);
+
+		const result = await hub.broadcast({
+			type: "workspace.announcement",
+			workspaceId,
+			data: { id: "announcement-1" },
+			timestamp: Math.floor(Date.now() / 1000),
+		});
+
+		expect(result.recipientCount).toBe(1);
+		expect(memberWs.send).not.toHaveBeenCalled();
+		expect(adminWs.send).toHaveBeenCalled();
+	});
+
+	it("WorkspaceHub refreshes a stale visibility snapshot on ping", async () => {
+		const roles = await seedWorkspaceRoles();
+		const grantedProject = await seedProject(roles.workspace.id, "SEEN");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, grantedProject.id, "member");
+
+		const serializeAttachment = vi.fn();
+		const mockWs = {
+			send: vi.fn(),
+			serializeAttachment,
+			deserializeAttachment: vi.fn().mockReturnValue({
+				userId: roles.member.user.id,
+				workspaceId: roles.workspace.id,
+				role: "member",
+				visibleProjectIds: [],
+				subscribedAt: 1,
+				snapshotAt: 1,
+			}),
+			close: vi.fn(),
+		};
+
+		const state = {
+			acceptWebSocket: vi.fn(),
+			getWebSockets: vi.fn().mockReturnValue([]),
+		};
+		const hub = new WorkspaceHub(state as unknown as DurableObjectState, env as unknown as Env);
+
+		await hub.webSocketMessage(mockWs as unknown as WebSocket, JSON.stringify({ action: "ping" }));
+
+		expect(serializeAttachment).toHaveBeenCalledWith(
+			expect.objectContaining({
+				visibleProjectIds: [grantedProject.id],
+			})
+		);
+		expect(mockWs.send).toHaveBeenCalledWith(expect.stringContaining('"type":"pong"'));
 	});
 
 	it("WorkspaceHub.fetch computes visibleProjectIds from the database on upgrade", async () => {

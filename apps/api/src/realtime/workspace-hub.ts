@@ -1,4 +1,6 @@
+import { drizzle, schema } from "@projektor/db";
 import type { Env, RealtimeEvent, Role } from "@projektor/types";
+import { and, eq } from "drizzle-orm";
 import { visibleProjectIds } from "../services/access";
 import type { ServiceCtx } from "../services/types";
 
@@ -10,15 +12,20 @@ export interface SubscriptionFilters {
 export interface SocketAttachment {
 	userId: string;
 	workspaceId: string;
-	role: Role;
+	role?: Role;
 	visibleProjectIds: string[];
 	subscribedAt: number;
+	snapshotAt: number;
 	filters?: SubscriptionFilters;
 }
 
 const INTERNAL_USER_ID_HEADER = "X-Internal-User-Id";
 const INTERNAL_WORKSPACE_ID_HEADER = "X-Internal-Workspace-Id";
 const INTERNAL_ROLE_HEADER = "X-Internal-Role";
+
+// How long a visibility/role snapshot is trusted on a hibernated socket before
+// it is refreshed from D1. Bounds stale access after admin demotion or removal.
+const SNAPSHOT_TTL_SECONDS = 300;
 
 function isWorkspaceAdmin(role: Role | undefined): boolean {
 	return role === "owner" || role === "admin";
@@ -67,12 +74,14 @@ export class WorkspaceHub {
 
 		this.ctx.acceptWebSocket(server);
 
+		const now = Math.floor(Date.now() / 1000);
 		const initialAttachment: SocketAttachment = {
 			userId: identity.userId,
 			workspaceId: identity.workspaceId,
 			role: identity.role,
 			visibleProjectIds: visibleIds,
-			subscribedAt: Math.floor(Date.now() / 1000),
+			subscribedAt: now,
+			snapshotAt: now,
 		};
 		server.serializeAttachment(initialAttachment);
 
@@ -92,12 +101,12 @@ export class WorkspaceHub {
 		return { userId, workspaceId, role };
 	}
 
-	private async loadVisibleProjectIds(identity: {
+	private buildServiceCtx(identity: {
 		userId: string;
 		workspaceId: string;
-		role: Role;
-	}): Promise<string[]> {
-		const ctx: ServiceCtx = {
+		role?: Role;
+	}): ServiceCtx {
+		return {
 			db: this.env.DB,
 			kv: this.env.KV,
 			r2: this.env.R2,
@@ -105,7 +114,48 @@ export class WorkspaceHub {
 			userId: identity.userId,
 			role: identity.role,
 		};
-		return visibleProjectIds(ctx);
+	}
+
+	private async loadVisibleProjectIds(identity: {
+		userId: string;
+		workspaceId: string;
+		role?: Role;
+	}): Promise<string[]> {
+		return visibleProjectIds(this.buildServiceCtx(identity));
+	}
+
+	private async refreshSnapshot(attachment: SocketAttachment): Promise<SocketAttachment> {
+		const orm = drizzle(this.env.DB, { schema });
+		const membership = await orm
+			.select({ role: schema.workspaceMembers.role })
+			.from(schema.workspaceMembers)
+			.where(
+				and(
+					eq(schema.workspaceMembers.workspaceId, attachment.workspaceId),
+					eq(schema.workspaceMembers.userId, attachment.userId)
+				)
+			)
+			.get();
+
+		const role = (membership?.role as Role | undefined) ?? attachment.role;
+		const visibleProjectIds = membership
+			? await this.loadVisibleProjectIds({
+					userId: attachment.userId,
+					workspaceId: attachment.workspaceId,
+					role,
+				})
+			: [];
+
+		return {
+			...attachment,
+			role,
+			visibleProjectIds,
+			snapshotAt: Math.floor(Date.now() / 1000),
+		};
+	}
+
+	private isSnapshotStale(attachment: SocketAttachment): boolean {
+		return Math.floor(Date.now() / 1000) - attachment.snapshotAt > SNAPSHOT_TTL_SECONDS;
 	}
 
 	async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
@@ -118,15 +168,20 @@ export class WorkspaceHub {
 				eventTypes?: unknown[];
 			};
 
+			let attachment = ws.deserializeAttachment() as SocketAttachment | null;
+			if (!attachment) return;
+
+			if (this.isSnapshotStale(attachment)) {
+				attachment = await this.refreshSnapshot(attachment);
+				ws.serializeAttachment(attachment);
+			}
+
 			if (data.action === "ping") {
 				ws.send(JSON.stringify({ type: "pong", timestamp: Math.floor(Date.now() / 1000) }));
 				return;
 			}
 
 			if (data.action === "subscribe") {
-				const attachment = ws.deserializeAttachment() as SocketAttachment | null;
-				if (!attachment) return;
-
 				const allowedProjects = new Set(attachment.visibleProjectIds);
 				const requestedProjects = Array.isArray(data.projects)
 					? data.projects.filter((id): id is string => typeof id === "string")
@@ -190,9 +245,11 @@ export class WorkspaceHub {
 				const attachment = ws.deserializeAttachment() as SocketAttachment | null;
 				if (!attachment) continue;
 
-				// Server-side project visibility check: never broadcast project-scoped
-				// events to a socket that cannot see the project.
-				if (event.projectId && !isWorkspaceAdmin(attachment.role)) {
+				// Server-side project visibility check: non-admins must receive only
+				// events scoped to a project they can see. Missing projectId is treated
+				// as "deny" for non-admins (fail-closed).
+				if (!isWorkspaceAdmin(attachment.role)) {
+					if (!event.projectId) continue;
 					const visible = new Set(attachment.visibleProjectIds);
 					if (!visible.has(event.projectId)) {
 						continue;

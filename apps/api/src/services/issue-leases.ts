@@ -253,6 +253,13 @@ export async function releaseIssue(ctx: ServiceCtx, raw: unknown) {
 		.get();
 	if (!active) throw new NotFoundError("No active lease on this issue");
 
+	const issue = await orm
+		.select({ projectId: schema.issues.projectId })
+		.from(schema.issues)
+		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!issue) throw new NotFoundError("Issue not found");
+
 	await orm
 		.update(schema.issueLeases)
 		.set({ releasedAt: now, releaseReason: "released" })
@@ -260,6 +267,7 @@ export async function releaseIssue(ctx: ServiceCtx, raw: unknown) {
 
 	await broadcastWorkspaceEvent(ctx, {
 		type: "lease.released",
+		projectId: issue.projectId,
 		data: { issueId, agentId },
 	});
 
