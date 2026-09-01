@@ -137,7 +137,7 @@ export class WorkspaceHub {
 			)
 			.get();
 
-		const role = (membership?.role as Role | undefined) ?? attachment.role;
+		const role = membership ? (membership.role as Role) : undefined;
 		const visibleProjectIds = membership
 			? await this.loadVisibleProjectIds({
 					userId: attachment.userId,

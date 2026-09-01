@@ -417,6 +417,54 @@ describe("Realtime WebSockets (Opt-In)", () => {
 		expect(mockWs.send).toHaveBeenCalledWith(expect.stringContaining('"type":"pong"'));
 	});
 
+	it("WorkspaceHub drops a removed admin's stale elevated access on refresh", async () => {
+		const roles = await seedWorkspaceRoles();
+		await env.DB.prepare("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?")
+			.bind(roles.workspace.id, roles.owner.user.id)
+			.run();
+
+		const serializeAttachment = vi.fn();
+		let attachment = {
+			userId: roles.owner.user.id,
+			workspaceId: roles.workspace.id,
+			role: "owner",
+			visibleProjectIds: [],
+			subscribedAt: 1,
+			snapshotAt: 1,
+		};
+		const mockWs = {
+			send: vi.fn(),
+			serializeAttachment: serializeAttachment.mockImplementation((next) => {
+				attachment = next;
+			}),
+			deserializeAttachment: vi.fn().mockImplementation(() => attachment),
+			close: vi.fn(),
+		};
+
+		const state = {
+			acceptWebSocket: vi.fn(),
+			getWebSockets: vi.fn().mockReturnValue([mockWs]),
+		};
+		const hub = new WorkspaceHub(state as unknown as DurableObjectState, env as unknown as Env);
+
+		await hub.webSocketMessage(mockWs as unknown as WebSocket, JSON.stringify({ action: "ping" }));
+
+		expect(serializeAttachment).toHaveBeenCalledWith(
+			expect.objectContaining({ role: undefined, visibleProjectIds: [] })
+		);
+
+		const { recipientCount } = await hub.broadcast({
+			type: "workspace.event",
+			workspaceId: roles.workspace.id,
+			data: { id: "should-not-reach-removed-admin" },
+			timestamp: Math.floor(Date.now() / 1000),
+		});
+		expect(recipientCount).toBe(0);
+		expect(mockWs.send).not.toHaveBeenCalledWith(
+			expect.stringContaining("should-not-reach-removed-admin")
+		);
+	});
+
 	it("WorkspaceHub.fetch computes visibleProjectIds from the database on upgrade", async () => {
 		const roles = await seedWorkspaceRoles();
 		const grantedProject = await seedProject(roles.workspace.id, "SEEN");
