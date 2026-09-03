@@ -4,6 +4,7 @@ import { insufficientScopeChallenge } from "../auth/challenge";
 import { type Capability, capabilityForMcpTool, tokenAllows } from "../auth/scopes";
 import { agentMessagesTools } from "../mcp/agent-messages";
 import { agentsTools } from "../mcp/agents";
+import { TOOL_DOMAIN_SLUGS, toolNamesForDomains } from "../mcp/catalog";
 import { codeHeatmapTools } from "../mcp/code-heatmap";
 import { commentsTools } from "../mcp/comments";
 import { customFieldsTools } from "../mcp/custom-fields";
@@ -120,7 +121,31 @@ router.post("/:workspaceId", async (c) => {
 			);
 
 		case "tools/list": {
-			const tools = getAllTools(workspace.id);
+			const domainsParam = c.req.query("domains");
+			let tools = getAllTools(workspace.id);
+			if (domainsParam !== undefined) {
+				const requested = dedupe(
+					domainsParam
+						.split(",")
+						.map((s) => s.trim())
+						.filter(Boolean)
+				);
+				if (requested.length > 0) {
+					const invalid = requested.filter((slug) => !TOOL_DOMAIN_SLUGS.includes(slug));
+					if (invalid.length > 0) {
+						return c.json(
+							jsonRpcError(
+								body.id,
+								-32602,
+								`Unknown domain slug(s): ${invalid.join(", ")}. Valid domains: ${TOOL_DOMAIN_SLUGS.join(", ")}`
+							),
+							400
+						);
+					}
+					const allowed = toolNamesForDomains(requested);
+					tools = tools.filter((t) => allowed.has(t.name));
+				}
+			}
 			return c.json(
 				jsonRpcResult(body.id, {
 					tools: tools.map((t) => ({
@@ -214,6 +239,10 @@ function insufficientScope(
 ) {
 	c.header("WWW-Authenticate", insufficientScopeChallenge(c.req.url, workspaceId));
 	return c.json(jsonRpcError(id, -32003, `Token lacks '${required}' scope`), 403);
+}
+
+function dedupe(values: string[]): string[] {
+	return [...new Set(values)];
 }
 
 function getAllTools(workspaceId: string): MCPTool[] {
