@@ -381,3 +381,5 @@ stale). The grouping there separates **Coordination** tools (the agent-native pr
 used by the fleet protocol above) from **Project data** tools.
 
 **Tip:** `get_issue` accepts `ref: "PROJ-42"` (project key + number) — you don't need the UUID when you have the display key.
+
+**`tools/list` caching:** the response carries `ttlMs`/`cacheScope` hints (SEP-2549); `cacheScope` is `"private"` because the list varies per query string (`?domains=`, PROJ-716). These are advisory only — projektor has no server-side cache backing them — so a client that caches `tools/list` must key on the full request URL (path + query), not the path alone, or it will serve one caller's filtered catalog to another.

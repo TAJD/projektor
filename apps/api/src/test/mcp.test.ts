@@ -18,9 +18,10 @@ async function mcpFetch(
 	workspaceId: string,
 	method: string,
 	params: unknown,
-	headers: Record<string, string>
+	headers: Record<string, string>,
+	query = ""
 ): Promise<Response> {
-	return SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+	return SELF.fetch(`http://localhost/mcp/${workspaceId}${query}`, {
 		method: "POST",
 		headers,
 		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
@@ -31,9 +32,10 @@ async function mcpCall<T>(
 	workspaceId: string,
 	method: string,
 	params: unknown,
-	headers: Record<string, string>
+	headers: Record<string, string>,
+	query = ""
 ): Promise<JsonRpcResult<T> | JsonRpcError> {
-	const res = await mcpFetch(workspaceId, method, params, headers);
+	const res = await mcpFetch(workspaceId, method, params, headers, query);
 	return res.json();
 }
 
@@ -110,6 +112,23 @@ describe("MCP endpoint", () => {
 		)) as JsonRpcResult<{ ttlMs: number; cacheScope: string }>;
 		expect(res.result.ttlMs).toBeGreaterThan(0);
 		expect(res.result.cacheScope).toBe("private");
+	});
+
+	it("tools/list responses differ by query string back to back, same path (PROJ-717)", async () => {
+		const filtered = (await mcpCall<{ tools: Array<{ name: string }> }>(
+			workspaceId,
+			"tools/list",
+			{},
+			headers,
+			"?domains=issues"
+		)) as JsonRpcResult<{ tools: Array<{ name: string }> }>;
+		const unfiltered = (await mcpCall<{ tools: Array<{ name: string }> }>(
+			workspaceId,
+			"tools/list",
+			{},
+			headers
+		)) as JsonRpcResult<{ tools: Array<{ name: string }> }>;
+		expect(filtered.result.tools.length).toBeLessThan(unfiltered.result.tools.length);
 	});
 
 	it("tools/list returns core tools", async () => {

@@ -43,11 +43,10 @@ const TOOLS_LIST_TTL_MS = 60_000;
 
 // "private" (HTTP Cache-Control semantics, not a projektor-specific value):
 // only the requesting client may cache this response, not a shared
-// intermediary. Correct today because tools/list is NOT filtered by token
-// scope or role (only tools/call is, below) — every caller in a workspace
-// sees the same list. If list filtering is ever added, this must become
-// per-identity, not just per-workspace, or a shared cache would leak one
-// caller's tool set to another.
+// intermediary. tools/list is filtered by `?domains=` (PROJ-716), so the
+// cache key must be the full request URL including the query string, not
+// the path alone — see AGENTS.md. This is an advisory hint; no server-side
+// cache backs it (PROJ-717).
 const TOOLS_LIST_CACHE_SCOPE = "private";
 
 // Surfaced to every MCP client at `initialize` (the MCP spec's optional
