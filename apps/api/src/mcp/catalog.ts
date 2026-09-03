@@ -98,3 +98,18 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 
 /** Total number of MCP tools across all domains. */
 export const TOOL_COUNT = TOOL_DOMAINS.reduce((n, d) => n + d.tools.length, 0);
+
+/** Valid `?domains=` slugs, in catalog order — the fail-closed validation list. */
+export const TOOL_DOMAIN_SLUGS: string[] = TOOL_DOMAINS.map((d) => d.domain);
+
+/** Tool names belonging to the given domain slugs. Unknown slugs are silently ignored — callers validate against `TOOL_DOMAIN_SLUGS` first. */
+export function toolNamesForDomains(slugs: Iterable<string>): Set<string> {
+	const wanted = new Set(slugs);
+	const names = new Set<string>();
+	for (const d of TOOL_DOMAINS) {
+		if (wanted.has(d.domain)) {
+			for (const t of d.tools) names.add(t.name);
+		}
+	}
+	return names;
+}

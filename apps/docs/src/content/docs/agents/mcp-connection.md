@@ -295,6 +295,11 @@ adopted that yet, so it doesn't claim the `"2026-07-28"` version string here.
 }
 ```
 
+These hints are advisory only — projektor has no server-side cache backing them. If you
+cache `tools/list` client-side, key on the full request URL (path + query string), not
+the path alone: the list varies by `?domains=`, so a path-only cache key will serve a
+stale or wrongly-filtered catalog.
+
 `cacheScope` follows HTTP `Cache-Control` semantics (`"private"` here, since the list
 isn't currently filtered per-caller, but isn't safe for a shared/intermediary cache to
 serve across different callers either).
