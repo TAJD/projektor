@@ -5,7 +5,7 @@ export const codeHeatmapTools: MCPTool[] = [
 	{
 		name: "get_code_heatmap",
 		description:
-			"Where work lands in the codebase, from file-claim history (issue_file_claims) — no git " +
+			"Where work lands in the codebase, from file-claim history — no git " +
 			"integration needed. Aggregates claims one path segment below `prefix` (omit for the " +
 			"top level), sized by distinctIssueCount (distinct issues that claimed a path under that " +
 			"segment, claimedAt within [since, until]) plus claimCount (raw claim count, including " +

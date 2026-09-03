@@ -9,9 +9,8 @@ export const flowMetricsTools: MCPTool[] = [
 			"collaboration-shape (humanInterventions, autonomyRatio, flowEfficiency — human " +
 			"attention, not an agent-vs-human split), volume-over-time (wipOverTime, throughputOverTime, cfdOverTime, " +
 			"arrivalVsCompletionOverTime, bugShareOverTime, bugTypeTracked), and factoryHealth " +
-			"(leaseExpiries, abandonedClaims, gateRejections, wipCapPressure) metrics for a project, " +
-			"computed from indexed transition timestamps. Full definitions: " +
-			"/projektor/agents/flow-metrics/. Two easily-confused pairs: autonomyRatio divides by " +
+			"(leaseExpiries, abandonedClaims, gateRejections, wipCapPressure) metrics for a project. " +
+			"Full definitions: /projektor/agents/flow-metrics/. Two easily-confused pairs: autonomyRatio divides by " +
 			"cycleTime (claimed→done) while flowEfficiency divides by leadTime (ready→done), so " +
 			"flowEfficiency is always ≤ autonomyRatio when there's a ready→claimed queue; and " +
 			"bugTypeTracked:false (no 'bug' task type in the workspace) is distinct from a genuine " +
