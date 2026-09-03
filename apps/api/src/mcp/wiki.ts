@@ -113,9 +113,9 @@ export const wikiTools: MCPTool[] = [
 			"(`---\\ntype: runbook\\ntags: [foo]\\nstatus: draft\\n---\\n...`) — type (freeform; " +
 			`well-known values ${WELL_KNOWN_TYPES}), tags[], status (draft|current|stale|` +
 			"deprecated), verified_at, verified_by, owners[], verify_interval (days), template " +
-			"(boolean) are parsed and denormalised for filtering. Invalid frontmatter (bad " +
-			"status/enum value, wrong field type, unrecognised key) is rejected with a structured " +
-			"validation error, not silently ignored. Alternatively, pass `templateSlug` (from " +
+			"(boolean) are parsed and denormalised for filtering. Invalid frontmatter (bad status/" +
+			"enum, wrong type, unrecognised key) is rejected with a structured error, not ignored. " +
+			"Alternatively, pass `templateSlug` (from " +
 			"list_wiki_templates) to seed this page's content from an existing template page — " +
 			"its `template: true` flag is stripped from the seeded content (the new page is not " +
 			"itself a template). `templateSlug` and `content` are mutually exclusive; a " +
@@ -232,17 +232,16 @@ export const wikiTools: MCPTool[] = [
 			"frontmatter block without touching the rest of the content — a key set to " +
 			"null is removed; a page with no frontmatter block gains one). " +
 			"baseRevisionId is required (the current revision id from " +
-			"list_wiki_revisions/get_wiki_revision, or null if the page has never been " +
-			"revised) — conflict detection is SECTION-scoped, not whole-page: two agents " +
-			"patching two different sections never conflict with each other even if the " +
-			"page's overall revision advanced between their reads, only if the SAME section " +
-			"changed underneath the caller (append_to_page and set_frontmatter skip this " +
-			"section check entirely — baseRevisionId is only validated as belonging to the " +
-			"page). On a heading miss (never existed, or was " +
-			"deleted/renamed since baseRevisionId) the error lists the page's current " +
-			"headings so a caller can retry against reality. Creates a revision, same as " +
-			"update_wiki_page; ops other than set_frontmatter do not touch the page's " +
-			"existing frontmatter metadata beyond reparsing it (never stamps verified_at).",
+			"list_wiki_revisions/get_wiki_revision, or null if never revised) — conflict " +
+			"detection is SECTION-scoped, not whole-page: two agents patching different " +
+			"sections never conflict, even if the page's revision advanced between their " +
+			"reads — only the SAME section changing underneath the caller conflicts " +
+			"(append_to_page and set_frontmatter skip this check; baseRevisionId is only " +
+			"validated as belonging to the page). A heading miss (never existed, or " +
+			"deleted/renamed since baseRevisionId) returns the page's current headings so " +
+			"a caller can retry against reality. Creates a revision like update_wiki_page; " +
+			"ops other than set_frontmatter leave frontmatter metadata untouched beyond " +
+			"reparsing it (never stamps verified_at).",
 		inputSchema: {
 			type: "object",
 			required: ["op", "baseRevisionId"],
@@ -595,8 +594,8 @@ export const wikiTools: MCPTool[] = [
 		name: "list_wiki_changes",
 		description:
 			"Cheap delta feed of wiki page changes since a unix-seconds timestamp — for agents " +
-			"polling 'what changed' instead of re-fetching/re-searching the whole wiki. Backed " +
-			"by the existing activity log (no extra write-path cost). `since` is EXCLUSIVE; " +
+			"polling 'what changed' instead of re-fetching/re-searching the whole wiki. " +
+			"`since` is EXCLUSIVE; " +
 			"poll again using the response's `nextSince`, not a locally-computed timestamp, so " +
 			"changes landing on the same second as the cutoff are never missed or double-" +
 			"delivered. Defaults to every wiki page the caller can see (same visibility as " +
@@ -714,9 +713,9 @@ export const wikiTools: MCPTool[] = [
 	{
 		name: "undelete_wiki_page",
 		description:
-			"Restore a trashed wiki page by ID (not slug — a slug is only unique among live " +
-			"pages, so more than one trashed page can share the same now-recycled slug; use " +
-			"list_wiki_trash to find the ID). Requires the same permission as delete_wiki_page. " +
+			"Restore a trashed wiki page by ID (not slug — trashed pages can share a " +
+			"now-recycled slug; use list_wiki_trash to find the ID). Requires the same " +
+			"permission as delete_wiki_page. " +
 			"If this page was cascade-trashed together with descendants, the whole subtree is " +
 			"restored as one batch — the response's restoredCount reports how many pages came " +
 			"back. Rejected with a structured conflict (no partial restore) if the ID's own " +
