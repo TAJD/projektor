@@ -223,6 +223,14 @@ describe("MetricsDashboard", () => {
 		expect(await screen.findByText(/No project specified/i)).toBeTruthy();
 	});
 
+	it("falls back to the stored project id when no URL param is present, matching ProjectNav (PROJ-723)", async () => {
+		localStorage.setItem("projektor-last-project-id", "p1");
+		mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+		expect(await screen.findByText("Throughput")).toBeTruthy();
+		localStorage.removeItem("projektor-last-project-id");
+	});
+
 	it("renders a help icon per stat/chart section and shows the definitions-map popover on click", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		mockFetchMetrics(FULL_METRICS);

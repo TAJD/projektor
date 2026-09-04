@@ -2,6 +2,7 @@ import type { RefObject } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
+import { resolveProjectIdFallback } from "../utils/resolve-project-id-fallback";
 import ProjectFlowCharts from "./ProjectFlowCharts";
 import { Button } from "./ui/Button";
 
@@ -336,15 +337,21 @@ function RecentWikiSection({ pages, projectId }: { pages: RecentWikiPage[]; proj
 }
 
 export default function ProjectLanding({ workspaceSlug }: Props) {
-	const [projectId, setProjectId] = useState<string | null>(null);
+	const [projectId, setProjectId] = useState<string | null | undefined>(undefined);
 	useEffect(() => {
-		// Pretty-URL route (/projects/view/<slug>) falls back to this same page
-		// (see the SPA fallback in apps/api/src/index.ts) — read the slug from the
-		// path when there's no ?id= query param.
+		let cancelled = false;
 		const slugMatch = window.location.pathname.match(/^\/projects\/view\/([^/]+)\/?$/);
-		const id = new URLSearchParams(window.location.search).get("id") ?? slugMatch?.[1] ?? null;
-		setProjectId(id);
-	}, []);
+		if (slugMatch?.[1]) {
+			setProjectId(slugMatch[1]);
+			return;
+		}
+		resolveProjectIdFallback(workspaceSlug).then((id) => {
+			if (!cancelled) setProjectId(id);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [workspaceSlug]);
 
 	const [project, setProject] = useState<Project | null>(null);
 	const [recentIssues, setRecentIssues] = useState<RecentIssue[]>([]);
@@ -401,7 +408,12 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 	);
 
 	useEffect(() => {
-		if (projectId) fetchData(projectId);
+		if (projectId === undefined) return;
+		if (!projectId) {
+			setLoading(false);
+			return;
+		}
+		fetchData(projectId);
 	}, [projectId, fetchData]);
 
 	if (!projectId && !loading) {

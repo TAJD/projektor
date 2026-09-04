@@ -79,6 +79,21 @@ describe("ProjectLanding", () => {
 		expect(screen.getByText(/Loading/i)).toBeTruthy();
 	});
 
+	it("clears loading and shows 'No project specified' when no id/slug/fallback resolves (PROJ-723)", async () => {
+		mockFetchProject();
+		render(<ProjectLanding />);
+		expect(await screen.findByText(/No project specified/i)).toBeTruthy();
+		expect(screen.queryByText(/Loading/i)).toBeNull();
+	});
+
+	it("falls back to the stored project id when no URL param or slug is present, matching ProjectNav (PROJ-723)", async () => {
+		localStorage.setItem("projektor-last-project-id", "p1");
+		mockFetchProject();
+		render(<ProjectLanding />);
+		expect(await screen.findByRole("heading", { name: "Projektor" })).toBeTruthy();
+		localStorage.removeItem("projektor-last-project-id");
+	});
+
 	it("renders project name and description after fetch", async () => {
 		history.replaceState(null, "", "?id=p1");
 		mockFetchProject();

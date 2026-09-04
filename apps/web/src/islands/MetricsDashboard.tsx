@@ -2,6 +2,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type uPlot from "uplot";
 import { apiFetch } from "../utils/api-client";
+import { resolveProjectIdFallback } from "../utils/resolve-project-id-fallback";
 import CodeHeatmap from "./charts/CodeHeatmap";
 import UplotChart, { createTooltipPlugin } from "./charts/UplotChart";
 import { MetricHelp, SectionHeading } from "./MetricHelp";
@@ -160,17 +161,23 @@ function formatDuration(seconds: number | null): string {
 }
 
 function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
-	const [projectId, setProjectId] = useState<string | null>(null);
+	const [projectId, setProjectId] = useState<string | null | undefined>(undefined);
 	const [metrics, setMetrics] = useState<FlowMetrics | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
-		const id = new URLSearchParams(window.location.search).get("projectId");
-		setProjectId(id);
-	}, []);
+		let cancelled = false;
+		resolveProjectIdFallback(workspaceSlug).then((id) => {
+			if (!cancelled) setProjectId(id);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [workspaceSlug]);
 
 	useEffect(() => {
+		if (projectId === undefined) return;
 		if (!projectId) {
 			setLoading(false);
 			return;

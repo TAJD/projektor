@@ -54,9 +54,10 @@ describe("SprintManager", () => {
 		expect(screen.getByText(/Loading sprints/i)).toBeTruthy();
 	});
 
-	it("shows 'No project specified' instead of hanging when no projectId is in the URL (PROJ-424)", () => {
+	it("shows 'No project specified' instead of hanging when no projectId is in the URL and no fallback resolves (PROJ-424)", async () => {
+		mockFetchSprints([]);
 		render(<SprintManager />);
-		expect(screen.getByText(/No project specified/i)).toBeTruthy();
+		expect(await screen.findByText(/No project specified/i)).toBeTruthy();
 		expect(screen.queryByText(/Loading sprints/i)).toBeNull();
 	});
 
@@ -66,6 +67,14 @@ describe("SprintManager", () => {
 		render(<SprintManager />);
 		expect(await screen.findByText("Sprint 1")).toBeTruthy();
 		expect(screen.getByText("Ship it")).toBeTruthy();
+	});
+
+	it("falls back to the stored project id when no URL param is present, matching ProjectNav (PROJ-723)", async () => {
+		localStorage.setItem("projektor-last-project-id", "p1");
+		mockFetchSprints([SPRINT]);
+		render(<SprintManager />);
+		expect(await screen.findByText("Sprint 1")).toBeTruthy();
+		localStorage.removeItem("projektor-last-project-id");
 	});
 
 	it("shows empty state when no sprints are returned", async () => {
