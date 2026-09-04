@@ -269,7 +269,7 @@ function ProjectCard({ project }: { project: Project }) {
 			href={
 				project.slug
 					? `/projects/view/${encodeURIComponent(project.slug)}`
-					: `/projects/view?id=${project.id}`
+					: `/projects/view?projectId=${encodeURIComponent(project.id)}`
 			}
 			class={`${PROJECT_CARD_CLASS}${archived ? " opacity-60" : ""}`}
 		>

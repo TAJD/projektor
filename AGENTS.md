@@ -232,6 +232,17 @@ persists the resolved id back to the address bar via `history.replaceState` (see
 state — reach for it, don't invent a second one, before adding a new island that needs project
 identity.
 
+The identity param is a boundary concern, not a transport mechanism: links between pages that
+stay within the resolved project (`ProjectNav`'s tabs, in-app links to a project's own issues,
+wiki pages, etc.) carry no project param at all — the store survives the `ClientRouter`
+navigation those `<a>` tags trigger, so the destination resolves instantly with no refetch.
+`?projectId=` (the project UUID) is written only where identity actually crosses a boundary: the
+cold-start entry point (`ProjectList`'s project cards), a full non-SPA reload
+(`window.location.href` assignments, which drop all in-memory state), or an explicit project
+switch. `?id=` is reserved for a page's own entity (an issue on `/issues/view`, for example) and
+is never used for project identity in newly-written links — the resolver still accepts it (along
+with `?project=`) on read, for backward compatibility with existing shared URLs.
+
 ## Dev workflow
 
 ```bash

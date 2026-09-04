@@ -185,22 +185,12 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 
 	const overviewHref = project.slug
 		? `/projects/view/${encodeURIComponent(project.slug)}`
-		: `/projects/view?id=${encodeURIComponent(project.id)}`;
+		: "/projects/view";
 
-	const tabs = TABS.map((t) => {
-		let href: string;
-		switch (t.path) {
-			case "/projects/view":
-				href = overviewHref;
-				break;
-			case "/issues":
-				href = `/issues?project=${encodeURIComponent(project.key)}`;
-				break;
-			default:
-				href = `${t.path}?projectId=${encodeURIComponent(project.id)}`;
-		}
-		return { ...t, href };
-	});
+	const tabs = TABS.map((t) => ({
+		...t,
+		href: t.path === "/projects/view" ? overviewHref : t.path,
+	}));
 
 	const visibleTabs = tabs.slice(0, visibleCount);
 	const overflowTabs = tabs.slice(visibleCount);
