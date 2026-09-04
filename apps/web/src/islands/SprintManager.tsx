@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
-import { resolveProjectIdFallback } from "../utils/resolve-project-id-fallback";
+import { resolveProjectId } from "../utils/resolve-project-id";
 import type { CustomFieldValue, ProjectLookup as Project } from "./board-utils";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
@@ -279,10 +279,13 @@ function useSprintData(workspaceSlug: string | undefined) {
 
 	useEffect(() => {
 		let cancelled = false;
-		resolveProjectIdFallback(workspaceSlug).then((id) => {
+		resolveProjectId<Project>(workspaceSlug).then((res) => {
 			if (cancelled) return;
-			setProjectId(id);
-			if (!id) setLoading(false);
+			setProjectId(res.project?.id ?? null);
+			if (!res.project) {
+				if (res.error) setError(res.error);
+				setLoading(false);
+			}
 		});
 		return () => {
 			cancelled = true;

@@ -10,7 +10,15 @@ const PROJECT = { id: "p1", key: "PROJ", name: "Projektor", slug: "projektor" };
 function mockFetchProject(project: typeof PROJECT | null) {
 	vi.stubGlobal(
 		"fetch",
-		vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(project) })
+		vi.fn().mockImplementation((url: string) => {
+			if (String(url).endsWith("/api/projects")) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve(project ? [project] : []),
+				});
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(project) });
+		})
 	);
 }
 
@@ -150,11 +158,12 @@ describe("ProjectNav", () => {
 		vi.stubGlobal(
 			"fetch",
 			vi.fn().mockImplementation((url: string) => {
+				const project = { id: "p1", key: "PROJ", name: "Proj", slug: null };
+				if (String(url).endsWith("/api/projects")) {
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([project]) });
+				}
 				if (String(url).includes("/api/projects/")) {
-					return Promise.resolve({
-						ok: true,
-						json: () => Promise.resolve({ id: "p1", key: "PROJ", name: "Proj", slug: null }),
-					});
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(project) });
 				}
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 			})

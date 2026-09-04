@@ -2,7 +2,7 @@ import type { RefObject } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
-import { resolveProjectIdFallback } from "../utils/resolve-project-id-fallback";
+import { type ProjectIdCandidate, resolveProjectId } from "../utils/resolve-project-id";
 import ProjectFlowCharts from "./ProjectFlowCharts";
 import { Button } from "./ui/Button";
 
@@ -345,8 +345,11 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 			setProjectId(slugMatch[1]);
 			return;
 		}
-		resolveProjectIdFallback(workspaceSlug).then((id) => {
-			if (!cancelled) setProjectId(id);
+		resolveProjectId<ProjectIdCandidate>(workspaceSlug).then((res) => {
+			if (!cancelled) {
+				setProjectId(res.project?.id ?? null);
+				if (res.error) setError(res.error);
+			}
 		});
 		return () => {
 			cancelled = true;
@@ -416,7 +419,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 		fetchData(projectId);
 	}, [projectId, fetchData]);
 
-	if (!projectId && !loading) {
+	if (!projectId && !loading && !error) {
 		return <p class="text-text-muted">No project specified.</p>;
 	}
 

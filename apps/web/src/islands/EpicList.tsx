@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useState } from "preact/hooks";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
+import { resolveProjectId } from "../utils/resolve-project-id";
 import {
 	CATEGORY_COLORS,
 	type Issue,
@@ -69,26 +70,6 @@ function parseUrlFilters(params: URLSearchParams): {
 		dateFrom: params.get("dateFrom") ?? "",
 		dateTo: params.get("dateTo") ?? "",
 	};
-}
-
-function persistResolvedProjectId(resolved: string) {
-	// safe-ls: resolved id is either the stored value (just confirmed to
-	// exist in the fetched project list) or the first project — never a
-	// stale reference, so it can't cause an API 4xx.
-	localStorage.setItem("projektor-last-project-id", resolved);
-	const p = new URLSearchParams(window.location.search);
-	p.set("projectId", resolved);
-	history.replaceState(null, "", `?${p.toString()}`);
-}
-
-function resolveProjectId(
-	prev: string | null,
-	stored: string | null,
-	projects: readonly ProjectMeta[]
-): string | null {
-	if (prev) return prev;
-	const validated = stored && projects.some((p) => p.id === stored) ? stored : null;
-	return validated ?? projects[0]?.id ?? null;
 }
 
 function defaultCreateProjectId(
@@ -242,30 +223,10 @@ function useEpicFilters() {
 function useProjectSelection(workspaceSlug: string | undefined) {
 	const [projectId, setProjectId] = useState<string | null>(null);
 	const [projectIdReady, setProjectIdReady] = useState(false);
+	const [projectError, setProjectError] = useState<string | null>(null);
 	const [epicTypeId, setEpicTypeId] = useState<string | null>(null);
 	const [projects, setProjects] = useState<ProjectMeta[]>([]);
-	const storedProjectIdRef = useRef<string | null>(null);
 
-	useEffect(() => {
-		const params = new URLSearchParams(window.location.search);
-		// Resolve projectId: URL param (trusted) → localStorage (validated against the
-		// fetched project list in the projects effect below) → defer to projects fetch.
-		const fromUrl = params.get("projectId");
-		if (fromUrl) {
-			setProjectId(fromUrl);
-			// safe-ls: remembers the last-viewed project id so a future visit without a
-			// URL param can skip re-selection. Never trusted directly — the projects
-			// effect below validates it against the fetched project list and falls back
-			// to the first project if it's missing (e.g. the project was deleted).
-			localStorage.setItem("projektor-last-project-id", fromUrl);
-			setProjectIdReady(true);
-		} else {
-			storedProjectIdRef.current = localStorage.getItem("projektor-last-project-id");
-			// projects fetch effect validates the stored id (if any) and marks ready
-		}
-	}, []);
-
-	// Fetch epic task type ID
 	useEffect(() => {
 		(async () => {
 			try {
@@ -283,28 +244,21 @@ function useProjectSelection(workspaceSlug: string | undefined) {
 		})();
 	}, [workspaceSlug]);
 
-	// Fetch projects for create form; also provides API fallback when no projectId in URL/localStorage
 	useEffect(() => {
-		(async () => {
-			try {
-				const data = await apiFetch<ProjectMeta[]>("/api/projects", { workspaceSlug });
-				if (Array.isArray(data)) {
-					setProjects(data);
-					setProjectId((prev) => {
-						const resolved = resolveProjectId(prev, storedProjectIdRef.current, data);
-						if (resolved) persistResolvedProjectId(resolved);
-						return resolved;
-					});
-				}
-			} catch {
-				// non-fatal
-			} finally {
-				setProjectIdReady(true);
-			}
-		})();
+		let cancelled = false;
+		resolveProjectId<ProjectMeta>(workspaceSlug).then((res) => {
+			if (cancelled) return;
+			setProjects(res.projects);
+			setProjectId(res.project?.id ?? null);
+			setProjectError(res.error);
+			setProjectIdReady(true);
+		});
+		return () => {
+			cancelled = true;
+		};
 	}, [workspaceSlug]);
 
-	return { projectId, projectIdReady, epicTypeId, projects };
+	return { projectId, projectIdReady, projectError, epicTypeId, projects };
 }
 
 interface UseEpicsDataOptions {
@@ -441,7 +395,8 @@ export default function EpicList({ workspaceSlug }: Props) {
 		setFilterDateTo,
 	} = useEpicFilters();
 
-	const { projectId, projectIdReady, epicTypeId, projects } = useProjectSelection(workspaceSlug);
+	const { projectId, projectIdReady, projectError, epicTypeId, projects } =
+		useProjectSelection(workspaceSlug);
 
 	const [sortBy, setSortBy] = useState<SortKey>("created_at");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -484,10 +439,10 @@ export default function EpicList({ workspaceSlug }: Props) {
 	const derivedStatuses = computeDerivedStatuses(epics);
 
 	if (!projectIdReady || loading) return <p aria-live="polite">Loading…</p>;
-	if (error)
+	if (error || projectError)
 		return (
 			<p role="alert" class="text-[var(--danger-text)]">
-				{error}
+				{error || projectError}
 			</p>
 		);
 
