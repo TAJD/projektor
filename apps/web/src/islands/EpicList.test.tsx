@@ -91,7 +91,10 @@ function mockFetchEpics(issues: readonly Issue[] = [EPIC_ISSUE]) {
 				});
 			}
 			if (u.includes("/api/projects")) {
-				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve([{ id: "p1", key: "PROJ", name: "Projektor" }]),
+				});
 			}
 			if (u.includes("/api/issues")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: issues }) });
@@ -211,6 +214,12 @@ describe("EpicList", () => {
 							}),
 					});
 				}
+				if (u.includes("/api/projects")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([{ id: "p1", key: "PROJ", name: "Projektor" }]),
+					});
+				}
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 			})
 		);
@@ -273,6 +282,12 @@ describe("EpicList", () => {
 					return Promise.resolve({
 						ok: true,
 						json: () => Promise.resolve({ items: [EPIC_ISSUE] }),
+					});
+				}
+				if (u.includes("/api/projects")) {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([{ id: "p1", key: "PROJ", name: "Projektor" }]),
 					});
 				}
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });

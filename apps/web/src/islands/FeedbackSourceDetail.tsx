@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { safeDecodeURIComponent } from "../lib/urls";
 import { apiFetch } from "../utils/api-client";
+import { persistProjectId, resolveProjectId } from "../utils/resolve-project-id";
 import FeedbackList from "./FeedbackList";
 import FeedbackSourceSettings, { type FeedbackSource } from "./FeedbackSourceSettings";
 import FeedbackSummary from "./FeedbackSummary";
@@ -156,28 +157,19 @@ export default function FeedbackSourceDetail({
 			setProjectId(projectIdProp);
 			return;
 		}
-		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
-		if (fromUrl) {
-			setProjectId(fromUrl);
-			localStorage.setItem("projektor-last-project-id", fromUrl);
-			return;
-		}
-		const storedId = localStorage.getItem("projektor-last-project-id");
-		if (storedId) {
-			setProjectId(storedId);
-		} else {
-			apiFetch<Array<{ id: string }>>("/api/projects", { workspaceSlug })
-				.then((list) => {
-					if (Array.isArray(list) && list.length > 0) {
-						setProjectId(list[0].id);
-					} else {
-						setLoading(false);
-					}
-				})
-				.catch(() => {
-					setLoading(false);
-				});
-		}
+		let cancelled = false;
+		resolveProjectId(workspaceSlug).then((res) => {
+			if (cancelled) return;
+			if (res.project) {
+				setProjectId(res.project.id);
+			} else {
+				setError(res.error);
+				setLoading(false);
+			}
+		});
+		return () => {
+			cancelled = true;
+		};
 	}, [projectIdProp, workspaceSlug]);
 
 	// Static output can't serve the dynamic /feedback/[sourceId] route directly, so
@@ -230,7 +222,7 @@ export default function FeedbackSourceDetail({
 							);
 							if (Array.isArray(otherSources) && otherSources.some((s) => s.id === sourceId)) {
 								setProjectId(p.id);
-								localStorage.setItem("projektor-last-project-id", p.id);
+								persistProjectId(p.id);
 								setSources(otherSources);
 								return;
 							}

@@ -42,10 +42,14 @@ function mockFetchProject(
 	issues: readonly (typeof ISSUE)[] = [ISSUE],
 	wiki: readonly unknown[] = [],
 	flowMetrics: unknown = { throughputOverTime: [], cfdOverTime: [] },
-	project: unknown = PROJECT
+	project: unknown = PROJECT,
+	projectsList: readonly unknown[] = [project]
 ) {
 	const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
 		const u = String(url);
+		if (u.endsWith("/api/projects")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(projectsList) });
+		}
 		if (u.includes("/api/issues")) {
 			return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: issues }) });
 		}
@@ -80,7 +84,7 @@ describe("ProjectLanding", () => {
 	});
 
 	it("clears loading and shows 'No project specified' when no id/slug/fallback resolves (PROJ-723)", async () => {
-		mockFetchProject();
+		mockFetchProject(undefined, undefined, undefined, undefined, []);
 		render(<ProjectLanding />);
 		expect(await screen.findByText(/No project specified/i)).toBeTruthy();
 		expect(screen.queryByText(/Loading/i)).toBeNull();

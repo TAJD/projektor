@@ -21,11 +21,17 @@ const SPRINT: Sprint = {
 	createdAt: 1000,
 };
 
-function mockFetchSprints(sprints: readonly Sprint[] = [SPRINT]) {
+function mockFetchSprints(
+	sprints: readonly Sprint[] = [SPRINT],
+	projects: readonly (typeof PROJECT)[] = [PROJECT]
+) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {
 			const u = String(url);
+			if (u.endsWith("/api/projects")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(projects) });
+			}
 			if (u.includes("/api/projects/")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve(PROJECT) });
 			}
@@ -55,7 +61,7 @@ describe("SprintManager", () => {
 	});
 
 	it("shows 'No project specified' instead of hanging when no projectId is in the URL and no fallback resolves (PROJ-424)", async () => {
-		mockFetchSprints([]);
+		mockFetchSprints([], []);
 		render(<SprintManager />);
 		expect(await screen.findByText(/No project specified/i)).toBeTruthy();
 		expect(screen.queryByText(/Loading sprints/i)).toBeNull();
@@ -99,6 +105,9 @@ describe("SprintManager", () => {
 		history.replaceState(null, "", "?projectId=p1");
 		const mockFetch = vi.fn().mockImplementation((url: string) => {
 			const u = String(url);
+			if (u.endsWith("/api/projects")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([PROJECT]) });
+			}
 			if (u.includes("/api/projects/")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve(PROJECT) });
 			}

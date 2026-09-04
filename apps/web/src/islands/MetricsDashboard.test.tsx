@@ -115,6 +115,9 @@ function mockFetchMetrics(metrics: unknown) {
 		if (u.includes("/code-heatmap")) {
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(EMPTY_CODE_HEATMAP) });
 		}
+		if (u.endsWith("/api/projects")) {
+			return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: "p1" }]) });
+		}
 		return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
 	});
 	vi.stubGlobal("fetch", fetchMock);

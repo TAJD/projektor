@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import { apiFetch } from "../utils/api-client";
+import { resolveProjectId } from "../utils/resolve-project-id";
 
 interface Project {
 	id: string;
@@ -78,6 +78,7 @@ function measureContentWidth(el: HTMLElement): number {
 
 export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 	const [project, setProject] = useState<Project | null>(null);
+	const [error, setError] = useState<string | null>(null);
 	const [activePath, setActivePath] = useState("");
 	const [tabWidths, setTabWidths] = useState<number[] | null>(null);
 	const [containerWidth, setContainerWidth] = useState(0);
@@ -92,53 +93,30 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 		setActivePath(window.location.pathname);
 
 		const params = new URLSearchParams(window.location.search);
-		// Pretty-URL route (/projects/view/<slug>, see the SPA fallback in apps/api/src/index.ts) has no query param.
 		const slugMatch = window.location.pathname.match(/^\/projects\/view\/([^/]+)\/?$/);
-		const rawId = params.get("id") || params.get("projectId") || slugMatch?.[1];
-		const rawProject = params.get("project");
+		const hint =
+			params.get("id") || params.get("projectId") || slugMatch?.[1] || params.get("project");
 
-		const resolve = (p: Project) => {
-			setProject(p);
-			localStorage.setItem("projektor-last-project-id", p.id);
-			if (pageLabel) document.title = `${pageLabel} — ${p.name}`;
-		};
-
-		if (rawId) {
-			apiFetch<Project>(`/api/projects/${encodeURIComponent(rawId)}`, { workspaceSlug })
-				.then((p) => resolve(p))
-				.catch(() => {});
-		} else if (rawProject) {
-			// ?project may be a key (e.g. "PROJ") or UUID; fetch list and find by either
-			apiFetch<Project[]>("/api/projects", { workspaceSlug })
-				.then((list) => {
-					if (Array.isArray(list)) {
-						const found = list.find((p) => p.key === rawProject || p.id === rawProject);
-						if (found) resolve(found);
-					}
-				})
-				.catch(() => {});
-		} else {
-			// No project param in URL — recover from localStorage, then fall back to first project
-			const storedId = localStorage.getItem("projektor-last-project-id");
-			if (storedId) {
-				apiFetch<Project>(`/api/projects/${encodeURIComponent(storedId)}`, { workspaceSlug })
-					.then((p) => resolve(p))
-					.catch(() =>
-						// Stored id is stale (or the request failed) — fall back to first project
-						apiFetch<Project[]>("/api/projects", { workspaceSlug }).then((list) => {
-							if (Array.isArray(list) && list.length > 0) resolve(list[0]);
-						})
-					)
-					.catch(() => {});
+		let cancelled = false;
+		resolveProjectId<Project>(
+			workspaceSlug,
+			hint || null,
+			(p, h) => p.id === h || p.key === h || p.slug === h
+		).then((res) => {
+			if (cancelled) return;
+			if (res.project) {
+				setProject(res.project);
+				setError(null);
+				if (pageLabel) document.title = `${pageLabel} — ${res.project.name}`;
 			} else {
-				apiFetch<Project[]>("/api/projects", { workspaceSlug })
-					.then((list) => {
-						if (Array.isArray(list) && list.length > 0) resolve(list[0]);
-					})
-					.catch(() => {});
+				setProject(null);
+				setError(res.error ?? "No project found");
 			}
-		}
-	}, [workspaceSlug]);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [workspaceSlug, pageLabel]);
 
 	useLayoutEffect(() => {
 		if (!project) return;
@@ -198,7 +176,13 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 		return computeVisibleCount(containerWidth, tabWidths, MORE_TRIGGER_RESERVE_PX, TAB_GAP_PX);
 	}, [tabWidths, containerWidth]);
 
-	if (!project) return null;
+	if (!project) {
+		return error ? (
+			<p role="alert" class="text-[var(--danger-text)] px-3 py-2 text-sm">
+				{error}
+			</p>
+		) : null;
+	}
 
 	const overviewHref = project.slug
 		? `/projects/view/${encodeURIComponent(project.slug)}`

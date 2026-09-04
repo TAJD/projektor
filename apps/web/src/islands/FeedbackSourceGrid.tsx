@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { resolveProjectId } from "../utils/resolve-project-id";
 import type { FeedbackSource, FeedbackVersionSummary } from "./FeedbackSourceSettings";
 import NewSourceModal from "./NewSourceModal";
 
@@ -84,28 +85,19 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 			setProjectId(projectIdProp);
 			return;
 		}
-		const fromUrl = new URLSearchParams(window.location.search).get("projectId");
-		if (fromUrl) {
-			setProjectId(fromUrl);
-			localStorage.setItem("projektor-last-project-id", fromUrl);
-			return;
-		}
-		const storedId = localStorage.getItem("projektor-last-project-id");
-		if (storedId) {
-			setProjectId(storedId);
-		} else {
-			apiFetch<Array<{ id: string }>>("/api/projects", { workspaceSlug })
-				.then((list) => {
-					if (Array.isArray(list) && list.length > 0) {
-						setProjectId(list[0].id);
-					} else {
-						setLoading(false);
-					}
-				})
-				.catch(() => {
-					setLoading(false);
-				});
-		}
+		let cancelled = false;
+		resolveProjectId(workspaceSlug).then((res) => {
+			if (cancelled) return;
+			if (res.project) {
+				setProjectId(res.project.id);
+			} else {
+				setError(res.error);
+				setLoading(false);
+			}
+		});
+		return () => {
+			cancelled = true;
+		};
 	}, [projectIdProp, workspaceSlug]);
 
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
