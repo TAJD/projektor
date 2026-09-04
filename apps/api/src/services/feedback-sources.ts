@@ -1,5 +1,6 @@
 import {
 	CreateFeedbackSourceSchema,
+	GetFeedbackSourceSchema,
 	ListFeedbackSourcesSchema,
 	RevokeFeedbackSourceSchema,
 	RotateFeedbackSourceSchema,
@@ -18,6 +19,10 @@ export interface FeedbackSourceView {
 	tokenPreview: string;
 	createdAt: number;
 	revokedAt: number | null;
+}
+
+export interface FeedbackSourceDetailView extends FeedbackSourceView {
+	projectId: string;
 }
 
 async function sha256hex(input: string): Promise<string> {
@@ -138,6 +143,27 @@ export async function listFeedbackSources(
 		createdAt: r.created_at,
 		revokedAt: r.revoked_at,
 	}));
+}
+
+export async function getFeedbackSource(
+	ctx: ServiceCtx,
+	input: unknown
+): Promise<FeedbackSourceDetailView> {
+	const parsed = GetFeedbackSourceSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+
+	const row = await requireSource(ctx, parsed.data.sourceId);
+	return {
+		id: row.id,
+		projectId: row.project_id,
+		name: row.name,
+		description: row.description,
+		isActive: row.is_active === 1,
+		allowedOrigins: row.allowed_origins ? (JSON.parse(row.allowed_origins) as string[]) : null,
+		tokenPreview: `${row.token_hash.slice(0, 12)}…`,
+		createdAt: row.created_at,
+		revokedAt: row.revoked_at,
+	};
 }
 
 export async function updateFeedbackSource(ctx: ServiceCtx, input: unknown): Promise<{ ok: true }> {

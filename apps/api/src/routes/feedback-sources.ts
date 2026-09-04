@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
 import {
 	createFeedbackSource,
+	getFeedbackSource,
 	listFeedbackSources,
 	revokeFeedbackSource,
 	rotateFeedbackSourceToken,
@@ -67,4 +68,16 @@ router.delete("/:id/feedback-sources/:sourceId", async (c) => {
 	}
 });
 
-export { router as feedbackSourcesRouter };
+const lookupRouter = new Hono<HonoEnv>();
+
+lookupRouter.get("/:sourceId", async (c) => {
+	const ctx = ctxFromHono(c);
+	const sourceId = c.req.param("sourceId");
+	try {
+		return c.json(await getFeedbackSource(ctx, { sourceId }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+export { lookupRouter as feedbackSourceLookupRouter, router as feedbackSourcesRouter };
