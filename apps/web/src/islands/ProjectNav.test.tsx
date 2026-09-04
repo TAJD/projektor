@@ -173,7 +173,7 @@ describe("ProjectNav", () => {
 		window.history.pushState({}, "", "/metrics?projectId=p1");
 		render(<ProjectNav workspaceSlug="my-ws" />);
 		const link = (await screen.findByText("Feedback")) as HTMLAnchorElement;
-		expect(link.getAttribute("href")).toBe("/feedback?projectId=p1");
+		expect(link.getAttribute("href")).toBe("/feedback");
 	});
 });
 
@@ -224,7 +224,7 @@ describe("ProjectNav — Priority+ overflow menu", () => {
 		expect(feedbackItem.getAttribute("aria-current")).toBe("page");
 	});
 
-	it("opens the menu with hidden tabs' correct ?projectId hrefs, and closes it on selection", async () => {
+	it("opens the menu with hidden tabs' plain hrefs (no project param), and closes it on selection", async () => {
 		window.history.pushState({}, "", "/issues?id=p1");
 		mockFetchProject(PROJECT);
 		stubNavMeasurements(340, 90);
@@ -236,9 +236,9 @@ describe("ProjectNav — Priority+ overflow menu", () => {
 		expect(menu).toBeTruthy();
 
 		const wikiItem = screen.getByRole("menuitem", { name: "Wiki" });
-		expect(wikiItem.getAttribute("href")).toBe("/wiki?projectId=p1");
+		expect(wikiItem.getAttribute("href")).toBe("/wiki");
 		const feedbackItem = screen.getByRole("menuitem", { name: "Feedback" });
-		expect(feedbackItem.getAttribute("href")).toBe("/feedback?projectId=p1");
+		expect(feedbackItem.getAttribute("href")).toBe("/feedback");
 
 		fireEvent.click(wikiItem);
 		expect(screen.queryByRole("menu")).toBeNull();
