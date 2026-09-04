@@ -6,6 +6,7 @@
 // The pattern: set the URL, override the stub, await findBy*.
 import { fireEvent, render, screen } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetProjectStoreForTests } from "../lib/project-context";
 import EpicList from "./EpicList";
 
 interface Issue {
@@ -105,6 +106,7 @@ function mockFetchEpics(issues: readonly Issue[] = [EPIC_ISSUE]) {
 }
 
 beforeEach(() => {
+	__resetProjectStoreForTests();
 	history.replaceState(null, "", "/");
 	localStorage.clear();
 });

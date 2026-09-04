@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
+import {
+	currentProject,
+	ensureProjectResolved,
+	projectReady,
+	projectError as storeProjectError,
+} from "../lib/project-context";
 import { apiFetch } from "../utils/api-client";
-import { resolveProjectId } from "../utils/resolve-project-id";
 import type { FeedbackSource, FeedbackVersionSummary } from "./FeedbackSourceSettings";
 import NewSourceModal from "./NewSourceModal";
 
@@ -79,39 +84,27 @@ function NewSourceCard({ onClick }: { onClick: () => void }) {
 }
 
 export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectIdProp }: Props) {
-	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	useEffect(() => {
-		if (projectIdProp) {
-			setProjectId(projectIdProp);
-			return;
-		}
-		let cancelled = false;
-		resolveProjectId(workspaceSlug).then((res) => {
-			if (cancelled) return;
-			if (res.project) {
-				setProjectId(res.project.id);
-			} else {
-				setError(res.error);
-				setLoading(false);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
+		if (!projectIdProp) ensureProjectResolved(workspaceSlug);
 	}, [projectIdProp, workspaceSlug]);
+
+	const resolvedReady = projectIdProp !== undefined || projectReady.value;
+	const projectId = projectIdProp ?? currentProject.value?.id ?? "";
+	const resolveError = projectIdProp ? null : storeProjectError.value;
 
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [summaries, setSummaries] = useState<SourceSummary[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [forbidden, setForbidden] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	const [fetchError, setFetchError] = useState<string | null>(null);
+	const error = resolveError ?? fetchError;
 	const [showCreate, setShowCreate] = useState(false);
 
 	const fetchAll = useCallback(
 		async (opts?: Readonly<{ background?: boolean }>) => {
 			if (!projectId) return;
 			if (!opts?.background) setLoading(true);
-			setError(null);
+			setFetchError(null);
 			setForbidden(false);
 			try {
 				const [sourcesData, summaryData] = await Promise.all([
@@ -126,7 +119,7 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 				setSummaries(Array.isArray(summaryData) ? summaryData : []);
 			} catch (e) {
 				if (String(e).includes(": 403")) setForbidden(true);
-				else setError(String(e));
+				else setFetchError(String(e));
 			} finally {
 				if (!opts?.background) setLoading(false);
 			}
@@ -135,8 +128,13 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 	);
 
 	useEffect(() => {
+		if (!resolvedReady) return;
+		if (!projectId) {
+			setLoading(false);
+			return;
+		}
 		fetchAll();
-	}, [fetchAll]);
+	}, [resolvedReady, projectId, fetchAll]);
 
 	if (loading) return <p aria-live="polite">Loading feedback sources…</p>;
 	if (forbidden) {

@@ -1,12 +1,10 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import { resolveProjectId } from "../utils/resolve-project-id";
-
-interface Project {
-	id: string;
-	key: string;
-	name: string;
-	slug: string | null;
-}
+import {
+	currentProject,
+	ensureProjectResolved,
+	type ProjectSummary,
+	projectError,
+} from "../lib/project-context";
 
 interface Props {
 	workspaceSlug?: string;
@@ -77,8 +75,6 @@ function measureContentWidth(el: HTMLElement): number {
 }
 
 export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
-	const [project, setProject] = useState<Project | null>(null);
-	const [error, setError] = useState<string | null>(null);
 	const [activePath, setActivePath] = useState("");
 	const [tabWidths, setTabWidths] = useState<number[] | null>(null);
 	const [containerWidth, setContainerWidth] = useState(0);
@@ -91,32 +87,35 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 
 	useEffect(() => {
 		setActivePath(window.location.pathname);
+	}, []);
 
-		const params = new URLSearchParams(window.location.search);
-		const slugMatch = window.location.pathname.match(/^\/projects\/view\/([^/]+)\/?$/);
-		const hint =
-			params.get("id") || params.get("projectId") || slugMatch?.[1] || params.get("project");
+	const hint =
+		typeof window === "undefined"
+			? null
+			: (() => {
+					const params = new URLSearchParams(window.location.search);
+					const slugMatch = window.location.pathname.match(/^\/projects\/view\/([^/]+)\/?$/);
+					return (
+						params.get("id") || params.get("projectId") || slugMatch?.[1] || params.get("project")
+					);
+				})();
 
+	const matchesHint = (p: ProjectSummary, h: string) => p.id === h || p.key === h || p.slug === h;
+
+	useEffect(() => {
 		let cancelled = false;
-		resolveProjectId<Project>(
-			workspaceSlug,
-			hint || null,
-			(p, h) => p.id === h || p.key === h || p.slug === h
-		).then((res) => {
-			if (cancelled) return;
-			if (res.project) {
-				setProject(res.project);
-				setError(null);
-				if (pageLabel) document.title = `${pageLabel} — ${res.project.name}`;
-			} else {
-				setProject(null);
-				setError(res.error ?? "No project found");
+		ensureProjectResolved(workspaceSlug, hint || null, matchesHint).then(() => {
+			if (!cancelled && pageLabel && currentProject.value) {
+				document.title = `${pageLabel} — ${currentProject.value.name}`;
 			}
 		});
 		return () => {
 			cancelled = true;
 		};
-	}, [workspaceSlug, pageLabel]);
+	}, [workspaceSlug, hint, pageLabel]);
+
+	const project = currentProject.value;
+	const error = projectError.value;
 
 	useLayoutEffect(() => {
 		if (!project) return;
