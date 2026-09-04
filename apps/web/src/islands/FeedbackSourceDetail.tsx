@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import {
-	currentProject,
-	ensureProjectResolved,
-	projectReady,
-	projectError as storeProjectError,
-} from "../lib/project-context";
 import { safeDecodeURIComponent } from "../lib/urls";
 import { apiFetch } from "../utils/api-client";
-import { persistProjectId } from "../utils/resolve-project-id";
 import FeedbackList from "./FeedbackList";
 import FeedbackSourceSettings, { type FeedbackSource } from "./FeedbackSourceSettings";
 import FeedbackSummary from "./FeedbackSummary";
@@ -157,25 +150,13 @@ export default function FeedbackSourceDetail({
 	projectId: projectIdProp,
 	sourceId: sourceIdProp,
 }: Props) {
-	useEffect(() => {
-		if (!projectIdProp) ensureProjectResolved(workspaceSlug);
-	}, [projectIdProp, workspaceSlug]);
-
-	const resolvedReady = projectIdProp !== undefined || projectReady.value;
-	const resolvedProjectId = projectIdProp ?? currentProject.value?.id ?? "";
-	const resolveError = projectIdProp ? null : storeProjectError.value;
-
-	const [projectId, setProjectId] = useState(projectIdProp ?? "");
-	useEffect(() => {
-		if (resolvedReady) setProjectId(resolvedProjectId);
-	}, [resolvedReady, resolvedProjectId]);
-
 	// Static output can't serve the dynamic /feedback/[sourceId] route directly, so
 	// FeedbackSourceDetail is also rendered by the static /feedback/view?sourceId= page (mirrors
 	// /issues/view.astro). Named "sourceId", not "id", because this page also renders ProjectNav,
 	// which reads ?id= as a *project* id — ?id= here would collide with it.
 	// Resolve sourceId from ?sourceId= first, then from the pretty-URL pathname.
 	const [sourceId, setSourceId] = useState(sourceIdProp ?? "");
+	const [loading, setLoading] = useState(true);
 	useEffect(() => {
 		if (sourceIdProp) return;
 		const fromUrl = new URLSearchParams(window.location.search).get("sourceId");
@@ -186,14 +167,33 @@ export default function FeedbackSourceDetail({
 		const m = window.location.pathname.match(/^\/feedback\/([^/]+)/);
 		if (m) {
 			const decoded = safeDecodeURIComponent(m[1]);
-			if (decoded) setSourceId(decoded);
+			if (decoded) return setSourceId(decoded);
 		}
+		setLoading(false);
 	}, [sourceIdProp]);
 
-	const [sources, setSources] = useState<FeedbackSource[]>([]);
-	const [loading, setLoading] = useState(true);
+	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	const [fetchError, setFetchError] = useState<string | null>(null);
-	const error = resolveError ?? fetchError;
+
+	useEffect(() => {
+		if (projectIdProp || !sourceId) return;
+		let cancelled = false;
+		apiFetch<{ projectId: string }>(`/api/feedback-sources/${sourceId}`, { workspaceSlug })
+			.then((r) => {
+				if (!cancelled) setProjectId(r.projectId);
+			})
+			.catch((e) => {
+				if (!cancelled) {
+					setFetchError(String(e));
+					setLoading(false);
+				}
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [projectIdProp, sourceId, workspaceSlug]);
+
+	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [tab, setTab] = useState<TabId>("items");
 	const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({});
 
@@ -205,48 +205,18 @@ export default function FeedbackSourceDetail({
 			const data = await apiFetch<FeedbackSource[]>(`/api/projects/${projectId}/feedback-sources`, {
 				workspaceSlug,
 			});
-			const list = Array.isArray(data) ? data : [];
-			if (sourceId && !list.some((s) => s.id === sourceId)) {
-				// The source may belong to another project in the workspace
-				const allProjects = await apiFetch<Array<{ id: string }>>("/api/projects", {
-					workspaceSlug,
-				});
-				if (Array.isArray(allProjects)) {
-					for (const p of allProjects) {
-						if (p.id === projectId) continue;
-						try {
-							const otherSources = await apiFetch<FeedbackSource[]>(
-								`/api/projects/${p.id}/feedback-sources`,
-								{ workspaceSlug }
-							);
-							if (Array.isArray(otherSources) && otherSources.some((s) => s.id === sourceId)) {
-								setProjectId(p.id);
-								persistProjectId(p.id);
-								setSources(otherSources);
-								return;
-							}
-						} catch {
-							// continue search
-						}
-					}
-				}
-			}
-			setSources(list);
+			setSources(Array.isArray(data) ? data : []);
 		} catch (e) {
 			setFetchError(String(e));
 		} finally {
 			setLoading(false);
 		}
-	}, [projectId, sourceId, workspaceSlug]);
+	}, [projectId, workspaceSlug]);
 
 	useEffect(() => {
-		if (!resolvedReady) return;
-		if (!projectId) {
-			setLoading(false);
-			return;
-		}
+		if (!projectId) return;
 		fetchSources();
-	}, [resolvedReady, projectId, fetchSources]);
+	}, [projectId, fetchSources]);
 
 	function focusTab(id: TabId) {
 		tabRefs.current[id]?.focus();
@@ -266,10 +236,10 @@ export default function FeedbackSourceDetail({
 	}
 
 	if (loading) return <p aria-live="polite">Loading source…</p>;
-	if (error) {
+	if (fetchError) {
 		return (
 			<p role="alert" class="text-[var(--danger-text)]">
-				{error}
+				{fetchError}
 			</p>
 		);
 	}
