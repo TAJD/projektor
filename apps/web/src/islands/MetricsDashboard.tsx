@@ -2,7 +2,7 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type uPlot from "uplot";
 import { apiFetch } from "../utils/api-client";
-import { resolveProjectIdFallback } from "../utils/resolve-project-id-fallback";
+import { type ProjectIdCandidate, resolveProjectId } from "../utils/resolve-project-id";
 import CodeHeatmap from "./charts/CodeHeatmap";
 import UplotChart, { createTooltipPlugin } from "./charts/UplotChart";
 import { MetricHelp, SectionHeading } from "./MetricHelp";
@@ -168,8 +168,11 @@ function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
 
 	useEffect(() => {
 		let cancelled = false;
-		resolveProjectIdFallback(workspaceSlug).then((id) => {
-			if (!cancelled) setProjectId(id);
+		resolveProjectId<ProjectIdCandidate>(workspaceSlug).then((res) => {
+			if (!cancelled) {
+				setProjectId(res.project?.id ?? null);
+				if (res.error) setError(res.error);
+			}
 		});
 		return () => {
 			cancelled = true;
