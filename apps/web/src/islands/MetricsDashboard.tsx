@@ -1,8 +1,13 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useMemo, useState } from "preact/hooks";
 import type uPlot from "uplot";
+import {
+	currentProject,
+	ensureProjectResolved,
+	projectReady,
+	projectError as storeProjectError,
+} from "../lib/project-context";
 import { apiFetch } from "../utils/api-client";
-import { type ProjectIdCandidate, resolveProjectId } from "../utils/resolve-project-id";
 import CodeHeatmap from "./charts/CodeHeatmap";
 import UplotChart, { createTooltipPlugin } from "./charts/UplotChart";
 import { MetricHelp, SectionHeading } from "./MetricHelp";
@@ -161,23 +166,16 @@ function formatDuration(seconds: number | null): string {
 }
 
 function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
-	const [projectId, setProjectId] = useState<string | null | undefined>(undefined);
 	const [metrics, setMetrics] = useState<FlowMetrics | null>(null);
 	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [fetchError, setFetchError] = useState<string | null>(null);
 
 	useEffect(() => {
-		let cancelled = false;
-		resolveProjectId<ProjectIdCandidate>(workspaceSlug).then((res) => {
-			if (!cancelled) {
-				setProjectId(res.project?.id ?? null);
-				if (res.error) setError(res.error);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
+		ensureProjectResolved(workspaceSlug);
 	}, [workspaceSlug]);
+
+	const projectId = projectReady.value ? (currentProject.value?.id ?? null) : undefined;
+	const error = storeProjectError.value ?? fetchError;
 
 	useEffect(() => {
 		if (projectId === undefined) return;
@@ -186,7 +184,7 @@ function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
 			return;
 		}
 		setLoading(true);
-		setError(null);
+		setFetchError(null);
 		const query = new URLSearchParams({
 			since: String(dateStrToEpochStart(range.since)),
 			until: String(dateStrToEpochEnd(range.until)),
@@ -196,7 +194,7 @@ function useFlowMetrics(workspaceSlug: string | undefined, range: RangeState) {
 			workspaceSlug,
 		})
 			.then((data) => setMetrics(data))
-			.catch((e) => setError(String(e)))
+			.catch((e) => setFetchError(String(e)))
 			.finally(() => setLoading(false));
 	}, [projectId, workspaceSlug, range.since, range.until, range.granularity]);
 

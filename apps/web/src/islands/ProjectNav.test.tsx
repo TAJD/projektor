@@ -3,6 +3,7 @@
 // first, stub fetch with vi.stubGlobal per case, then await findByText for the async update.
 import { fireEvent, render, screen } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetProjectStoreForTests } from "../lib/project-context";
 import ProjectNav from "./ProjectNav";
 
 const PROJECT = { id: "p1", key: "PROJ", name: "Projektor", slug: "projektor" };
@@ -30,6 +31,7 @@ let offsetWidthDescriptor: PropertyDescriptor | undefined;
 let clientWidthDescriptor: PropertyDescriptor | undefined;
 
 beforeEach(() => {
+	__resetProjectStoreForTests();
 	offsetWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
 	clientWidthDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
 });
