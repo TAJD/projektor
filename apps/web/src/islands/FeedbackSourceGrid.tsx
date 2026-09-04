@@ -39,22 +39,11 @@ const CARD_CLASS =
 	"flex flex-col gap-2 p-4 bg-surface border border-border rounded-lg no-underline shadow-xs " +
 	"transition-all duration-150 hover:border-accent hover:-translate-y-px";
 
-function SourceCard({
-	source,
-	summary,
-	projectId,
-}: {
-	source: FeedbackSource;
-	summary?: SourceSummary;
-	projectId: string;
-}) {
+function SourceCard({ source, summary }: { source: FeedbackSource; summary?: SourceSummary }) {
 	const total = summary?.totalCount ?? 0;
 	const lastSeenAt = summary?.versions.reduce((max, v) => Math.max(max, v.lastSeenAt), 0) ?? 0;
 	return (
-		<a
-			href={`/feedback/${source.id}${projectId ? `?projectId=${projectId}` : ""}`}
-			class={`${CARD_CLASS} ${statusClass(source)}`}
-		>
+		<a href={`/feedback/${source.id}`} class={`${CARD_CLASS} ${statusClass(source)}`}>
 			<div class="flex items-center justify-between gap-2">
 				<span class="font-bold text-text-base">{source.name}</span>
 				<span class="text-[0.7rem] font-medium px-1.5 py-0.5 rounded bg-bg border border-border text-text-muted">
@@ -163,12 +152,7 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 				style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}
 			>
 				{sources.map((s) => (
-					<SourceCard
-						key={s.id}
-						source={s}
-						summary={summaryBySource.get(s.id)}
-						projectId={projectId}
-					/>
+					<SourceCard key={s.id} source={s} summary={summaryBySource.get(s.id)} />
 				))}
 				<NewSourceCard onClick={() => setShowCreate(true)} />
 			</div>

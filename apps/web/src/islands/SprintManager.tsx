@@ -615,7 +615,7 @@ function SprintBreadcrumb({ project }: { project: Project | null }) {
 				Projects
 			</a>
 			<span class="mx-[0.375rem]">/</span>
-			<a href={`/projects/view?id=${project.id}`} class="text-text-muted no-underline">
+			<a href="/projects/view" class="text-text-muted no-underline">
 				{project.name}
 			</a>
 			<span class="mx-[0.375rem]">/</span>
