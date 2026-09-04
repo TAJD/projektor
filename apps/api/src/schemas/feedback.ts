@@ -38,6 +38,10 @@ export const ListFeedbackSourcesSchema = z.object({
 	projectId: z.string().min(1, "projectId is required"),
 });
 
+export const GetFeedbackSourceSchema = z.object({
+	sourceId: z.string().min(1, "sourceId is required"),
+});
+
 export const UpdateFeedbackSourceSchema = z
 	.object({
 		sourceId: z.string(),

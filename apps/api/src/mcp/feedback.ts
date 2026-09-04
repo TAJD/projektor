@@ -2,6 +2,7 @@ import type { MCPTool } from "@projektor/types";
 import { convertFeedbackToIssue, listFeedback, updateFeedbackStatus } from "../services/feedback";
 import {
 	createFeedbackSource,
+	getFeedbackSource,
 	listFeedbackSources,
 	revokeFeedbackSource,
 	rotateFeedbackSourceToken,
@@ -52,6 +53,20 @@ export const feedbackTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			return listFeedbackSources(ctx as unknown as ServiceCtx, input);
+		},
+	},
+	{
+		name: "get_feedback_source",
+		description:
+			"Look up a single feedback source by id, including its projectId. Workspace-scoped: a " +
+			"sourceId from another workspace 404s. Any workspace member can read.",
+		inputSchema: {
+			type: "object",
+			required: ["sourceId"],
+			properties: { sourceId: { type: "string" } },
+		},
+		async handler(input, ctx) {
+			return getFeedbackSource(ctx as unknown as ServiceCtx, input);
 		},
 	},
 	{
