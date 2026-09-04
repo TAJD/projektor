@@ -24,11 +24,20 @@ const SOURCE_B = {
 	revokedAt: null,
 };
 
-function stubFetch(sources = [SOURCE_A, SOURCE_B]) {
+function stubFetch(sources = [SOURCE_A, SOURCE_B], sourceProjectId = "p1") {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {
 			const u = String(url);
+			if (/\/api\/feedback-sources\/[^/]+$/.test(u)) {
+				const found = sources.find((s) => s.id === u.split("/").pop());
+				if (!found)
+					return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({}) });
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ ...found, projectId: sourceProjectId }),
+				});
+			}
 			if (u.includes("/feedback-sources")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve(sources) });
 			}
@@ -37,12 +46,6 @@ function stubFetch(sources = [SOURCE_A, SOURCE_B]) {
 			}
 			if (u.includes("/feedback")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-			}
-			if (u.includes("/api/projects")) {
-				return Promise.resolve({
-					ok: true,
-					json: () => Promise.resolve([{ id: "p1", name: "Project 1" }]),
-				});
 			}
 			return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 		})
@@ -106,14 +109,27 @@ describe("FeedbackSourceDetail", () => {
 		}
 	});
 
-	it("resolves projectId from localStorage or /api/projects when no projectId prop or query param is present", async () => {
+	it("resolves projectId via GET /api/feedback-sources/:sourceId when no projectId prop is present", async () => {
 		stubFetch();
 		const originalPath = window.location.pathname;
 		window.history.pushState({}, "", "/feedback/s1");
-		localStorage.removeItem("projektor-last-project-id");
 		try {
 			render(<FeedbackSourceDetail workspaceSlug="my-ws" />);
 			expect(await screen.findByRole("heading", { name: "Onboarding survey" })).toBeTruthy();
+		} finally {
+			window.history.pushState({}, "", originalPath);
+		}
+	});
+
+	it("does not write projektor-last-project-id, and resolving a source in project p2 doesn't affect a page reading it", async () => {
+		localStorage.setItem("projektor-last-project-id", "p1");
+		stubFetch([SOURCE_A], "p2");
+		const originalPath = window.location.pathname;
+		window.history.pushState({}, "", "/feedback/s1");
+		try {
+			render(<FeedbackSourceDetail workspaceSlug="my-ws" />);
+			await screen.findByRole("heading", { name: "Onboarding survey" });
+			expect(localStorage.getItem("projektor-last-project-id")).toBe("p1");
 		} finally {
 			window.history.pushState({}, "", originalPath);
 		}
