@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
+import { resolveProjectIdFallback } from "../utils/resolve-project-id-fallback";
 import type { CustomFieldValue, ProjectLookup as Project } from "./board-utils";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
@@ -270,17 +271,23 @@ function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boo
 }
 
 function useSprintData(workspaceSlug: string | undefined) {
-	const [projectId, setProjectId] = useState<string | null>(null);
+	const [projectId, setProjectId] = useState<string | null | undefined>(undefined);
 	const [project, setProject] = useState<Project | null>(null);
 	const [sprints, setSprints] = useState<Sprint[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
-		const id = new URLSearchParams(window.location.search).get("projectId");
-		setProjectId(id);
-		if (!id) setLoading(false);
-	}, []);
+		let cancelled = false;
+		resolveProjectIdFallback(workspaceSlug).then((id) => {
+			if (cancelled) return;
+			setProjectId(id);
+			if (!id) setLoading(false);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [workspaceSlug]);
 
 	const fetchSprints = useCallback(
 		async (pid: string) => {
@@ -311,7 +318,7 @@ function useSprintData(workspaceSlug: string | undefined) {
 		if (projectId) fetchSprints(projectId);
 	}, [projectId, fetchSprints]);
 
-	return { projectId, project, sprints, loading, error, fetchSprints };
+	return { projectId: projectId ?? null, project, sprints, loading, error, fetchSprints };
 }
 
 function useSprintVelocity(sprints: readonly Sprint[], workspaceSlug: string | undefined) {
