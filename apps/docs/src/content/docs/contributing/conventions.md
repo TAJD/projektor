@@ -224,6 +224,22 @@ All island↔API calls go through `apps/web/src/utils/api-client.ts`:
 No raw `fetch(` calls in island components. No local `buildHeaders` copies.
 This mirrors the backend service-layer contract: routes are thin wrappers; islands are thin callers.
 
+## Frontend: project identity (`apps/web/src/lib/project-context.ts`)
+
+Islands are separate `client:load` roots (each its own Preact tree), so Preact context can't
+cross between them. Project identity instead lives in a module-level `@preact/signals` store:
+`currentProject`, `projectsList`, `projectError`, `projectReady`. Module state survives Astro's
+`ClientRouter` navigations, so whichever island resolves first writes it and every sibling
+island, plus the next in-app navigation, reads it without a refetch.
+
+Islands call `ensureProjectResolved(workspaceSlug, urlHint?, matches?)` (or the `useCurrentProject`
+hook) instead of parsing `?projectId=`/`?id=` or fetching `/api/projects` themselves. Resolution
+persists the resolved id back to the address bar via `history.replaceState` (see
+`resolve-project-id.ts`'s `persistProjectId`), so copied URLs stay shareable. This is the only
+`@preact/signals` usage in the codebase and the only module-level store pattern for cross-island
+state — reach for it, don't invent a second one, before adding a new island that needs project
+identity.
+
 ## Dev workflow
 
 ```bash

@@ -1,8 +1,14 @@
 import type { RefObject } from "preact";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import {
+	currentProject,
+	ensureProjectResolved,
+	type ProjectSummary,
+	projectReady,
+	projectError as storeProjectError,
+} from "../lib/project-context";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
-import { type ProjectIdCandidate, resolveProjectId } from "../utils/resolve-project-id";
 import ProjectFlowCharts from "./ProjectFlowCharts";
 import { Button } from "./ui/Button";
 
@@ -336,31 +342,33 @@ function RecentWikiSection({ pages, projectId }: { pages: RecentWikiPage[]; proj
 	);
 }
 
+const matchesHint = (p: ProjectSummary, h: string) => p.id === h || p.key === h || p.slug === h;
+
 export default function ProjectLanding({ workspaceSlug }: Props) {
-	const [projectId, setProjectId] = useState<string | null | undefined>(undefined);
+	const hint =
+		typeof window === "undefined"
+			? null
+			: (() => {
+					const params = new URLSearchParams(window.location.search);
+					const slugMatch = window.location.pathname.match(/^\/projects\/view\/([^/]+)\/?$/);
+					return (
+						params.get("id") || params.get("projectId") || slugMatch?.[1] || params.get("project")
+					);
+				})();
+
 	useEffect(() => {
-		let cancelled = false;
-		const slugMatch = window.location.pathname.match(/^\/projects\/view\/([^/]+)\/?$/);
-		if (slugMatch?.[1]) {
-			setProjectId(slugMatch[1]);
-			return;
-		}
-		resolveProjectId<ProjectIdCandidate>(workspaceSlug).then((res) => {
-			if (!cancelled) {
-				setProjectId(res.project?.id ?? null);
-				if (res.error) setError(res.error);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [workspaceSlug]);
+		ensureProjectResolved(workspaceSlug, hint || null, matchesHint);
+	}, [workspaceSlug, hint]);
+
+	const projectId = projectReady.value ? (currentProject.value?.id ?? null) : undefined;
+	const resolveError = storeProjectError.value;
 
 	const [project, setProject] = useState<Project | null>(null);
 	const [recentIssues, setRecentIssues] = useState<RecentIssue[]>([]);
 	const [recentWiki, setRecentWiki] = useState<RecentWikiPage[]>([]);
 	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [fetchError, setFetchError] = useState<string | null>(null);
+	const error = resolveError ?? fetchError;
 
 	const {
 		editingDesc,
@@ -398,11 +406,11 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 	const fetchData = useCallback(
 		async (id: string) => {
 			setLoading(true);
-			setError(null);
+			setFetchError(null);
 			try {
 				await loadProjectData(id, workspaceSlug, { setProject, setRecentIssues, setRecentWiki });
 			} catch (e) {
-				setError(String(e));
+				setFetchError(String(e));
 			} finally {
 				setLoading(false);
 			}

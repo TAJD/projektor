@@ -4,6 +4,7 @@
 // /api/projects/:id/flow-metrics via raw fetch + buildHeaders. loading starts as true.
 import { fireEvent, render, screen, within } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetProjectStoreForTests } from "../lib/project-context";
 import MetricsDashboard from "./MetricsDashboard";
 
 const EMPTY_METRICS = {
@@ -125,6 +126,7 @@ function mockFetchMetrics(metrics: unknown) {
 }
 
 beforeEach(() => {
+	__resetProjectStoreForTests();
 	history.replaceState(null, "", "/");
 });
 

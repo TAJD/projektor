@@ -6,6 +6,7 @@
 // The pattern: set the URL, override the stub, await findBy*.
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetProjectStoreForTests } from "../lib/project-context";
 import SprintManager, { type Sprint } from "./SprintManager";
 
 const PROJECT = { id: "p1", name: "Projektor", key: "PROJ" };
@@ -44,6 +45,7 @@ function mockFetchSprints(
 }
 
 beforeEach(() => {
+	__resetProjectStoreForTests();
 	history.replaceState(null, "", "/");
 });
 

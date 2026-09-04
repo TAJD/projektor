@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCurrentProject } from "../lib/project-context";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
-import { resolveProjectId } from "../utils/resolve-project-id";
 import {
 	CATEGORY_COLORS,
 	type Issue,
@@ -221,11 +221,7 @@ function useEpicFilters() {
 }
 
 function useProjectSelection(workspaceSlug: string | undefined) {
-	const [projectId, setProjectId] = useState<string | null>(null);
-	const [projectIdReady, setProjectIdReady] = useState(false);
-	const [projectError, setProjectError] = useState<string | null>(null);
 	const [epicTypeId, setEpicTypeId] = useState<string | null>(null);
-	const [projects, setProjects] = useState<ProjectMeta[]>([]);
 
 	useEffect(() => {
 		(async () => {
@@ -244,21 +240,14 @@ function useProjectSelection(workspaceSlug: string | undefined) {
 		})();
 	}, [workspaceSlug]);
 
-	useEffect(() => {
-		let cancelled = false;
-		resolveProjectId<ProjectMeta>(workspaceSlug).then((res) => {
-			if (cancelled) return;
-			setProjects(res.projects);
-			setProjectId(res.project?.id ?? null);
-			setProjectError(res.error);
-			setProjectIdReady(true);
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [workspaceSlug]);
+	const {
+		project,
+		projects,
+		error: projectError,
+		ready: projectIdReady,
+	} = useCurrentProject(workspaceSlug);
 
-	return { projectId, projectIdReady, projectError, epicTypeId, projects };
+	return { projectId: project?.id ?? null, projectIdReady, projectError, epicTypeId, projects };
 }
 
 interface UseEpicsDataOptions {

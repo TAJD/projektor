@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import {
+	currentProject,
+	ensureProjectResolved,
+	projectReady,
+	projectError as storeProjectError,
+} from "../lib/project-context";
 import { safeDecodeURIComponent } from "../lib/urls";
 import { apiFetch } from "../utils/api-client";
-import { persistProjectId, resolveProjectId } from "../utils/resolve-project-id";
+import { persistProjectId } from "../utils/resolve-project-id";
 import FeedbackList from "./FeedbackList";
 import FeedbackSourceSettings, { type FeedbackSource } from "./FeedbackSourceSettings";
 import FeedbackSummary from "./FeedbackSummary";
@@ -151,26 +157,18 @@ export default function FeedbackSourceDetail({
 	projectId: projectIdProp,
 	sourceId: sourceIdProp,
 }: Props) {
+	useEffect(() => {
+		if (!projectIdProp) ensureProjectResolved(workspaceSlug);
+	}, [projectIdProp, workspaceSlug]);
+
+	const resolvedReady = projectIdProp !== undefined || projectReady.value;
+	const resolvedProjectId = projectIdProp ?? currentProject.value?.id ?? "";
+	const resolveError = projectIdProp ? null : storeProjectError.value;
+
 	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 	useEffect(() => {
-		if (projectIdProp) {
-			setProjectId(projectIdProp);
-			return;
-		}
-		let cancelled = false;
-		resolveProjectId(workspaceSlug).then((res) => {
-			if (cancelled) return;
-			if (res.project) {
-				setProjectId(res.project.id);
-			} else {
-				setError(res.error);
-				setLoading(false);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [projectIdProp, workspaceSlug]);
+		if (resolvedReady) setProjectId(resolvedProjectId);
+	}, [resolvedReady, resolvedProjectId]);
 
 	// Static output can't serve the dynamic /feedback/[sourceId] route directly, so
 	// FeedbackSourceDetail is also rendered by the static /feedback/view?sourceId= page (mirrors
@@ -194,14 +192,15 @@ export default function FeedbackSourceDetail({
 
 	const [sources, setSources] = useState<FeedbackSource[]>([]);
 	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [fetchError, setFetchError] = useState<string | null>(null);
+	const error = resolveError ?? fetchError;
 	const [tab, setTab] = useState<TabId>("items");
 	const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({});
 
 	const fetchSources = useCallback(async () => {
 		if (!projectId) return;
 		setLoading(true);
-		setError(null);
+		setFetchError(null);
 		try {
 			const data = await apiFetch<FeedbackSource[]>(`/api/projects/${projectId}/feedback-sources`, {
 				workspaceSlug,
@@ -234,15 +233,20 @@ export default function FeedbackSourceDetail({
 			}
 			setSources(list);
 		} catch (e) {
-			setError(String(e));
+			setFetchError(String(e));
 		} finally {
 			setLoading(false);
 		}
 	}, [projectId, sourceId, workspaceSlug]);
 
 	useEffect(() => {
+		if (!resolvedReady) return;
+		if (!projectId) {
+			setLoading(false);
+			return;
+		}
 		fetchSources();
-	}, [fetchSources]);
+	}, [resolvedReady, projectId, fetchSources]);
 
 	function focusTab(id: TabId) {
 		tabRefs.current[id]?.focus();

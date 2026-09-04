@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
+import {
+	currentProject,
+	ensureProjectResolved,
+	projectReady,
+	projectError as storeProjectError,
+} from "../lib/project-context";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
-import { resolveProjectId } from "../utils/resolve-project-id";
 import type { CustomFieldValue, ProjectLookup as Project } from "./board-utils";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
@@ -271,31 +276,22 @@ function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boo
 }
 
 function useSprintData(workspaceSlug: string | undefined) {
-	const [projectId, setProjectId] = useState<string | null | undefined>(undefined);
 	const [project, setProject] = useState<Project | null>(null);
 	const [sprints, setSprints] = useState<Sprint[]>([]);
 	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [fetchError, setFetchError] = useState<string | null>(null);
 
 	useEffect(() => {
-		let cancelled = false;
-		resolveProjectId<Project>(workspaceSlug).then((res) => {
-			if (cancelled) return;
-			setProjectId(res.project?.id ?? null);
-			if (!res.project) {
-				if (res.error) setError(res.error);
-				setLoading(false);
-			}
-		});
-		return () => {
-			cancelled = true;
-		};
+		ensureProjectResolved(workspaceSlug);
 	}, [workspaceSlug]);
+
+	const projectId = projectReady.value ? (currentProject.value?.id ?? null) : undefined;
+	const error = storeProjectError.value ?? fetchError;
 
 	const fetchSprints = useCallback(
 		async (pid: string) => {
 			setLoading(true);
-			setError(null);
+			setFetchError(null);
 			try {
 				const [proj, sprintData] = await Promise.all([
 					apiFetch<Project>(`/api/projects/${pid}`, { workspaceSlug }),
@@ -309,7 +305,7 @@ function useSprintData(workspaceSlug: string | undefined) {
 					setSprints(Array.isArray(sprintData?.items) ? sprintData.items : []);
 				}
 			} catch (e) {
-				setError(String(e));
+				setFetchError(String(e));
 			} finally {
 				setLoading(false);
 			}
@@ -318,7 +314,12 @@ function useSprintData(workspaceSlug: string | undefined) {
 	);
 
 	useEffect(() => {
-		if (projectId) fetchSprints(projectId);
+		if (projectId === undefined) return;
+		if (!projectId) {
+			setLoading(false);
+			return;
+		}
+		fetchSprints(projectId);
 	}, [projectId, fetchSprints]);
 
 	return { projectId: projectId ?? null, project, sprints, loading, error, fetchSprints };
