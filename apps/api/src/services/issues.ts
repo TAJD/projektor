@@ -1608,9 +1608,12 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 	// otherwise concludes "no work" when a differently-worded backlog exists. Surface
 	// the count so the caller knows to groom (or re-query with includeNotReady).
 	const droppedNotReady = annotated.filter((i) => "needsGrooming" in i).length;
-	const ready = includeNotReady ? annotated : annotated.filter((i) => !("needsGrooming" in i));
+	if (includeNotReady) return { issues: annotated.slice(0, limit), droppedNotReady: 0 };
 
-	return { issues: ready.slice(0, limit), droppedNotReady: includeNotReady ? 0 : droppedNotReady };
+	const readyOnly = annotated.filter((i) => !("needsGrooming" in i));
+	if (readyOnly.length > 0) return { issues: readyOnly.slice(0, limit), droppedNotReady };
+
+	return { issues: annotated.slice(0, limit), droppedNotReady, degraded: true };
 }
 
 export async function searchIssues(ctx: ServiceCtx, raw: unknown) {

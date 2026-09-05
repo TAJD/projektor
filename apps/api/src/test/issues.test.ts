@@ -2087,6 +2087,22 @@ describe("get_prioritized_issues MCP tool", () => {
 		expect(titles).not.toContain("In other project");
 	});
 
+	it("degrades to the ranked not-ready list when nothing passes the bar (PROJ-738)", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "Not ready" });
+
+		const body = await callPrioritized();
+		expect(body.error).toBeUndefined();
+		const data = JSON.parse(body.result!.content[0].text) as {
+			issues: Array<{ title: string; needsGrooming?: boolean }>;
+			droppedNotReady: number;
+			degraded?: boolean;
+		};
+		expect(data.issues.map((i) => i.title)).toContain("Not ready");
+		expect(data.issues.find((i) => i.title === "Not ready")?.needsGrooming).toBe(true);
+		expect(data.droppedNotReady).toBe(1);
+		expect(data.degraded).toBe(true);
+	});
+
 	it("computes droppedNotReady scoped to projectId", async () => {
 		const otherProject = await seedProject(workspaceId, "OTHER");
 		// Neither issue has a body, so both fail the definition-of-ready check.
