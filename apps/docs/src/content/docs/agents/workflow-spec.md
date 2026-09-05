@@ -12,13 +12,15 @@ via the `get_workflow` MCP tool or `GET /api/workflow`.
 
 ## Definition of ready
 
-An issue is **ready** for an agent to pick up when its body states all three of:
+An issue is **ready** for an agent to pick up when its body states both of:
 
 1. **Acceptance criteria** — a checklist or bullet list of concrete, checkable outcomes.
 2. **Scope** — the files or components expected to change, named explicitly (not "the
    backend").
-3. **Verification** — the exact command(s) that prove the work is done (a test file, a
-   lint/type-check command, a fixture run).
+
+Verification isn't required here (PROJ-738) — you can't name the exact command that
+proves work is done before you've done the work. It's required later, at completion-report
+time instead; see Completion reports below.
 
 `get_prioritized_issues` filters out issues that don't meet this bar by default. Pass
 `includeNotReady: true` to see them anyway, tagged with `needsGrooming: true` and the

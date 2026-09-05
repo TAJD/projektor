@@ -81,9 +81,5 @@ export function checkDefinitionOfReady(body: string): ReadinessCheck {
 		missing.push("scope/files");
 	}
 
-	if (!sectionHasContent(body, /verification/i)) {
-		missing.push("verification");
-	}
-
 	return { ready: missing.length === 0, missing };
 }

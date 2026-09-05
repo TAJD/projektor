@@ -2067,7 +2067,7 @@ describe("get_prioritized_issues MCP tool", () => {
 		const notReadyRow = data.issues.find((i) => i.title === "Not ready");
 		expect(notReadyRow?.needsGrooming).toBe(true);
 		expect(notReadyRow?.missingCriteria).toEqual(
-			expect.arrayContaining(["acceptance criteria", "scope/files", "verification"])
+			expect.arrayContaining(["acceptance criteria", "scope/files"])
 		);
 		const readyRow = data.issues.find((i) => i.title === "Ready");
 		expect(readyRow?.needsGrooming).toBeUndefined();
