@@ -185,7 +185,7 @@ router.post("/:workspaceId", async (c) => {
 					})
 				);
 			} catch (err) {
-				const { code, message, data } = toMcpError(err);
+				const { code, message, data } = toMcpError(err, crypto.randomUUID());
 				return c.json(jsonRpcError(body.id, code, message, data));
 			}
 		}
@@ -213,7 +213,7 @@ router.post("/:workspaceId", async (c) => {
 				const result = await getPrompt(ctx, name, promptArgs ?? {});
 				return c.json(jsonRpcResult(body.id, result));
 			} catch (err) {
-				const { code, message, data } = toMcpError(err);
+				const { code, message, data } = toMcpError(err, crypto.randomUUID());
 				return c.json(jsonRpcError(body.id, code, message, data));
 			}
 		}
