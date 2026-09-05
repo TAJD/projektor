@@ -64,6 +64,7 @@ export interface Env {
 	// Optional: opt-in real-time WebSocket hub (Durable Objects). Omitted for
 	// free-tier/1-click deployments; present when opt-in real-time features are enabled.
 	WORKSPACE_HUB?: DurableObjectNamespace;
+	RATE_LIMIT_TEST_NOW_MS?: string;
 }
 
 export interface RealtimeEvent<T = unknown> {
