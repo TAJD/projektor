@@ -54,4 +54,15 @@ describe("ConnectorManager", () => {
 		expect(await screen.findByText(/No connected applications/i)).toBeTruthy();
 		expect(screen.getByText(/Add this workspace as a connector in Claude/i)).toBeTruthy();
 	});
+
+	it("shows a friendly message instead of a raw ApiError for the public viewer's 403 (PROJ-580)", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue({ ok: false, status: 403, json: () => Promise.resolve({}) })
+		);
+		render(<ConnectorManager workspaceSlug="my-ws" />);
+		expect(await screen.findByText(/Signed-in members only/i)).toBeTruthy();
+		expect(screen.queryByText(/ApiError/i)).toBeNull();
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
 });

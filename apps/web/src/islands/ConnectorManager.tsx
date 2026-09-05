@@ -138,6 +138,7 @@ export default function ConnectorManager({ workspaceSlug: propWorkspaceSlug }: P
 	const [grants, setGrants] = useState<ConnectorGrant[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [forbidden, setForbidden] = useState(false);
 
 	const [revokeId, setRevokeId] = useState<string | null>(null);
 	const [revoking, setRevoking] = useState(false);
@@ -147,13 +148,18 @@ export default function ConnectorManager({ workspaceSlug: propWorkspaceSlug }: P
 		if (!workspaceSlug) return;
 		setLoading(true);
 		setError(null);
+		setForbidden(false);
 		try {
 			const data = await apiFetch<ConnectorGrant[]>(`/api/workspaces/${workspaceSlug}/connectors`, {
 				workspaceSlug,
 			});
 			setGrants(Array.isArray(data) ? data : []);
 		} catch (e) {
-			setError(String(e));
+			if (String(e).includes(": 403")) {
+				setForbidden(true);
+			} else {
+				setError(String(e));
+			}
 		} finally {
 			setLoading(false);
 		}
@@ -195,6 +201,15 @@ export default function ConnectorManager({ workspaceSlug: propWorkspaceSlug }: P
 
 	if (!workspaceSlug) return null;
 	if (loading) return <p aria-live="polite">Loading connected applications…</p>;
+
+	if (forbidden) {
+		return (
+			<div class="p-4 bg-surface border border-border rounded-md text-text-muted">
+				<strong>Signed-in members only.</strong> Connectors are personal credentials, so the shared
+				read-only demo viewer has none to show.
+			</div>
+		);
+	}
 
 	if (error) {
 		return (

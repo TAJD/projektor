@@ -27,11 +27,22 @@ const PAGE: WikiPageData = {
 	freshness: null,
 };
 
-function mockFetchWiki(page: WikiPageData | null, ok = true, status = 404) {
+function mockFetchWiki(
+	page: WikiPageData | null,
+	ok = true,
+	status = 404,
+	meEmail = "real-user@example.com"
+) {
 	vi.stubGlobal(
 		"fetch",
 		vi.fn().mockImplementation((url: string) => {
 			const u = String(url);
+			if (u.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ user: { id: "u1", email: meEmail, name: "User" } }),
+				});
+			}
 			if (u.includes("/revisions")) {
 				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 			}
@@ -148,6 +159,36 @@ describe("WikiPage", () => {
 			expect(putCall?.[0]).toContain("/api/wiki/my-page");
 			expect(JSON.parse(putCall?.[1].body)).toEqual({ parentId: "w2" });
 		});
+	});
+});
+
+describe("WikiPage — public read-only demo viewer (PROJ-580)", () => {
+	it("hides all write affordances for the public viewer", async () => {
+		mockFetchWiki(PAGE, true, 404, "public-viewer@projektor.local");
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => {
+			expect(screen.queryByRole("button", { name: "+ Child page" })).toBeNull();
+		});
+
+		expect(screen.queryByRole("button", { name: "+ New page" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Move" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+		expect(screen.queryByRole("button", { name: /Attach file/i })).toBeNull();
+	});
+
+	it("shows write affordances for a real user", async () => {
+		mockFetchWiki(PAGE, true, 404, "real-user@example.com");
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		expect(await screen.findByRole("button", { name: "+ New page" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "+ Child page" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Move" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
+		expect(screen.getByRole("button", { name: /Attach file/i })).toBeTruthy();
 	});
 });
 

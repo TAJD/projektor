@@ -9,6 +9,7 @@ import {
 } from "../lib/project-context";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
+import { usePublicViewer } from "../utils/public-viewer";
 import ProjectFlowCharts from "./ProjectFlowCharts";
 import { Button } from "./ui/Button";
 
@@ -171,6 +172,7 @@ function DescriptionEditor({
 	onSave,
 	onCancel,
 	onStartEdit,
+	canEdit,
 }: {
 	project: Project;
 	editingDesc: boolean;
@@ -182,6 +184,7 @@ function DescriptionEditor({
 	onSave: () => void;
 	onCancel: () => void;
 	onStartEdit: () => void;
+	canEdit: boolean;
 }) {
 	if (editingDesc) {
 		return (
@@ -196,7 +199,7 @@ function DescriptionEditor({
 			/>
 		);
 	}
-	return <DescriptionView project={project} onStartEdit={onStartEdit} />;
+	return <DescriptionView project={project} onStartEdit={canEdit ? onStartEdit : undefined} />;
 }
 
 function DescriptionEditForm({
@@ -244,7 +247,22 @@ function DescriptionEditForm({
 	);
 }
 
-function DescriptionView({ project, onStartEdit }: { project: Project; onStartEdit: () => void }) {
+function DescriptionView({
+	project,
+	onStartEdit,
+}: {
+	project: Project;
+	onStartEdit: (() => void) | undefined;
+}) {
+	if (!onStartEdit) {
+		return project.description ? (
+			<p class="m-0 text-text-base text-[0.9375rem] leading-[1.6] px-2 py-[0.375rem]">
+				{project.description}
+			</p>
+		) : (
+			<p class="m-0 text-text-muted text-sm italic px-2 py-[0.375rem]">No description.</p>
+		);
+	}
 	return (
 		// biome-ignore lint/a11y/useSemanticElements: div wraps block-level <p>; button can't nest <p>
 		<div
@@ -359,6 +377,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 
 	const projectId = projectReady.value ? (currentProject.value?.id ?? null) : undefined;
 	const resolveError = storeProjectError.value;
+	const isPublicViewer = usePublicViewer(workspaceSlug);
 
 	const [project, setProject] = useState<Project | null>(null);
 	const [recentIssues, setRecentIssues] = useState<RecentIssue[]>([]);
@@ -453,18 +472,19 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 					<h1 class="m-0 text-2xl font-bold text-text-base">{project.name}</h1>
 					<span class={KEY_BADGE_CLASS}>{project.key}</span>
 					{project.archivedAt != null && <span class={KEY_BADGE_CLASS}>Archived</span>}
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						onClick={toggleArchived}
-						disabled={archiving}
-					>
-						{project.archivedAt != null ? "Unarchive" : "Archive"}
-					</Button>
+					{!isPublicViewer && (
+						<Button
+							type="button"
+							variant="outline"
+							size="sm"
+							onClick={toggleArchived}
+							disabled={archiving}
+						>
+							{project.archivedAt != null ? "Unarchive" : "Archive"}
+						</Button>
+					)}
 				</div>
 
-				{/* Editable description */}
 				<div class="max-w-[640px]">
 					<DescriptionEditor
 						project={project}
@@ -477,6 +497,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 						onSave={saveDesc}
 						onCancel={cancelEditDesc}
 						onStartEdit={startEditDesc}
+						canEdit={!isPublicViewer}
 					/>
 				</div>
 			</header>

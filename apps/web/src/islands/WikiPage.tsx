@@ -5,6 +5,7 @@ import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
 import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
+import { usePublicViewer } from "../utils/public-viewer";
 import AccessPending from "./AccessPending";
 import type { ProjectLookup as ProjectOption } from "./board-utils";
 import MarkdownEditor from "./LazyMarkdownEditor";
@@ -242,15 +243,17 @@ function WikiVerifyControls({
 	onVerify,
 	verifying,
 	verifyError,
+	isPublicViewer,
 }: {
 	hasVerificationSignal: boolean;
 	onVerify: () => void;
 	verifying: boolean;
 	verifyError: string | null;
+	isPublicViewer: boolean;
 }) {
 	return (
 		<>
-			{hasVerificationSignal && (
+			{hasVerificationSignal && !isPublicViewer && (
 				<Button variant="outline" size="sm" onClick={onVerify} disabled={verifying}>
 					{verifying ? "Verifying…" : "Verify"}
 				</Button>
@@ -269,11 +272,13 @@ function WikiMetadataCard({
 	onVerify,
 	verifying,
 	verifyError,
+	isPublicViewer,
 }: {
 	page: WikiPageData;
 	onVerify: () => void;
 	verifying: boolean;
 	verifyError: string | null;
+	isPublicViewer: boolean;
 }) {
 	const hasMetadata =
 		Boolean(page.type) ||
@@ -297,6 +302,7 @@ function WikiMetadataCard({
 				onVerify={onVerify}
 				verifying={verifying}
 				verifyError={verifyError}
+				isPublicViewer={isPublicViewer}
 			/>
 		</div>
 	);
@@ -779,12 +785,15 @@ function WikiSidebar({
 		"wiki-sidebar",
 		drawerOpen ? "wiki-sidebar-open" : "",
 	].join(" ");
+	const isPublicViewer = usePublicViewer(workspaceSlug);
 	return (
 		<aside id="wiki-page-tree" class={asideClass} aria-label="Wiki pages" ref={sidebarRef}>
 			<ScopeControl workspaceSlug={workspaceSlug} projectId={projectId} />
-			<Button variant="primary" onClick={onCreate} class="w-full mb-4 max-sm:min-h-[44px]">
-				+ New page
-			</Button>
+			{!isPublicViewer && (
+				<Button variant="primary" onClick={onCreate} class="w-full mb-4 max-sm:min-h-[44px]">
+					+ New page
+				</Button>
+			)}
 			<input
 				type="search"
 				value={searchQuery}
@@ -1189,6 +1198,7 @@ function PageHeader({
 	onStartCreateChild,
 	onStartMove,
 	onDelete,
+	isPublicViewer,
 }: {
 	editing: boolean;
 	pageId: string;
@@ -1202,6 +1212,7 @@ function PageHeader({
 	onStartCreateChild: (pageId: string) => void;
 	onStartMove: () => void;
 	onDelete: () => void;
+	isPublicViewer: boolean;
 }) {
 	const isMobile = useIsMobileViewport();
 	return (
@@ -1219,45 +1230,47 @@ function PageHeader({
 				<h1 class="m-0 text-[1.75rem] font-bold text-text-base">{title}</h1>
 			)}
 
-			<div class="flex gap-2 shrink-0 max-sm:shrink">
-				{editing ? (
-					<>
-						<Button variant="primary" onClick={onSave} disabled={saving}>
-							{saving ? "Saving…" : "Save"}
-						</Button>
-						<Button variant="outline" onClick={onCancelEdit} disabled={saving}>
-							Cancel
-						</Button>
-					</>
-				) : isMobile ? (
-					<>
-						<Button variant="outline" onClick={onStartEdit}>
-							Edit
-						</Button>
-						<PageActionOverflowMenu
-							pageId={pageId}
-							onStartCreateChild={onStartCreateChild}
-							onStartMove={onStartMove}
-							onDelete={onDelete}
-						/>
-					</>
-				) : (
-					<>
-						<Button variant="outline" size="sm" onClick={() => onStartCreateChild(pageId)}>
-							+ Child page
-						</Button>
-						<Button variant="outline" size="sm" onClick={onStartMove}>
-							Move
-						</Button>
-						<Button variant="outline" onClick={onStartEdit}>
-							Edit
-						</Button>
-						<Button variant="danger" onClick={onDelete}>
-							Delete
-						</Button>
-					</>
-				)}
-			</div>
+			{!isPublicViewer && (
+				<div class="flex gap-2 shrink-0 max-sm:shrink">
+					{editing ? (
+						<>
+							<Button variant="primary" onClick={onSave} disabled={saving}>
+								{saving ? "Saving…" : "Save"}
+							</Button>
+							<Button variant="outline" onClick={onCancelEdit} disabled={saving}>
+								Cancel
+							</Button>
+						</>
+					) : isMobile ? (
+						<>
+							<Button variant="outline" onClick={onStartEdit}>
+								Edit
+							</Button>
+							<PageActionOverflowMenu
+								pageId={pageId}
+								onStartCreateChild={onStartCreateChild}
+								onStartMove={onStartMove}
+								onDelete={onDelete}
+							/>
+						</>
+					) : (
+						<>
+							<Button variant="outline" size="sm" onClick={() => onStartCreateChild(pageId)}>
+								+ Child page
+							</Button>
+							<Button variant="outline" size="sm" onClick={onStartMove}>
+								Move
+							</Button>
+							<Button variant="outline" onClick={onStartEdit}>
+								Edit
+							</Button>
+							<Button variant="danger" onClick={onDelete}>
+								Delete
+							</Button>
+						</>
+					)}
+				</div>
+			)}
 		</header>
 	);
 }
@@ -1456,11 +1469,13 @@ function AttachmentEntry({
 	workspaceSlug,
 	referenced,
 	onDelete,
+	isPublicViewer,
 }: {
 	attachment: Attachment;
 	workspaceSlug?: string;
 	referenced: boolean;
 	onDelete: (attachmentId: string) => void;
+	isPublicViewer: boolean;
 }) {
 	const qs = workspaceSlug ? `?workspace=${workspaceSlug}` : "";
 	return (
@@ -1484,14 +1499,16 @@ function AttachmentEntry({
 				{referenced ? "In page" : "Unreferenced"}
 			</span>
 			<span class="text-xs text-text-muted shrink-0">{formatBytes(attachment.size)}</span>
-			<Button
-				size="sm"
-				onClick={() => onDelete(attachment.id)}
-				aria-label={`Delete ${attachment.filename}`}
-				class="bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
-			>
-				×
-			</Button>
+			{!isPublicViewer && (
+				<Button
+					size="sm"
+					onClick={() => onDelete(attachment.id)}
+					aria-label={`Delete ${attachment.filename}`}
+					class="bg-transparent border-none text-text-muted px-[0.125rem] leading-none"
+				>
+					×
+				</Button>
+			)}
 		</div>
 	);
 }
@@ -1565,6 +1582,7 @@ function AttachmentsPanel({
 	onCancelUpload: () => void;
 	onDeleteAttachment: (attachmentId: string) => void;
 }) {
+	const isPublicViewer = usePublicViewer(workspaceSlug);
 	return (
 		<div class="mt-8">
 			<h3 class="text-xs uppercase tracking-[0.05em] text-text-muted font-semibold mb-3 pb-2 border-b border-border">
@@ -1580,30 +1598,32 @@ function AttachmentsPanel({
 							workspaceSlug={workspaceSlug}
 							referenced={isReferenced(a.id, content)}
 							onDelete={onDeleteAttachment}
+							isPublicViewer={isPublicViewer}
 						/>
 					))}
 				</div>
 			)}
 
-			{uploadFormOpen ? (
-				<AttachmentUploadForm
-					uploadFile={uploadFile}
-					uploading={uploading}
-					uploadError={uploadError}
-					onFileChange={onFileChange}
-					onUpload={onUpload}
-					onCancel={onCancelUpload}
-				/>
-			) : (
-				<button
-					type="button"
-					onClick={() => onToggleUploadForm(true)}
-					class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1"
-				>
-					<span class="text-base leading-none">+</span>
-					<span>Attach file</span>
-				</button>
-			)}
+			{!isPublicViewer &&
+				(uploadFormOpen ? (
+					<AttachmentUploadForm
+						uploadFile={uploadFile}
+						uploading={uploading}
+						uploadError={uploadError}
+						onFileChange={onFileChange}
+						onUpload={onUpload}
+						onCancel={onCancelUpload}
+					/>
+				) : (
+					<button
+						type="button"
+						onClick={() => onToggleUploadForm(true)}
+						class="text-sm text-text-muted hover:text-text-base transition-colors flex items-center gap-1"
+					>
+						<span class="text-base leading-none">+</span>
+						<span>Attach file</span>
+					</button>
+				))}
 		</div>
 	);
 }
@@ -1700,8 +1720,10 @@ function PageArticleMeta(
 		| "draftBanner"
 		| "onRestoreDraft"
 		| "onDiscardDraft"
+		| "workspaceSlug"
 	>
 ) {
+	const isPublicViewer = usePublicViewer(props.workspaceSlug);
 	return (
 		<>
 			<PageBreadcrumbs breadcrumbs={props.breadcrumbs} onNavigate={props.onNavigate} />
@@ -1730,6 +1752,7 @@ function PageArticleMeta(
 				onStartCreateChild={props.onStartCreateChild}
 				onStartMove={props.onStartMove}
 				onDelete={props.onDelete}
+				isPublicViewer={isPublicViewer}
 			/>
 
 			{!props.editing && (
@@ -1738,6 +1761,7 @@ function PageArticleMeta(
 					onVerify={props.onVerify}
 					verifying={props.verifying}
 					verifyError={props.verifyError}
+					isPublicViewer={isPublicViewer}
 				/>
 			)}
 
