@@ -93,4 +93,30 @@ describe("checkDefinitionOfReady (PROJ-253)", () => {
 		].join("\n");
 		expect(checkDefinitionOfReady(body)).toEqual({ ready: true, missing: [] });
 	});
+
+	it("recognises a bold label with the colon inside and content on the same line (PROJ-738)", () => {
+		const body = [
+			"**Acceptance criteria:** does the thing",
+			"**Scope / files:** `src/x.ts`",
+			"**Verification:** `pnpm test`; manual check too",
+		].join("\n");
+		expect(checkDefinitionOfReady(body)).toEqual({ ready: true, missing: [] });
+	});
+
+	const readyBase = "## Acceptance criteria\n- thing\n\nScope: `src/x.ts`\n\n";
+	it.each([
+		["## heading", "## Verification\n`pnpm test`"],
+		["### heading", "### Verification\n`pnpm test`"],
+		["bold, colon inside, inline content", "**Verification:** `pnpm test`"],
+		["bold label alone, content on next line", "**Verification**\n`pnpm test`"],
+		["em dash separator", "Verification — `pnpm test`"],
+		["bulleted bold", "- **Verification:** `pnpm test`"],
+		["lowercase colon", "verification: `pnpm test`"],
+		["bold lowercase inline", "**verification:** `pnpm test`"],
+	])("recognises a Verification label written as: %s (PROJ-738)", (_name, verificationLine) => {
+		expect(checkDefinitionOfReady(readyBase + verificationLine)).toEqual({
+			ready: true,
+			missing: [],
+		});
+	});
 });

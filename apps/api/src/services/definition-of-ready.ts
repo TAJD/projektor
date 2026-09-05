@@ -30,8 +30,8 @@ function isLabelLine(line: string, label: RegExp): boolean {
 	if (isHeading || isBold) return word.test(t);
 
 	// A plain line only counts when the label is a "Label:" prefix, not mid-sentence.
-	const stripped = t.replace(/^[-*]\s+/, "");
-	return ci(`^\\s*(?:${label.source})\\b[^:]*:`, label.flags).test(stripped);
+	const stripped = t.replace(/^[-*]\s+/, "").replace(/\*\*/g, "");
+	return ci(`^\\s*(?:${label.source})\\b[^:—–]*[:—–]`, label.flags).test(stripped);
 }
 
 // Non-empty content for `label`'s section: inline after a "Label:" or on a following
@@ -45,7 +45,8 @@ function sectionHasContent(body: string, label: RegExp): boolean {
 		.replace(/^[#\-*\s]+/, "")
 		.replace(/\*\*/g, "")
 		.replace(/`/g, "");
-	const afterColon = inline.includes(":") ? inline.slice(inline.indexOf(":") + 1).trim() : "";
+	const sepIdx = inline.search(/[:—–]/);
+	const afterColon = sepIdx === -1 ? "" : inline.slice(sepIdx + 1).trim();
 	if (afterColon !== "") return true;
 
 	for (let i = idx + 1; i < lines.length; i++) {

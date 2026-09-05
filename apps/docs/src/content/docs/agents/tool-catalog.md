@@ -117,7 +117,7 @@ running server.
 | `update_issue` | Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. |
 | `search_issues` | Search issues by keyword in title or body |
 | `delete_issue` | Delete an issue by ID or ref (e.g. PROJ-42) |
-| `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded. |
+| `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded. If none of the open issues pass, the ranked (not-ready) list is returned anyway with `degraded: true` on the response and `needsGrooming`/`missingCriteria` on each issue, rather than an empty array — empty otherwise means "no open work", which would be a lie. |
 
 ### Issue links
 

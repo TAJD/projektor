@@ -261,7 +261,10 @@ export const issuesTools: MCPTool[] = [
 		description:
 			"Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + " +
 			"inverse story points. Useful for deciding what to work on next. By default, issues that fail the " +
-			"definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded.",
+			"definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded. " +
+			"If none of the open issues pass, the ranked (not-ready) list is returned anyway with " +
+			"`degraded: true` on the response and `needsGrooming`/`missingCriteria` on each issue, rather than " +
+			'an empty array — empty otherwise means "no open work", which would be a lie.',
 		inputSchema: {
 			type: "object",
 			properties: {
