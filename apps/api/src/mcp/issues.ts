@@ -129,9 +129,10 @@ export const issuesTools: MCPTool[] = [
 		name: "create_issue",
 		description:
 			"Create a new issue in a project. For an issue an agent should be able to pick up " +
-			"autonomously, the body should state acceptance criteria, scope (files/components), " +
-			"and verification (the exact command(s) that prove it's done) — see get_workflow's " +
-			"definition of ready. get_prioritized_issues excludes issues missing these by default.",
+			"autonomously, the body should state acceptance criteria and scope (files/components) " +
+			"— see get_workflow's definition of ready. get_prioritized_issues excludes issues " +
+			"missing these by default. Verification isn't part of the readiness bar (PROJ-738) — " +
+			"it's required later, in the completionReport when entering review/done.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId", "title"],
@@ -261,7 +262,7 @@ export const issuesTools: MCPTool[] = [
 		description:
 			"Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + " +
 			"inverse story points. Useful for deciding what to work on next. By default, issues that fail the " +
-			"definition-of-ready check (missing acceptance criteria, scope/files, or verification) are excluded. " +
+			"definition-of-ready check (missing acceptance criteria or scope/files) are excluded. " +
 			"If none of the open issues pass, the ranked (not-ready) list is returned anyway with " +
 			"`degraded: true` on the response and `needsGrooming`/`missingCriteria` on each issue, rather than " +
 			'an empty array — empty otherwise means "no open work", which would be a lie.',
