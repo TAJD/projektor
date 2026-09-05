@@ -127,7 +127,11 @@ export const issuesTools: MCPTool[] = [
 	},
 	{
 		name: "create_issue",
-		description: "Create a new issue in a project",
+		description:
+			"Create a new issue in a project. For an issue an agent should be able to pick up " +
+			"autonomously, the body should state acceptance criteria, scope (files/components), " +
+			"and verification (the exact command(s) that prove it's done) — see get_workflow's " +
+			"definition of ready. get_prioritized_issues excludes issues missing these by default.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId", "title"],
