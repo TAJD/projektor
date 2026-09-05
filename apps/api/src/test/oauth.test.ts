@@ -781,14 +781,12 @@ describe("the request limiter keys on the grant, not the token (PROJ-658)", () =
 		const user = await seedUser(email);
 		await seedMember(workspace.id, user.id, "member");
 
+		env.RATE_LIMIT_TEST_NOW_MS = String(Date.now());
 		const { tokens, clientId } = await connect({ email, workspaceId: workspace.id });
 		for (let i = 0; i < API_LIMIT; i++) {
 			expect((await mcpCall(workspace.id, tokens.access_token, "list_projects")).status).toBe(200);
 		}
 
-		// A rotated access token carries the same <userId>:<grantId> prefix, so it lands in
-		// the bucket the previous one filled. Keyed on the whole token, an hourly refresh
-		// would reset the budget and the limit would mean nothing.
 		const refreshed = await exchange({
 			grant_type: "refresh_token",
 			refresh_token: tokens.refresh_token,
@@ -798,6 +796,7 @@ describe("the request limiter keys on the grant, not the token (PROJ-658)", () =
 		const rotated = await refreshed.json<TokenResponse>();
 		expect(rotated.access_token).not.toBe(tokens.access_token);
 		expect((await mcpCall(workspace.id, rotated.access_token, "list_projects")).status).toBe(429);
+		env.RATE_LIMIT_TEST_NOW_MS = undefined;
 
 		// And the other direction: a second connector for the same person gets its own
 		// budget, so one noisy client cannot lock the user out of the rest.

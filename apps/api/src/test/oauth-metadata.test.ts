@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 // PROJ-655: the two public OAuth discovery documents.
@@ -169,10 +169,12 @@ describe("discovery endpoints are rate-limited", () => {
 		// counter before each test, so the 4th request in this test is the first to
 		// exceed it. Without the /.well-known/* limiter mount these would all be 200:
 		// rateLimitMiddleware was previously mounted on /api/* and /mcp/* only.
+		env.RATE_LIMIT_TEST_NOW_MS = String(Date.now());
 		const ip = { "CF-Connecting-IP": "203.0.113.7" };
 		for (let i = 0; i < 3; i++) {
 			expect((await SELF.fetch(AS_URL, { headers: ip })).status).toBe(200);
 		}
 		expect((await SELF.fetch(AS_URL, { headers: ip })).status).toBe(429);
+		env.RATE_LIMIT_TEST_NOW_MS = undefined;
 	});
 });

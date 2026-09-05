@@ -30,7 +30,12 @@ export async function rateLimitMiddleware(
 	next: Next
 ): Promise<Response | undefined> {
 	const windowSecs = parseInt(c.env.RATE_LIMIT_WINDOW_SECS ?? "60", 10);
-	const now = Math.floor(Date.now() / 1000);
+	const testNow =
+		c.env.ENVIRONMENT !== "production" && c.env.RATE_LIMIT_TEST_NOW_MS
+			? Number(c.env.RATE_LIMIT_TEST_NOW_MS)
+			: NaN;
+	const nowMs = Number.isFinite(testNow) ? testNow : Date.now();
+	const now = Math.floor(nowMs / 1000);
 	const slot = Math.floor(now / windowSecs) * windowSecs; // fixed-window start timestamp
 
 	const authHeader = c.req.header("Authorization");
