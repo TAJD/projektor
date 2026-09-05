@@ -200,7 +200,14 @@ async function alreadyProvisioned(env: Env, userId: string): Promise<boolean> {
 	const localExpiry = inMemoryProvisionedCache.get(userId);
 	if (localExpiry && localExpiry > Date.now()) return true;
 
-	if (!(await env.KV.get(provisionedKey(userId)))) return false;
+	let marker: string | null;
+	try {
+		marker = await env.KV.get(provisionedKey(userId));
+	} catch (err) {
+		console.error(`[provisioning] failed to read provisioned marker for ${userId} from KV:`, err);
+		return false;
+	}
+	if (!marker) return false;
 	inMemoryProvisionedCache.set(userId, Date.now() + PROVISIONED_LOCAL_TTL_MS);
 	return true;
 }

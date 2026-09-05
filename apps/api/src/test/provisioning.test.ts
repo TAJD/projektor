@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import type { Env } from "@projektor/types";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	ensureUserProvisioned,
 	forgetProvisionedForTests,
@@ -339,7 +339,30 @@ describe("PROJ-433: provisioning runs once per user, not per request", () => {
 		expect(await memberRole(ws.id, user.id)).toBe("viewer");
 	});
 
-	// The marker must not record a run that did nothing because the workspace wasn't there
+	it("re-runs safely when the provisioned-marker read fails, instead of throwing", async () => {
+		const slug = "prov-kv-read-fail";
+		const ws = await seedWorkspace(slug);
+		const user = await seedUser("kv-read-fail@example.com");
+		const config = envWith({
+			ADMIN_EMAILS: "",
+			DEFAULT_WORKSPACE_SLUG: slug,
+			AUTO_JOIN_ROLE: "viewer",
+		});
+
+		await ensureUserProvisioned(config, user);
+		await dropMembership(ws.id, user.id);
+		await resetProvisioningCacheForTests();
+
+		vi.spyOn(env.KV, "get").mockRejectedValueOnce(new Error("KV read failed"));
+		try {
+			await ensureUserProvisioned(config, user);
+		} finally {
+			vi.restoreAllMocks();
+		}
+
+		expect(await memberRole(ws.id, user.id)).toBe("viewer");
+	});
+
 	// yet — that user would then stay unprovisioned for the whole TTL after bootstrap.
 	it("does not cache a run that bailed waiting for the default workspace", async () => {
 		const slug = "prov-cache-early-bird";

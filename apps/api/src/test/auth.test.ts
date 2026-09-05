@@ -502,8 +502,57 @@ describe("PROJ-730: JWKS cache write failure doesn't fail auth", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// PROJ-360: last_used_at is a coarse audit field, throttled so bearer/agent
+describe("PROJ-735: JWKS cache read failure falls back to a fresh fetch", () => {
+	it("a KV read error doesn't fail auth — falls through to fetching fresh certs", async () => {
+		const keyPair = (await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"]
+		)) as CryptoKeyPair;
+		const publicJwk = (await crypto.subtle.exportKey("jwk", keyPair.publicKey)) as JsonWebKey;
+
+		const domain = `proj-735-${crypto.randomUUID().slice(0, 8)}.example.com`;
+		const audience = "proj-735-audience";
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		env.CF_ACCESS_AUDIENCE = audience;
+
+		resetAuthCachesForTests();
+
+		const fetchSpy = vi.fn(async () => {
+			return new Response(JSON.stringify({ keys: [publicJwk] }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		});
+		vi.stubGlobal("fetch", fetchSpy);
+		vi.spyOn(env.KV, "get").mockRejectedValueOnce(new Error("KV read failed"));
+
+		try {
+			const jwt = await signTestJwt(keyPair.privateKey, {
+				exp: Math.floor(Date.now() / 1000) + 3600,
+				aud: audience,
+				iss: `https://${domain}`,
+				email: `proj-735-${crypto.randomUUID().slice(0, 8)}@example.com`,
+			});
+
+			const res = await SELF.fetch("http://localhost/auth/me", {
+				headers: { "Cf-Access-Jwt-Assertion": jwt },
+			});
+
+			expect(res.status).toBe(200);
+			expect(fetchSpy).toHaveBeenCalled();
+		} finally {
+			vi.unstubAllGlobals();
+			vi.restoreAllMocks();
+		}
+	});
+});
+
 // traffic (the hottest auth path) doesn't rewrite it on every single request.
 // ---------------------------------------------------------------------------
 

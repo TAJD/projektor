@@ -476,7 +476,12 @@ async function getCfAccessKeys(
 		return inMemoryCertsCache.keys;
 	}
 
-	const cached = await env.KV.get("cf-access-certs", "json");
+	let cached: unknown;
+	try {
+		cached = await env.KV.get("cf-access-certs", "json");
+	} catch (err) {
+		console.error("[auth] failed to read cf-access-certs from KV, fetching fresh:", err);
+	}
 	if (cached) {
 		const keys = cached as JsonWebKey[];
 		inMemoryCertsCache = { keys, expiresAt: Date.now() + CERTS_LOCAL_TTL_MS };
