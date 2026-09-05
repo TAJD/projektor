@@ -9,11 +9,13 @@ import type { ServiceCtx } from "./types";
 const DEFAULT_VARIANT = "bounded";
 const DEFAULT_REVIEW_MODEL = "opus";
 const DEFAULT_CADENCE = 2;
+const DEFAULT_CHECKPOINT_INTERVAL = 10;
 
 function fillEpicGoalDirective(params: {
 	variant: "bounded" | "full";
 	reviewModel: string;
 	cadence: number;
+	checkpointInterval: number;
 	epicTitle: string;
 	epicRef: string;
 	openChildCount: number;
@@ -36,6 +38,11 @@ function fillEpicGoalDirective(params: {
 			fill(EPIC_GOAL_TEMPLATE.reviewCadence, "{N}", String(params.cadence)),
 			"{MODEL}",
 			params.reviewModel
+		),
+		fill(
+			EPIC_GOAL_TEMPLATE.humanCheckpoint,
+			"{CHECKPOINT_INTERVAL}",
+			String(params.checkpointInterval)
 		),
 		EPIC_GOAL_TEMPLATE.doneWhen[params.variant],
 		EPIC_GOAL_TEMPLATE.decisionsLog,
@@ -69,6 +76,7 @@ export async function composePlaybook(ctx: ServiceCtx, raw: unknown) {
 	const variant = params.variant ?? DEFAULT_VARIANT;
 	const reviewModel = params.reviewModel ?? DEFAULT_REVIEW_MODEL;
 	const cadence = params.cadence ?? DEFAULT_CADENCE;
+	const checkpointInterval = params.checkpointInterval ?? DEFAULT_CHECKPOINT_INTERVAL;
 
 	const issue = (await getIssue(ctx, { ref: params.epicRef })) as {
 		title: string;
@@ -85,6 +93,7 @@ export async function composePlaybook(ctx: ServiceCtx, raw: unknown) {
 		variant,
 		reviewModel,
 		cadence,
+		checkpointInterval,
 		epicTitle: issue.title,
 		epicRef: `${issue.project_key}-${issue.number}`,
 		openChildCount: issue.rollup.remaining,

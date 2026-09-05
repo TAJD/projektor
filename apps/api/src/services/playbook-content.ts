@@ -43,6 +43,14 @@ export const EPIC_GOAL_TEMPLATE = {
 	reviewCadence:
 		"**Review cadence:** after every {N} completed tickets, run an adversarial {MODEL} review " +
 		"of the accumulated diff; file and fix anything it finds before continuing.",
+	humanCheckpoint:
+		"**Human checkpoint:** every {CHECKPOINT_INTERVAL} completed tickets, or immediately if " +
+		"confidence is genuinely low, stop and give a human something to act on: **Try** — a URL " +
+		"and a 30-second script for what to open, what to do, and what should happen — and **Least " +
+		"confident about** — the one thing in this batch you'd most want a second opinion on, in " +
+		"your own words. This is for the failure a diff review and a green build don't catch; use " +
+		"it for what a human would only find by using the thing. If confidence is genuinely low, do " +
+		"not self-merge even when the diff scope allows it — queue the change and say so.",
 	doneWhen: {
 		bounded:
 			"**Done when:** every ticket on the epic (original + actioned generated) is closed, " +
@@ -52,10 +60,13 @@ export const EPIC_GOAL_TEMPLATE = {
 			"is green, and everything is committed and pushed.",
 	},
 	decisionsLog:
-		"**Decisions log:** instead of asking questions, make the call and record decisions, " +
-		"tradeoffs, and anything needing human judgment as comments on the epic for review at the " +
-		"end. If two reasonable implementations diverge, comment both options on the ticket, pick " +
-		"the simpler, and flag it.",
+		"**Decisions log:** instead of asking questions, make the call — but when you record it " +
+		"depends on the decision. If reversing it later stays cheap, comment it on the epic for " +
+		"review at the end, as before. If it's cheap to reverse now and expensive later — retiring " +
+		"a public endpoint, deleting a directory, changing a data shape, choosing duplication over " +
+		"abstraction — comment it on the epic when you make it, not at the end, so a human can " +
+		"object before the next ticket compounds it. If two reasonable implementations diverge, " +
+		"comment both options on the ticket, pick the simpler, and flag it.",
 } as const;
 
 export const PLAYBOOKS: Playbook[] = [
@@ -82,18 +93,19 @@ those rules, so an agent working an epic normally fetches both.
 \`get_playbook("epic-goal")\` returns this page verbatim, template and all — read it and
 adapt it by hand.
 
-\`compose_playbook("epic-goal", { epicRef, variant, reviewModel, cadence })\` returns just
-the directive, with every placeholder already filled from data the server holds:
+\`compose_playbook("epic-goal", { epicRef, variant, reviewModel, cadence, checkpointInterval })\`
+returns just the directive, with every placeholder already filled from data the server holds:
 
 | Parameter / source | Fills |
 |---|---|
 | \`epicRef\` *(required)* — resolved to the epic's ref and title | the **Goal** clause |
 | \`variant\` — \`bounded\` (default) or \`full\` | the **Self-feed** and **Done when** clauses |
 | \`cadence\` (default 2) and \`reviewModel\` (default \`opus\`) | the **Review cadence** clause |
+| \`checkpointInterval\` (default 10) | the **Human checkpoint** clause |
 | the epic's open child count and the project's agent WIP limit | an extra **Live data** clause |
 
 MCP clients that support the \`prompts\` primitive surface the same composed directive as a
-slash command, with the three optional parameters as prompt arguments.
+slash command, with the four optional parameters as prompt arguments.
 
 ## What each clause is for
 
@@ -110,10 +122,17 @@ slash command, with the three optional parameters as prompt arguments.
   generator rather than a fixed list. This is the only clause the two variants differ on.
 - **Review cadence** — naming the model and the interval up front makes the checkpoint
   something the agent can self-enforce; "review as you go" doesn't survive a long run.
+- **Human checkpoint** — a diff review and a green build catch neither a regression that
+  only shows up when a page actually loads, nor a decision that was wrong on the merits.
+  Naming a URL, a script, and the one thing the agent is least sure about gives a human
+  something to act on instead of a queue of PR titles.
 - **Done when** — a checkable condition (every ticket closed, verification green,
   everything pushed) instead of a judgment call.
-- **Decisions log** — judgment calls land as comments on the epic for review at the end,
-  so an ambiguity doesn't block the run on a question.
+- **Decisions log** — most judgment calls land as comments on the epic for review at the
+  end, so an ambiguity doesn't block the run on a question. The exception is a decision
+  that's cheap to reverse now and expensive later, which is surfaced immediately instead —
+  logging it only at the end would let several more tickets compound a call nobody has
+  actually agreed with yet.
 
 ## Template — bounded variant (default)
 
@@ -126,6 +145,8 @@ slash command, with the three optional parameters as prompt arguments.
 > ${EPIC_GOAL_TEMPLATE.selfFeed.bounded}
 >
 > ${EPIC_GOAL_TEMPLATE.reviewCadence}
+>
+> ${EPIC_GOAL_TEMPLATE.humanCheckpoint}
 >
 > ${EPIC_GOAL_TEMPLATE.doneWhen.bounded}
 >
