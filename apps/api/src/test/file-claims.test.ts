@@ -355,6 +355,33 @@ describe("File Claims API", () => {
 		expect(priorHolderMessages.items[0].body).toContain(issue2.id);
 	});
 
+	it("PROJ-635: force:true override on multiple paths held by the same issue posts one message per side, not one per path", async () => {
+		await claimFiles({
+			issueId,
+			paths: ["src/multi-a.ts", "src/multi-b.ts", "src/multi-c.ts"],
+		});
+
+		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Force claims" });
+		const forceRes = await claimFiles({
+			issueId: issue2.id,
+			paths: ["src/multi-a.ts", "src/multi-b.ts", "src/multi-c.ts"],
+			force: true,
+		});
+		expect(forceRes.status).toBe(201);
+
+		const messages = await listMessagesForScope(`issue:${issue2.id}`);
+		expect(messages.items).toHaveLength(1);
+		expect(messages.items[0].body).toContain("src/multi-a.ts");
+		expect(messages.items[0].body).toContain("src/multi-b.ts");
+		expect(messages.items[0].body).toContain("src/multi-c.ts");
+
+		const priorHolderMessages2 = await listMessagesForScope(`issue:${issueId}`);
+		expect(priorHolderMessages2.items).toHaveLength(1);
+		expect(priorHolderMessages2.items[0].body).toContain("src/multi-a.ts");
+		expect(priorHolderMessages2.items[0].body).toContain("src/multi-b.ts");
+		expect(priorHolderMessages2.items[0].body).toContain("src/multi-c.ts");
+	});
+
 	// PROJ-636: a claim whose holding session stopped heartbeating is reclaimed by the next
 	// claim on that path, the way issue leases already were.
 	//

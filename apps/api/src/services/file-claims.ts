@@ -181,19 +181,13 @@ async function overrideConflictingClaims(
 ) {
 	const { workspaceId, issueId, agentId, paths, claimsByPath, now } = params;
 	const overridden: (typeof schema.issueFileClaims.$inferSelect)[] = [];
+	const displacedPaths = new Map<string, string[]>();
 	for (const path of paths) {
 		const existing = claimsByPath.get(path);
 		if (existing) {
-			await postMessage(ctx, {
-				scope: `issue:${issueId}`,
-				agentId: agentId ?? undefined,
-				body: `force-claimed "${path}", overriding issue ${existing.issueId}`,
-			});
-			await postMessage(ctx, {
-				scope: `issue:${existing.issueId}`,
-				agentId: agentId ?? undefined,
-				body: `issue ${issueId} force-claimed "${path}", which this issue held`,
-			});
+			const list = displacedPaths.get(existing.issueId) ?? [];
+			list.push(path);
+			displacedPaths.set(existing.issueId, list);
 			await orm
 				.update(schema.issueFileClaims)
 				.set({ releasedAt: now, releaseReason: "overridden" })
@@ -211,6 +205,19 @@ async function overrideConflictingClaims(
 			});
 			overridden.push({ ...existing, releasedAt: now, releaseReason: "overridden" });
 		}
+	}
+	for (const [displacedIssueId, displacedIssuePaths] of displacedPaths) {
+		const pathList = displacedIssuePaths.map((p) => `"${p}"`).join(", ");
+		await postMessage(ctx, {
+			scope: `issue:${issueId}`,
+			agentId: agentId ?? undefined,
+			body: `force-claimed ${pathList}, overriding issue ${displacedIssueId}`,
+		});
+		await postMessage(ctx, {
+			scope: `issue:${displacedIssueId}`,
+			agentId: agentId ?? undefined,
+			body: `issue ${issueId} force-claimed ${pathList}, which this issue held`,
+		});
 	}
 	return overridden;
 }
