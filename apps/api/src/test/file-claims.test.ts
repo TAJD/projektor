@@ -333,9 +333,7 @@ describe("File Claims API", () => {
 		expect(rejectedMessages.items).toHaveLength(0);
 	});
 
-	// PROJ-624: force:true DOES post a message, scoped to the issue that ends up
-	// holding the claim after the override (not the prior holder that lost it).
-	it("PROJ-624: force:true override posts a message scoped to the now-holding issue", async () => {
+	it("PROJ-635/624: force:true override posts a message to both the now-holding and the displaced issue", async () => {
 		await claimFiles({ issueId, paths: ["src/message-on-force.ts"] });
 
 		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Force claims" });
@@ -352,7 +350,9 @@ describe("File Claims API", () => {
 		expect(messages.items[0].body).toContain(issueId);
 
 		const priorHolderMessages = await listMessagesForScope(`issue:${issueId}`);
-		expect(priorHolderMessages.items).toHaveLength(0);
+		expect(priorHolderMessages.items).toHaveLength(1);
+		expect(priorHolderMessages.items[0].body).toContain("src/message-on-force.ts");
+		expect(priorHolderMessages.items[0].body).toContain(issue2.id);
 	});
 
 	// PROJ-636: a claim whose holding session stopped heartbeating is reclaimed by the next

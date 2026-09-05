@@ -189,6 +189,11 @@ async function overrideConflictingClaims(
 				agentId: agentId ?? undefined,
 				body: `force-claimed "${path}", overriding issue ${existing.issueId}`,
 			});
+			await postMessage(ctx, {
+				scope: `issue:${existing.issueId}`,
+				agentId: agentId ?? undefined,
+				body: `issue ${issueId} force-claimed "${path}", which this issue held`,
+			});
 			await orm
 				.update(schema.issueFileClaims)
 				.set({ releasedAt: now, releaseReason: "overridden" })

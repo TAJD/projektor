@@ -141,19 +141,21 @@ talk to, and can do so with `post_message`. Nothing is pushed to the holder: it 
 working and nothing about its claim changed.
 
 **Forced override.** When the caller passes `force`, the existing claim is released as
-`overridden` and `overrideConflictingClaims` posts a message via `postMessage`
-(`apps/api/src/services/agent-messages.ts`). Note the scope: the message goes to
-`issue:<claiming issue>` — the issue that just took the path — naming the displaced issue
-in the body. It is an audit record on the overrider, not a notification to the overridden.
+`overridden` and `overrideConflictingClaims` posts two messages via `postMessage`
+(`apps/api/src/services/agent-messages.ts`, PROJ-635): one to `issue:<claiming issue>` —
+an audit record naming the displaced issue — and one to `issue:<displaced issue>`, so the
+agent that lost the path is told directly rather than discovering it when its own next
+write or claim fails.
 
 So the routing is *informational, not conversational*. Both paths tell the agent doing the
 claiming who it collided with, and both persist the collision as a `claim_conflicts` row.
-Neither pushes anything to the agent that lost the path; that agent finds out when its
-next write or claim fails. A tool built specifically around negotiation — MCP Agent Mail,
-whose agents message each other and pick different files — is genuinely better at this
-particular step, and [how Projektor differs](/projektor/philosophy/alternatives/) says so.
-What Projektor does instead of negotiating is *record*, which is the subject of the next
-section.
+Rejection still pushes nothing to the holder — its claim didn't change, so there's nothing
+for it to react to — but a forced override does, since a live agent's assumption about what
+it owns just became false (PROJ-635's reasoning for treating the two cases differently). A
+tool built specifically around negotiation — MCP Agent Mail, whose agents message each
+other and pick different files — is genuinely better at the rejection step, and
+[how Projektor differs](/projektor/philosophy/alternatives/) says so. What Projektor does
+instead of negotiating there is *record*, which is the subject of the next section.
 
 ## Conflict as an event log
 

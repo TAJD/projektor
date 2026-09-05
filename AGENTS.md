@@ -51,9 +51,10 @@ editing anything:
   not how fast you can ask.
 - **A refused claim tells you who to talk to.** Rejection is all-or-nothing: nothing is
   claimed, and the error names the issue and agent holding the path — message them with
-  `post_message` if you need it. Nothing is pushed to the holder either way, including
-  when you use `force` (that posts an audit message to *your* issue scope, not theirs), so
-  if you override someone, tell them yourself. Every contended path is recorded regardless.
+  `post_message` if you need it. Nothing is pushed to the holder on a plain rejection —
+  its claim didn't change. `force` is different: it posts to both your issue scope (audit)
+  and theirs (PROJ-635), since you just took something they thought they still held. Every
+  contended path is recorded regardless.
 
 This is the mechanism; the mechanical call sequence for this repo is under "Fleet
 coordination protocol" below, and the design rationale (why leases, claims, and the
