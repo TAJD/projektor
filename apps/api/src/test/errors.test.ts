@@ -114,7 +114,7 @@ describe("mcp/error-adapter: toMcpError", () => {
 	// JSON-RPC 2.0 `error.data` member instead.
 	it("maps ValidationError to -32602 with the issues in error.data and a message summary", () => {
 		const issues = { formErrors: ["ambiguous heading"], fieldErrors: {} };
-		const result = toMcpError(new ValidationError(issues));
+		const result = toMcpError(new ValidationError(issues), "req-1");
 		expect(result).toEqual({
 			code: -32602,
 			message: "Invalid params (ambiguous heading)",
@@ -123,7 +123,7 @@ describe("mcp/error-adapter: toMcpError", () => {
 	});
 
 	it("maps NotFoundError to -32000 with its client-facing message", () => {
-		expect(toMcpError(new NotFoundError("Issue not found"))).toEqual({
+		expect(toMcpError(new NotFoundError("Issue not found"), "req-1")).toEqual({
 			code: -32000,
 			message: "Issue not found",
 		});
@@ -135,7 +135,8 @@ describe("mcp/error-adapter: toMcpError", () => {
 	// MCP hosts that don't surface `data` to the calling model.
 	it("maps a NotFoundError with details to -32000 with the details in error.data and a message summary", () => {
 		const result = toMcpError(
-			new NotFoundError("Heading 'Nope' not found", { currentHeadings: ["Alpha", "Beta"] })
+			new NotFoundError("Heading 'Nope' not found", { currentHeadings: ["Alpha", "Beta"] }),
+			"req-1"
 		);
 		expect(result).toEqual({
 			code: -32000,
@@ -147,21 +148,21 @@ describe("mcp/error-adapter: toMcpError", () => {
 	// PROJ-508: an empty details object must be treated the same as no details at all —
 	// omit `data` (per the JSON-RPC 2.0 contract) rather than sending `data: {}`.
 	it("treats an empty NotFoundError.details object as no details", () => {
-		expect(toMcpError(new NotFoundError("Issue not found", {}))).toEqual({
+		expect(toMcpError(new NotFoundError("Issue not found", {}), "req-1")).toEqual({
 			code: -32000,
 			message: "Issue not found",
 		});
 	});
 
 	it("maps ForbiddenError to -32000 with its client-facing message", () => {
-		expect(toMcpError(new ForbiddenError("Not allowed"))).toEqual({
+		expect(toMcpError(new ForbiddenError("Not allowed"), "req-1")).toEqual({
 			code: -32000,
 			message: "Not allowed",
 		});
 	});
 
 	it("maps ConflictError to -32000 with its client-facing message", () => {
-		expect(toMcpError(new ConflictError("Slug taken"))).toEqual({
+		expect(toMcpError(new ConflictError("Slug taken"), "req-1")).toEqual({
 			code: -32000,
 			message: "Slug taken",
 		});
@@ -173,7 +174,8 @@ describe("mcp/error-adapter: toMcpError", () => {
 	// folded into `message` as a fallback for MCP hosts that don't surface `data`.
 	it("maps a ConflictError with details to -32000 with the details in error.data and a message summary", () => {
 		const result = toMcpError(
-			new ConflictError("Revision conflict", { currentRevisionId: "rev-2", diff: "..." })
+			new ConflictError("Revision conflict", { currentRevisionId: "rev-2", diff: "..." }),
+			"req-1"
 		);
 		expect(result).toEqual({
 			code: -32000,
@@ -186,7 +188,7 @@ describe("mcp/error-adapter: toMcpError", () => {
 	// summary folded into `message` is truncated; `data` still carries the full value.
 	it("truncates a long detail value in the message summary but not in error.data", () => {
 		const longDiff = "x".repeat(500);
-		const result = toMcpError(new ConflictError("Revision conflict", { diff: longDiff }));
+		const result = toMcpError(new ConflictError("Revision conflict", { diff: longDiff }), "req-1");
 		expect(result.data).toEqual({ diff: longDiff });
 		expect(result.message.length).toBeLessThan(150);
 		expect(result.message).toContain("diff: xxx");
@@ -195,16 +197,17 @@ describe("mcp/error-adapter: toMcpError", () => {
 	// PROJ-508: an empty details object must be treated the same as no details at all —
 	// omit `data` (per the JSON-RPC 2.0 contract) rather than sending `data: {}`.
 	it("treats an empty ConflictError.details object as no details", () => {
-		expect(toMcpError(new ConflictError("Slug taken", {}))).toEqual({
+		expect(toMcpError(new ConflictError("Slug taken", {}), "req-1")).toEqual({
 			code: -32000,
 			message: "Slug taken",
 		});
 	});
 
-	it("maps a non-ServiceError to a generic internal error, not the raw message", () => {
-		expect(toMcpError(new Error("stack trace with secrets"))).toEqual({
-			code: -32000,
-			message: "Internal error",
-		});
+	it("maps a non-ServiceError to a generic internal error carrying the request id, not the raw message", () => {
+		const result = toMcpError(new Error("stack trace with secrets"), "req-42");
+		expect(result.code).toBe(-32000);
+		expect(result.message).toBe("Internal error (request: req-42)");
+		expect(result.message).not.toContain("stack trace with secrets");
+		expect(result.data).toEqual({ requestId: "req-42" });
 	});
 });

@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as cache from "../services/cache";
 import {
 	authHeaders,
 	seedIssue,
@@ -196,6 +197,66 @@ describe("KV caching", () => {
 			const after = await SELF.fetch(url, { headers: hdrs });
 			const afterBody = (await after.json()) as Array<{ key: string }>;
 			expect(afterBody.some((t) => t.key === "chore")).toBe(false);
+		});
+	});
+
+	describe("KV operation failures (PROJ-730)", () => {
+		function throwingKv(err: unknown): KVNamespace {
+			return {
+				get: () => Promise.reject(err),
+				put: () => Promise.reject(err),
+				delete: () => Promise.reject(err),
+			} as unknown as KVNamespace;
+		}
+
+		it("get() degrades to a cache miss instead of throwing", async () => {
+			const kv = throwingKv(new Error("10048: your account has reached the free usage limit"));
+			await expect(cache.get(kv, "any-key")).resolves.toBeNull();
+		});
+
+		it("set() resolves instead of throwing", async () => {
+			const kv = throwingKv(new Error("10048: your account has reached the free usage limit"));
+			await expect(cache.set(kv, "any-key", { a: 1 }, 60)).resolves.toBeUndefined();
+		});
+
+		it("invalidate() resolves instead of throwing", async () => {
+			const kv = throwingKv(new Error("10048: your account has reached the free usage limit"));
+			await expect(cache.invalidate(kv, "any-key")).resolves.toBeUndefined();
+		});
+
+		it("update_issue's D1 write still lands and is reported as success when the cache invalidate fails", async () => {
+			const { token, slug, workspaceId, projectId, userId } = await seedProjectFixture({
+				role: "owner",
+			});
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Before" });
+
+			const spy = vi
+				.spyOn(env.KV, "delete")
+				.mockRejectedValueOnce(new Error("10048: your account has reached the free usage limit"));
+
+			const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "tools/call",
+					params: { name: "update_issue", arguments: { id: issue.id, title: "After" } },
+				}),
+			});
+			expect(spy).toHaveBeenCalled();
+			expect(res.status).toBe(200);
+			const rpc = (await res.json()) as { result?: unknown; error?: unknown };
+			expect(rpc.error).toBeUndefined();
+
+			const row = await env.DB.prepare("SELECT title FROM issues WHERE id = ?")
+				.bind(issue.id)
+				.first<{ title: string }>();
+			expect(row?.title).toBe("After");
+		});
+
+		afterEach(() => {
+			vi.restoreAllMocks();
 		});
 	});
 });

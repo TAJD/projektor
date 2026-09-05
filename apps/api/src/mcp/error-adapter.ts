@@ -97,7 +97,10 @@ function toMcpServiceErrorWithDetails(
 	return { code: -32000, message: `${message} (${summarizeDetails(details)})`, data: details };
 }
 
-export function toMcpError(err: unknown): { code: number; message: string; data?: unknown } {
+export function toMcpError(
+	err: unknown,
+	requestId: string
+): { code: number; message: string; data?: unknown } {
 	if (err instanceof ValidationError) return toMcpValidationError(err);
 	if (err instanceof ServiceError) {
 		// Only the kinds whose messages are deliberately client-facing are
@@ -120,10 +123,14 @@ export function toMcpError(err: unknown): { code: number; message: string; data?
 					err instanceof ConflictError ? err.details : undefined
 				);
 			default:
-				console.error("[mcp] unhandled ServiceError kind in tools/call:", err.kind, err);
-				return { code: -32000, message: "Internal error" };
+				console.error(`[mcp] unhandled ServiceError kind (request ${requestId}):`, err.kind, err);
+				return {
+					code: -32000,
+					message: `Internal error (request: ${requestId})`,
+					data: { requestId },
+				};
 		}
 	}
-	console.error("[mcp] unhandled error in tools/call:", err);
-	return { code: -32000, message: "Internal error" };
+	console.error(`[mcp] unhandled error in tools/call (request ${requestId}):`, err);
+	return { code: -32000, message: `Internal error (request: ${requestId})`, data: { requestId } };
 }

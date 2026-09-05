@@ -436,7 +436,11 @@ async function fetchAndCacheCfAccessKeys(env: Env): Promise<JsonWebKey[]> {
 	if (!res.ok) throw new Error("Failed to fetch CF Access certs");
 	const { keys } = await res.json<{ keys: JsonWebKey[] }>();
 
-	await env.KV.put("cf-access-certs", JSON.stringify(keys), { expirationTtl: 3600 });
+	try {
+		await env.KV.put("cf-access-certs", JSON.stringify(keys), { expirationTtl: 3600 });
+	} catch (err) {
+		console.error("[auth] failed to cache cf-access-certs in KV, continuing without it:", err);
+	}
 	inMemoryCertsCache = { keys, expiresAt: Date.now() + CERTS_LOCAL_TTL_MS };
 	return keys;
 }
@@ -531,7 +535,14 @@ async function upsertUserByEmail(
 	if (!user) throw new Error("Failed to upsert user");
 
 	if (kv) {
-		await kv.put(`user-by-email:${email}`, JSON.stringify(user), { expirationTtl: 300 });
+		try {
+			await kv.put(`user-by-email:${email}`, JSON.stringify(user), { expirationTtl: 300 });
+		} catch (err) {
+			console.error(
+				`[auth] failed to cache user-by-email:${email} in KV, continuing without it:`,
+				err
+			);
+		}
 	}
 	inMemoryUserCache.set(email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
 

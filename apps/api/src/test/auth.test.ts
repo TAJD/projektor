@@ -442,6 +442,66 @@ describe("PROJ-358: JWKS force-refresh on signature verification failure", () =>
 	});
 });
 
+describe("PROJ-730: JWKS cache write failure doesn't fail auth", () => {
+	it("a successful JWKS fetch still authenticates when caching it in KV fails", async () => {
+		const keyPair = (await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"]
+		)) as CryptoKeyPair;
+		const publicJwk = (await crypto.subtle.exportKey("jwk", keyPair.publicKey)) as JsonWebKey;
+
+		const domain = `proj-730-${crypto.randomUUID().slice(0, 8)}.example.com`;
+		const audience = "proj-730-audience";
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		env.CF_ACCESS_AUDIENCE = audience;
+
+		resetAuthCachesForTests();
+		await env.KV.delete("cf-access-certs");
+
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				return new Response(JSON.stringify({ keys: [publicJwk] }), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				});
+			})
+		);
+		const putSpy = vi
+			.spyOn(env.KV, "put")
+			.mockRejectedValueOnce(new Error("10048: your account has reached the free usage limit"));
+
+		try {
+			const jwt = await signTestJwt(keyPair.privateKey, {
+				exp: Math.floor(Date.now() / 1000) + 3600,
+				aud: audience,
+				iss: `https://${domain}`,
+				email: `proj-730-${crypto.randomUUID().slice(0, 8)}@example.com`,
+			});
+
+			const res = await SELF.fetch("http://localhost/auth/me", {
+				headers: { "Cf-Access-Jwt-Assertion": jwt },
+			});
+
+			expect(res.status).toBe(200);
+			expect(putSpy).toHaveBeenCalledWith(
+				"cf-access-certs",
+				expect.any(String),
+				expect.objectContaining({ expirationTtl: 3600 })
+			);
+		} finally {
+			vi.unstubAllGlobals();
+			vi.restoreAllMocks();
+		}
+	});
+});
+
 // ---------------------------------------------------------------------------
 // PROJ-360: last_used_at is a coarse audit field, throttled so bearer/agent
 // traffic (the hottest auth path) doesn't rewrite it on every single request.
