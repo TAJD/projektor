@@ -80,6 +80,10 @@ describe("compose_playbook", () => {
 		expect(body.directive).not.toContain("Self-feed (full)");
 		expect(body.directive).toContain("every 2 completed tickets");
 		expect(body.directive).toContain("adversarial opus review");
+		expect(body.directive).toContain("Human checkpoint");
+		expect(body.directive).toContain("every 10 completed tickets");
+		expect(body.directive).toContain("Least confident about");
+		expect(body.directive).toContain("cheap to reverse now and expensive later");
 		// one open child (Child 1), one done (Child 2) -> rollup.remaining == 1
 		expect(body.directive).toContain("1 open child ticket(s)");
 		expect(body.directive).toContain("WIP limit is 7");
@@ -106,6 +110,14 @@ describe("compose_playbook", () => {
 		expect(body.directive).not.toContain("Self-feed (bounded)");
 		expect(body.directive).toContain("every 5 completed tickets");
 		expect(body.directive).toContain("adversarial sonnet review");
+	});
+
+	it("honors a custom checkpointInterval", async () => {
+		const res = await compose({ epicRef: `PROJ-${epicNumber}`, checkpointInterval: 3 });
+		const json = (await res.json()) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const body = JSON.parse(json.result.content[0].text) as { directive: string };
+
+		expect(body.directive).toContain("every 3 completed tickets");
 	});
 
 	it("notes when the epic has no open child tickets yet", async () => {
@@ -148,6 +160,12 @@ describe("compose_playbook", () => {
 
 	it("errors on an invalid cadence", async () => {
 		const res = await compose({ epicRef: `PROJ-${epicNumber}`, cadence: -1 });
+		const json = (await res.json()) as JsonRpcError;
+		expect(json.error.code).toBe(-32602);
+	});
+
+	it("errors on an invalid checkpointInterval", async () => {
+		const res = await compose({ epicRef: `PROJ-${epicNumber}`, checkpointInterval: -1 });
 		const json = (await res.json()) as JsonRpcError;
 		expect(json.error.code).toBe(-32602);
 	});

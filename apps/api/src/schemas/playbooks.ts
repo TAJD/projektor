@@ -7,5 +7,6 @@ export const ComposePlaybookSchema = z.object({
 		variant: z.enum(["bounded", "full"]).optional(),
 		reviewModel: z.string().optional(),
 		cadence: z.number().int().positive().optional(),
+		checkpointInterval: z.number().int().positive().optional(),
 	}),
 });

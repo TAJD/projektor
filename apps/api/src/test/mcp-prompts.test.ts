@@ -43,7 +43,13 @@ describe("MCP prompts", () => {
 		const prompt = json.result.prompts.find((p) => p.name === "epic-goal");
 		expect(prompt).toBeDefined();
 		const argNames = prompt!.arguments.map((a) => a.name);
-		expect(argNames).toEqual(["epicRef", "variant", "reviewModel", "cadence"]);
+		expect(argNames).toEqual([
+			"epicRef",
+			"variant",
+			"reviewModel",
+			"cadence",
+			"checkpointInterval",
+		]);
 		expect(prompt!.arguments.find((a) => a.name === "epicRef")?.required).toBe(true);
 		expect(prompt!.arguments.find((a) => a.name === "variant")?.required).toBe(false);
 	});
@@ -61,9 +67,11 @@ describe("MCP prompts", () => {
 		expect(json.result.messages[0].content.type).toBe("text");
 		expect(json.result.messages[0].content.text).toContain("Ship the widget");
 		expect(json.result.messages[0].content.text).toContain("Self-feed (bounded)");
+		expect(json.result.messages[0].content.text).toContain("Human checkpoint");
+		expect(json.result.messages[0].content.text).toContain("every 10 completed tickets");
 	});
 
-	it("prompts/get honors string-valued variant/reviewModel/cadence arguments", async () => {
+	it("prompts/get honors string-valued variant/reviewModel/cadence/checkpointInterval arguments", async () => {
 		const json = (await mcpCall("prompts/get", {
 			name: "epic-goal",
 			arguments: {
@@ -71,12 +79,14 @@ describe("MCP prompts", () => {
 				variant: "full",
 				reviewModel: "sonnet",
 				cadence: "5",
+				checkpointInterval: "3",
 			},
 		})) as JsonRpcResult<{ messages: Array<{ content: { text: string } }> }>;
 		const text = json.result.messages[0].content.text;
 		expect(text).toContain("Self-feed (full)");
 		expect(text).toContain("every 5 completed tickets");
 		expect(text).toContain("adversarial sonnet review");
+		expect(text).toContain("every 3 completed tickets");
 	});
 
 	it("prompts/get on an unresolvable epicRef surfaces the compose error", async () => {

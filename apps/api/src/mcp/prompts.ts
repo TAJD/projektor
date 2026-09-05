@@ -32,6 +32,11 @@ const PROMPTS: MCPPromptDescriptor[] = [
 			{ name: "variant", description: '"bounded" (default) or "full"', required: false },
 			{ name: "reviewModel", description: 'Review model name, default "opus"', required: false },
 			{ name: "cadence", description: "Ticket review cadence, default 2", required: false },
+			{
+				name: "checkpointInterval",
+				description: "Human checkpoint interval in tickets, default 10",
+				required: false,
+			},
 		],
 	},
 ];
@@ -55,6 +60,7 @@ export async function getPrompt(ctx: PluginContext, name: string, args: Record<s
 			variant: args.variant || undefined,
 			reviewModel: args.reviewModel || undefined,
 			cadence: args.cadence ? Number(args.cadence) : undefined,
+			checkpointInterval: args.checkpointInterval ? Number(args.checkpointInterval) : undefined,
 		},
 	});
 
