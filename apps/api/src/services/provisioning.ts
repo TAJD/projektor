@@ -207,7 +207,14 @@ async function alreadyProvisioned(env: Env, userId: string): Promise<boolean> {
 
 async function markProvisioned(env: Env, userId: string): Promise<void> {
 	inMemoryProvisionedCache.set(userId, Date.now() + PROVISIONED_LOCAL_TTL_MS);
-	await env.KV.put(provisionedKey(userId), "1", { expirationTtl: PROVISIONED_KV_TTL_SECS });
+	try {
+		await env.KV.put(provisionedKey(userId), "1", { expirationTtl: PROVISIONED_KV_TTL_SECS });
+	} catch (err) {
+		console.error(
+			`[provisioning] failed to cache provisioned marker for ${userId} in KV, continuing without it:`,
+			err
+		);
+	}
 }
 
 /**

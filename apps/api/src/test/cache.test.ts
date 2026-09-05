@@ -230,9 +230,9 @@ describe("KV caching", () => {
 			});
 			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Before" });
 
-			vi.spyOn(env.KV, "delete").mockRejectedValueOnce(
-				new Error("10048: your account has reached the free usage limit")
-			);
+			const spy = vi
+				.spyOn(env.KV, "delete")
+				.mockRejectedValueOnce(new Error("10048: your account has reached the free usage limit"));
 
 			const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
 				method: "POST",
@@ -244,6 +244,7 @@ describe("KV caching", () => {
 					params: { name: "update_issue", arguments: { id: issue.id, title: "After" } },
 				}),
 			});
+			expect(spy).toHaveBeenCalled();
 			expect(res.status).toBe(200);
 			const rpc = (await res.json()) as { result?: unknown; error?: unknown };
 			expect(rpc.error).toBeUndefined();
