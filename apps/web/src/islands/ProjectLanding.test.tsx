@@ -44,10 +44,17 @@ function mockFetchProject(
 	wiki: readonly unknown[] = [],
 	flowMetrics: unknown = { throughputOverTime: [], cfdOverTime: [] },
 	project: unknown = PROJECT,
-	projectsList: readonly unknown[] = [project]
+	projectsList: readonly unknown[] = [project],
+	meEmail = "real-user@example.com"
 ) {
 	const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
 		const u = String(url);
+		if (u.includes("/auth/me")) {
+			return Promise.resolve({
+				ok: true,
+				json: () => Promise.resolve({ user: { id: "u1", email: meEmail, name: "User" } }),
+			});
+		}
 		if (u.endsWith("/api/projects")) {
 			return Promise.resolve({ ok: true, json: () => Promise.resolve(projectsList) });
 		}
@@ -63,7 +70,6 @@ function mockFetchProject(
 		if (opts?.method === "PATCH") {
 			return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
 		}
-		// project fetch
 		return Promise.resolve({ ok: true, json: () => Promise.resolve(project) });
 	});
 	vi.stubGlobal("fetch", fetchMock);
@@ -205,5 +211,28 @@ describe("ProjectLanding — archive/unarchive (PROJ-649)", () => {
 		mockFetchProject([], [], undefined, { ...PROJECT, archivedAt: 1700000000 });
 		render(<ProjectLanding />);
 		expect(await screen.findByRole("button", { name: "Unarchive" })).toBeTruthy();
+	});
+});
+
+describe("ProjectLanding — public read-only demo viewer (PROJ-580)", () => {
+	it("hides the Archive button and the description-edit affordance for the public viewer", async () => {
+		history.replaceState(null, "", "?id=p1");
+		mockFetchProject([], [], undefined, PROJECT, [PROJECT], "public-viewer@projektor.local");
+		render(<ProjectLanding />);
+		await screen.findByRole("heading", { name: "Projektor" });
+
+		expect(screen.queryByRole("button", { name: "Archive" })).toBeNull();
+		expect(screen.queryByLabelText("Edit project description")).toBeNull();
+		expect(await screen.findByText("An issue tracker.")).toBeTruthy();
+	});
+
+	it("shows the Archive button and the description-edit affordance for a real user", async () => {
+		history.replaceState(null, "", "?id=p1");
+		mockFetchProject([], [], undefined, PROJECT, [PROJECT], "real-user@example.com");
+		render(<ProjectLanding />);
+		await screen.findByRole("heading", { name: "Projektor" });
+
+		expect(await screen.findByRole("button", { name: "Archive" })).toBeTruthy();
+		expect(screen.getByLabelText("Edit project description")).toBeTruthy();
 	});
 });
