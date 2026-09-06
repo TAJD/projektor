@@ -27,6 +27,7 @@ jobs:
     name: Build & publish release artifact
     needs: ci
     runs-on: ubuntu-latest
+    environment: production-release
     env:
       VERSION: ${{ github.event.inputs.version || github.ref_name }}
     steps:
