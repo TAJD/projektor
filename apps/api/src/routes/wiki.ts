@@ -30,6 +30,7 @@ router.get("/", async (c) => {
 				status,
 				tags,
 				includeTemplates,
+				includeWorkspacePages: c.req.query("includeWorkspacePages"),
 			})
 		);
 	} catch (e) {
@@ -41,7 +42,12 @@ router.get("/tree", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
 		const projectId = c.req.query("projectId");
-		return c.json(await wikiService.getWikiTree(ctx, projectId));
+		return c.json(
+			await wikiService.getWikiTree(ctx, {
+				projectId,
+				includeWorkspacePages: c.req.query("includeWorkspacePages"),
+			})
+		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -68,6 +74,7 @@ router.get("/search", async (c) => {
 				type,
 				status,
 				tags,
+				includeWorkspacePages: c.req.query("includeWorkspacePages"),
 			})
 		);
 	} catch (e) {
@@ -93,7 +100,14 @@ router.get("/stale-pages", async (c) => {
 		const projectId = c.req.query("projectId");
 		const limit = c.req.query("limit");
 		const offset = c.req.query("offset");
-		return c.json(await wikiService.listStaleWikiPages(ctx, { projectId, limit, offset }));
+		return c.json(
+			await wikiService.listStaleWikiPages(ctx, {
+				projectId,
+				limit,
+				offset,
+				includeWorkspacePages: c.req.query("includeWorkspacePages"),
+			})
+		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
