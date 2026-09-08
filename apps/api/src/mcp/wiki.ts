@@ -12,6 +12,13 @@ const WELL_KNOWN_TYPES = WIKI_WELL_KNOWN_TYPES.join("|");
 const TYPE_FILTER_DESCRIPTION =
 	"Filter to pages whose frontmatter `type` matches (freeform; well-known " +
 	`values are ${WELL_KNOWN_TYPES})`;
+const INCLUDE_WORKSPACE_PAGES_PROPERTY = {
+	type: "boolean" as const,
+	description:
+		"When a projectId is given, also return workspace-level pages (those belonging to " +
+		"no project). Default false — the projectId filter alone returns that project's " +
+		"pages only.",
+};
 
 export const wikiTools: MCPTool[] = [
 	{
@@ -45,6 +52,7 @@ export const wikiTools: MCPTool[] = [
 						"Include template pages in the results (default false, matching search_wiki/" +
 						"list_stale_pages). Use list_wiki_templates for the template-picker use case instead.",
 				},
+				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
 		async handler(input, ctx) {
@@ -87,6 +95,7 @@ export const wikiTools: MCPTool[] = [
 					enum: ["draft", "current", "stale", "deprecated"],
 					description: "Filter to pages whose frontmatter `status` matches",
 				},
+				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
 		async handler(input, ctx) {
@@ -327,11 +336,11 @@ export const wikiTools: MCPTool[] = [
 			type: "object",
 			properties: {
 				projectId: { type: "string", description: "Filter to pages belonging to this project ID" },
+				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
 		async handler(input, ctx) {
-			const { projectId } = input as { projectId?: string };
-			return wikiService.getWikiTree(ctx as ServiceCtx, projectId);
+			return wikiService.getWikiTree(ctx as ServiceCtx, input);
 		},
 	},
 	{
@@ -473,6 +482,7 @@ export const wikiTools: MCPTool[] = [
 				},
 				limit: { type: "number", default: 50 },
 				offset: { type: "number", default: 0 },
+				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
 		async handler(input, ctx) {

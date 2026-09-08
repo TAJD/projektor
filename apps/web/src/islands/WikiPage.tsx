@@ -1,5 +1,6 @@
 import type { RefObject } from "preact";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
+import { currentProject, ensureProjectResolved, projectReady } from "../lib/project-context";
 import { slugify } from "../lib/slugify";
 import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
@@ -669,7 +670,9 @@ function ScopeControl({
 				options={options}
 				ariaLabel="Wiki project scope"
 				onChange={(value) => {
-					window.location.href = value ? `/wiki?projectId=${encodeURIComponent(value)}` : "/wiki";
+					window.location.href = value
+						? `/wiki?projectId=${encodeURIComponent(value)}`
+						: `/wiki?scope=${WORKSPACE_SCOPE}`;
 				}}
 			/>
 		</div>
@@ -1941,9 +1944,8 @@ function slugFromPathname(pathname: string): string {
 	return decoded ?? "";
 }
 
-function useWikiUrlState(projectIdProp: string | undefined, slugProp: string | undefined) {
+function useWikiUrlState(slugProp: string | undefined) {
 	const [slug, setSlug] = useState(slugProp ?? "");
-	const [projectId, setProjectId] = useState(projectIdProp ?? "");
 
 	useEffect(() => {
 		if (!slugProp) {
@@ -1953,11 +1955,31 @@ function useWikiUrlState(projectIdProp: string | undefined, slugProp: string | u
 			// redirect effect hasn't run yet.
 			setSlug(params.get("slug") || slugFromPathname(window.location.pathname));
 		}
-		if (!projectIdProp)
-			setProjectId(new URLSearchParams(window.location.search).get("projectId") ?? "");
-	}, [projectIdProp, slugProp]);
+	}, [slugProp]);
 
-	return { slug, setSlug, projectId };
+	return { slug, setSlug };
+}
+
+const WORKSPACE_SCOPE = "workspace";
+
+function useWikiScope(
+	workspaceSlug: string | undefined,
+	projectIdProp: string | undefined
+): string | undefined {
+	const [workspaceScope, setWorkspaceScope] = useState<boolean | undefined>(undefined);
+
+	useEffect(() => {
+		setWorkspaceScope(new URLSearchParams(window.location.search).get("scope") === WORKSPACE_SCOPE);
+	}, []);
+
+	useEffect(() => {
+		if (!projectIdProp && workspaceScope === false) ensureProjectResolved(workspaceSlug);
+	}, [workspaceSlug, projectIdProp, workspaceScope]);
+
+	if (projectIdProp) return projectIdProp;
+	if (workspaceScope === undefined) return undefined;
+	if (workspaceScope) return "";
+	return projectReady.value ? (currentProject.value?.id ?? "") : undefined;
 }
 
 // PROJ-487: /wiki?slug=X (and stale slugs that PROJ-483 redirects) get sent to the
@@ -1978,15 +2000,16 @@ function useLegacyQuerySlugRedirect(fetchedSlug: string | undefined, requestedSl
 	}, [fetchedSlug, requestedSlug]);
 }
 
-function useWikiTree(workspaceSlug: string | undefined, projectId: string) {
+function useWikiTree(workspaceSlug: string | undefined, projectId: string | undefined) {
 	const [pageTree, setPageTree] = useState<TreeNode[]>([]);
 	const [pageMap, setPageMap] = useState<Record<string, FlatEntry>>({});
 	const [treeLoading, setTreeLoading] = useState(false);
 
 	const fetchTree = useCallback(async () => {
+		if (projectId === undefined) return;
 		setTreeLoading(true);
 		try {
-			const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+			const qs = projectId ? `?${wikiScopeParams(projectId)}` : "";
 			const data = await apiFetch<TreeNode[]>(`/api/wiki/tree${qs}`, { workspaceSlug });
 			const tree = Array.isArray(data) ? data : [];
 			setPageTree(tree);
@@ -2007,16 +2030,16 @@ function useWikiTree(workspaceSlug: string | undefined, projectId: string) {
 
 // PROJ-489 (R7): the list_stale_pages maintenance queue, shown as a collapsible section
 // in the sidebar — fetched lazily (only once expanded) since most sessions won't open it.
-function useWikiStalePages(workspaceSlug: string | undefined, projectId: string) {
+function useWikiStalePages(workspaceSlug: string | undefined, projectId: string | undefined) {
 	const [staleOpen, setStaleOpen] = useState(false);
 	const [stalePages, setStalePages] = useState<StalePageItem[]>([]);
 	const [staleLoading, setStaleLoading] = useState(false);
 
 	useEffect(() => {
-		if (!staleOpen) return;
+		if (!staleOpen || projectId === undefined) return;
 		let cancelled = false;
 		setStaleLoading(true);
-		const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+		const qs = projectId ? `?${wikiScopeParams(projectId)}` : "";
 		apiFetch<StalePageItem[]>(`/api/wiki/stale-pages${qs}`, { workspaceSlug })
 			.then((data) => {
 				if (!cancelled) setStalePages(Array.isArray(data) ? data : []);
@@ -2035,6 +2058,10 @@ function useWikiStalePages(workspaceSlug: string | undefined, projectId: string)
 	return { staleOpen, setStaleOpen, stalePages, staleLoading };
 }
 
+function wikiScopeParams(projectId: string): URLSearchParams {
+	return new URLSearchParams({ projectId, includeWorkspacePages: "1" });
+}
+
 function appendWikiFilterParams(
 	qs: URLSearchParams,
 	{
@@ -2044,7 +2071,10 @@ function appendWikiFilterParams(
 		filterTags,
 	}: { projectId: string; filterType: string; filterStatus: string; filterTags: string }
 ) {
-	if (projectId) qs.set("projectId", projectId);
+	if (projectId) {
+		qs.set("projectId", projectId);
+		qs.set("includeWorkspacePages", "1");
+	}
 	if (filterType) qs.set("type", filterType);
 	if (filterStatus) qs.set("status", filterStatus);
 	if (filterTags.trim()) qs.set("tags", filterTags);
@@ -2055,7 +2085,7 @@ function appendWikiFilterParams(
 // with the FTS query via search_wiki's own type/status/tags params).
 function useWikiFilters(
 	workspaceSlug: string | undefined,
-	projectId: string,
+	projectId: string | undefined,
 	pageTree: readonly TreeNode[]
 ) {
 	const [filterType, setFilterType] = useState("");
@@ -2072,7 +2102,7 @@ function useWikiFilters(
 	const typeOptions = useMemo(() => buildTypeFilterOptions(collectTreeTypes(pageTree)), [pageTree]);
 
 	useEffect(() => {
-		if (!hasActiveFilters) {
+		if (!hasActiveFilters || projectId === undefined) {
 			setFilteredResults([]);
 			return;
 		}
@@ -2108,7 +2138,7 @@ function useWikiFilters(
 
 function useWikiSearch(
 	workspaceSlug: string | undefined,
-	projectId: string,
+	projectId: string | undefined,
 	filters: Readonly<{ filterType: string; filterStatus: string; filterTags: string }>
 ) {
 	const [searchQuery, setSearchQuery] = useState("");
@@ -2117,7 +2147,7 @@ function useWikiSearch(
 	const { filterType, filterStatus, filterTags } = filters;
 
 	useEffect(() => {
-		if (!searchQuery.trim()) {
+		if (!searchQuery.trim() || projectId === undefined) {
 			setSearchResults([]);
 			return;
 		}
@@ -3480,13 +3510,15 @@ function useWikiPageState(
 	slugProp: string | undefined
 ) {
 	const gate = useAccessGate(workspaceSlug);
-	const { slug, setSlug, projectId } = useWikiUrlState(projectIdProp, slugProp);
-	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, projectId);
-	const filters = useWikiFilters(workspaceSlug, projectId, pageTree);
-	const stale = useWikiStalePages(workspaceSlug, projectId);
+	const { slug, setSlug } = useWikiUrlState(slugProp);
+	const scope = useWikiScope(workspaceSlug, projectIdProp);
+	const projectId = scope ?? "";
+	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, scope);
+	const filters = useWikiFilters(workspaceSlug, scope, pageTree);
+	const stale = useWikiStalePages(workspaceSlug, scope);
 	const { searchQuery, setSearchQuery, searchResults, searchLoading } = useWikiSearch(
 		workspaceSlug,
-		projectId,
+		scope,
 		{
 			filterType: filters.filterType,
 			filterStatus: filters.filterStatus,

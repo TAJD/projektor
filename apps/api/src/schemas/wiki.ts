@@ -110,6 +110,8 @@ const TagsFilterSchema = z.preprocess((v) => {
 const WikiTypeFilterSchema = z.string().min(1).max(50).optional();
 const WikiStatusFilterSchema = z.enum(["draft", "current", "stale", "deprecated"]).optional();
 
+const IncludeWorkspacePagesSchema = BooleanQueryParam.optional().default(false);
+
 export const ListPagesInputSchema = z.object({
 	parentId: z.string().optional(),
 	projectId: z.string().uuid().optional(),
@@ -122,6 +124,12 @@ export const ListPagesInputSchema = z.object({
 	// is a separate function, unaffected by this flag; this is for a caller of
 	// listWikiPages itself that specifically wants templates included.
 	includeTemplates: z.boolean().optional().default(false),
+	includeWorkspacePages: IncludeWorkspacePagesSchema,
+});
+
+export const WikiTreeInputSchema = z.object({
+	projectId: z.string().uuid().optional(),
+	includeWorkspacePages: IncludeWorkspacePagesSchema,
 });
 
 export const SearchWikiInputSchema = z.object({
@@ -136,6 +144,7 @@ export const SearchWikiInputSchema = z.object({
 	type: WikiTypeFilterSchema,
 	tags: TagsFilterSchema,
 	status: WikiStatusFilterSchema,
+	includeWorkspacePages: IncludeWorkspacePagesSchema,
 });
 
 // PROJ-492 (R10): `against` is either another revision id or the literal string
@@ -161,6 +170,7 @@ export const ListStaleWikiPagesInputSchema = z.object({
 	projectId: z.string().uuid().optional(),
 	limit: z.coerce.number().int().min(1).max(200).optional().default(50),
 	offset: z.coerce.number().int().min(0).optional().default(0),
+	includeWorkspacePages: IncludeWorkspacePagesSchema,
 });
 
 // PROJ-490 (R8): section-addressed patch operations. `baseRevisionId` is required

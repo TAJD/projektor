@@ -15,6 +15,7 @@ import {
 	SlugSchema,
 	UpdatePageSchema,
 	WikiRevisionDiffInputSchema,
+	WikiTreeInputSchema,
 } from "../schemas/wiki";
 import {
 	canWriteProject,
@@ -389,6 +390,13 @@ function staleWikiPageCondition(now: number) {
 	)`;
 }
 
+function projectScopeCondition(projectId: string | undefined, includeWorkspacePages: boolean) {
+	if (!projectId) return undefined;
+	return includeWorkspacePages
+		? or(eq(schema.wikiPages.projectId, projectId), isNull(schema.wikiPages.projectId))
+		: eq(schema.wikiPages.projectId, projectId);
+}
+
 function buildListWikiPagesConditions(
 	ctx: ServiceCtx,
 	data: ReturnType<typeof ListPagesInputSchema.parse>
@@ -399,7 +407,8 @@ function buildListWikiPagesConditions(
 		isNull(schema.wikiPages.deletedAt),
 	];
 	if (data.parentId) conditions.push(eq(schema.wikiPages.parentId, data.parentId));
-	if (data.projectId) conditions.push(eq(schema.wikiPages.projectId, data.projectId));
+	const scope = projectScopeCondition(data.projectId, data.includeWorkspacePages);
+	if (scope) conditions.push(scope);
 	if (data.type) conditions.push(eq(schema.wikiPages.type, data.type));
 	if (data.status) conditions.push(eq(schema.wikiPages.status, data.status));
 	const tagsCond = tagsFilterCondition(data.tags ?? []);
@@ -479,11 +488,12 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 	const parsed = SearchWikiInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { query, limit, offset, projectId, updatedSince, type, status, tags } = parsed.data;
+	const includeWorkspacePages = parsed.data.includeWorkspacePages;
 
 	const ftsQuery = sanitizeFtsQuery(query);
 	if (!ftsQuery) return [];
 
-	if (projectId) {
+	if (projectId && !includeWorkspacePages) {
 		// PROJ-311: searching a specific project the user can't see returns nothing.
 		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
 			return [];
@@ -492,6 +502,7 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 
 	const { q, params, now } = buildSearchWikiQuery(ctx, ftsQuery, {
 		projectId,
+		includeWorkspacePages,
 		updatedSince,
 		type,
 		status,
@@ -509,6 +520,7 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 
 type SearchWikiFilters = {
 	projectId: string | undefined;
+	includeWorkspacePages: boolean;
 	updatedSince: number | undefined;
 	type: string | undefined;
 	status: string | undefined;
@@ -520,7 +532,16 @@ type SearchWikiFilters = {
 function buildSearchWikiQuery(
 	ctx: ServiceCtx,
 	ftsQuery: string,
-	{ projectId, updatedSince, type, status, tags, limit, offset }: SearchWikiFilters
+	{
+		projectId,
+		includeWorkspacePages,
+		updatedSince,
+		type,
+		status,
+		tags,
+		limit,
+		offset,
+	}: SearchWikiFilters
 ): { q: string; params: unknown[]; now: number } {
 	let q = `SELECT p.id, p.slug, p.title, p.project_id,
               p.type, p.tags, p.status, p.verified_at, p.verified_by, p.owners, p.verify_interval,
@@ -539,9 +560,12 @@ function buildSearchWikiQuery(
 	const params: unknown[] = [ftsQuery, ctx.workspaceId];
 
 	if (projectId) {
-		q += " AND p.project_id = ?";
+		q += includeWorkspacePages
+			? " AND (p.project_id = ? OR p.project_id IS NULL)"
+			: " AND p.project_id = ?";
 		params.push(projectId);
-	} else {
+	}
+	if (!projectId || includeWorkspacePages) {
 		// PROJ-311: across the workspace, exclude project-scoped pages the user isn't granted.
 		const visible = visibleProjectSqlFragment(ctx, "p.project_id");
 		if (visible) {
@@ -1536,9 +1560,9 @@ export async function verifyWikiPage(ctx: ServiceCtx, idOrSlug: string) {
 export async function listStaleWikiPages(ctx: ServiceCtx, input: unknown) {
 	const parsed = ListStaleWikiPagesInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { projectId, limit, offset } = parsed.data;
+	const { projectId, limit, offset, includeWorkspacePages } = parsed.data;
 
-	if (projectId) {
+	if (projectId && !includeWorkspacePages) {
 		// PROJ-311: same as searchWiki — querying a project the caller can't see returns nothing.
 		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
 			return [];
@@ -1556,9 +1580,9 @@ export async function listStaleWikiPages(ctx: ServiceCtx, input: unknown) {
 		// PROJ-496: a trashed page needs no re-verification either.
 		isNull(schema.wikiPages.deletedAt),
 	];
-	if (projectId) {
-		conditions.push(eq(schema.wikiPages.projectId, projectId));
-	} else {
+	const scope = projectScopeCondition(projectId, includeWorkspacePages);
+	if (scope) conditions.push(scope);
+	if (!projectId || includeWorkspacePages) {
 		// PROJ-311: workspace-wide, exclude project-scoped pages the caller isn't granted.
 		const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
 		if (visible) {
@@ -2636,7 +2660,11 @@ export async function purgeExpiredWikiPages(
 	return { purgedCount: ids.length, purgedIds: ids };
 }
 
-export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<TreeNode[]> {
+export async function getWikiTree(ctx: ServiceCtx, input: unknown = {}): Promise<TreeNode[]> {
+	const parsed = WikiTreeInputSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { projectId, includeWorkspacePages } = parsed.data;
+
 	const orm = drizzle(ctx.db, { schema });
 	const conditions = [
 		eq(schema.wikiPages.workspaceId, ctx.workspaceId),
@@ -2646,7 +2674,8 @@ export async function getWikiTree(ctx: ServiceCtx, projectId?: string): Promise<
 		// in-trash" case documented on undeleteWikiPage.
 		isNull(schema.wikiPages.deletedAt),
 	];
-	if (projectId) conditions.push(eq(schema.wikiPages.projectId, projectId));
+	const scope = projectScopeCondition(projectId, includeWorkspacePages);
+	if (scope) conditions.push(scope);
 	// PROJ-311: same visibility filter as listWikiPages.
 	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
 	if (visible) {

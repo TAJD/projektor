@@ -664,6 +664,72 @@ describe("Wiki API", () => {
 		expect(allPages).toHaveLength(2);
 	});
 
+	async function seedWikiPageRow(
+		workspaceId: string,
+		projectId: string | null,
+		pageSlug: string,
+		title: string
+	) {
+		await env.DB.prepare(
+			"INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content, created_by_id, updated_by_id, created_at, updated_at, tags, owners, is_template) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', 0)"
+		)
+			.bind(pageSlug, workspaceId, projectId, pageSlug, title, "body", userId, userId, 1000, 1000)
+			.run();
+	}
+
+	it("includeWorkspacePages widens a project scope to workspace-level pages (PROJ-742)", async () => {
+		const ws = await env.DB.prepare("SELECT id FROM workspaces WHERE slug = ?")
+			.bind(slug)
+			.first<{ id: string }>();
+		const project = await seedProject(ws!.id, "WIDEN");
+		const other = await seedProject(ws!.id, "OTHER");
+		await seedGroupGrant(ws!.id, userId, project.id);
+		await seedGroupGrant(ws!.id, userId, other.id);
+		await seedWikiPageRow(ws!.id, project.id, "scoped-page", "Scoped Page");
+		await seedWikiPageRow(ws!.id, null, "shared-page", "Shared Page");
+		await seedWikiPageRow(ws!.id, other.id, "other-page", "Other Project Page");
+
+		const strictRes = await SELF.fetch(`http://localhost/api/wiki?projectId=${project.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await strictRes.json()) as Array<{ title: string }>).map((p) => p.title)).toEqual([
+			"Scoped Page",
+		]);
+
+		const widenedRes = await SELF.fetch(
+			`http://localhost/api/wiki?projectId=${project.id}&includeWorkspacePages=1`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(
+			((await widenedRes.json()) as Array<{ title: string }>).map((p) => p.title).sort()
+		).toEqual(["Scoped Page", "Shared Page"]);
+
+		const treeRes = await SELF.fetch(
+			`http://localhost/api/wiki/tree?projectId=${project.id}&includeWorkspacePages=1`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(((await treeRes.json()) as Array<{ title: string }>).map((p) => p.title).sort()).toEqual(
+			["Scoped Page", "Shared Page"]
+		);
+	});
+
+	it("includeWorkspacePages still hides a project the caller isn't granted (PROJ-742)", async () => {
+		const ws = await env.DB.prepare("SELECT id FROM workspaces WHERE slug = ?")
+			.bind(slug)
+			.first<{ id: string }>();
+		const ungranted = await seedProject(ws!.id, "UNGRANTED");
+		await seedWikiPageRow(ws!.id, null, "ungranted-shared-page", "Shared Page");
+		await seedWikiPageRow(ws!.id, ungranted.id, "secret-page", "Secret Page");
+
+		const res = await SELF.fetch(
+			`http://localhost/api/wiki?projectId=${ungranted.id}&includeWorkspacePages=1`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(((await res.json()) as Array<{ title: string }>).map((p) => p.title)).toEqual([
+			"Shared Page",
+		]);
+	});
+
 	it("POST /api/wiki stores projectId and GET returns it", async () => {
 		const { env } = await import("cloudflare:test");
 		const ws = await env.DB.prepare("SELECT id FROM workspaces WHERE slug = ?")

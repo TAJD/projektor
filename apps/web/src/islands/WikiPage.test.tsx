@@ -8,6 +8,7 @@
 // vi.stubGlobal, then await findBy* for the async state update.
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetProjectStoreForTests } from "../lib/project-context";
 import WikiPage, { type ServerDraft, type WikiPageData } from "./WikiPage";
 
 const PAGE: WikiPageData = {
@@ -292,12 +293,16 @@ describe("WikiPage — path-based routing (PROJ-487)", () => {
 	});
 });
 
-describe("WikiPage — project scope control (PROJ-352)", () => {
+describe("WikiPage — project scope control (PROJ-352, PROJ-742)", () => {
+	let requestedUrls: string[] = [];
+
 	function mockFetchWikiWithProjects(page: WikiPageData | null) {
+		requestedUrls = [];
 		vi.stubGlobal(
 			"fetch",
 			vi.fn().mockImplementation((url: string) => {
 				const u = String(url);
+				requestedUrls.push(u);
 				if (u.includes("/revisions")) {
 					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
 				}
@@ -315,13 +320,21 @@ describe("WikiPage — project scope control (PROJ-352)", () => {
 		);
 	}
 
-	it("defaults to 'Workspace (all projects)' scope when no projectId is set", async () => {
+	beforeEach(() => {
+		__resetProjectStoreForTests();
+		localStorage.clear();
+		history.replaceState(null, "", "/");
+	});
+
+	it("scopes to the resolved current project when no scope is set in the URL", async () => {
 		mockFetchWikiWithProjects(PAGE);
 		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
-		expect(screen.getByRole("combobox", { name: "Wiki project scope" }).textContent).toMatch(
-			/Workspace \(all projects\)/i
-		);
+		await waitFor(() => {
+			expect(screen.getByRole("combobox", { name: "Wiki project scope" }).textContent).toMatch(
+				/PROJ — Projektor/i
+			);
+		});
 	});
 
 	it("shows the project's scope when projectId is set via the URL", async () => {
@@ -333,6 +346,46 @@ describe("WikiPage — project scope control (PROJ-352)", () => {
 			expect(screen.getByRole("combobox", { name: "Wiki project scope" }).textContent).toMatch(
 				/PROJ — Projektor/i
 			);
+		});
+	});
+
+	it("fetches the tree scoped to the project, including workspace-level pages", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchWikiWithProjects(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => {
+			const treeUrl = requestedUrls.find((u) => u.includes("/api/wiki/tree"));
+			expect(treeUrl).toBeTruthy();
+			expect(treeUrl).toContain("projectId=p1");
+			expect(treeUrl).toContain("includeWorkspacePages=1");
+		});
+	});
+
+	it("never fetches the tree unscoped before the project resolves", async () => {
+		mockFetchWikiWithProjects(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => {
+			expect(requestedUrls.some((u) => u.includes("/api/wiki/tree"))).toBe(true);
+		});
+		for (const u of requestedUrls.filter((x) => x.includes("/api/wiki/tree"))) {
+			expect(u).toContain("projectId=p1");
+		}
+	});
+
+	it("honours ?scope=workspace as the explicit all-projects opt-out", async () => {
+		history.replaceState(null, "", "?scope=workspace");
+		mockFetchWikiWithProjects(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		expect(screen.getByRole("combobox", { name: "Wiki project scope" }).textContent).toMatch(
+			/Workspace \(all projects\)/i
+		);
+		await waitFor(() => {
+			const treeUrl = requestedUrls.find((u) => u.includes("/api/wiki/tree"));
+			expect(treeUrl).toBeTruthy();
+			expect(treeUrl).not.toContain("projectId=");
 		});
 	});
 });
