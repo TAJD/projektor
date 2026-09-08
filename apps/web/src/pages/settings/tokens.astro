@@ -2,20 +2,21 @@
 import Base from '../../layouts/Base.astro';
 import TokenManager from '../../islands/TokenManager';
 import ConnectorManager from '../../islands/ConnectorManager';
+import ConnectAgentGuide from '../../islands/ConnectAgentGuide';
 
 const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefined;
 ---
-<Base title="API Tokens — Projektor">
+<Base title="Connect Claude Code — Projektor">
   <div class="page-container">
     <header style="margin-bottom: 1.5rem;">
       <h1 style="margin: 0 0 .25rem; font-size: 1.5rem; font-weight: 700; color: var(--text);">
-        API Tokens
+        Connect Claude Code
       </h1>
       <p style="margin: 0; font-size: .875rem; color: var(--text-muted);">
-        Manage workspace API tokens for agents and scripts.
+        Any workspace member can connect their own agent &mdash; access is automatically scoped to your role and group grants.
       </p>
     </header>
-    <TokenManager client:load workspaceSlug={workspaceSlug} />
+    <ConnectAgentGuide client:load workspaceSlug={workspaceSlug} />
 
     <header style="margin: 2.5rem 0 1.5rem;">
       <h2 style="margin: 0 0 .25rem; font-size: 1.25rem; font-weight: 700; color: var(--text);">
@@ -26,5 +27,15 @@ const workspaceSlug = import.meta.env.PUBLIC_WORKSPACE_SLUG as string | undefine
       </p>
     </header>
     <ConnectorManager client:load workspaceSlug={workspaceSlug} />
+
+    <header style="margin: 2.5rem 0 1.5rem;">
+      <h2 style="margin: 0 0 .25rem; font-size: 1.25rem; font-weight: 700; color: var(--text);">
+        API tokens &mdash; admins only
+      </h2>
+      <p style="margin: 0; font-size: .875rem; color: var(--text-muted);">
+        Shared workspace tokens for agents and scripts that can't use the connector sign-in flow above.
+      </p>
+    </header>
+    <TokenManager client:load workspaceSlug={workspaceSlug} />
   </div>
 </Base>
