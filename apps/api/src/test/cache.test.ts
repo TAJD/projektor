@@ -223,6 +223,34 @@ describe("KV caching", () => {
 			const kv = throwingKv(new Error("10048: your account has reached the free usage limit"));
 			await expect(cache.invalidate(kv, "any-key")).resolves.toBeUndefined();
 		});
+	});
+
+	describe("createLocalCache (PROJ-746)", () => {
+		it("returns undefined before a set and the stored value after", () => {
+			const local = cache.createLocalCache<number>(1000);
+			expect(local.get("k")).toBeUndefined();
+			local.set("k", 42);
+			expect(local.get("k")).toBe(42);
+		});
+
+		it("expires an entry once its TTL elapses", () => {
+			vi.useFakeTimers();
+			try {
+				const local = cache.createLocalCache<number>(1000);
+				local.set("k", 42);
+				vi.advanceTimersByTime(1001);
+				expect(local.get("k")).toBeUndefined();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("invalidate() removes an entry before its TTL elapses", () => {
+			const local = cache.createLocalCache<number>(1000);
+			local.set("k", 42);
+			local.invalidate("k");
+			expect(local.get("k")).toBeUndefined();
+		});
 
 		it("update_issue's D1 write still lands and is reported as success when the cache invalidate fails", async () => {
 			const { token, slug, workspaceId, projectId, userId } = await seedProjectFixture({

@@ -9,6 +9,13 @@ import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
 const TASK_TYPES_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:task-types`;
+const localCache = cache.createLocalCache<unknown[]>(WS_META_TTL * 1000);
+
+async function invalidateTaskTypesCache(ctx: ServiceCtx) {
+	const cacheKey = TASK_TYPES_CACHE_KEY(ctx.workspaceId);
+	await cache.invalidate(ctx.kv, cacheKey);
+	localCache.invalidate(cacheKey);
+}
 
 function buildTaskTypeUpdateSet(
 	data: z.infer<typeof UpdateTaskTypeSchema>
@@ -24,8 +31,14 @@ function buildTaskTypeUpdateSet(
 
 export async function listTaskTypes(ctx: ServiceCtx) {
 	const cacheKey = TASK_TYPES_CACHE_KEY(ctx.workspaceId);
+	const local = localCache.get(cacheKey);
+	if (local) return local;
+
 	const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
-	if (cached) return cached;
+	if (cached) {
+		localCache.set(cacheKey, cached);
+		return cached;
+	}
 
 	const orm = drizzle(ctx.db, { schema });
 	const rows = await orm
@@ -40,6 +53,7 @@ export async function listTaskTypes(ctx: ServiceCtx) {
 	}));
 
 	await cache.set(ctx.kv, cacheKey, result, WS_META_TTL);
+	localCache.set(cacheKey, result);
 	return result;
 }
 
@@ -76,7 +90,7 @@ export async function createTaskType(ctx: ServiceCtx, raw: unknown) {
 		isDefault: isDefault ? 1 : 0,
 	});
 
-	await cache.invalidate(ctx.kv, TASK_TYPES_CACHE_KEY(ctx.workspaceId));
+	await invalidateTaskTypesCache(ctx);
 	return { id, key, name };
 }
 
@@ -108,7 +122,7 @@ export async function updateTaskType(ctx: ServiceCtx, id: string, raw: unknown) 
 		.set(setObj)
 		.where(and(eq(schema.taskTypes.id, id), eq(schema.taskTypes.workspaceId, ctx.workspaceId)));
 
-	await cache.invalidate(ctx.kv, TASK_TYPES_CACHE_KEY(ctx.workspaceId));
+	await invalidateTaskTypesCache(ctx);
 	return { ok: true };
 }
 
@@ -137,7 +151,7 @@ export async function deleteTaskType(ctx: ServiceCtx, id: string) {
 		.delete(schema.taskTypes)
 		.where(and(eq(schema.taskTypes.id, id), eq(schema.taskTypes.workspaceId, ctx.workspaceId)));
 
-	await cache.invalidate(ctx.kv, TASK_TYPES_CACHE_KEY(ctx.workspaceId));
+	await invalidateTaskTypesCache(ctx);
 	return { ok: true };
 }
 

@@ -30,3 +30,25 @@ export async function invalidate(kv: KVNamespace, key: string): Promise<void> {
 		);
 	}
 }
+
+export interface LocalCache<T> {
+	get(key: string): T | undefined;
+	set(key: string, value: T): void;
+	invalidate(key: string): void;
+}
+
+export function createLocalCache<T>(ttlMs: number): LocalCache<T> {
+	const store = new Map<string, { value: T; expiresAt: number }>();
+	return {
+		get(key) {
+			const hit = store.get(key);
+			return hit && hit.expiresAt > Date.now() ? hit.value : undefined;
+		},
+		set(key, value) {
+			store.set(key, { value, expiresAt: Date.now() + ttlMs });
+		},
+		invalidate(key) {
+			store.delete(key);
+		},
+	};
+}
