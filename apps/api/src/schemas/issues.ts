@@ -23,7 +23,18 @@ export const CreateIssueSchema = z
 const CompletionReportSchema = z.object({
 	summary: z.string().min(1),
 	verification: z.string().min(1),
-	prLink: z.string().url().optional(),
+	prLink: z
+		.string()
+		.optional()
+		.transform((val) => {
+			if (!val) return undefined;
+			try {
+				new URL(val);
+				return val;
+			} catch {
+				return undefined;
+			}
+		}),
 });
 
 export const UpdateIssueSchema = z
