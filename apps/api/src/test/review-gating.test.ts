@@ -127,6 +127,20 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 		expect((await commentBodies(issue.id)).some((b) => b.includes(prLink))).toBe(true);
 	});
 
+	it("drops a protocol-less prLink the same as any other invalid URL", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Protocol-less prLink",
+		});
+		await seedAgentLease(workspaceId, issue.id);
+
+		const res = await patch(issue.id, {
+			status: "in_review",
+			completionReport: { ...report, prLink: "github.com/TAJD/projektor/pull/99" },
+		});
+		expect(res.status).toBe(200);
+		expect((await commentBodies(issue.id)).some((b) => b.includes("**PR:**"))).toBe(false);
+	});
+
 	// --- PROJ-375: agents close to done directly, no block ---
 
 	it("lets an agent (live lease) transition an issue directly to done", async () => {

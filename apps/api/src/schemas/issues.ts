@@ -25,16 +25,8 @@ const CompletionReportSchema = z.object({
 	verification: z.string().min(1),
 	prLink: z
 		.string()
-		.optional()
-		.transform((val) => {
-			if (!val) return undefined;
-			try {
-				new URL(val);
-				return val;
-			} catch {
-				return undefined;
-			}
-		}),
+		.transform((val) => (z.string().url().safeParse(val).success ? val : undefined))
+		.optional(),
 });
 
 export const UpdateIssueSchema = z
