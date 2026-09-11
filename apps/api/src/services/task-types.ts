@@ -8,8 +8,9 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
+const WS_META_LOCAL_TTL_MS = 5000;
 const TASK_TYPES_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:task-types`;
-const localCache = cache.createLocalCache<unknown[]>(WS_META_TTL * 1000);
+const localCache = cache.createLocalCache<unknown[]>(WS_META_LOCAL_TTL_MS);
 
 async function invalidateTaskTypesCache(ctx: ServiceCtx) {
 	const cacheKey = TASK_TYPES_CACHE_KEY(ctx.workspaceId);

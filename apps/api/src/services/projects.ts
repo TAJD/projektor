@@ -9,8 +9,9 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
+const WS_META_LOCAL_TTL_MS = 5000;
 const PROJECTS_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:projects`;
-const localCache = cache.createLocalCache<unknown[]>(WS_META_TTL * 1000);
+const localCache = cache.createLocalCache<unknown[]>(WS_META_LOCAL_TTL_MS);
 
 async function invalidateProjectsCache(ctx: ServiceCtx) {
 	const cacheKey = PROJECTS_CACHE_KEY(ctx.workspaceId);
