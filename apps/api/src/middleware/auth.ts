@@ -511,7 +511,12 @@ async function upsertUserByEmail(
 	if (local && local.expiresAt > Date.now()) return local.user;
 
 	if (kv) {
-		const cached = await kv.get(`user-by-email:${email}`, "json");
+		let cached: unknown;
+		try {
+			cached = await kv.get(`user-by-email:${email}`, "json");
+		} catch (err) {
+			console.error(`[auth] failed to read user-by-email:${email} from KV, continuing:`, err);
+		}
 		if (cached) {
 			const user = cached as AuthUser;
 			inMemoryUserCache.set(email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });

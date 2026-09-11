@@ -8,12 +8,20 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from ".
 import type { ServiceCtx } from "./types";
 
 const WS_META_TTL = 60;
+const WS_META_LOCAL_TTL_MS = 5000;
 const TASK_STATUSES_CACHE_KEY = (workspaceId: string) => `ws-meta:${workspaceId}:task-statuses`;
+const localCache = cache.createLocalCache<unknown[]>(WS_META_LOCAL_TTL_MS);
 
 export async function listTaskStatuses(ctx: ServiceCtx) {
 	const cacheKey = TASK_STATUSES_CACHE_KEY(ctx.workspaceId);
+	const local = localCache.get(cacheKey);
+	if (local) return local;
+
 	const cached = await cache.get<unknown[]>(ctx.kv, cacheKey);
-	if (cached) return cached;
+	if (cached) {
+		localCache.set(cacheKey, cached);
+		return cached;
+	}
 
 	const orm = drizzle(ctx.db, { schema });
 	const rows = await orm
@@ -28,7 +36,14 @@ export async function listTaskStatuses(ctx: ServiceCtx) {
 	}));
 
 	await cache.set(ctx.kv, cacheKey, result, WS_META_TTL);
+	localCache.set(cacheKey, result);
 	return result;
+}
+
+async function invalidateTaskStatusesCache(ctx: ServiceCtx) {
+	const cacheKey = TASK_STATUSES_CACHE_KEY(ctx.workspaceId);
+	await cache.invalidate(ctx.kv, cacheKey);
+	localCache.invalidate(cacheKey);
 }
 
 export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
@@ -66,7 +81,7 @@ export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
 		isDefault: isDefault ? 1 : 0,
 	});
 
-	await cache.invalidate(ctx.kv, TASK_STATUSES_CACHE_KEY(ctx.workspaceId));
+	await invalidateTaskStatusesCache(ctx);
 	return { id, key, name };
 }
 
@@ -114,7 +129,7 @@ export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown
 			and(eq(schema.taskStatuses.id, id), eq(schema.taskStatuses.workspaceId, ctx.workspaceId))
 		);
 
-	await cache.invalidate(ctx.kv, TASK_STATUSES_CACHE_KEY(ctx.workspaceId));
+	await invalidateTaskStatusesCache(ctx);
 	return { ok: true };
 }
 
@@ -148,7 +163,7 @@ export async function deleteTaskStatus(ctx: ServiceCtx, id: string) {
 			and(eq(schema.taskStatuses.id, id), eq(schema.taskStatuses.workspaceId, ctx.workspaceId))
 		);
 
-	await cache.invalidate(ctx.kv, TASK_STATUSES_CACHE_KEY(ctx.workspaceId));
+	await invalidateTaskStatusesCache(ctx);
 	return { ok: true };
 }
 

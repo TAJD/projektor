@@ -158,6 +158,39 @@ describe("KV caching", () => {
 			expect(second.length).toBeGreaterThan(0);
 		});
 
+		it("creating a project invalidates the cache — subsequent list_projects reflects it immediately", async () => {
+			const hdrs = authHeaders(token, slug);
+			const mcpUrl = `http://localhost/mcp/${workspaceId}`;
+
+			async function mcpListProjects() {
+				const res = await SELF.fetch(mcpUrl, {
+					method: "POST",
+					headers: hdrs,
+					body: JSON.stringify({
+						jsonrpc: "2.0",
+						id: 1,
+						method: "tools/call",
+						params: { name: "list_projects", arguments: {} },
+					}),
+				});
+				const rpc = (await res.json()) as { result: { content: Array<{ text: string }> } };
+				return JSON.parse(rpc.result.content[0].text) as Array<{ key: string }>;
+			}
+
+			const before = await mcpListProjects();
+
+			const created = await SELF.fetch("http://localhost/api/projects", {
+				method: "POST",
+				headers: hdrs,
+				body: JSON.stringify({ name: "New Project", key: "NEWP" }),
+			});
+			expect(created.status).toBe(201);
+
+			const after = await mcpListProjects();
+			expect(after.length).toBe(before.length + 1);
+			expect(after.some((p) => p.key === "NEWP")).toBe(true);
+		});
+
 		it("creating a task status invalidates the cache — subsequent list reflects it immediately", async () => {
 			const url = "http://localhost/api/task-statuses";
 			const hdrs = authHeaders(token, slug);
@@ -222,6 +255,34 @@ describe("KV caching", () => {
 		it("invalidate() resolves instead of throwing", async () => {
 			const kv = throwingKv(new Error("10048: your account has reached the free usage limit"));
 			await expect(cache.invalidate(kv, "any-key")).resolves.toBeUndefined();
+		});
+	});
+
+	describe("createLocalCache (PROJ-746)", () => {
+		it("returns undefined before a set and the stored value after", () => {
+			const local = cache.createLocalCache<number>(1000);
+			expect(local.get("k")).toBeUndefined();
+			local.set("k", 42);
+			expect(local.get("k")).toBe(42);
+		});
+
+		it("expires an entry once its TTL elapses", () => {
+			vi.useFakeTimers();
+			try {
+				const local = cache.createLocalCache<number>(1000);
+				local.set("k", 42);
+				vi.advanceTimersByTime(1001);
+				expect(local.get("k")).toBeUndefined();
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
+		it("invalidate() removes an entry before its TTL elapses", () => {
+			const local = cache.createLocalCache<number>(1000);
+			local.set("k", 42);
+			local.invalidate("k");
+			expect(local.get("k")).toBeUndefined();
 		});
 
 		it("update_issue's D1 write still lands and is reported as success when the cache invalidate fails", async () => {

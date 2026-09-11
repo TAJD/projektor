@@ -553,8 +553,62 @@ describe("PROJ-735: JWKS cache read failure falls back to a fresh fetch", () => 
 	});
 });
 
-// traffic (the hottest auth path) doesn't rewrite it on every single request.
-// ---------------------------------------------------------------------------
+describe("PROJ-746: user-by-email cache read failure falls back to the DB upsert", () => {
+	it("a KV read error on the user cache doesn't fail auth — falls through to the DB", async () => {
+		const keyPair = (await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"]
+		)) as CryptoKeyPair;
+		const publicJwk = (await crypto.subtle.exportKey("jwk", keyPair.publicKey)) as JsonWebKey;
+
+		const domain = `proj-746-${crypto.randomUUID().slice(0, 8)}.example.com`;
+		const audience = "proj-746-audience";
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		env.CF_ACCESS_AUDIENCE = audience;
+
+		resetAuthCachesForTests();
+		await env.KV.delete("cf-access-certs");
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(JSON.stringify({ keys: [publicJwk] }), { status: 200 }))
+		);
+		const originalGet = env.KV.get.bind(env.KV);
+		vi.spyOn(env.KV, "get").mockImplementation(async (key: unknown, ...rest: unknown[]) => {
+			if (typeof key === "string" && key.startsWith("user-by-email:")) {
+				throw new Error("KV read failed");
+			}
+			// biome-ignore lint/suspicious/noExplicitAny: forwarding to the real KVNamespace.get overloads
+			return (originalGet as any)(key, ...rest);
+		});
+
+		try {
+			const email = `proj-746-${crypto.randomUUID().slice(0, 8)}@example.com`;
+			const jwt = await signTestJwt(keyPair.privateKey, {
+				exp: Math.floor(Date.now() / 1000) + 3600,
+				aud: audience,
+				iss: `https://${domain}`,
+				email,
+			});
+
+			const res = await SELF.fetch("http://localhost/auth/me", {
+				headers: { "Cf-Access-Jwt-Assertion": jwt },
+			});
+
+			expect(res.status).toBe(200);
+			const row = await env.DB.prepare("SELECT id FROM users WHERE email = ?").bind(email).first();
+			expect(row).not.toBeNull();
+		} finally {
+			vi.unstubAllGlobals();
+			vi.restoreAllMocks();
+		}
+	});
+});
 
 describe("PROJ-360: api_tokens.last_used_at write throttling", () => {
 	it("a request within the throttle window does not rewrite a recent last_used_at", async () => {
