@@ -7,13 +7,18 @@ import {
 	CreateDealSchema,
 	CreateInteractionSchema,
 	CreateOrganisationSchema,
+	CreatePipelineSchema,
+	CreateStageSchema,
 	LinkInteractionContactSchema,
 	UpdateContactSchema,
 	UpdateDealLineSchema,
 	UpdateDealSchema,
 	UpdateInteractionSchema,
 	UpdateOrganisationSchema,
+	UpdatePipelineSchema,
+	UpdateStageSchema,
 } from "../schemas/crm";
+import { recordActivity } from "./activity";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
@@ -659,4 +664,407 @@ export async function listContactsForInteraction(ctx: ServiceCtx, interactionId:
 		.where(eq(schema.crmInteractionContacts.interactionId, interactionId));
 
 	return { items };
+}
+
+async function requirePipeline(ctx: ServiceCtx, id: string) {
+	const orm = drizzle(ctx.db, { schema });
+	const pipeline = await orm
+		.select()
+		.from(schema.crmPipelines)
+		.where(
+			and(eq(schema.crmPipelines.id, id), eq(schema.crmPipelines.workspaceId, ctx.workspaceId))
+		)
+		.get();
+	if (!pipeline) throw new NotFoundError("Pipeline not found");
+	return pipeline;
+}
+
+async function requireStageRow(ctx: ServiceCtx, id: string) {
+	const orm = drizzle(ctx.db, { schema });
+	const stage = await orm
+		.select()
+		.from(schema.crmStages)
+		.where(and(eq(schema.crmStages.id, id), eq(schema.crmStages.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!stage) throw new NotFoundError("Stage not found");
+	return stage;
+}
+
+async function listPipelineStageKinds(
+	ctx: ServiceCtx,
+	pipelineId: string
+): Promise<{ id: string; kind: "open" | "won" | "lost" }[]> {
+	const orm = drizzle(ctx.db, { schema });
+	return orm
+		.select({ id: schema.crmStages.id, kind: schema.crmStages.kind })
+		.from(schema.crmStages)
+		.where(
+			and(
+				eq(schema.crmStages.pipelineId, pipelineId),
+				eq(schema.crmStages.workspaceId, ctx.workspaceId)
+			)
+		);
+}
+
+function countWonLost(stages: readonly { kind: "open" | "won" | "lost" }[]) {
+	let won = 0;
+	let lost = 0;
+	for (const s of stages) {
+		if (s.kind === "won") won++;
+		if (s.kind === "lost") lost++;
+	}
+	return { won, lost };
+}
+
+function assertWonLostInvariant(
+	before: readonly { kind: "open" | "won" | "lost" }[],
+	after: readonly { kind: "open" | "won" | "lost" }[]
+) {
+	const b = countWonLost(before);
+	const a = countWonLost(after);
+	if (a.won > 1) {
+		throw new ValidationError({
+			formErrors: ["A pipeline may have at most one won stage"],
+			fieldErrors: {},
+		});
+	}
+	if (b.won >= 1 && a.won === 0) {
+		throw new ValidationError({
+			formErrors: ["A pipeline must retain exactly one won stage"],
+			fieldErrors: {},
+		});
+	}
+	if (b.lost >= 1 && a.lost === 0) {
+		throw new ValidationError({
+			formErrors: ["A pipeline must retain at least one lost stage"],
+			fieldErrors: {},
+		});
+	}
+}
+
+export async function createPipeline(ctx: ServiceCtx, raw: unknown) {
+	const result = CreatePipelineSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { name, defaultOnboardingTemplate, isDefault } = result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+	const id = crypto.randomUUID();
+	const ts = now();
+
+	await orm.insert(schema.crmPipelines).values({
+		id,
+		workspaceId: ctx.workspaceId,
+		name,
+		defaultOnboardingTemplate: defaultOnboardingTemplate ?? null,
+		isDefault: isDefault ? 1 : 0,
+		createdAt: ts,
+		updatedAt: ts,
+	});
+
+	return { id };
+}
+
+export async function getPipeline(ctx: ServiceCtx, id: string) {
+	return requirePipeline(ctx, id);
+}
+
+export async function listPipelines(ctx: ServiceCtx) {
+	const orm = drizzle(ctx.db, { schema });
+	const items = await orm
+		.select()
+		.from(schema.crmPipelines)
+		.where(eq(schema.crmPipelines.workspaceId, ctx.workspaceId))
+		.orderBy(asc(schema.crmPipelines.createdAt));
+	return { items };
+}
+
+type PipelineUpdateData = z.infer<typeof UpdatePipelineSchema>;
+
+function buildPipelineSetData(data: PipelineUpdateData, ts: number) {
+	const setData: {
+		updatedAt: number;
+		name?: string;
+		defaultOnboardingTemplate?: string | null;
+		isDefault?: number;
+	} = { updatedAt: ts };
+
+	if (data.name !== undefined) setData.name = data.name;
+	if ("defaultOnboardingTemplate" in data)
+		setData.defaultOnboardingTemplate = data.defaultOnboardingTemplate ?? null;
+	if (data.isDefault !== undefined) setData.isDefault = data.isDefault ? 1 : 0;
+
+	return setData;
+}
+
+export async function updatePipeline(ctx: ServiceCtx, id: string, raw: unknown) {
+	const result = UpdatePipelineSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	await requirePipeline(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	const setData = buildPipelineSetData(result.data, now());
+	await orm
+		.update(schema.crmPipelines)
+		.set(setData)
+		.where(
+			and(eq(schema.crmPipelines.id, id), eq(schema.crmPipelines.workspaceId, ctx.workspaceId))
+		);
+
+	return { ok: true };
+}
+
+export async function createStage(ctx: ServiceCtx, raw: unknown) {
+	const result = CreateStageSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { pipelineId, name, position, kind, probability, requiredFields } = result.data;
+
+	await requirePipeline(ctx, pipelineId);
+
+	const current = await listPipelineStageKinds(ctx, pipelineId);
+	assertWonLostInvariant(current, [...current, { id: "new", kind }]);
+
+	const orm = drizzle(ctx.db, { schema });
+	const id = crypto.randomUUID();
+	const ts = now();
+
+	await orm.insert(schema.crmStages).values({
+		id,
+		workspaceId: ctx.workspaceId,
+		pipelineId,
+		name,
+		position,
+		kind,
+		probability: probability ?? null,
+		requiredFields: JSON.stringify(requiredFields ?? []),
+		createdAt: ts,
+		updatedAt: ts,
+	});
+
+	return { id };
+}
+
+export async function listStages(ctx: ServiceCtx, pipelineId: string) {
+	await requirePipeline(ctx, pipelineId);
+
+	const orm = drizzle(ctx.db, { schema });
+	const items = await orm
+		.select()
+		.from(schema.crmStages)
+		.where(
+			and(
+				eq(schema.crmStages.pipelineId, pipelineId),
+				eq(schema.crmStages.workspaceId, ctx.workspaceId)
+			)
+		)
+		.orderBy(asc(schema.crmStages.position));
+	return { items };
+}
+
+type StageUpdateData = z.infer<typeof UpdateStageSchema>;
+
+function buildStageSetData(data: StageUpdateData, ts: number) {
+	const setData: {
+		updatedAt: number;
+		name?: string;
+		position?: number;
+		kind?: "open" | "won" | "lost";
+		probability?: number | null;
+		requiredFields?: string;
+	} = { updatedAt: ts };
+
+	if (data.name !== undefined) setData.name = data.name;
+	if (data.position !== undefined) setData.position = data.position;
+	if (data.kind !== undefined) setData.kind = data.kind;
+	if ("probability" in data) setData.probability = data.probability ?? null;
+	if (data.requiredFields !== undefined)
+		setData.requiredFields = JSON.stringify(data.requiredFields);
+
+	return setData;
+}
+
+export async function updateStage(ctx: ServiceCtx, id: string, raw: unknown) {
+	const result = UpdateStageSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	const existing = await requireStageRow(ctx, id);
+
+	const newKind = result.data.kind;
+	if (newKind !== undefined) {
+		const current = await listPipelineStageKinds(ctx, existing.pipelineId);
+		const after = current.map((s) => (s.id === id ? { ...s, kind: newKind } : s));
+		assertWonLostInvariant(current, after);
+	}
+
+	const orm = drizzle(ctx.db, { schema });
+	const setData = buildStageSetData(result.data, now());
+	await orm
+		.update(schema.crmStages)
+		.set(setData)
+		.where(and(eq(schema.crmStages.id, id), eq(schema.crmStages.workspaceId, ctx.workspaceId)));
+
+	return { ok: true };
+}
+
+export async function deleteStage(ctx: ServiceCtx, id: string) {
+	const existing = await requireStageRow(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	const dealInStage = await orm
+		.select({ id: schema.crmDeals.id })
+		.from(schema.crmDeals)
+		.where(and(eq(schema.crmDeals.stageId, id), eq(schema.crmDeals.workspaceId, ctx.workspaceId)))
+		.get();
+	if (dealInStage) throw new ConflictError("Cannot delete a stage with deals in it");
+
+	const current = await listPipelineStageKinds(ctx, existing.pipelineId);
+	const after = current.filter((s) => s.id !== id);
+	assertWonLostInvariant(current, after);
+
+	await orm
+		.delete(schema.crmStages)
+		.where(and(eq(schema.crmStages.id, id), eq(schema.crmStages.workspaceId, ctx.workspaceId)));
+
+	return { ok: true };
+}
+
+export async function seedDefaultPipeline(db: D1Database, workspaceId: string): Promise<void> {
+	const orm = drizzle(db, { schema });
+	const existing = await orm
+		.select({ id: schema.crmPipelines.id })
+		.from(schema.crmPipelines)
+		.where(
+			and(eq(schema.crmPipelines.workspaceId, workspaceId), eq(schema.crmPipelines.isDefault, 1))
+		)
+		.get();
+	if (existing) return;
+
+	const ts = Math.floor(Date.now() / 1000);
+	const pipelineId = crypto.randomUUID();
+	await orm.insert(schema.crmPipelines).values({
+		id: pipelineId,
+		workspaceId,
+		name: "Sales",
+		defaultOnboardingTemplate: null,
+		isDefault: 1,
+		createdAt: ts,
+		updatedAt: ts,
+	});
+
+	const stages: { name: string; kind: "open" | "won" | "lost" }[] = [
+		{ name: "Lead", kind: "open" },
+		{ name: "Qualified", kind: "open" },
+		{ name: "Proposal", kind: "open" },
+		{ name: "Won", kind: "won" },
+		{ name: "Lost", kind: "lost" },
+	];
+	for (const [i, s] of stages.entries()) {
+		await orm.insert(schema.crmStages).values({
+			id: crypto.randomUUID(),
+			workspaceId,
+			pipelineId,
+			name: s.name,
+			position: i + 1,
+			kind: s.kind,
+			probability: null,
+			requiredFields: "[]",
+			createdAt: ts,
+			updatedAt: ts,
+		});
+	}
+}
+
+export async function moveDealStage(
+	ctx: ServiceCtx,
+	dealId: string,
+	newStageId: string,
+	opts?: Readonly<{ reason?: string; lostReason?: string }>
+) {
+	const orm = drizzle(ctx.db, { schema });
+	const deal = await orm
+		.select()
+		.from(schema.crmDeals)
+		.where(and(eq(schema.crmDeals.id, dealId), eq(schema.crmDeals.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!deal) throw new NotFoundError("Deal not found");
+
+	const newStage = await requireStageRow(ctx, newStageId);
+	if (!deal.pipelineId || newStage.pipelineId !== deal.pipelineId) {
+		throw new ValidationError({
+			formErrors: ["Target stage does not belong to the deal's pipeline"],
+			fieldErrors: {},
+		});
+	}
+
+	let currentPosition = -1;
+	if (deal.stageId) {
+		const currentStage = await orm
+			.select({ position: schema.crmStages.position })
+			.from(schema.crmStages)
+			.where(
+				and(
+					eq(schema.crmStages.id, deal.stageId),
+					eq(schema.crmStages.workspaceId, ctx.workspaceId)
+				)
+			)
+			.get();
+		if (currentStage) currentPosition = currentStage.position;
+	}
+
+	if (newStage.position > currentPosition) {
+		const requiredFields: string[] = JSON.parse(newStage.requiredFields);
+		const dealRecord = deal as unknown as Record<string, unknown>;
+		const missing = requiredFields.filter((field) => {
+			const value = dealRecord[field];
+			return value === null || value === undefined || value === "";
+		});
+		if (missing.length > 0) {
+			throw new ValidationError({
+				formErrors: [`Missing required field(s) for this stage: ${missing.join(", ")}`],
+				fieldErrors: {},
+			});
+		}
+	} else if (newStage.position < currentPosition) {
+		if (!opts?.reason || opts.reason.trim().length === 0) {
+			throw new ValidationError({
+				formErrors: ["A reason is required to move a deal back to an earlier stage"],
+				fieldErrors: {},
+			});
+		}
+	}
+
+	if (newStage.kind === "lost" && (!opts?.lostReason || opts.lostReason.trim().length === 0)) {
+		throw new ValidationError({
+			formErrors: ["lostReason is required when moving a deal to a lost stage"],
+			fieldErrors: {},
+		});
+	}
+
+	const ts = now();
+	const setData: {
+		stageId: string;
+		updatedAt: number;
+		wonAt?: number | null;
+		lostReason?: string | null;
+	} = { stageId: newStageId, updatedAt: ts };
+	if (newStage.kind === "won") setData.wonAt = ts;
+	if (newStage.kind === "lost") setData.lostReason = opts?.lostReason ?? null;
+
+	await orm
+		.update(schema.crmDeals)
+		.set(setData)
+		.where(and(eq(schema.crmDeals.id, dealId), eq(schema.crmDeals.workspaceId, ctx.workspaceId)));
+
+	await recordActivity(ctx, {
+		entityType: "deal",
+		entityId: dealId,
+		action: "updated",
+		diff: {
+			fromStageId: deal.stageId,
+			toStageId: newStageId,
+			...(opts?.reason ? { reason: opts.reason } : {}),
+		},
+	});
+
+	return { ok: true };
 }

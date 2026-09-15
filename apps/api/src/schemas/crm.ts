@@ -108,3 +108,44 @@ export const LinkInteractionContactSchema = z.object({
 	interactionId: z.string().uuid(),
 	contactId: z.string().uuid(),
 });
+
+const StageKindEnum = z.enum(["open", "won", "lost"]);
+
+export const CreatePipelineSchema = z.object({
+	name: z.string().min(1).max(255),
+	defaultOnboardingTemplate: z.string().max(500).optional(),
+	isDefault: z.boolean().optional(),
+});
+
+export const UpdatePipelineSchema = z
+	.object({
+		name: z.string().min(1).max(255).optional(),
+		defaultOnboardingTemplate: z.string().max(500).nullable().optional(),
+		isDefault: z.boolean().optional(),
+	})
+	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
+
+export const CreateStageSchema = z.object({
+	pipelineId: z.string().uuid(),
+	name: z.string().min(1).max(255),
+	position: z.number().int(),
+	kind: StageKindEnum,
+	probability: z.number().int().min(0).max(100).optional(),
+	requiredFields: z.array(z.string().min(1)).optional(),
+});
+
+export const UpdateStageSchema = z
+	.object({
+		name: z.string().min(1).max(255).optional(),
+		position: z.number().int().optional(),
+		kind: StageKindEnum.optional(),
+		probability: z.number().int().min(0).max(100).nullable().optional(),
+		requiredFields: z.array(z.string().min(1)).optional(),
+	})
+	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
+
+export const MoveDealStageSchema = z.object({
+	newStageId: z.string().uuid(),
+	reason: z.string().min(1).optional(),
+	lostReason: z.string().min(1).max(1000).optional(),
+});

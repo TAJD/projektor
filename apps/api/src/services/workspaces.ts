@@ -9,6 +9,7 @@ import {
 	UpdateRoleSchema,
 	UpdateWorkspaceSchema,
 } from "../schemas/workspaces";
+import { seedDefaultPipeline } from "./crm";
 import { seedDefaultCustomFields } from "./custom-fields";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { seedDefaultTaskStatuses } from "./task-statuses";
@@ -65,6 +66,7 @@ export async function createWorkspace(db: D1Database, userId: string, input: unk
 	await seedDefaultTaskStatuses(db, id);
 	await seedDefaultCustomFields(db, id);
 	await seedDefaultWikiTemplates(db, id, userId);
+	await seedDefaultPipeline(db, id);
 
 	return { id, name, slug };
 }

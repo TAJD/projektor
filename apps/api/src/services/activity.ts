@@ -4,7 +4,7 @@ import type { ServiceCtx } from "./types";
 export async function recordActivity(
 	ctx: ServiceCtx,
 	opts: Readonly<{
-		entityType: "issue" | "wiki_page" | "project" | "group";
+		entityType: "issue" | "wiki_page" | "project" | "group" | "deal";
 		entityId: string;
 		action: "created" | "updated" | "deleted";
 		diff?: Record<string, unknown>;

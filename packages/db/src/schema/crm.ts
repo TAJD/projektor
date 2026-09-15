@@ -134,6 +134,48 @@ export const crmInteractions = sqliteTable(
 	})
 );
 
+export const crmPipelines = sqliteTable(
+	"crm_pipelines",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		defaultOnboardingTemplate: text("default_onboarding_template"),
+		isDefault: integer("is_default").notNull().default(0),
+		createdAt: integer("created_at").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	(t) => ({
+		workspaceIdx: index("crm_pipelines_workspace_idx").on(t.workspaceId),
+	})
+);
+
+export const crmStages = sqliteTable(
+	"crm_stages",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		pipelineId: text("pipeline_id")
+			.notNull()
+			.references(() => crmPipelines.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		position: integer("position").notNull(),
+		kind: text("kind", { enum: ["open", "won", "lost"] }).notNull(),
+		probability: integer("probability"),
+		requiredFields: text("required_fields").notNull().default("[]"),
+		createdAt: integer("created_at").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	(t) => ({
+		workspaceIdx: index("crm_stages_workspace_idx").on(t.workspaceId),
+		pipelineIdx: index("crm_stages_pipeline_idx").on(t.pipelineId),
+	})
+);
+
 export const crmInteractionContacts = sqliteTable(
 	"crm_interaction_contacts",
 	{

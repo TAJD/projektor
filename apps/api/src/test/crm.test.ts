@@ -6,23 +6,32 @@ import {
 	createDealLine,
 	createInteraction,
 	createOrganisation,
+	createPipeline,
+	createStage,
 	deleteContact,
 	deleteOrganisation,
+	deleteStage,
 	getContact,
 	getDeal,
 	getDealLine,
 	getInteraction,
 	getOrganisation,
+	getPipeline,
 	linkInteractionContact,
 	listContactsForInteraction,
 	listOrganisations,
+	listPipelines,
+	listStages,
+	moveDealStage,
+	seedDefaultPipeline,
 	updateContact,
 	updateDeal,
 	updateDealLine,
 	updateInteraction,
 	updateOrganisation,
+	updatePipeline,
 } from "../services/crm";
-import { ConflictError, NotFoundError } from "../services/errors";
+import { ConflictError, NotFoundError, ValidationError } from "../services/errors";
 import type { ServiceCtx } from "../services/types";
 import { seedFixture } from "./helpers";
 
@@ -194,5 +203,191 @@ describe("CRM workspace scoping", () => {
 
 		const { items } = await listOrganisations(ctxB);
 		expect(items).toHaveLength(0);
+	});
+});
+
+describe("CRM pipelines and stages", () => {
+	let ctx: ServiceCtx;
+	let pipelineId: string;
+
+	beforeEach(async () => {
+		ctx = await ctxFor();
+		({ id: pipelineId } = await createPipeline(ctx, { name: "Test Pipeline" }));
+	});
+
+	it("creates, reads, lists, and updates a pipeline", async () => {
+		const pipeline = await getPipeline(ctx, pipelineId);
+		expect(pipeline.name).toBe("Test Pipeline");
+
+		await updatePipeline(ctx, pipelineId, { name: "Renamed Pipeline" });
+		const updated = await getPipeline(ctx, pipelineId);
+		expect(updated.name).toBe("Renamed Pipeline");
+
+		const { items } = await listPipelines(ctx);
+		expect(items.map((p) => p.id)).toContain(pipelineId);
+	});
+
+	it("creates and lists stages in position order", async () => {
+		await createStage(ctx, { pipelineId, name: "Lead", position: 1, kind: "open" });
+		await createStage(ctx, { pipelineId, name: "Won", position: 2, kind: "won" });
+		await createStage(ctx, { pipelineId, name: "Lost", position: 3, kind: "lost" });
+
+		const { items } = await listStages(ctx, pipelineId);
+		expect(items.map((s) => s.name)).toEqual(["Lead", "Won", "Lost"]);
+	});
+
+	it("rejects a second won stage in the same pipeline", async () => {
+		await createStage(ctx, { pipelineId, name: "Won", position: 1, kind: "won" });
+
+		await expect(
+			createStage(ctx, { pipelineId, name: "Also Won", position: 2, kind: "won" })
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("rejects deleting the only lost stage in a pipeline", async () => {
+		const { id: lostId } = await createStage(ctx, {
+			pipelineId,
+			name: "Lost",
+			position: 1,
+			kind: "lost",
+		});
+
+		await expect(deleteStage(ctx, lostId)).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("rejects deleting a stage that still has deals in it", async () => {
+		const { id: leadId } = await createStage(ctx, {
+			pipelineId,
+			name: "Lead",
+			position: 1,
+			kind: "open",
+		});
+		await createStage(ctx, { pipelineId, name: "Won", position: 2, kind: "won" });
+		await createStage(ctx, { pipelineId, name: "Lost", position: 3, kind: "lost" });
+		const { id: orgId } = await createOrganisation(ctx, { name: "Stage Delete Org" });
+		await createDeal(ctx, { orgId, currency: "USD", pipelineId, stageId: leadId });
+
+		await expect(deleteStage(ctx, leadId)).rejects.toBeInstanceOf(ConflictError);
+	});
+});
+
+describe("CRM deal stage moves", () => {
+	let ctx: ServiceCtx;
+	let orgId: string;
+	let pipelineId: string;
+	let leadId: string;
+	let qualifiedId: string;
+	let wonId: string;
+	let lostId: string;
+	let dealId: string;
+
+	beforeEach(async () => {
+		ctx = await ctxFor();
+		({ id: orgId } = await createOrganisation(ctx, { name: "Stage Move Org" }));
+		({ id: pipelineId } = await createPipeline(ctx, { name: "Move Pipeline" }));
+		({ id: leadId } = await createStage(ctx, {
+			pipelineId,
+			name: "Lead",
+			position: 1,
+			kind: "open",
+		}));
+		({ id: qualifiedId } = await createStage(ctx, {
+			pipelineId,
+			name: "Qualified",
+			position: 2,
+			kind: "open",
+		}));
+		({ id: wonId } = await createStage(ctx, {
+			pipelineId,
+			name: "Won",
+			position: 3,
+			kind: "won",
+			requiredFields: ["ownerUserId"],
+		}));
+		({ id: lostId } = await createStage(ctx, {
+			pipelineId,
+			name: "Lost",
+			position: 4,
+			kind: "lost",
+		}));
+		({ id: dealId } = await createDeal(ctx, {
+			orgId,
+			currency: "USD",
+			pipelineId,
+			stageId: qualifiedId,
+		}));
+	});
+
+	it("rejects advancing to a stage missing a required field, naming the field", async () => {
+		await expect(moveDealStage(ctx, dealId, wonId, {})).rejects.toMatchObject({
+			issues: { formErrors: [expect.stringContaining("ownerUserId")] },
+		});
+	});
+
+	it("advances to a won stage once the required field is present and sets wonAt", async () => {
+		await updateDeal(ctx, dealId, { ownerUserId: ctx.userId });
+
+		await moveDealStage(ctx, dealId, wonId, {});
+
+		const deal = await getDeal(ctx, dealId);
+		expect(deal.stageId).toBe(wonId);
+		expect(deal.wonAt).not.toBeNull();
+	});
+
+	it("rejects regressing to an earlier stage without a reason", async () => {
+		await expect(moveDealStage(ctx, dealId, leadId, {})).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("allows regressing with a reason and records it on the activity event", async () => {
+		await moveDealStage(ctx, dealId, leadId, { reason: "Champion went dark" });
+
+		const deal = await getDeal(ctx, dealId);
+		expect(deal.stageId).toBe(leadId);
+
+		const activityRow = await env.DB.prepare(
+			"SELECT diff FROM activity WHERE entity_type = 'deal' AND entity_id = ? ORDER BY created_at DESC LIMIT 1"
+		)
+			.bind(dealId)
+			.first<{ diff: string }>();
+		expect(activityRow).toBeTruthy();
+		const diff = JSON.parse(activityRow!.diff);
+		expect(diff.toStageId).toBe(leadId);
+		expect(diff.reason).toBe("Champion went dark");
+	});
+
+	it("rejects moving to a lost stage without a lostReason", async () => {
+		await expect(moveDealStage(ctx, dealId, lostId, {})).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("sets lostReason when moving to a lost stage with a reason given", async () => {
+		await moveDealStage(ctx, dealId, lostId, { lostReason: "Budget cut" });
+
+		const deal = await getDeal(ctx, dealId);
+		expect(deal.stageId).toBe(lostId);
+		expect(deal.lostReason).toBe("Budget cut");
+	});
+});
+
+describe("CRM default pipeline seeding", () => {
+	it("is idempotent and creates the Sales pipeline with its five stages", async () => {
+		const { workspace } = await seedFixture();
+
+		await seedDefaultPipeline(env.DB, workspace.id);
+		await seedDefaultPipeline(env.DB, workspace.id);
+
+		const ctx: ServiceCtx = {
+			db: env.DB,
+			kv: env.KV,
+			r2: env.R2,
+			workspaceId: workspace.id,
+			userId: "",
+		};
+		const { items: pipelines } = await listPipelines(ctx);
+		expect(pipelines).toHaveLength(1);
+		expect(pipelines[0].name).toBe("Sales");
+		expect(pipelines[0].isDefault).toBe(1);
+
+		const { items: stages } = await listStages(ctx, pipelines[0].id);
+		expect(stages.map((s) => s.name)).toEqual(["Lead", "Qualified", "Proposal", "Won", "Lost"]);
 	});
 });
