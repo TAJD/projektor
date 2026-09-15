@@ -45,6 +45,12 @@ function PreferencesSection() {
 		applyPrefsToDocument(prefs);
 		setDensity(prefs.density);
 		setSidebar(prefs.sidebar);
+		const collapseToggle = document.querySelector(".sidebar-collapse-toggle");
+		collapseToggle?.setAttribute(
+			"aria-label",
+			prefs.sidebar === "collapsed" ? "Expand sidebar" : "Collapse sidebar"
+		);
+		collapseToggle?.setAttribute("aria-expanded", prefs.sidebar === "collapsed" ? "false" : "true");
 	}
 
 	return (

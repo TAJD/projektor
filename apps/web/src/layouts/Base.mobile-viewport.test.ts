@@ -174,10 +174,14 @@ describe("Base layout — preferences bootstrap and sidebar collapse (PROJ-760)"
 		document.body.innerHTML = '<button class="sidebar-collapse-toggle"></button>';
 		const scriptStart = source.indexOf("function isCollapsed() {");
 		const scriptEnd = source.indexOf("})();", scriptStart);
-		const script = source.slice(scriptStart, scriptEnd);
+		const script = source
+			.slice(scriptStart, scriptEnd)
+			.replace(
+				"document.addEventListener('astro:page-load', bindSidebarCollapseToggle);",
+				"bindSidebarCollapseToggle();"
+			);
 		try {
 			new Function(script)();
-			document.dispatchEvent(new Event("astro:page-load"));
 			const btn = document.querySelector(".sidebar-collapse-toggle") as HTMLButtonElement;
 			btn.click();
 			expect(document.documentElement.getAttribute("data-sidebar")).toBe("collapsed");
@@ -185,6 +189,29 @@ describe("Base layout — preferences bootstrap and sidebar collapse (PROJ-760)"
 			expect(stored).toEqual({ theme: "dark", density: "compact", sidebar: "collapsed" });
 		} finally {
 			localStorage.removeItem("prefs");
+		}
+	});
+
+	it("derives theme from the DOM when toggling collapse with no prefs object stored yet", () => {
+		document.documentElement.setAttribute("data-theme", "light");
+		document.body.innerHTML = '<button class="sidebar-collapse-toggle"></button>';
+		const scriptStart = source.indexOf("function isCollapsed() {");
+		const scriptEnd = source.indexOf("})();", scriptStart);
+		const script = source
+			.slice(scriptStart, scriptEnd)
+			.replace(
+				"document.addEventListener('astro:page-load', bindSidebarCollapseToggle);",
+				"bindSidebarCollapseToggle();"
+			);
+		try {
+			new Function(script)();
+			const btn = document.querySelector(".sidebar-collapse-toggle") as HTMLButtonElement;
+			btn.click();
+			const stored = JSON.parse(localStorage.getItem("prefs") ?? "{}");
+			expect(stored).toEqual({ theme: "light", density: "comfortable", sidebar: "collapsed" });
+		} finally {
+			localStorage.removeItem("prefs");
+			document.documentElement.removeAttribute("data-theme");
 		}
 	});
 });

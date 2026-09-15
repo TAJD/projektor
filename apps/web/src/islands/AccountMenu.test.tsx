@@ -156,4 +156,24 @@ describe("AccountMenu — density and sidebar preferences (PROJ-760)", () => {
 		expect(document.documentElement.getAttribute("data-sidebar")).toBe("collapsed");
 		expect(JSON.parse(localStorage.getItem("prefs") ?? "{}").sidebar).toBe("collapsed");
 	});
+
+	it("preserves an existing dark theme when switching to Compact, and flips aria-pressed on the sibling button", async () => {
+		localStorage.setItem(
+			"prefs",
+			JSON.stringify({ theme: "dark", density: "comfortable", sidebar: "expanded" })
+		);
+		stubMeFetch({ ok: true, name: "Jane Doe", email: "jane@example.com" });
+		render(<AccountMenu />);
+		fireEvent.click(await screen.findByRole("button", { name: /Jane Doe/ }));
+
+		fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+
+		expect(JSON.parse(localStorage.getItem("prefs") ?? "{}").theme).toBe("dark");
+		expect(screen.getByRole("button", { name: "Compact" }).getAttribute("aria-pressed")).toBe(
+			"true"
+		);
+		expect(screen.getByRole("button", { name: "Comfortable" }).getAttribute("aria-pressed")).toBe(
+			"false"
+		);
+	});
 });
