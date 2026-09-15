@@ -569,7 +569,7 @@ function IssueDetailView(
 			{props.blockedByLinks.length > 0 && (
 				<div
 					role="alert"
-					class="mb-4 px-[0.875rem] py-2 bg-[var(--warning-bg)] border border-[var(--warning-border)]
+					class="mb-4 px-[0.875rem] py-2 bg-warning-bg border border-warning-border
 						rounded-md text-sm text-text-base flex items-center gap-2"
 				>
 					<span>⚠</span>
@@ -731,7 +731,7 @@ export default function IssueDetail({
 	const loadError = error ?? resolveError;
 	if (loadError)
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				Failed to load issue: {loadError}
 			</p>
 		);

@@ -28,15 +28,15 @@ function deriveKey(name: string): string {
 }
 
 const INPUT_BASE_CLASS =
-	"w-full px-2 py-1.5 text-sm border border-[var(--border)] rounded bg-[var(--bg)] text-[var(--text)]";
+	"w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text-base";
 
 const PROJECT_CARD_CLASS =
-	"flex flex-col gap-2 p-4 bg-[var(--surface)] border border-[var(--border)] rounded-lg no-underline shadow-xs" +
-	" transition-all duration-150 hover:border-[var(--accent)] hover:-translate-y-px";
+	"flex flex-col gap-2 p-4 bg-surface border border-border rounded-lg no-underline shadow-xs" +
+	" transition-all duration-150 hover:border-accent hover:-translate-y-px";
 
 const KEY_BADGE_CLASS =
-	"font-mono text-[0.7rem] font-medium px-1.5 py-0.5 rounded bg-[var(--surface)] border border-[var(--border)]" +
-	" text-[var(--text-muted)] leading-6";
+	"font-mono text-[0.7rem] font-medium px-1.5 py-0.5 rounded bg-surface border border-border" +
+	" text-text-muted leading-6";
 
 interface ProjectCreateFormProps {
 	nameRef: { current: HTMLInputElement | null };
@@ -68,16 +68,16 @@ function ProjectCreateForm({
 	return (
 		<form
 			onSubmit={onSubmit}
-			class="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-5 flex flex-col gap-3"
+			class="bg-surface border border-border rounded-lg p-4 mb-5 flex flex-col gap-3"
 		>
 			<div class="flex gap-3 flex-wrap">
 				<div class="flex-[2_1_160px] min-w-0">
 					<label
 						htmlFor="new-project-name"
-						class="block mb-1 text-xs font-semibold text-[var(--text-muted)]"
+						class="block mb-1 text-xs font-semibold text-text-muted"
 					>
 						Name{" "}
-						<span aria-hidden="true" style={{ color: "var(--accent)" }}>
+						<span aria-hidden="true" class="text-accent">
 							*
 						</span>
 					</label>
@@ -94,12 +94,9 @@ function ProjectCreateForm({
 					/>
 				</div>
 				<div class="flex-[1_1_100px] min-w-0">
-					<label
-						htmlFor="new-project-key"
-						class="block mb-1 text-xs font-semibold text-[var(--text-muted)]"
-					>
+					<label htmlFor="new-project-key" class="block mb-1 text-xs font-semibold text-text-muted">
 						Key{" "}
-						<span aria-hidden="true" style={{ color: "var(--accent)" }}>
+						<span aria-hidden="true" class="text-accent">
 							*
 						</span>
 					</label>
@@ -117,7 +114,7 @@ function ProjectCreateForm({
 				<div class="flex-[3_1_220px] min-w-0">
 					<label
 						htmlFor="new-project-desc"
-						class="block mb-1 text-xs font-semibold text-[var(--text-muted)]"
+						class="block mb-1 text-xs font-semibold text-text-muted"
 					>
 						Description
 					</label>
@@ -274,24 +271,13 @@ function ProjectCard({ project }: { project: Project }) {
 			class={`${PROJECT_CARD_CLASS}${archived ? " opacity-60" : ""}`}
 		>
 			<div class="flex items-center gap-2">
-				<span class="font-bold text-[var(--text)] text-base">{project.name}</span>
+				<span class="font-bold text-text-base text-base">{project.name}</span>
 				<span class={KEY_BADGE_CLASS}>{project.key}</span>
-				{archived && (
-					<span class={KEY_BADGE_CLASS} style={{ color: "var(--text-muted)" }}>
-						Archived
-					</span>
-				)}
+				{archived && <span class={KEY_BADGE_CLASS}>Archived</span>}
 			</div>
-			<span class="text-xs text-[var(--text-muted)]">{countLabel}</span>
+			<span class="text-xs text-text-muted">{countLabel}</span>
 			{project.description && (
-				<span
-					class="text-sm text-[var(--text-muted)] overflow-hidden"
-					style={{
-						display: "-webkit-box",
-						WebkitLineClamp: 2,
-						WebkitBoxOrient: "vertical",
-					}}
-				>
+				<span class="text-sm text-text-muted overflow-hidden line-clamp-2">
 					{project.description}
 				</span>
 			)}
@@ -301,13 +287,10 @@ function ProjectCard({ project }: { project: Project }) {
 
 function ProjectGrid({ projects }: { projects: Project[] }) {
 	if (projects.length === 0) {
-		return <p class="text-[var(--text-muted)] text-center py-12">No projects yet.</p>;
+		return <p class="text-text-muted text-center py-12">No projects yet.</p>;
 	}
 	return (
-		<div
-			class="grid gap-4"
-			style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}
-		>
+		<div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
 			{projects.map((p) => (
 				<ProjectCard key={p.id} project={p} />
 			))}
@@ -351,7 +334,7 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 	return (
 		<>
 			<div class="flex justify-between items-center mb-4">
-				<label class="flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+				<label class="flex items-center gap-1.5 text-xs text-text-muted">
 					<input
 						type="checkbox"
 						checked={showArchived}
@@ -360,7 +343,7 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 					Show archived
 				</label>
 				{isPublicViewer ? (
-					<p class="text-xs text-[var(--text-muted)] m-0">
+					<p class="text-xs text-text-muted m-0">
 						Read-only demo — projects can't be created here.
 					</p>
 				) : (

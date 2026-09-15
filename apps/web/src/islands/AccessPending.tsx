@@ -10,14 +10,14 @@ export default function AccessPending() {
 			<div
 				aria-hidden="true"
 				class={
-					"flex items-center justify-center w-12 h-12 rounded-full bg-[var(--surface)] " +
-					"border border-[var(--border)] text-2xl"
+					"flex items-center justify-center w-12 h-12 rounded-full bg-surface " +
+					"border border-border text-2xl"
 				}
 			>
 				🔒
 			</div>
-			<h2 class="m-0 text-lg font-semibold text-[var(--text)]">Access pending</h2>
-			<p class="m-0 text-sm text-[var(--text-muted)]">
+			<h2 class="m-0 text-lg font-semibold text-text-base">Access pending</h2>
+			<p class="m-0 text-sm text-text-muted">
 				You’re not a member of any project group yet. Once a workspace admin adds you to a group,
 				the projects, issues, and wiki pages you can access will appear here.
 			</p>

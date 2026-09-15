@@ -695,11 +695,7 @@ function GroupDetailEditor(props: DetailProps) {
 	const [grantRole, setGrantRole] = useState<GrantRole>("member");
 
 	if (!detail) {
-		return (
-			<div class={CARD}>
-				{err ? <span class="text-[var(--danger-text)]">{err}</span> : "Loading…"}
-			</div>
-		);
+		return <div class={CARD}>{err ? <span class="text-danger-text">{err}</span> : "Loading…"}</div>;
 	}
 
 	const memberIds = new Set(detail.members.map((m) => m.userId));
@@ -720,7 +716,7 @@ function GroupDetailEditor(props: DetailProps) {
 				run={run}
 				onClose={props.onClose}
 			/>
-			{err && <div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{err}</div>}
+			{err && <div class="text-danger-text text-[0.8rem] mb-2">{err}</div>}
 
 			<GroupMembersSection
 				slug={slug}
@@ -880,7 +876,7 @@ function GroupsSection(props: GroupsSectionProps) {
 					</div>
 				)}
 				{props.createErr && (
-					<div class="text-[var(--danger-text)] text-[0.8rem] mb-2">{props.createErr}</div>
+					<div class="text-danger-text text-[0.8rem] mb-2">{props.createErr}</div>
 				)}
 
 				{data.groups.length === 0 ? (

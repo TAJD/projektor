@@ -238,7 +238,7 @@ function NewTokenPanel({
 			<p class="m-0 mb-2 font-semibold text-[0.9rem] text-text-base">
 				Token created: <span class="font-mono text-[0.8rem] text-text-muted">{newToken.name}</span>
 			</p>
-			<p class="text-[var(--danger-text)] text-[0.8rem] my-1">
+			<p class="text-danger-text text-[0.8rem] my-1">
 				⚠ Copy this token now — you won't be able to see it again.
 			</p>
 			<div class="flex items-center gap-2 my-2">
@@ -361,7 +361,7 @@ function CreateTokenForm({
 			</div>
 
 			{createError && (
-				<p role="alert" class="text-[var(--danger-text)] text-[0.8rem] m-0 mb-3">
+				<p role="alert" class="text-danger-text text-[0.8rem] m-0 mb-3">
 					{createError}
 				</p>
 			)}
@@ -447,9 +447,7 @@ function TokenTableRow({
 	onConfirmRevoke,
 }: TokenTableRowProps) {
 	const expiresClass = `${TD_BASE} font-mono text-[0.8rem] ${
-		tok.expiresAt && tok.expiresAt < Date.now() / 1000
-			? "text-[var(--danger-text)]"
-			: "text-text-muted"
+		tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-danger-text" : "text-text-muted"
 	}`;
 	return (
 		<tr>
@@ -499,7 +497,7 @@ function TokenRevokeControl({
 				<Button variant="outline" size="sm" disabled={revoking} onClick={onCancelRevoke}>
 					No
 				</Button>
-				{revokeError && <span class="text-[var(--danger-text)] text-xs">{revokeError}</span>}
+				{revokeError && <span class="text-danger-text text-xs">{revokeError}</span>}
 			</span>
 		);
 	}
@@ -507,7 +505,7 @@ function TokenRevokeControl({
 		<Button
 			variant="outline"
 			size="sm"
-			class="text-[var(--danger-text)] border-[var(--danger-border)]"
+			class="text-danger-text border-danger-border"
 			onClick={() => onSelectRevoke(tok.id)}
 		>
 			Revoke
@@ -536,7 +534,7 @@ function TokenMobileCards({
 						<dd class="m-0">{formatDate(tok.createdAt)}</dd>
 						<dt class="font-semibold">Expires</dt>
 						<dd
-							class={`m-0 ${tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-[var(--danger-text)]" : ""}`}
+							class={`m-0 ${tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-danger-text" : ""}`}
 						>
 							{tok.expiresAt === null ? "No expiry" : formatDate(tok.expiresAt)}
 						</dd>
@@ -821,7 +819,7 @@ export default function TokenManager({ workspaceSlug: propWorkspaceSlug }: Props
 
 	if (error) {
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				Failed to load tokens: {error}
 			</p>
 		);

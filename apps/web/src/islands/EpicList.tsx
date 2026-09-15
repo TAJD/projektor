@@ -430,7 +430,7 @@ export default function EpicList({ workspaceSlug }: Props) {
 	if (!projectIdReady || loading) return <p aria-live="polite">Loading…</p>;
 	if (error || projectError)
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				{error || projectError}
 			</p>
 		);
@@ -641,7 +641,7 @@ function CreateEpicModal({
 				<h2 class="mb-5 text-lg font-bold text-text-base">New Epic</h2>
 
 				{createError && (
-					<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
+					<p role="alert" class="text-danger-text mb-3 text-sm">
 						{createError}
 					</p>
 				)}

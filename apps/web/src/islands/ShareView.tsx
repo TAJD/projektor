@@ -60,25 +60,15 @@ function formatDate(unixSeconds: number): string {
 function ErrorState({ error }: { error: string }) {
 	const isExpired = error === "not_found";
 	return (
-		<div style={{ padding: "2rem", textAlign: "center" }}>
-			<p style={{ fontSize: "3rem", marginBottom: "1rem" }}>{isExpired ? "🔗" : "⚠"}</p>
-			<h2 style={{ marginBottom: "0.5rem" }}>
-				{isExpired ? "Link not found or expired" : "Something went wrong"}
-			</h2>
-			<p style={{ color: "var(--text-muted)" }}>
+		<div class="p-8 text-center">
+			<p class="text-5xl mb-4">{isExpired ? "🔗" : "⚠"}</p>
+			<h2 class="mb-2">{isExpired ? "Link not found or expired" : "Something went wrong"}</h2>
+			<p class="text-text-muted">
 				{isExpired
 					? "This share link may have expired (links are valid for 3 days) or the URL is incorrect."
 					: "Unable to load the shared issue. Please try again later."}
 			</p>
-			<a
-				href="/"
-				style={{
-					color: "var(--accent)",
-					textDecoration: "none",
-					marginTop: "1.5rem",
-					display: "inline-block",
-				}}
-			>
+			<a href="/" class="text-accent no-underline mt-6 inline-block">
 				← Go to Projektor
 			</a>
 		</div>
@@ -88,53 +78,26 @@ function ErrorState({ error }: { error: string }) {
 function IssueHeader({ issue }: { issue: SharedIssue }) {
 	const priorityStyle = PRIORITY_COLORS[issue.priority] ?? PRIORITY_COLORS.none;
 	return (
-		<header style={{ marginBottom: "1.5rem" }}>
-			<div
-				style={{
-					display: "flex",
-					alignItems: "center",
-					gap: "0.5rem",
-					marginBottom: "0.75rem",
-					flexWrap: "wrap",
-				}}
-			>
+		<header class="mb-6">
+			<div class="flex items-center gap-2 mb-3 flex-wrap">
 				{/* Priority badge */}
 				<Badge style={{ background: priorityStyle.bg, color: priorityStyle.text }}>
 					{PRIORITY_LABELS[issue.priority] ?? issue.priority}
 				</Badge>
 				{/* Status badge */}
 				{issue.status_name && (
-					<Badge
-						style={{
-							background: "var(--surface)",
-							color: "var(--text-muted)",
-							border: "1px solid var(--border)",
-						}}
-					>
-						{issue.status_name}
-					</Badge>
+					<Badge class="bg-surface text-text-muted border border-border">{issue.status_name}</Badge>
 				)}
 				{/* Project */}
 				{issue.project_name && (
-					<span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+					<span class="text-xs text-text-muted">
 						{issue.project_name}
 						{issue.project_key ? ` (${issue.project_key})` : ""}
 					</span>
 				)}
 			</div>
-			<h1 style={{ margin: 0, fontSize: "1.375rem", fontWeight: 700, lineHeight: 1.3 }}>
-				{issue.title}
-			</h1>
-			<div
-				style={{
-					marginTop: "0.5rem",
-					fontSize: "0.8rem",
-					color: "var(--text-muted)",
-					display: "flex",
-					gap: "1rem",
-					flexWrap: "wrap",
-				}}
-			>
+			<h1 class="m-0 text-[1.375rem] font-bold leading-[1.3]">{issue.title}</h1>
+			<div class="mt-2 text-[0.8rem] text-text-muted flex gap-4 flex-wrap">
 				{issue.assignee_name && <span>Assignee: {issue.assignee_name}</span>}
 				<span>Created {formatDate(issue.created_at)}</span>
 			</div>
@@ -145,31 +108,15 @@ function IssueHeader({ issue }: { issue: SharedIssue }) {
 function CustomFieldsSection({ fields }: { fields: SharedIssue["customFields"] }) {
 	if (fields.length === 0) return null;
 	return (
-		<div style={{ borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
-			<p
-				style={{
-					fontSize: "0.7rem",
-					fontWeight: 600,
-					textTransform: "uppercase",
-					letterSpacing: "0.06em",
-					color: "var(--text-muted)",
-					marginBottom: "0.75rem",
-				}}
-			>
+		<div class="border-t border-border pt-4">
+			<p class="text-[0.7rem] font-semibold uppercase tracking-[0.06em] text-text-muted mb-3">
 				Fields
 			</p>
-			<dl
-				style={{
-					display: "grid",
-					gridTemplateColumns: "max-content 1fr",
-					gap: "0.4rem 1rem",
-					fontSize: "0.8125rem",
-				}}
-			>
+			<dl class="grid grid-cols-[max-content_1fr] gap-[0.4rem_1rem] text-[0.8125rem]">
 				{fields.map((f) => (
 					<>
-						<dt style={{ color: "var(--text-muted)", fontWeight: 500 }}>{f.label}</dt>
-						<dd style={{ margin: 0 }}>{f.value}</dd>
+						<dt class="text-text-muted font-medium">{f.label}</dt>
+						<dd class="m-0">{f.value}</dd>
 					</>
 				))}
 			</dl>
@@ -215,7 +162,7 @@ export default function ShareView() {
 
 	if (loading)
 		return (
-			<p aria-live="polite" style={{ padding: "2rem" }}>
+			<p aria-live="polite" class="p-8">
 				Loading…
 			</p>
 		);
@@ -225,26 +172,11 @@ export default function ShareView() {
 	if (!issue) return null;
 
 	return (
-		<div style={{ padding: "2rem" }}>
+		<div class="p-8">
 			{/* Banner */}
-			<div
-				style={{
-					background: "var(--surface)",
-					border: "1px solid var(--border)",
-					borderRadius: "6px",
-					padding: "0.625rem 1rem",
-					marginBottom: "1.5rem",
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "space-between",
-					flexWrap: "wrap",
-					gap: "0.5rem",
-					fontSize: "0.8125rem",
-					color: "var(--text-muted)",
-				}}
-			>
+			<div class="bg-surface border border-border rounded-md py-[0.625rem] px-4 mb-6 flex items-center justify-between flex-wrap gap-2 text-[0.8125rem] text-text-muted">
 				<span>Shared view · Expires {formatDate(issue.expires_at)}</span>
-				<a href="/" style={{ color: "var(--accent)", textDecoration: "none", fontWeight: 500 }}>
+				<a href="/" class="text-accent no-underline font-medium">
 					Sign in to collaborate →
 				</a>
 			</div>
@@ -256,14 +188,11 @@ export default function ShareView() {
 			{issue.body ? (
 				<div
 					ref={bodyRef}
-					class="prose"
+					class="prose mb-6"
 					dangerouslySetInnerHTML={{ __html: renderMd(issue.body) }}
-					style={{ marginBottom: "1.5rem" }}
 				/>
 			) : (
-				<p style={{ color: "var(--text-muted)", fontStyle: "italic", marginBottom: "1.5rem" }}>
-					No description.
-				</p>
+				<p class="text-text-muted italic mb-6">No description.</p>
 			)}
 
 			{/* Custom fields */}

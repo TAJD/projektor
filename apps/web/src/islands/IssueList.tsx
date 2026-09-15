@@ -64,7 +64,7 @@ export default function IssueList({ workspaceSlug }: Props) {
 	if (data.loading && !data.hasLoadedOnce.current) return <p aria-live="polite">Loading issues…</p>;
 	if (data.error) {
 		return (
-			<p role="alert" style={{ color: "var(--danger-text)" }}>
+			<p role="alert" class="text-danger-text">
 				Failed to load issues: {data.error}
 			</p>
 		);

@@ -64,7 +64,7 @@ function IssueListTop({
 			/>
 
 			{data.updateError && (
-				<p role="alert" class="text-[var(--danger-text)] mb-2">
+				<p role="alert" class="text-danger-text mb-2">
 					{data.updateError}
 				</p>
 			)}

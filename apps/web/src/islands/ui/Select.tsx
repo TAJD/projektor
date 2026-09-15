@@ -248,7 +248,7 @@ function SelectMenu({
 					onMouseEnter={() => onHighlight(i)}
 					onClick={() => onChoose(i)}
 				>
-					{opt.action ? <span style={{ flexGrow: 1 }}>{opt.label}</span> : opt.label}
+					{opt.action ? <span class="grow">{opt.label}</span> : opt.label}
 					{opt.action && (
 						<button
 							type="button"
@@ -257,17 +257,7 @@ function SelectMenu({
 								e.stopPropagation();
 								opt.action?.onClick();
 							}}
-							style={{
-								marginLeft: "auto",
-								background: "none",
-								border: "none",
-								cursor: "pointer",
-								color: "var(--text-muted)",
-								padding: "0 0.2rem",
-								fontSize: "0.85rem",
-								lineHeight: "1",
-								flexShrink: 0,
-							}}
+							class="ml-auto bg-transparent border-none cursor-pointer text-text-muted px-[0.2rem] py-0 text-[0.85rem] leading-none shrink-0"
 						>
 							{opt.action.icon ?? "×"}
 						</button>

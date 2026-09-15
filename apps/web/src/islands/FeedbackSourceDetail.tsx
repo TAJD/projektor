@@ -238,7 +238,7 @@ export default function FeedbackSourceDetail({
 	if (loading) return <p aria-live="polite">Loading source…</p>;
 	if (fetchError) {
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				{fetchError}
 			</p>
 		);

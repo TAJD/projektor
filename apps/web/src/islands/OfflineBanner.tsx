@@ -22,8 +22,7 @@ export function OfflineBanner() {
 	return (
 		<div
 			role="status"
-			class="px-3 py-1.5 text-sm font-medium text-center"
-			style={{ background: "var(--danger-bg)", color: "var(--danger-text)" }}
+			class="px-3 py-1.5 text-sm font-medium text-center bg-danger-bg text-danger-text"
 		>
 			You're offline — changes won't save until your connection returns.
 		</div>

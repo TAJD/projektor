@@ -851,7 +851,7 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 
 			{loading && <p aria-live="polite">Loading metrics…</p>}
 			{!loading && error && (
-				<p role="alert" class="text-[var(--danger-text)]">
+				<p role="alert" class="text-danger-text">
 					{error}
 				</p>
 			)}

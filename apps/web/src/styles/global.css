@@ -30,6 +30,63 @@
 	   produced no rule at all, so the highlight never rendered; under v4 it would have
 	   rendered solid indigo behind the text. Mixing explicitly here keeps it theme-aware. */
 	--color-accent-soft: color-mix(in oklab, var(--accent) 30%, transparent);
+	--color-on-accent: var(--on-accent);
+
+	--color-nav-bg: var(--nav-bg);
+	--color-text-strong: var(--text-strong);
+	--color-code-color: var(--code-color);
+	--color-code-bg: var(--code-bg);
+
+	--color-danger-text: var(--danger-text);
+	--color-danger-bg: var(--danger-bg);
+	--color-danger-border: var(--danger-border);
+	--color-warning-bg: var(--warning-bg);
+	--color-warning-border: var(--warning-border);
+	--color-success-bg: var(--success-bg);
+	--color-success-border: var(--success-border);
+
+	--color-epic-text: var(--epic-text);
+	--color-epic-bg: var(--epic-bg);
+	--color-epic-border: var(--epic-border);
+
+	--color-priority-urgent-text: var(--priority-urgent-text);
+	--color-priority-urgent-bg: var(--priority-urgent-bg);
+	--color-priority-high-text: var(--priority-high-text);
+	--color-priority-high-bg: var(--priority-high-bg);
+	--color-priority-medium-text: var(--priority-medium-text);
+	--color-priority-medium-bg: var(--priority-medium-bg);
+	--color-priority-medium-solid: var(--priority-medium-solid);
+	--color-priority-low-text: var(--priority-low-text);
+	--color-priority-low-bg: var(--priority-low-bg);
+	--color-priority-none-text: var(--priority-none-text);
+	--color-priority-none-bg: var(--priority-none-bg);
+	--color-priority-urgent-solid: var(--priority-urgent-solid);
+	--color-priority-high-solid: var(--priority-high-solid);
+	--color-priority-low-solid: var(--priority-low-solid);
+
+	--color-status-todo: var(--status-todo);
+	--color-status-in-progress: var(--status-in-progress);
+	--color-status-in-review: var(--status-in-review);
+	--color-status-done: var(--status-done);
+	--color-status-done-bg: var(--status-done-bg);
+	--color-status-cancelled: var(--status-cancelled);
+
+	--color-sprint-active-bg: var(--sprint-active-bg);
+	--color-sprint-active-border: var(--sprint-active-border);
+	--color-sprint-completed-bg: var(--sprint-completed-bg);
+	--color-sprint-completed-border: var(--sprint-completed-border);
+	--color-sprint-notice-bg: var(--sprint-notice-bg);
+	--color-sprint-notice-border: var(--sprint-notice-border);
+
+	--color-dropzone-bg: var(--dropzone-bg);
+	--color-velocity-bar-bg: var(--velocity-bar-bg);
+	--color-chart-secondary: var(--chart-secondary);
+	--color-chart-seq-1: var(--chart-seq-1);
+	--color-chart-seq-2: var(--chart-seq-2);
+	--color-chart-seq-3: var(--chart-seq-3);
+	--color-chart-seq-4: var(--chart-seq-4);
+
+	--shadow-elevation-sm: var(--elevation-sm);
 
 	--font-sans: var(--font-family-sans);
 	--font-mono: var(--font-family-mono);

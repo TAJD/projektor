@@ -194,7 +194,7 @@ export default function MyIssues({ workspaceSlug }: Props) {
 	if (loading) return <p aria-live="polite">Loading…</p>;
 	if (error)
 		return (
-			<p role="alert" style={{ color: "var(--danger-text)" }}>
+			<p role="alert" class="text-danger-text">
 				Failed to load issues: {error}
 			</p>
 		);
@@ -211,7 +211,7 @@ export default function MyIssues({ workspaceSlug }: Props) {
 						type="checkbox"
 						checked={includeDone}
 						onChange={(e) => setIncludeDone((e.target as HTMLInputElement).checked)}
-						class="accent-[var(--accent)] w-4 h-4"
+						class="accent-accent w-4 h-4"
 					/>
 					Include done
 				</label>

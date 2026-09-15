@@ -858,9 +858,9 @@ describe("Filters popover stacking (CD-294)", () => {
 		openFiltersPopover();
 
 		const panel = await screen.findByRole("button", { name: "Todo" });
-		const popover = panel.closest("[style*='position: fixed']") as HTMLElement;
+		const popover = panel.closest(".fixed") as HTMLElement;
 		expect(popover).toBeTruthy();
-		expect(Number(popover.style.zIndex)).toBeGreaterThan(110);
+		expect(popover.className).toContain("z-[200]");
 	});
 
 	// PROJ-588 review: the pure computeFiltersPopoverPosition tests never assert the
@@ -871,8 +871,8 @@ describe("Filters popover stacking (CD-294)", () => {
 		openFiltersPopover();
 
 		const panel = await screen.findByRole("button", { name: "Todo" });
-		const popover = panel.closest("[style*='position: fixed']") as HTMLElement;
+		const popover = panel.closest(".fixed") as HTMLElement;
 		expect(popover.style.maxHeight).toBeTruthy();
-		expect(popover.style.overflowY).toBe("auto");
+		expect(popover.className).toContain("overflow-y-auto");
 	});
 });

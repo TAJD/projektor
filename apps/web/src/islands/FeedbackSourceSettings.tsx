@@ -36,7 +36,7 @@ function formatDate(ts: number): string {
 function NewTokenReveal({ token, onDismiss }: { token: string; onDismiss: () => void }) {
 	return (
 		<div class="bg-surface border border-border rounded-md p-4">
-			<p class="text-[var(--danger-text)] text-[0.8rem] my-1">
+			<p class="text-danger-text text-[0.8rem] my-1">
 				⚠ Copy this token now — you won't be able to see it again.
 			</p>
 			<code class="block font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded break-all">
@@ -83,7 +83,7 @@ function DangerZone({
 					<Button
 						variant="outline"
 						size="sm"
-						class="text-[var(--danger-text)] border-[var(--danger-border)]"
+						class="text-danger-text border-danger-border"
 						onClick={onRevoke}
 					>
 						Revoke source
@@ -146,7 +146,7 @@ export default function FeedbackSourceSettings({
 	return (
 		<section class="flex flex-col gap-4 max-w-[520px]">
 			{error && (
-				<p role="alert" class="text-[var(--danger-text)]">
+				<p role="alert" class="text-danger-text">
 					{error}
 				</p>
 			)}

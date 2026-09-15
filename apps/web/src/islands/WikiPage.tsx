@@ -260,7 +260,7 @@ function WikiVerifyControls({
 				</Button>
 			)}
 			{verifyError && (
-				<span role="alert" class="text-[var(--danger-text)]">
+				<span role="alert" class="text-danger-text">
 					{verifyError}
 				</span>
 			)}
@@ -892,13 +892,13 @@ function CreatePageForm({
 				{parentTitle ? `New child page under "${parentTitle}"` : "New page"}
 			</h2>
 			{error && (
-				<p role="alert" class="text-[var(--danger-text)] mb-3">
+				<p role="alert" class="text-danger-text mb-3">
 					{error}
 				</p>
 			)}
 			<div class="mb-4">
 				<label htmlFor="create-title" class="block font-medium text-sm text-text-base mb-1">
-					Title <span class="text-[var(--danger-text)]">*</span>
+					Title <span class="text-danger-text">*</span>
 				</label>
 				<input
 					id="create-title"
@@ -1023,7 +1023,7 @@ function MovePageForm({
 		<div class="mb-4 p-3 border border-border rounded bg-surface">
 			<p class="m-0 mb-2 text-sm font-medium text-text-base">Move to a new parent page</p>
 			{error && (
-				<p role="alert" class="text-[var(--danger-text)] mb-2 text-sm">
+				<p role="alert" class="text-danger-text mb-2 text-sm">
 					{error}
 				</p>
 			)}
@@ -1404,7 +1404,7 @@ function RevisionRow({
 				(diffLoading ? (
 					<p class="mt-2 mb-1 text-[0.75rem]">Loading diff…</p>
 				) : diffError ? (
-					<p role="alert" class="mt-2 mb-1 text-[0.75rem] text-[var(--danger-text)]">
+					<p role="alert" class="mt-2 mb-1 text-[0.75rem] text-danger-text">
 						{diffError}
 					</p>
 				) : (
@@ -1550,7 +1550,7 @@ function AttachmentUploadForm({
 				Cancel
 			</Button>
 			{uploadError && (
-				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
+				<span role="alert" class="text-[0.8rem] text-danger-text self-center">
 					{uploadError}
 				</span>
 			)}
@@ -1789,7 +1789,7 @@ function PageArticleMeta(
 			)}
 
 			{props.saveError && (
-				<p role="alert" class="text-[var(--danger-text)] mb-3">
+				<p role="alert" class="text-danger-text mb-3">
 					{props.saveError}
 				</p>
 			)}
@@ -1923,7 +1923,7 @@ function WikiMainContent(
 			);
 		}
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				Failed to load page: {props.error}
 			</p>
 		);

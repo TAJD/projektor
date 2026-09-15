@@ -52,7 +52,7 @@ function NewSourceForm({
 	return (
 		<form onSubmit={onSubmit}>
 			{error && (
-				<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
+				<p role="alert" class="text-danger-text mb-3 text-sm">
 					{error}
 				</p>
 			)}
@@ -174,7 +174,7 @@ export default function NewSourceModal({ projectId, workspaceSlug, onClose, onCr
 
 				{newToken ? (
 					<div class="bg-surface border border-border rounded-md p-4">
-						<p class="text-[var(--danger-text)] text-[0.8rem] my-1">
+						<p class="text-danger-text text-[0.8rem] my-1">
 							⚠ Copy this token now — you won't be able to see it again.
 						</p>
 						<code class="block font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded break-all">

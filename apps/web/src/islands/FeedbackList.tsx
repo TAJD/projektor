@@ -395,7 +395,7 @@ export default function FeedbackList({ workspaceSlug, projectId, sourceId }: Pro
 			</div>
 
 			{error && (
-				<p role="alert" class="text-[var(--danger-text)]">
+				<p role="alert" class="text-danger-text">
 					{error}
 				</p>
 			)}

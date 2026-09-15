@@ -143,7 +143,7 @@ function CompletionSummaryPanel({
 	const doneSP = doneIssues.reduce((sum, i) => sum + getStoryPoints(i), 0);
 
 	return (
-		<div class="mb-6 px-5 py-4 bg-[var(--success-bg)] border border-[var(--success-border)] rounded-lg">
+		<div class="mb-6 px-5 py-4 bg-success-bg border border-success-border rounded-lg">
 			<div class="flex justify-between items-start mb-3">
 				<h3 class="m-0 text-base font-semibold text-text-base">Sprint complete: {sprint.name}</h3>
 				<button
@@ -185,7 +185,7 @@ function CompletionSummaryPanel({
 							<li key={issue.id}>
 								<a
 									href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
-									class="text-sm text-[var(--accent)] no-underline hover:underline"
+									class="text-sm text-accent no-underline hover:underline"
 								>
 									{issue.title}
 								</a>
@@ -212,15 +212,14 @@ function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boo
 				<p class="text-sm text-text-muted m-0">No completed sprints yet</p>
 			) : (
 				<div>
-					<div class="flex items-end gap-2" style={{ height: `${BAR_AREA_PX + 48}px` }}>
+					<div class="flex items-end gap-2 h-[148px]">
 						{data.map(({ sprint, pointsCompleted, pointsTotal }) => {
 							const totalH = Math.round((pointsTotal / maxPts) * BAR_AREA_PX);
 							const doneH = totalH > 0 ? Math.round((pointsCompleted / pointsTotal) * totalH) : 0;
 							return (
 								<div
 									key={sprint.id}
-									class="flex-1 flex flex-col items-center justify-end min-w-0"
-									style={{ height: `${BAR_AREA_PX + 48}px` }}
+									class="flex-1 flex flex-col items-center justify-end min-w-0 h-[148px]"
 								>
 									<div class="text-[0.7rem] font-semibold text-text-base mb-1">
 										{pointsCompleted}
@@ -229,20 +228,13 @@ function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boo
 										)}
 									</div>
 									<div
-										class="relative w-full rounded-t"
-										style={{
-											height: `${Math.max(totalH, 2)}px`,
-											background: "var(--velocity-bar-bg)",
-										}}
+										class="relative w-full rounded-t bg-velocity-bar-bg"
+										style={{ height: `${Math.max(totalH, 2)}px` }}
 									>
 										{doneH > 0 && (
 											<div
-												class="absolute bottom-0 left-0 right-0 rounded-t"
-												style={{
-													height: `${doneH}px`,
-													background: "var(--status-done)",
-													opacity: "0.8",
-												}}
+												class="absolute bottom-0 left-0 right-0 rounded-t bg-status-done opacity-80"
+												style={{ height: `${doneH}px` }}
 											/>
 										)}
 									</div>
@@ -255,17 +247,11 @@ function VelocityChart({ data, loading }: { data: SprintVelocity[]; loading: boo
 					</div>
 					<div class="mt-3 flex gap-4 text-xs text-text-muted">
 						<span class="inline-flex items-center gap-1">
-							<span
-								class="inline-block w-3 h-2 rounded-xs"
-								style={{ background: "var(--status-done)", opacity: "0.8" }}
-							/>
+							<span class="inline-block w-3 h-2 rounded-xs bg-status-done opacity-80" />
 							Completed SP
 						</span>
 						<span class="inline-flex items-center gap-1">
-							<span
-								class="inline-block w-3 h-2 rounded-xs"
-								style={{ background: "var(--velocity-bar-bg)" }}
-							/>
+							<span class="inline-block w-3 h-2 rounded-xs bg-velocity-bar-bg" />
 							Total SP
 						</span>
 					</div>
@@ -591,7 +577,7 @@ export default function SprintManager({ workspaceSlug }: Props) {
 	if (loading) return <p aria-live="polite">Loading sprints…</p>;
 	if (error)
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				{error}
 			</p>
 		);
@@ -625,8 +611,8 @@ function SprintBreadcrumb({ project }: { project: Project | null }) {
 }
 
 const ACTIVE_SPRINT_NOTICE_CLASS =
-	"mb-4 px-[0.875rem] py-[0.625rem] bg-[var(--sprint-notice-bg)] " +
-	"border border-[var(--sprint-notice-border)] rounded-md text-sm text-[var(--status-in-progress)]";
+	"mb-4 px-[0.875rem] py-[0.625rem] bg-sprint-notice-bg " +
+	"border border-sprint-notice-border rounded-md text-sm text-status-in-progress";
 
 function ActiveSprintNotice({ sprints }: { sprints: Sprint[] }) {
 	const active = sprints.find((s) => s.status === "active");
@@ -638,8 +624,8 @@ function ActiveSprintNotice({ sprints }: { sprints: Sprint[] }) {
 }
 
 const CREATE_FORM_ACTIVE_WARNING_CLASS =
-	"mb-[0.875rem] px-3 py-2 bg-[var(--danger-bg)] border border-[var(--danger-border)] " +
-	"rounded text-[0.8rem] text-[var(--danger-text)]";
+	"mb-[0.875rem] px-3 py-2 bg-danger-bg border border-danger-border " +
+	"rounded text-[0.8rem] text-danger-text";
 
 interface CreateSprintFormProps {
 	activeCount: number;
@@ -778,7 +764,7 @@ function CreateSprintForm({
 				/>
 
 				{createError && (
-					<p role="alert" class="text-[var(--danger-text)] text-[0.8rem] m-0 mb-3">
+					<p role="alert" class="text-danger-text text-[0.8rem] m-0 mb-3">
 						{createError}
 					</p>
 				)}
@@ -843,7 +829,7 @@ function SprintCompleteControls({
 			<Button variant="outline" size="sm" disabled={completing} onClick={onCancel}>
 				Cancel
 			</Button>
-			{completeError && <span class="text-[var(--danger-text)] text-xs">{completeError}</span>}
+			{completeError && <span class="text-danger-text text-xs">{completeError}</span>}
 		</span>
 	);
 }

@@ -81,7 +81,7 @@ function SectionDivider({ title }: { title: string }) {
 			<span class="text-[0.7rem] font-semibold uppercase tracking-wider text-text-muted whitespace-nowrap">
 				{title}
 			</span>
-			<div class="flex-1 h-px bg-[var(--border)]" />
+			<div class="flex-1 h-px bg-border" />
 		</div>
 	);
 }
@@ -200,8 +200,8 @@ export function ShareButton({
 			</Button>
 			{shareUrl && (
 				<div
-					class="absolute left-0 top-full mt-1 z-50 bg-[var(--bg)] border border-border rounded-md
-						shadow-[var(--elevation-sm)] p-3 w-72"
+					class="absolute left-0 top-full mt-1 z-50 bg-bg border border-border rounded-md
+						shadow-elevation-sm p-3 w-72"
 				>
 					<p class="text-xs text-text-muted mb-2">Share link · Expires in 3 days</p>
 					<div class="flex items-center gap-1">
@@ -238,7 +238,7 @@ export function ParentBadge({ parentEpic }: { parentEpic: IssueData | null }) {
 			href={issueUrl(parentEpic.project_key, parentEpic.number, parentEpic.title, parentEpic.id)}
 			class={`inline-flex items-center gap-1 px-2 py-[0.125rem] rounded no-underline text-xs font-medium border ${
 				isEpic
-					? "bg-[var(--epic-bg)] text-[var(--epic-text)] border-[var(--epic-border)]"
+					? "bg-epic-bg text-epic-text border-epic-border"
 					: "bg-surface text-text-muted border-border"
 			}`}
 		>
@@ -300,7 +300,7 @@ export function TitleSection({
 		return (
 			<div>
 				{saveTitleError && (
-					<p role="alert" class="text-[var(--danger-text)] mb-2 text-sm">
+					<p role="alert" class="text-danger-text mb-2 text-sm">
 						{saveTitleError}
 					</p>
 				)}
@@ -316,7 +316,7 @@ export function TitleSection({
 					// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline editor opens
 					autoFocus
 					class="w-full text-2xl font-bold text-text-base bg-bg border border-border rounded-md px-3
-						py-1.5 mb-2 focus:outline-hidden focus:ring-1 focus:ring-[var(--accent)]"
+						py-1.5 mb-2 focus:outline-hidden focus:ring-1 focus:ring-accent"
 				/>
 				<div class="flex gap-2">
 					<Button onClick={saveTitle} disabled={savingTitle} variant="primary" size="sm">
@@ -501,7 +501,7 @@ export function BodySection({
 				<span class="text-[0.7rem] font-semibold uppercase tracking-wider text-text-muted whitespace-nowrap">
 					Description
 				</span>
-				<div class="flex-1 h-px bg-[var(--border)]" />
+				<div class="flex-1 h-px bg-border" />
 				{!editingBody && (
 					<button
 						type="button"
@@ -515,7 +515,7 @@ export function BodySection({
 			</div>
 
 			{saveBodyError && (
-				<p role="alert" class="text-[var(--danger-text)] mb-2 text-sm">
+				<p role="alert" class="text-danger-text mb-2 text-sm">
 					{saveBodyError}
 				</p>
 			)}
@@ -575,7 +575,7 @@ export function ChildIssuesSection({
 						{issue.rollup.done} done · {issue.rollup.remaining} remaining
 					</span>
 				)}
-				<div class="flex-1 h-px bg-[var(--border)]" />
+				<div class="flex-1 h-px bg-border" />
 			</div>
 			{childIssues.length === 0 ? (
 				<p class="text-text-muted italic">No child issues yet.</p>
@@ -645,7 +645,7 @@ function LinkItem({ link, onRemove }: { link: IssueLink; onRemove: () => void })
 				<span class="text-text-base">{link.linkedIssueTitle}</span>
 				{link.linkedIssueStatusCategory && (
 					<span
-						class="px-[0.375rem] py-[0.0625rem] rounded-[3px] text-[0.7rem] bg-[var(--priority-low-bg)] font-medium"
+						class="px-[0.375rem] py-[0.0625rem] rounded-[3px] text-[0.7rem] bg-priority-low-bg font-medium"
 						style={{ color: categoryColor(link.linkedIssueStatusCategory) }}
 					>
 						{link.linkedIssueStatusCategory.replace("_", " ")}
@@ -716,7 +716,7 @@ function LinkForm({
 				Cancel
 			</Button>
 			{linkFormError && (
-				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
+				<span role="alert" class="text-[0.8rem] text-danger-text self-center">
 					{linkFormError}
 				</span>
 			)}
@@ -1039,7 +1039,7 @@ function AttachmentUploadForm({
 				</Button>
 			</div>
 			{uploadError && (
-				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
+				<span role="alert" class="text-[0.8rem] text-danger-text self-center">
 					{uploadError}
 				</span>
 			)}
@@ -1147,7 +1147,7 @@ function WikiPageLinkForm({
 				</Button>
 			</div>
 			{linkError && (
-				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)]">
+				<span role="alert" class="text-[0.8rem] text-danger-text">
 					{linkError}
 				</span>
 			)}
@@ -1228,7 +1228,7 @@ function UrlLinkForm({
 				</Button>
 			</div>
 			{linkError && (
-				<span role="alert" class="text-[0.8rem] text-[var(--danger-text)] self-center">
+				<span role="alert" class="text-[0.8rem] text-danger-text self-center">
 					{linkError}
 				</span>
 			)}
@@ -1528,7 +1528,7 @@ function CommentItem({
 	}, [comment.body, isEditing]);
 
 	return (
-		<div class="px-4 py-3 border border-border rounded-lg mb-3 bg-surface shadow-[var(--elevation-sm)]">
+		<div class="px-4 py-3 border border-border rounded-lg mb-3 bg-surface shadow-elevation-sm">
 			<div class="flex justify-between mb-[0.375rem]">
 				<span class="font-semibold text-sm text-text-base">
 					{comment.author_name || comment.author_email}
@@ -1545,7 +1545,7 @@ function CommentItem({
 							<Button
 								onClick={onDelete}
 								size="sm"
-								class="bg-transparent border border-[var(--danger-text)] text-[var(--danger-text)]"
+								class="bg-transparent border border-danger-text text-danger-text"
 							>
 								Delete
 							</Button>
@@ -1556,7 +1556,7 @@ function CommentItem({
 			{isEditing ? (
 				<div>
 					{editError && (
-						<p role="alert" class="text-[var(--danger-text)] mb-2 text-sm">
+						<p role="alert" class="text-danger-text mb-2 text-sm">
 							{editError}
 						</p>
 					)}
@@ -1754,7 +1754,7 @@ export function CommentsSection({
 
 			<form onSubmit={submitComment}>
 				{commentError && (
-					<p role="alert" class="text-[var(--danger-text)] mb-2 text-sm">
+					<p role="alert" class="text-danger-text mb-2 text-sm">
 						{commentError}
 					</p>
 				)}
@@ -1845,7 +1845,7 @@ function TypeField({
 				{/* PROJ-602: without this, a rejected type change (e.g. demoting an epic
 					that still has children) reverts the dropdown with zero explanation. */}
 				{typeChangeError && (
-					<p role="alert" class="text-[var(--danger-text)] text-xs mt-1">
+					<p role="alert" class="text-danger-text text-xs mt-1">
 						{typeChangeError}
 					</p>
 				)}
@@ -1976,7 +1976,7 @@ export function SidebarPanel({
 
 	return (
 		<div class="w-[240px] shrink-0 max-sm:w-full sticky top-4 self-start">
-			<div class="rounded-lg border border-border bg-surface px-4 py-2 divide-y divide-[var(--border)]">
+			<div class="rounded-lg border border-border bg-surface px-4 py-2 divide-y divide-border">
 				<SidebarField label="Status">
 					<StatusField
 						issue={issue}

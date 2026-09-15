@@ -63,9 +63,7 @@ function RevokeControl({ id, state }: { id: string; state: RevokeState }) {
 				<Button variant="outline" size="sm" disabled={state.revoking} onClick={state.onCancel}>
 					No
 				</Button>
-				{state.revokeError && (
-					<span class="text-[var(--danger-text)] text-xs">{state.revokeError}</span>
-				)}
+				{state.revokeError && <span class="text-danger-text text-xs">{state.revokeError}</span>}
 			</span>
 		);
 	}
@@ -73,7 +71,7 @@ function RevokeControl({ id, state }: { id: string; state: RevokeState }) {
 		<Button
 			variant="outline"
 			size="sm"
-			class="text-[var(--danger-text)] border-[var(--danger-border)]"
+			class="text-danger-text border-danger-border"
 			onClick={() => state.onSelect(id)}
 		>
 			Disconnect
@@ -213,7 +211,7 @@ export default function ConnectorManager({ workspaceSlug: propWorkspaceSlug }: P
 
 	if (error) {
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				Failed to load connected applications: {error}
 			</p>
 		);

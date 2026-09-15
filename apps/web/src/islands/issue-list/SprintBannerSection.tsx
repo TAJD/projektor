@@ -59,8 +59,8 @@ function SprintProgress({ issues }: { issues: Issue[] }) {
 			</div>
 			<div class="h-1.5 bg-bg rounded-full overflow-hidden border border-border">
 				<div
-					class="h-full rounded-full transition-[width] duration-300"
-					style={{ width: `${pct}%`, background: "var(--accent)" }}
+					class="h-full rounded-full transition-[width] duration-300 bg-accent"
+					style={{ width: `${pct}%` }}
 				/>
 			</div>
 		</div>
@@ -195,7 +195,7 @@ function SprintEditForm({
 	return (
 		<form onSubmit={saveSprintEdit}>
 			{sprintEditError && (
-				<p role="alert" class="text-[var(--danger-text)] text-sm mb-2">
+				<p role="alert" class="text-danger-text text-sm mb-2">
 					{sprintEditError}
 				</p>
 			)}
