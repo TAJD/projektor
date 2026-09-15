@@ -1,265 +1,268 @@
 :root {
-  --bg: #ffffff;
-  --surface: #f8fafc;
-  --text: #111827;
-  --text-strong: #030712;
-  --text-muted: #6b7280;
-  --border: #e2e8f0;
-  --nav-bg: #ffffff;
-  --accent: #4f46e5;
-  --on-accent: #fff;
-  /* Layout */
-  --sidebar-width: 220px;
-  --sidebar-width-collapsed: 56px;
-  --topbar-height: 56px;
-  /* Elevation. Named --elevation-sm rather than --shadow-sm because Tailwind v4 emits
-     its own theme as real custom properties on :root, and global.css loads after this
-     block — so an app token sharing a Tailwind namespace loses the cascade silently
-     (PROJ-302). Dark mode was unaffected, since [data-theme] outranks :root, which is
-     exactly what would have made it hard to spot. */
-  --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
-  /* Priority badge tokens (light) */
-  --priority-urgent-text: #dc2626;
-  --priority-urgent-bg: rgba(220, 38, 38, 0.15);
-  --priority-high-text: #d97706;
-  --priority-high-bg: rgba(217, 119, 6, 0.15);
-  --priority-medium-text: #4f46e5;
-  --priority-medium-bg: rgba(79, 70, 229, 0.12);
-  --priority-low-text: #6b7280;
-  --priority-low-bg: rgba(107, 114, 128, 0.12);
-  --priority-none-text: var(--priority-low-text);
-  --priority-none-bg: var(--priority-low-bg);
-  /* Priority solid pill tokens - filled swatches (e.g. filter pills) under fixed white
-     (--on-accent) text, not text-on-surface. Intentionally identical across all four
-     theme blocks: unlike the translucent tint tokens above (retuned lighter/higher-alpha
-     for dark mode since they sit under token-colored text), these are opaque brand fills
-     with fixed-color text on top, so lightening them for dark mode would move the fill
-     toward the white text and tank contrast. */
-  --priority-urgent-solid: #dc2626;
-  --priority-high-solid: #d97706;
-  --priority-medium-solid: #2563eb;
-  --priority-low-solid: #6b7280;
-  /* Code tokens (light) - dark text on clearly-distinct slate-200 bg */
-  --code-color: #1e293b;
-  --code-bg: #dde3ea;
-  /* Epic badge tokens (light) - violet-700 on near-white bg */
-  --epic-text: #7c3aed;
-  --epic-bg: rgba(124, 58, 237, 0.10);
-  --epic-border: rgba(124, 58, 237, 0.30);
-  /* Status category tokens (light) */
-  --status-todo: #6b7280;
-  --status-in-progress: #4f46e5;
-  --status-in-review: #7c3aed;
-  --status-done: #16a34a;
-  --status-cancelled: #dc2626;
-  /* Sprint status badge tokens (light) */
-  --sprint-active-bg: rgba(37, 99, 235, 0.12);
-  --sprint-active-border: rgba(37, 99, 235, 0.3);
-  --sprint-completed-bg: rgba(22, 163, 74, 0.12);
-  --sprint-completed-border: rgba(22, 163, 74, 0.3);
-  --status-done-bg: rgba(22, 163, 74, 0.12);
-  /* Danger action tokens (light) */
-  --danger-text: #dc2626;
-  --danger-bg: rgba(220, 38, 38, 0.10);
-  --danger-border: rgba(220, 38, 38, 0.30);
-  /* Warning banner tokens (light) */
-  --warning-bg: rgba(251, 191, 36, 0.12);
-  --warning-border: rgba(251, 191, 36, 0.5);
-  /* Success banner tokens (light) */
-  --success-bg: rgba(22, 163, 74, 0.06);
-  --success-border: rgba(22, 163, 74, 0.3);
-  /* Board dropzone token (light) */
-  --dropzone-bg: rgba(37, 99, 235, 0.04);
-  /* Sprint notice banner tokens (light) */
-  --sprint-notice-bg: rgba(37, 99, 235, 0.08);
-  --sprint-notice-border: rgba(37, 99, 235, 0.25);
-  /* Velocity chart bar-track token (light) */
-  --velocity-bar-bg: rgba(37, 99, 235, 0.15);
-  /* Chart series tokens (light) - metrics dashboard */
-  --chart-secondary: #d97706;
-  --chart-seq-1: #86b6ef;
-  --chart-seq-2: #5598e7;
-  --chart-seq-3: #2a78d6;
-  --chart-seq-4: #1c5cab;
+	--sidebar-width: 220px;
+	--sidebar-width-collapsed: 56px;
+	--topbar-height: 56px;
+
+	--priority-urgent-solid: #dc2626;
+	--priority-high-solid: #d97706;
+	--priority-medium-solid: #2563eb;
+	--priority-low-solid: #6b7280;
+	--chart-secondary: #d97706;
+
+	--light-bg: #ffffff;
+	--light-surface: #f8fafc;
+	--light-text: #111827;
+	--light-text-strong: #030712;
+	--light-text-muted: #6b7280;
+	--light-border: #e2e8f0;
+	--light-nav-bg: #ffffff;
+	--light-accent: #4f46e5;
+	--light-on-accent: #fff;
+	--light-elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+	--light-priority-urgent-text: #dc2626;
+	--light-priority-urgent-bg: rgba(220, 38, 38, 0.15);
+	--light-priority-high-text: #d97706;
+	--light-priority-high-bg: rgba(217, 119, 6, 0.15);
+	--light-priority-medium-text: #4f46e5;
+	--light-priority-medium-bg: rgba(79, 70, 229, 0.12);
+	--light-priority-low-text: #6b7280;
+	--light-priority-low-bg: rgba(107, 114, 128, 0.12);
+	--light-code-color: #1e293b;
+	--light-code-bg: #dde3ea;
+	--light-epic-text: #7c3aed;
+	--light-epic-bg: rgba(124, 58, 237, 0.1);
+	--light-epic-border: rgba(124, 58, 237, 0.3);
+	--light-status-todo: #6b7280;
+	--light-status-in-progress: #4f46e5;
+	--light-status-in-review: #7c3aed;
+	--light-status-done: #16a34a;
+	--light-status-cancelled: #dc2626;
+	--light-sprint-active-bg: rgba(37, 99, 235, 0.12);
+	--light-sprint-active-border: rgba(37, 99, 235, 0.3);
+	--light-sprint-completed-bg: rgba(22, 163, 74, 0.12);
+	--light-sprint-completed-border: rgba(22, 163, 74, 0.3);
+	--light-status-done-bg: rgba(22, 163, 74, 0.12);
+	--light-danger-text: #dc2626;
+	--light-danger-bg: rgba(220, 38, 38, 0.1);
+	--light-danger-border: rgba(220, 38, 38, 0.3);
+	--light-warning-bg: rgba(251, 191, 36, 0.12);
+	--light-warning-border: rgba(251, 191, 36, 0.5);
+	--light-success-bg: rgba(22, 163, 74, 0.06);
+	--light-success-border: rgba(22, 163, 74, 0.3);
+	--light-dropzone-bg: rgba(37, 99, 235, 0.04);
+	--light-sprint-notice-bg: rgba(37, 99, 235, 0.08);
+	--light-sprint-notice-border: rgba(37, 99, 235, 0.25);
+	--light-velocity-bar-bg: rgba(37, 99, 235, 0.15);
+	--light-chart-seq-1: #86b6ef;
+	--light-chart-seq-2: #5598e7;
+	--light-chart-seq-3: #2a78d6;
+	--light-chart-seq-4: #1c5cab;
+
+	--dark-bg: #0d1117;
+	--dark-surface: #1a1f2e;
+	--dark-text: #f3f5f9;
+	--dark-text-strong: #ffffff;
+	--dark-text-muted: #94a3b8;
+	--dark-border: #2a3242;
+	--dark-nav-bg: #12161f;
+	--dark-accent: #6366f1;
+	--dark-on-accent: #fff;
+	--dark-elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+	--dark-priority-urgent-text: #fca5a5;
+	--dark-priority-urgent-bg: rgba(248, 113, 113, 0.18);
+	--dark-priority-high-text: #fcd34d;
+	--dark-priority-high-bg: rgba(251, 191, 36, 0.18);
+	--dark-priority-medium-text: #a5b4fc;
+	--dark-priority-medium-bg: rgba(129, 140, 248, 0.18);
+	--dark-priority-low-text: #cbd5e1;
+	--dark-priority-low-bg: rgba(148, 163, 184, 0.18);
+	--dark-code-color: #e2e8f0;
+	--dark-code-bg: #141b2b;
+	--dark-epic-text: #c4b5fd;
+	--dark-epic-bg: rgba(196, 181, 253, 0.15);
+	--dark-epic-border: rgba(196, 181, 253, 0.3);
+	--dark-status-todo: #94a3b8;
+	--dark-status-in-progress: #818cf8;
+	--dark-status-in-review: #c4b5fd;
+	--dark-status-done: #4ade80;
+	--dark-status-cancelled: #f87171;
+	--dark-sprint-active-bg: rgba(129, 140, 248, 0.18);
+	--dark-sprint-active-border: rgba(129, 140, 248, 0.4);
+	--dark-sprint-completed-bg: rgba(74, 222, 128, 0.18);
+	--dark-sprint-completed-border: rgba(74, 222, 128, 0.4);
+	--dark-status-done-bg: rgba(74, 222, 128, 0.18);
+	--dark-danger-text: #f87171;
+	--dark-danger-bg: rgba(248, 113, 113, 0.12);
+	--dark-danger-border: rgba(248, 113, 113, 0.32);
+	--dark-warning-bg: rgba(252, 211, 77, 0.18);
+	--dark-warning-border: rgba(252, 211, 77, 0.55);
+	--dark-success-bg: rgba(74, 222, 128, 0.12);
+	--dark-success-border: rgba(74, 222, 128, 0.4);
+	--dark-dropzone-bg: rgba(129, 140, 248, 0.08);
+	--dark-sprint-notice-bg: rgba(129, 140, 248, 0.12);
+	--dark-sprint-notice-border: rgba(129, 140, 248, 0.35);
+	--dark-velocity-bar-bg: rgba(129, 140, 248, 0.2);
+	--dark-chart-seq-1: #bcd7f7;
+	--dark-chart-seq-2: #8ab8f0;
+	--dark-chart-seq-3: #5a94e4;
+	--dark-chart-seq-4: #3a72c8;
+
+	--priority-none-text: var(--priority-low-text);
+	--priority-none-bg: var(--priority-low-bg);
 }
+
+:root,
+[data-theme="light"] {
+	--bg: var(--light-bg);
+	--surface: var(--light-surface);
+	--text: var(--light-text);
+	--text-strong: var(--light-text-strong);
+	--text-muted: var(--light-text-muted);
+	--border: var(--light-border);
+	--nav-bg: var(--light-nav-bg);
+	--accent: var(--light-accent);
+	--on-accent: var(--light-on-accent);
+	--elevation-sm: var(--light-elevation-sm);
+	--priority-urgent-text: var(--light-priority-urgent-text);
+	--priority-urgent-bg: var(--light-priority-urgent-bg);
+	--priority-high-text: var(--light-priority-high-text);
+	--priority-high-bg: var(--light-priority-high-bg);
+	--priority-medium-text: var(--light-priority-medium-text);
+	--priority-medium-bg: var(--light-priority-medium-bg);
+	--priority-low-text: var(--light-priority-low-text);
+	--priority-low-bg: var(--light-priority-low-bg);
+	--code-color: var(--light-code-color);
+	--code-bg: var(--light-code-bg);
+	--epic-text: var(--light-epic-text);
+	--epic-bg: var(--light-epic-bg);
+	--epic-border: var(--light-epic-border);
+	--status-todo: var(--light-status-todo);
+	--status-in-progress: var(--light-status-in-progress);
+	--status-in-review: var(--light-status-in-review);
+	--status-done: var(--light-status-done);
+	--status-cancelled: var(--light-status-cancelled);
+	--sprint-active-bg: var(--light-sprint-active-bg);
+	--sprint-active-border: var(--light-sprint-active-border);
+	--sprint-completed-bg: var(--light-sprint-completed-bg);
+	--sprint-completed-border: var(--light-sprint-completed-border);
+	--status-done-bg: var(--light-status-done-bg);
+	--danger-text: var(--light-danger-text);
+	--danger-bg: var(--light-danger-bg);
+	--danger-border: var(--light-danger-border);
+	--warning-bg: var(--light-warning-bg);
+	--warning-border: var(--light-warning-border);
+	--success-bg: var(--light-success-bg);
+	--success-border: var(--light-success-border);
+	--dropzone-bg: var(--light-dropzone-bg);
+	--sprint-notice-bg: var(--light-sprint-notice-bg);
+	--sprint-notice-border: var(--light-sprint-notice-border);
+	--velocity-bar-bg: var(--light-velocity-bar-bg);
+	--chart-seq-1: var(--light-chart-seq-1);
+	--chart-seq-2: var(--light-chart-seq-2);
+	--chart-seq-3: var(--light-chart-seq-3);
+	--chart-seq-4: var(--light-chart-seq-4);
+}
+
+[data-theme="dark"] {
+	--bg: var(--dark-bg);
+	--surface: var(--dark-surface);
+	--text: var(--dark-text);
+	--text-strong: var(--dark-text-strong);
+	--text-muted: var(--dark-text-muted);
+	--border: var(--dark-border);
+	--nav-bg: var(--dark-nav-bg);
+	--accent: var(--dark-accent);
+	--on-accent: var(--dark-on-accent);
+	--elevation-sm: var(--dark-elevation-sm);
+	--priority-urgent-text: var(--dark-priority-urgent-text);
+	--priority-urgent-bg: var(--dark-priority-urgent-bg);
+	--priority-high-text: var(--dark-priority-high-text);
+	--priority-high-bg: var(--dark-priority-high-bg);
+	--priority-medium-text: var(--dark-priority-medium-text);
+	--priority-medium-bg: var(--dark-priority-medium-bg);
+	--priority-low-text: var(--dark-priority-low-text);
+	--priority-low-bg: var(--dark-priority-low-bg);
+	--code-color: var(--dark-code-color);
+	--code-bg: var(--dark-code-bg);
+	--epic-text: var(--dark-epic-text);
+	--epic-bg: var(--dark-epic-bg);
+	--epic-border: var(--dark-epic-border);
+	--status-todo: var(--dark-status-todo);
+	--status-in-progress: var(--dark-status-in-progress);
+	--status-in-review: var(--dark-status-in-review);
+	--status-done: var(--dark-status-done);
+	--status-cancelled: var(--dark-status-cancelled);
+	--sprint-active-bg: var(--dark-sprint-active-bg);
+	--sprint-active-border: var(--dark-sprint-active-border);
+	--sprint-completed-bg: var(--dark-sprint-completed-bg);
+	--sprint-completed-border: var(--dark-sprint-completed-border);
+	--status-done-bg: var(--dark-status-done-bg);
+	--danger-text: var(--dark-danger-text);
+	--danger-bg: var(--dark-danger-bg);
+	--danger-border: var(--dark-danger-border);
+	--warning-bg: var(--dark-warning-bg);
+	--warning-border: var(--dark-warning-border);
+	--success-bg: var(--dark-success-bg);
+	--success-border: var(--dark-success-border);
+	--dropzone-bg: var(--dark-dropzone-bg);
+	--sprint-notice-bg: var(--dark-sprint-notice-bg);
+	--sprint-notice-border: var(--dark-sprint-notice-border);
+	--velocity-bar-bg: var(--dark-velocity-bar-bg);
+	--chart-seq-1: var(--dark-chart-seq-1);
+	--chart-seq-2: var(--dark-chart-seq-2);
+	--chart-seq-3: var(--dark-chart-seq-3);
+	--chart-seq-4: var(--dark-chart-seq-4);
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    /* Cool near-black base with one clear step up to surface (Linear/Vercel feel) */
-    --bg: #0d1117;
-    --surface: #1a1f2e;
-    --text: #f3f5f9;
-    --text-strong: #ffffff;
-    --text-muted: #94a3b8;     /* slate-400 - ~7.4:1 on --bg, passes WCAG AA */
-    --border: #2a3242;
-    --nav-bg: #12161f;          /* sits between bg and surface */
-    --accent: #6366f1;          /* indigo-500 - distinctive on dark */
-    --on-accent: #fff;
-    --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
-    /* Priority badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
-    --priority-urgent-text: #fca5a5;
-    --priority-urgent-bg: rgba(248, 113, 113, 0.18);
-    --priority-high-text: #fcd34d;
-    --priority-high-bg: rgba(251, 191, 36, 0.18);
-    --priority-medium-text: #a5b4fc;   /* indigo-300 - aligns with accent */
-    --priority-medium-bg: rgba(129, 140, 248, 0.18);
-    --priority-low-text: #cbd5e1;
-    --priority-low-bg: rgba(148, 163, 184, 0.18);
-    /* Priority solid pill tokens - kept identical to :root (see comment there); not
-       retuned for dark mode since these are opaque fills under fixed white text */
-    --priority-urgent-solid: #dc2626;
-    --priority-high-solid: #d97706;
-    --priority-medium-solid: #2563eb;
-    --priority-low-solid: #6b7280;
-    /* Code tokens (dark) - light text on slightly deeper slate bg */
-    --code-color: #e2e8f0;
-    --code-bg: #141b2b;
-    /* Epic badge tokens (dark) - violet-300 on near-black bg */
-    --epic-text: #c4b5fd;
-    --epic-bg: rgba(196, 181, 253, 0.15);
-    --epic-border: rgba(196, 181, 253, 0.30);
-    /* Status category tokens (dark) */
-    --status-todo: #94a3b8;
-    --status-in-progress: #818cf8;
-    --status-in-review: #c4b5fd;
-    --status-done: #4ade80;
-    --status-cancelled: #f87171;
-    /* Sprint status badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
-    --sprint-active-bg: rgba(129, 140, 248, 0.18);
-    --sprint-active-border: rgba(129, 140, 248, 0.4);
-    --sprint-completed-bg: rgba(74, 222, 128, 0.18);
-    --sprint-completed-border: rgba(74, 222, 128, 0.4);
-    --status-done-bg: rgba(74, 222, 128, 0.18);
-    /* Danger action tokens (dark) - brighter red stays readable on near-black */
-    --danger-text: #f87171;
-    --danger-bg: rgba(248, 113, 113, 0.12);
-    --danger-border: rgba(248, 113, 113, 0.32);
-    /* Warning banner tokens (dark) - lighter amber tint at higher alpha */
-    --warning-bg: rgba(252, 211, 77, 0.18);
-    --warning-border: rgba(252, 211, 77, 0.55);
-    /* Success banner tokens (dark) - lighter green tint at higher alpha */
-    --success-bg: rgba(74, 222, 128, 0.12);
-    --success-border: rgba(74, 222, 128, 0.4);
-    /* Board dropzone token (dark) - lighter indigo tint at higher alpha */
-    --dropzone-bg: rgba(129, 140, 248, 0.08);
-    /* Sprint notice banner tokens (dark) - lighter indigo tint at higher alpha */
-    --sprint-notice-bg: rgba(129, 140, 248, 0.12);
-    --sprint-notice-border: rgba(129, 140, 248, 0.35);
-    /* Velocity chart bar-track token (dark) - lighter indigo tint at higher alpha */
-    --velocity-bar-bg: rgba(129, 140, 248, 0.20);
-    /* Chart series tokens (dark) - metrics dashboard */
-    --chart-secondary: #d97706;
-    --chart-seq-1: #bcd7f7;
-    --chart-seq-2: #8ab8f0;
-    --chart-seq-3: #5a94e4;
-    --chart-seq-4: #3a72c8;
-  }
-}
-[data-theme='dark'] {
-  --bg: #0d1117;
-  --surface: #1a1f2e;
-  --text: #f3f5f9;
-  --text-strong: #ffffff;
-  --text-muted: #94a3b8;
-  --border: #2a3242;
-  --nav-bg: #12161f;
-  --accent: #6366f1;
-  --on-accent: #fff;
-  --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
-  --priority-urgent-text: #fca5a5;
-  --priority-urgent-bg: rgba(248, 113, 113, 0.18);
-  --priority-high-text: #fcd34d;
-  --priority-high-bg: rgba(251, 191, 36, 0.18);
-  --priority-medium-text: #a5b4fc;
-  --priority-medium-bg: rgba(129, 140, 248, 0.18);
-  --priority-low-text: #cbd5e1;
-  --priority-low-bg: rgba(148, 163, 184, 0.18);
-  --priority-urgent-solid: #dc2626;
-  --priority-high-solid: #d97706;
-  --priority-medium-solid: #2563eb;
-  --priority-low-solid: #6b7280;
-  --code-color: #e2e8f0;
-  --code-bg: #141b2b;
-  --epic-text: #c4b5fd;
-  --epic-bg: rgba(196, 181, 253, 0.15);
-  --epic-border: rgba(196, 181, 253, 0.30);
-  --status-todo: #94a3b8;
-  --status-in-progress: #818cf8;
-  --status-in-review: #c4b5fd;
-  --status-done: #4ade80;
-  --status-cancelled: #f87171;
-  --sprint-active-bg: rgba(129, 140, 248, 0.18);
-  --sprint-active-border: rgba(129, 140, 248, 0.4);
-  --sprint-completed-bg: rgba(74, 222, 128, 0.18);
-  --sprint-completed-border: rgba(74, 222, 128, 0.4);
-  --status-done-bg: rgba(74, 222, 128, 0.18);
-  --danger-text: #f87171;
-  --danger-bg: rgba(248, 113, 113, 0.12);
-  --danger-border: rgba(248, 113, 113, 0.32);
-  --warning-bg: rgba(252, 211, 77, 0.18);
-  --warning-border: rgba(252, 211, 77, 0.55);
-  --success-bg: rgba(74, 222, 128, 0.12);
-  --success-border: rgba(74, 222, 128, 0.4);
-  --dropzone-bg: rgba(129, 140, 248, 0.08);
-  --sprint-notice-bg: rgba(129, 140, 248, 0.12);
-  --sprint-notice-border: rgba(129, 140, 248, 0.35);
-  --velocity-bar-bg: rgba(129, 140, 248, 0.20);
-  --chart-secondary: #d97706;
-  --chart-seq-1: #bcd7f7;
-  --chart-seq-2: #8ab8f0;
-  --chart-seq-3: #5a94e4;
-  --chart-seq-4: #3a72c8;
-}
-[data-theme='light'] {
-  --bg: #ffffff;
-  --surface: #f8fafc;
-  --text: #111827;
-  --text-strong: #030712;
-  --text-muted: #6b7280;
-  --border: #e2e8f0;
-  --nav-bg: #ffffff;
-  --accent: #4f46e5;
-  --on-accent: #fff;
-  --priority-urgent-text: #dc2626;
-  --priority-urgent-bg: rgba(220, 38, 38, 0.15);
-  --priority-high-text: #d97706;
-  --priority-high-bg: rgba(217, 119, 6, 0.15);
-  --priority-medium-text: #4f46e5;
-  --priority-medium-bg: rgba(79, 70, 229, 0.12);
-  --priority-low-text: #6b7280;
-  --priority-low-bg: rgba(107, 114, 128, 0.12);
-  --priority-urgent-solid: #dc2626;
-  --priority-high-solid: #d97706;
-  --priority-medium-solid: #2563eb;
-  --priority-low-solid: #6b7280;
-  --code-color: #1e293b;
-  --code-bg: #dde3ea;
-  --epic-text: #7c3aed;
-  --epic-bg: rgba(124, 58, 237, 0.10);
-  --epic-border: rgba(124, 58, 237, 0.30);
-  --status-todo: #6b7280;
-  --status-in-progress: #4f46e5;
-  --status-in-review: #7c3aed;
-  --status-done: #16a34a;
-  --status-cancelled: #dc2626;
-  --sprint-active-bg: rgba(37, 99, 235, 0.12);
-  --sprint-active-border: rgba(37, 99, 235, 0.3);
-  --sprint-completed-bg: rgba(22, 163, 74, 0.12);
-  --sprint-completed-border: rgba(22, 163, 74, 0.3);
-  --status-done-bg: rgba(22, 163, 74, 0.12);
-  --danger-text: #dc2626;
-  --danger-bg: rgba(220, 38, 38, 0.10);
-  --danger-border: rgba(220, 38, 38, 0.30);
-  --warning-bg: rgba(251, 191, 36, 0.12);
-  --warning-border: rgba(251, 191, 36, 0.5);
-  --success-bg: rgba(22, 163, 74, 0.06);
-  --success-border: rgba(22, 163, 74, 0.3);
-  --dropzone-bg: rgba(37, 99, 235, 0.04);
-  --sprint-notice-bg: rgba(37, 99, 235, 0.08);
-  --sprint-notice-border: rgba(37, 99, 235, 0.25);
-  --velocity-bar-bg: rgba(37, 99, 235, 0.15);
-  --chart-secondary: #d97706;
-  --chart-seq-1: #86b6ef;
-  --chart-seq-2: #5598e7;
-  --chart-seq-3: #2a78d6;
-  --chart-seq-4: #1c5cab;
+	:root:not([data-theme]) {
+		--bg: var(--dark-bg);
+		--surface: var(--dark-surface);
+		--text: var(--dark-text);
+		--text-strong: var(--dark-text-strong);
+		--text-muted: var(--dark-text-muted);
+		--border: var(--dark-border);
+		--nav-bg: var(--dark-nav-bg);
+		--accent: var(--dark-accent);
+		--on-accent: var(--dark-on-accent);
+		--elevation-sm: var(--dark-elevation-sm);
+		--priority-urgent-text: var(--dark-priority-urgent-text);
+		--priority-urgent-bg: var(--dark-priority-urgent-bg);
+		--priority-high-text: var(--dark-priority-high-text);
+		--priority-high-bg: var(--dark-priority-high-bg);
+		--priority-medium-text: var(--dark-priority-medium-text);
+		--priority-medium-bg: var(--dark-priority-medium-bg);
+		--priority-low-text: var(--dark-priority-low-text);
+		--priority-low-bg: var(--dark-priority-low-bg);
+		--code-color: var(--dark-code-color);
+		--code-bg: var(--dark-code-bg);
+		--epic-text: var(--dark-epic-text);
+		--epic-bg: var(--dark-epic-bg);
+		--epic-border: var(--dark-epic-border);
+		--status-todo: var(--dark-status-todo);
+		--status-in-progress: var(--dark-status-in-progress);
+		--status-in-review: var(--dark-status-in-review);
+		--status-done: var(--dark-status-done);
+		--status-cancelled: var(--dark-status-cancelled);
+		--sprint-active-bg: var(--dark-sprint-active-bg);
+		--sprint-active-border: var(--dark-sprint-active-border);
+		--sprint-completed-bg: var(--dark-sprint-completed-bg);
+		--sprint-completed-border: var(--dark-sprint-completed-border);
+		--status-done-bg: var(--dark-status-done-bg);
+		--danger-text: var(--dark-danger-text);
+		--danger-bg: var(--dark-danger-bg);
+		--danger-border: var(--dark-danger-border);
+		--warning-bg: var(--dark-warning-bg);
+		--warning-border: var(--dark-warning-border);
+		--success-bg: var(--dark-success-bg);
+		--success-border: var(--dark-success-border);
+		--dropzone-bg: var(--dark-dropzone-bg);
+		--sprint-notice-bg: var(--dark-sprint-notice-bg);
+		--sprint-notice-border: var(--dark-sprint-notice-border);
+		--velocity-bar-bg: var(--dark-velocity-bar-bg);
+		--chart-seq-1: var(--dark-chart-seq-1);
+		--chart-seq-2: var(--dark-chart-seq-2);
+		--chart-seq-3: var(--dark-chart-seq-3);
+		--chart-seq-4: var(--dark-chart-seq-4);
+	}
 }
