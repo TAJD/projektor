@@ -8,7 +8,6 @@
 
 	--priority-urgent-solid: #dc2626;
 	--priority-high-solid: #d97706;
-	--priority-medium-solid: #2563eb;
 	--priority-low-solid: #6b7280;
 	--chart-secondary: #d97706;
 
@@ -26,8 +25,9 @@
 	--light-priority-urgent-bg: rgba(220, 38, 38, 0.15);
 	--light-priority-high-text: #d97706;
 	--light-priority-high-bg: rgba(217, 119, 6, 0.15);
-	--light-priority-medium-text: #4f46e5;
-	--light-priority-medium-bg: rgba(79, 70, 229, 0.12);
+	--light-priority-medium-text: var(--light-accent);
+	--light-priority-medium-bg: color-mix(in oklab, var(--light-accent) 12%, transparent);
+	--light-priority-medium-solid: var(--light-accent);
 	--light-priority-low-text: #6b7280;
 	--light-priority-low-bg: rgba(107, 114, 128, 0.12);
 	--light-code-color: #1e293b;
@@ -36,12 +36,12 @@
 	--light-epic-bg: rgba(124, 58, 237, 0.1);
 	--light-epic-border: rgba(124, 58, 237, 0.3);
 	--light-status-todo: #6b7280;
-	--light-status-in-progress: #4f46e5;
+	--light-status-in-progress: var(--light-accent);
 	--light-status-in-review: #7c3aed;
 	--light-status-done: #16a34a;
 	--light-status-cancelled: #dc2626;
-	--light-sprint-active-bg: rgba(37, 99, 235, 0.12);
-	--light-sprint-active-border: rgba(37, 99, 235, 0.3);
+	--light-sprint-active-bg: color-mix(in oklab, var(--light-accent) 12%, transparent);
+	--light-sprint-active-border: color-mix(in oklab, var(--light-accent) 30%, transparent);
 	--light-sprint-completed-bg: rgba(22, 163, 74, 0.12);
 	--light-sprint-completed-border: rgba(22, 163, 74, 0.3);
 	--light-status-done-bg: rgba(22, 163, 74, 0.12);
@@ -52,14 +52,14 @@
 	--light-warning-border: rgba(251, 191, 36, 0.5);
 	--light-success-bg: rgba(22, 163, 74, 0.06);
 	--light-success-border: rgba(22, 163, 74, 0.3);
-	--light-dropzone-bg: rgba(37, 99, 235, 0.04);
-	--light-sprint-notice-bg: rgba(37, 99, 235, 0.08);
-	--light-sprint-notice-border: rgba(37, 99, 235, 0.25);
-	--light-velocity-bar-bg: rgba(37, 99, 235, 0.15);
-	--light-chart-seq-1: #86b6ef;
-	--light-chart-seq-2: #5598e7;
-	--light-chart-seq-3: #2a78d6;
-	--light-chart-seq-4: #1c5cab;
+	--light-dropzone-bg: color-mix(in oklab, var(--light-accent) 4%, transparent);
+	--light-sprint-notice-bg: color-mix(in oklab, var(--light-accent) 8%, transparent);
+	--light-sprint-notice-border: color-mix(in oklab, var(--light-accent) 25%, transparent);
+	--light-velocity-bar-bg: color-mix(in oklab, var(--light-accent) 15%, transparent);
+	--light-chart-seq-1: color-mix(in oklch, white 55%, var(--light-accent) 45%);
+	--light-chart-seq-2: color-mix(in oklch, white 30%, var(--light-accent) 70%);
+	--light-chart-seq-3: var(--light-accent);
+	--light-chart-seq-4: color-mix(in oklch, black 20%, var(--light-accent) 80%);
 
 	--dark-bg: #0d1117;
 	--dark-surface: #1a1f2e;
@@ -75,8 +75,9 @@
 	--dark-priority-urgent-bg: rgba(248, 113, 113, 0.18);
 	--dark-priority-high-text: #fcd34d;
 	--dark-priority-high-bg: rgba(251, 191, 36, 0.18);
-	--dark-priority-medium-text: #a5b4fc;
-	--dark-priority-medium-bg: rgba(129, 140, 248, 0.18);
+	--dark-priority-medium-text: color-mix(in oklch, white 55%, var(--dark-accent) 45%);
+	--dark-priority-medium-bg: color-mix(in oklab, var(--dark-accent) 18%, transparent);
+	--dark-priority-medium-solid: var(--dark-accent);
 	--dark-priority-low-text: #cbd5e1;
 	--dark-priority-low-bg: rgba(148, 163, 184, 0.18);
 	--dark-code-color: #e2e8f0;
@@ -85,12 +86,12 @@
 	--dark-epic-bg: rgba(196, 181, 253, 0.15);
 	--dark-epic-border: rgba(196, 181, 253, 0.3);
 	--dark-status-todo: #94a3b8;
-	--dark-status-in-progress: #818cf8;
+	--dark-status-in-progress: color-mix(in oklch, white 25%, var(--dark-accent) 75%);
 	--dark-status-in-review: #c4b5fd;
 	--dark-status-done: #4ade80;
 	--dark-status-cancelled: #f87171;
-	--dark-sprint-active-bg: rgba(129, 140, 248, 0.18);
-	--dark-sprint-active-border: rgba(129, 140, 248, 0.4);
+	--dark-sprint-active-bg: color-mix(in oklab, var(--dark-accent) 18%, transparent);
+	--dark-sprint-active-border: color-mix(in oklab, var(--dark-accent) 40%, transparent);
 	--dark-sprint-completed-bg: rgba(74, 222, 128, 0.18);
 	--dark-sprint-completed-border: rgba(74, 222, 128, 0.4);
 	--dark-status-done-bg: rgba(74, 222, 128, 0.18);
@@ -101,14 +102,14 @@
 	--dark-warning-border: rgba(252, 211, 77, 0.55);
 	--dark-success-bg: rgba(74, 222, 128, 0.12);
 	--dark-success-border: rgba(74, 222, 128, 0.4);
-	--dark-dropzone-bg: rgba(129, 140, 248, 0.08);
-	--dark-sprint-notice-bg: rgba(129, 140, 248, 0.12);
-	--dark-sprint-notice-border: rgba(129, 140, 248, 0.35);
-	--dark-velocity-bar-bg: rgba(129, 140, 248, 0.2);
-	--dark-chart-seq-1: #bcd7f7;
-	--dark-chart-seq-2: #8ab8f0;
-	--dark-chart-seq-3: #5a94e4;
-	--dark-chart-seq-4: #3a72c8;
+	--dark-dropzone-bg: color-mix(in oklab, var(--dark-accent) 8%, transparent);
+	--dark-sprint-notice-bg: color-mix(in oklab, var(--dark-accent) 12%, transparent);
+	--dark-sprint-notice-border: color-mix(in oklab, var(--dark-accent) 35%, transparent);
+	--dark-velocity-bar-bg: color-mix(in oklab, var(--dark-accent) 20%, transparent);
+	--dark-chart-seq-1: color-mix(in oklch, white 60%, var(--dark-accent) 40%);
+	--dark-chart-seq-2: color-mix(in oklch, white 35%, var(--dark-accent) 65%);
+	--dark-chart-seq-3: var(--dark-accent);
+	--dark-chart-seq-4: color-mix(in oklch, black 15%, var(--dark-accent) 85%);
 
 	--priority-none-text: var(--priority-low-text);
 	--priority-none-bg: var(--priority-low-bg);
@@ -132,6 +133,7 @@
 	--priority-high-bg: var(--light-priority-high-bg);
 	--priority-medium-text: var(--light-priority-medium-text);
 	--priority-medium-bg: var(--light-priority-medium-bg);
+	--priority-medium-solid: var(--light-priority-medium-solid);
 	--priority-low-text: var(--light-priority-low-text);
 	--priority-low-bg: var(--light-priority-low-bg);
 	--code-color: var(--light-code-color);
@@ -183,6 +185,7 @@
 	--priority-high-bg: var(--dark-priority-high-bg);
 	--priority-medium-text: var(--dark-priority-medium-text);
 	--priority-medium-bg: var(--dark-priority-medium-bg);
+	--priority-medium-solid: var(--dark-priority-medium-solid);
 	--priority-low-text: var(--dark-priority-low-text);
 	--priority-low-bg: var(--dark-priority-low-bg);
 	--code-color: var(--dark-code-color);
@@ -235,6 +238,7 @@
 		--priority-high-bg: var(--dark-priority-high-bg);
 		--priority-medium-text: var(--dark-priority-medium-text);
 		--priority-medium-bg: var(--dark-priority-medium-bg);
+		--priority-medium-solid: var(--dark-priority-medium-solid);
 		--priority-low-text: var(--dark-priority-low-text);
 		--priority-low-bg: var(--dark-priority-low-bg);
 		--code-color: var(--dark-code-color);
