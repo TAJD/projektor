@@ -56,6 +56,7 @@ const REST_ONLY: Record<string, string> = {
 	// Public share links — issued by a human, consumed anonymously.
 	"share.ts:createShareToken": "public share links are issued by a human",
 	"share.ts:getSharedIssue": "anonymous read path, no workspace auth",
+	"share.ts:getSharedLogo": "streams bytes for the browser, no JSON operation",
 	"share.ts:revokeShareToken": "revoking a public share link is a human action",
 	// Upload plumbing — multipart/quota mechanics, not operations.
 	"files.ts:storageQuotaBytes": "quota arithmetic used by the upload route",

@@ -244,6 +244,53 @@ describe("Share tokens", () => {
 		expect(data.brand.accent).toBeNull();
 	});
 
+	it("review finding 1: GET /api/share/:token/logo serves the workspace logo with no auth", async () => {
+		const owner = await seedIssueFixture({ role: "owner" });
+		const pngBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+		const form = new FormData();
+		form.append("file", new File([pngBytes], "logo.png", { type: "image/png" }));
+		const ownerAuth = authHeaders(owner.token, owner.slug);
+		const uploadRes = await SELF.fetch(`http://localhost/api/workspaces/${owner.slug}/brand/logo`, {
+			method: "POST",
+			headers: { Authorization: ownerAuth.Authorization, "X-Workspace-Slug": owner.slug },
+			body: form,
+		});
+		expect(uploadRes.status).toBe(201);
+
+		const createRes = await SELF.fetch(`http://localhost/api/issues/${owner.issueId}/share`, {
+			method: "POST",
+			headers: authHeaders(owner.token, owner.slug),
+		});
+		const { token: shareToken } = (await createRes.json()) as { token: string; url: string };
+
+		const shareRes = await SELF.fetch(`http://localhost/api/share/${shareToken}`);
+		const shareData = (await shareRes.json()) as { brand: { logoUrl: string | null } };
+		expect(shareData.brand.logoUrl).toBe(`/api/share/${shareToken}/logo`);
+
+		const logoRes = await SELF.fetch(`http://localhost${shareData.brand.logoUrl}`);
+		expect(logoRes.status).toBe(200);
+		expect(logoRes.headers.get("Content-Type")).toBe("image/png");
+		expect(new Uint8Array(await logoRes.arrayBuffer())).toEqual(pngBytes);
+	});
+
+	it("review finding 1: GET /api/share/:token/logo 404s when the workspace has no logo set", async () => {
+		const createRes = await SELF.fetch(`http://localhost/api/issues/${issueId}/share`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		const { token: shareToken } = (await createRes.json()) as { token: string; url: string };
+
+		const res = await SELF.fetch(`http://localhost/api/share/${shareToken}/logo`);
+		expect(res.status).toBe(404);
+	});
+
+	it("review finding 1: GET /api/share/<unknown-token>/logo 404s", async () => {
+		const res = await SELF.fetch(
+			"http://localhost/api/share/ffffffffffffffffffffffffffffffff/logo"
+		);
+		expect(res.status).toBe(404);
+	});
+
 	it("PROJ-242: viewer role cannot revoke a share link", async () => {
 		const viewerFixture = await seedIssueFixture({ role: "viewer" });
 		const { env } = await import("cloudflare:test");

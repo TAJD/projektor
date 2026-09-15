@@ -313,7 +313,13 @@ export async function deleteWorkspace(
 		throw new ConflictError("Delete all projects before deleting the workspace");
 	}
 
+	const brand = await readBrand(ctx);
 	await orm.delete(schema.workspaces).where(eq(schema.workspaces.id, ctx.workspaceId));
+	if (brand.logoR2Key) {
+		try {
+			await ctx.r2.delete(brand.logoR2Key);
+		} catch {}
+	}
 	return { ok: true };
 }
 
@@ -404,6 +410,19 @@ export async function getWorkspaceBrandForShare(
 	return toBrandDto(row?.brand ?? {}, workspaceSlug);
 }
 
+export async function getWorkspaceBrandLogoR2Key(
+	db: D1Database,
+	workspaceId: string
+): Promise<string | null> {
+	const orm = drizzle(db, { schema });
+	const row = await orm
+		.select({ brand: schema.workspaces.brand })
+		.from(schema.workspaces)
+		.where(eq(schema.workspaces.id, workspaceId))
+		.get();
+	return row?.brand?.logoR2Key ?? null;
+}
+
 const BRAND_FIELDS = ["displayName", "accent", "onAccent", "fontFamily", "fontUrl"] as const;
 
 export async function updateWorkspaceBrand(
@@ -452,7 +471,11 @@ export async function uploadWorkspaceLogo(
 		await ctx.r2.delete(r2Key);
 		throw e;
 	}
-	if (current.logoR2Key) await ctx.r2.delete(current.logoR2Key);
+	if (current.logoR2Key) {
+		try {
+			await ctx.r2.delete(current.logoR2Key);
+		} catch {}
+	}
 
 	return { ok: true };
 }
@@ -469,8 +492,12 @@ export async function deleteWorkspaceLogo(ctx: ServiceCtx): Promise<{ ok: true }
 	return { ok: true };
 }
 
+function ownsLogoKey(workspaceId: string, r2Key: string): boolean {
+	return r2Key.startsWith(`${workspaceId}/brand-logo/`);
+}
+
 export async function getWorkspaceLogoObject(ctx: ServiceCtx): Promise<R2ObjectBody | null> {
 	const current = await readBrand(ctx);
-	if (!current.logoR2Key) return null;
+	if (!current.logoR2Key || !ownsLogoKey(ctx.workspaceId, current.logoR2Key)) return null;
 	return ctx.r2.get(current.logoR2Key);
 }

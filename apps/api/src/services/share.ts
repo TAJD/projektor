@@ -1,6 +1,10 @@
 import { ForbiddenError, NotFoundError } from "./errors";
 import type { ServiceCtx } from "./types";
-import { getWorkspaceBrandForShare, type WorkspaceBrandDto } from "./workspaces";
+import {
+	getWorkspaceBrandForShare,
+	getWorkspaceBrandLogoR2Key,
+	type WorkspaceBrandDto,
+} from "./workspaces";
 
 async function hashToken(token: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
@@ -107,10 +111,31 @@ export async function getSharedIssue(
 		.bind(tokenMeta.issue_id)
 		.all<{ key: string; label: string; type: string; value: string }>();
 
-	const brand = await getWorkspaceBrandForShare(db, row.workspace_id, row.workspace_slug);
+	const brandDto = await getWorkspaceBrandForShare(db, row.workspace_id, row.workspace_slug);
+	const brand = brandDto.logoUrl ? { ...brandDto, logoUrl: `/api/share/${token}/logo` } : brandDto;
 	const { workspace_id, workspace_slug, ...rest } = row;
 
 	return { ...rest, customFields: cfRows.results ?? [], brand };
+}
+
+export async function getSharedLogo(
+	db: D1Database,
+	r2: R2Bucket,
+	token: string
+): Promise<R2ObjectBody | null> {
+	const now = Math.floor(Date.now() / 1000);
+	const id = await hashToken(token);
+
+	const row = await db
+		.prepare("SELECT workspace_id FROM share_tokens WHERE id = ? AND expires_at > ?")
+		.bind(id, now)
+		.first<{ workspace_id: string }>();
+	if (!row) return null;
+
+	const r2Key = await getWorkspaceBrandLogoR2Key(db, row.workspace_id);
+	if (!r2Key) return null;
+
+	return r2.get(r2Key);
 }
 
 export async function revokeShareToken(ctx: ServiceCtx, issueId: string): Promise<void> {

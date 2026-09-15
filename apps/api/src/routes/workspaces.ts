@@ -158,8 +158,9 @@ router.delete("/:slug", async (c) => {
 
 router.get("/:slug/brand", async (c) => {
 	const ctx = ctxFromHono(c);
+	const workspace = c.get("workspace") as { slug: string };
 	try {
-		return c.json(await getWorkspaceBrand(ctx, c.req.param("slug")));
+		return c.json(await getWorkspaceBrand(ctx, workspace.slug));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -167,8 +168,9 @@ router.get("/:slug/brand", async (c) => {
 
 router.patch("/:slug/brand", async (c) => {
 	const ctx = ctxFromHono(c);
+	const workspace = c.get("workspace") as { slug: string };
 	try {
-		return c.json(await updateWorkspaceBrand(ctx, c.req.param("slug"), await c.req.json()));
+		return c.json(await updateWorkspaceBrand(ctx, workspace.slug, await c.req.json()));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

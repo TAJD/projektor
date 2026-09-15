@@ -687,4 +687,111 @@ describe("Workspace brand (PROJ-761)", () => {
 		});
 		expect(res.status).toBe(403);
 	});
+
+	it("review finding 2: rejects a javascript: fontUrl with 400", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ fontUrl: "javascript:alert(1)" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("review finding 2: rejects a data: fontUrl with 400", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ fontUrl: "data:text/html,<script>alert(1)</script>" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("review finding 2: accepts an https: fontUrl", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ fontUrl: "https://fonts.example.com/font.css" }),
+		});
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { fontUrl: string };
+		expect(body.fontUrl).toBe("https://fonts.example.com/font.css");
+	});
+
+	it("review finding 3: GET logo 404s when the stored R2 key belongs to another workspace", async () => {
+		const { env } = await import("cloudflare:test");
+		const foreignKey = `${crypto.randomUUID()}/brand-logo/${crypto.randomUUID()}`;
+		await env.R2.put(foreignKey, new Uint8Array([1, 2, 3]));
+		await env.DB.prepare("UPDATE workspaces SET brand = ? WHERE slug = ?")
+			.bind(JSON.stringify({ logoR2Key: foreignKey }), slug)
+			.run();
+
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			headers: memberHeaders,
+		});
+		expect(res.status).toBe(404);
+	});
+
+	it("review finding 4: PATCH /:slug/brand operates on the header-resolved workspace, not the URL slug, and doesn't touch the URL's workspace", async () => {
+		const other = await seedFixture({ role: "owner" });
+
+		const patchRes = await SELF.fetch(
+			`http://localhost/api/workspaces/${other.workspace.slug}/brand`,
+			{
+				method: "PATCH",
+				headers: ownerHeaders,
+				body: JSON.stringify({ displayName: "Header Workspace" }),
+			}
+		);
+		expect(patchRes.status).toBe(200);
+		const patched = (await patchRes.json()) as { displayName: string | null };
+		expect(patched.displayName).toBe("Header Workspace");
+
+		const headerWsBrand = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			headers: memberHeaders,
+		});
+		expect(((await headerWsBrand.json()) as { displayName: string | null }).displayName).toBe(
+			"Header Workspace"
+		);
+
+		const otherOwnerHeaders = authHeaders(other.token, other.workspace.slug);
+		const otherWsBrand = await SELF.fetch(
+			`http://localhost/api/workspaces/${other.workspace.slug}/brand`,
+			{ headers: otherOwnerHeaders }
+		);
+		expect(((await otherWsBrand.json()) as { displayName: string | null }).displayName).toBeNull();
+	});
+});
+
+describe("Workspace brand R2 cleanup (review finding 5)", () => {
+	it("deleting a workspace removes its uploaded logo from R2", async () => {
+		const owner = await seedFixture({ role: "owner" });
+		const ownerHeaders = authHeaders(owner.token, owner.workspace.slug);
+
+		const form = new FormData();
+		form.append("file", new File([new Uint8Array([1, 2, 3])], "logo.png", { type: "image/png" }));
+		await SELF.fetch(`http://localhost/api/workspaces/${owner.workspace.slug}/brand/logo`, {
+			method: "POST",
+			headers: {
+				Authorization: ownerHeaders.Authorization,
+				"X-Workspace-Slug": owner.workspace.slug,
+			},
+			body: form,
+		});
+
+		const { env } = await import("cloudflare:test");
+		const row = await env.DB.prepare("SELECT brand FROM workspaces WHERE id = ?")
+			.bind(owner.workspace.id)
+			.first<{ brand: string }>();
+		const r2Key = (JSON.parse(row?.brand ?? "{}") as { logoR2Key?: string }).logoR2Key;
+		expect(r2Key).toBeDefined();
+		expect(await env.R2.get(r2Key as string)).not.toBeNull();
+
+		const delRes = await SELF.fetch(`http://localhost/api/workspaces/${owner.workspace.slug}`, {
+			method: "DELETE",
+			headers: ownerHeaders,
+		});
+		expect(delRes.status).toBe(200);
+
+		expect(await env.R2.get(r2Key as string)).toBeNull();
+	});
 });

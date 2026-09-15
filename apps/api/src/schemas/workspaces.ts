@@ -42,6 +42,11 @@ export const UpdateWorkspaceBrandSchema = z
 		accent: HexColor.nullable().optional(),
 		onAccent: HexColor.nullable().optional(),
 		fontFamily: z.string().min(1).max(100).nullable().optional(),
-		fontUrl: z.string().url().nullable().optional(),
+		fontUrl: z
+			.string()
+			.url()
+			.refine((v) => v.startsWith("https://"), "fontUrl must be an https:// URL")
+			.nullable()
+			.optional(),
 	})
 	.strict();

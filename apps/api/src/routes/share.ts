@@ -1,7 +1,12 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
-import { createShareToken, getSharedIssue, revokeShareToken } from "../services/share";
+import {
+	createShareToken,
+	getSharedIssue,
+	getSharedLogo,
+	revokeShareToken,
+} from "../services/share";
 import { ctxFromHono } from "../services/types";
 
 // Authenticated router — POST/DELETE /api/issues/:id/share
@@ -42,6 +47,20 @@ publicRouter.get("/:token", async (c) => {
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
+});
+
+publicRouter.get("/:token/logo", async (c) => {
+	const token = c.req.param("token");
+	const obj = await getSharedLogo(c.env.DB, c.env.R2, token);
+	if (!obj) return c.json({ error: "No logo set" }, 404);
+	const body = await obj.arrayBuffer();
+	return new Response(body, {
+		headers: {
+			"Content-Type": obj.httpMetadata?.contentType ?? "application/octet-stream",
+			"Cache-Control": "public, max-age=300",
+			"X-Content-Type-Options": "nosniff",
+		},
+	});
 });
 
 export { publicRouter as sharePublicRouter };
