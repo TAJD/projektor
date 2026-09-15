@@ -25,4 +25,8 @@ describe("deriveBrandMark", () => {
 		expect(deriveBrandMark("   ")).toBe("P");
 		expect(deriveBrandMark("")).toBe("P");
 	});
+
+	it("keeps an astral-plane leading character intact instead of splitting its surrogate pair", () => {
+		expect(deriveBrandMark("🚀 Acme")).toBe("🚀");
+	});
 });

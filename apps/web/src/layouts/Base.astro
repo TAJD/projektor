@@ -227,13 +227,9 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
           dark: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
         };
 
-        function getStored() {
-          try {
-            var t = localStorage.getItem('theme');
-            return t === 'dark' || t === 'light' ? t : 'system';
-          } catch (e) {
-            return 'system';
-          }
+        function getCurrentState() {
+          var t = document.documentElement.getAttribute('data-theme');
+          return t === 'dark' || t === 'light' ? t : 'system';
         }
 
         function updateThemeIcon(themeBtn, state) {
@@ -247,9 +243,9 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
         function bindThemeToggle() {
           var themeBtn = document.querySelector('button.theme-toggle');
           if (!themeBtn) return;
-          updateThemeIcon(themeBtn, getStored());
+          updateThemeIcon(themeBtn, getCurrentState());
           themeBtn.addEventListener('click', function () {
-            var next = ORDER[(ORDER.indexOf(getStored()) + 1) % ORDER.length];
+            var next = ORDER[(ORDER.indexOf(getCurrentState()) + 1) % ORDER.length];
             try {
               if (next === 'system') localStorage.removeItem('theme');
               else localStorage.setItem('theme', next);
@@ -264,7 +260,8 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
       })();
     </script>
     <script>
-      import { applyBrand } from '../utils/brand';
+      import { applyBrand, applyCachedBrand } from '../utils/brand';
+      document.addEventListener('astro:after-swap', applyCachedBrand);
       document.addEventListener('astro:page-load', () => applyBrand());
     </script>
     <!-- PROJ-428: hide the top bar on scroll-down, reveal on scroll-up, so it

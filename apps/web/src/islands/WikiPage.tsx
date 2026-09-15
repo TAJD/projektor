@@ -5,6 +5,7 @@ import { slugify } from "../lib/slugify";
 import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch } from "../utils/api-client";
+import { getBrandName } from "../utils/brand";
 import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
 import { usePublicViewer } from "../utils/public-viewer";
 import AccessPending from "./AccessPending";
@@ -2274,7 +2275,7 @@ function excerptOf(content: string, maxLength = 200): string {
 function useWikiPageMeta(page: WikiPageData | null) {
 	useEffect(() => {
 		if (!page) return;
-		document.title = `${page.title} — Projektor Wiki`;
+		document.title = `${page.title} — ${getBrandName()} Wiki`;
 		setMetaTag("property", "og:title", page.title);
 		setMetaTag("property", "og:description", excerptOf(page.content));
 		setMetaTag(

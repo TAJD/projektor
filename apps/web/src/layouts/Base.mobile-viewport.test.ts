@@ -81,7 +81,41 @@ describe("Base layout — icon consistency and tri-state theme control (PROJ-758
 		expect(scriptStart).toBeGreaterThan(-1);
 		const scriptEnd = source.indexOf("</script>", scriptStart);
 		const script = source.slice(scriptStart, scriptEnd);
-		expect(script).toMatch(/ORDER\[\(ORDER\.indexOf\(getStored\(\)\) \+ 1\) % ORDER\.length\]/);
+		expect(script).toMatch(/ORDER\[\(ORDER\.indexOf\(getCurrentState\(\)\) \+ 1\) % ORDER\.length\]/);
+	});
+
+	it("derives the current theme state from the DOM, not localStorage, so a blocked/throwing localStorage can't stick the toggle on one state", () => {
+		const scriptStart = source.indexOf("var ORDER = ['system', 'light', 'dark'];");
+		const scriptEnd = source.indexOf("})();", scriptStart);
+		const script = source.slice(scriptStart, scriptEnd);
+		expect(script).toMatch(/function getCurrentState\(\)/);
+		expect(script).toMatch(/var t = document\.documentElement\.getAttribute\('data-theme'\);/);
+
+		document.body.innerHTML = '<button class="theme-toggle"><svg></svg></button>';
+		const originalLocalStorage = window.localStorage;
+		Object.defineProperty(window, "localStorage", {
+			configurable: true,
+			get() {
+				throw new Error("blocked");
+			},
+		});
+		try {
+			new Function(script)();
+			document.dispatchEvent(new Event("astro:page-load"));
+			const themeBtn = document.querySelector("button.theme-toggle") as HTMLButtonElement;
+			const seen: (string | null)[] = [document.documentElement.getAttribute("data-theme")];
+			for (let i = 0; i < 3; i++) {
+				themeBtn.click();
+				seen.push(document.documentElement.getAttribute("data-theme"));
+			}
+			expect(seen).toEqual([null, "light", "dark", null]);
+		} finally {
+			Object.defineProperty(window, "localStorage", {
+				configurable: true,
+				value: originalLocalStorage,
+			});
+			document.documentElement.removeAttribute("data-theme");
+		}
 	});
 
 	it("clears the stored preference so the bootstrap's missing-value fallback still applies", () => {
