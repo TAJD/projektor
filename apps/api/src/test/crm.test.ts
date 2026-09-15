@@ -5,7 +5,6 @@ import {
 	archiveProduct,
 	createContact,
 	createDeal,
-	createDealLine,
 	createInteraction,
 	createOrganisation,
 	createPipeline,
@@ -20,7 +19,6 @@ import {
 	deleteTarget,
 	getContact,
 	getDeal,
-	getDealLine,
 	getInteraction,
 	getOrganisation,
 	getPipeline,
@@ -28,6 +26,7 @@ import {
 	getTargetProgress,
 	linkInteractionContact,
 	listContactsForInteraction,
+	listDealLinesByDeal,
 	listOrganisations,
 	listPipelines,
 	listStages,
@@ -39,7 +38,6 @@ import {
 	setWorkspaceBaseCurrency,
 	updateContact,
 	updateDeal,
-	updateDealLine,
 	updateInteraction,
 	updateOrganisation,
 	updatePipeline,
@@ -252,17 +250,32 @@ describe("CRM deals, deal lines, and interactions", () => {
 		);
 	});
 
-	it("creates, reads, and updates a deal line", async () => {
+	it("rejects setDealLines referencing a pricing plan from another workspace, leaving no line created", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
 		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
-		const { id } = await createDealLine(ctx, { dealId, qty: 2, currency: "USD", amount: 5000 });
 
-		const line = await getDealLine(ctx, id);
-		expect(line.qty).toBe(2);
-		expect(line.amount).toBe(5000);
+		const ctxB = await ctxFor();
+		const { id: productIdB } = await createProduct(ctxB, { name: "Other WS Product" });
+		const { id: planIdB } = await createPricingPlan(ctxB, {
+			productId: productIdB,
+			name: "Other WS Plan",
+			interval: "one_off",
+			currency: "USD",
+			amount: 500,
+		});
 
-		await updateDealLine(ctx, id, { qty: 3 });
-		const updated = await getDealLine(ctx, id);
-		expect(updated.qty).toBe(3);
+		await expect(
+			setDealLines(ctx, dealId, [{ productId: productIdB, planId: planIdB, qty: 1 }])
+		).rejects.toBeInstanceOf(NotFoundError);
+
+		const { items } = await listDealLinesByDeal(ctx, dealId);
+		expect(items).toHaveLength(0);
+	});
+
+	it("rejects updateDeal attempting to set valueBase or fxRate directly, which are service-computed only", async () => {
+		const { id } = await createDeal(ctx, { orgId, currency: "USD" });
+		await expect(updateDeal(ctx, id, { valueBase: 100 })).rejects.toBeInstanceOf(ValidationError);
+		await expect(updateDeal(ctx, id, { fxRate: 1.5 })).rejects.toBeInstanceOf(ValidationError);
 	});
 
 	it("creates, reads, and updates an interaction", async () => {
@@ -650,6 +663,83 @@ describe("CRM products, pricing plans, and multi-currency deal valuation", () =>
 
 		await expect(archiveProduct(ctx, productId)).resolves.toEqual({ ok: true });
 	});
+
+	it("leaves a deal's existing lines untouched when setDealLines fails due to a missing fx rate", async () => {
+		await setWorkspaceBaseCurrency(ctx, "GBP");
+
+		const { id: productId } = await createProduct(ctx, { name: "Widgets" });
+		const { id: planId } = await createPricingPlan(ctx, {
+			productId,
+			name: "Widget Plan",
+			interval: "one_off",
+			currency: "EUR",
+			amount: 1000,
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "EUR" });
+
+		const existingLineId = crypto.randomUUID();
+		await env.DB.prepare(
+			"INSERT INTO crm_deal_lines (id, workspace_id, deal_id, product_id, plan_id, qty, currency, amount, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+		)
+			.bind(
+				existingLineId,
+				ctx.workspaceId,
+				dealId,
+				productId,
+				planId,
+				1,
+				"EUR",
+				1000,
+				Math.floor(Date.now() / 1000)
+			)
+			.run();
+
+		await expect(setDealLines(ctx, dealId, [{ productId, planId, qty: 2 }])).rejects.toBeInstanceOf(
+			ValidationError
+		);
+
+		const { items } = await listDealLinesByDeal(ctx, dealId);
+		expect(items).toHaveLength(1);
+		expect(items[0].id).toBe(existingLineId);
+		expect(items[0].qty).toBe(1);
+	});
+
+	it("blocks changing the workspace base currency when deals already have value_base set", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
+		const { id: productId } = await createProduct(ctx, { name: "Blocker Product" });
+		const { id: planId } = await createPricingPlan(ctx, {
+			productId,
+			name: "Blocker Plan",
+			interval: "one_off",
+			currency: "USD",
+			amount: 100,
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealLines(ctx, dealId, [{ productId, planId, qty: 1 }]);
+
+		await expect(setWorkspaceBaseCurrency(ctx, "GBP")).rejects.toBeInstanceOf(ConflictError);
+	});
+
+	it("allows changing the workspace base currency freely when no deals have value_base set yet", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
+		await expect(setWorkspaceBaseCurrency(ctx, "GBP")).resolves.toEqual({ ok: true });
+	});
+
+	it("rejects setDealLines with more than 50 lines", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
+		const { id: productId } = await createProduct(ctx, { name: "Bulk Product" });
+		const { id: planId } = await createPricingPlan(ctx, {
+			productId,
+			name: "Bulk Plan",
+			interval: "one_off",
+			currency: "USD",
+			amount: 10,
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+
+		const lines = Array.from({ length: 51 }, () => ({ productId, planId, qty: 1 }));
+		await expect(setDealLines(ctx, dealId, lines)).rejects.toBeInstanceOf(ValidationError);
+	});
 });
 
 describe("CRM targets and progress computation", () => {
@@ -749,16 +839,17 @@ describe("CRM targets and progress computation", () => {
 	});
 
 	it("computes actual won_value in base currency within the target period", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
 		const { id: dealA } = await createDeal(ctx, { orgId, currency: "USD", wonAt: IN_WINDOW });
-		await updateDeal(ctx, dealA, { valueBase: 10000 });
+		await updateDeal(ctx, dealA, { valueOverride: 10000 });
 		const { id: dealB } = await createDeal(ctx, { orgId, currency: "USD", wonAt: IN_WINDOW });
-		await updateDeal(ctx, dealB, { valueBase: 5000 });
+		await updateDeal(ctx, dealB, { valueOverride: 5000 });
 		const { id: dealOutside } = await createDeal(ctx, {
 			orgId,
 			currency: "USD",
 			wonAt: BEFORE_WINDOW,
 		});
-		await updateDeal(ctx, dealOutside, { valueBase: 999999 });
+		await updateDeal(ctx, dealOutside, { valueOverride: 999999 });
 
 		const { id: targetId } = await createTarget(ctx, {
 			metric: "won_value",
@@ -878,5 +969,152 @@ describe("CRM targets and progress computation", () => {
 				value: 1,
 			})
 		).rejects.toBeInstanceOf(ForbiddenError);
+	});
+
+	it("rejects a target with an absurd periodStart, not letting NaN propagate downstream", async () => {
+		await expect(
+			createTarget(ctx, {
+				metric: "deals_created",
+				period: "month",
+				periodStart: 99999999999999,
+				value: 1,
+			})
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("rejects a target with a negative value", async () => {
+		await expect(
+			createTarget(ctx, {
+				metric: "deals_created",
+				period: "month",
+				periodStart: PERIOD_START,
+				value: -1,
+			})
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("clamps a month-end target period instead of overflowing into a later month", async () => {
+		const periodStart = Math.floor(Date.UTC(2023, 0, 31) / 1000);
+		const correctEnd = Math.floor(Date.UTC(2023, 1, 28) / 1000);
+		const overflowEnd = Math.floor(Date.UTC(2023, 2, 3) / 1000);
+
+		const { id: included } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(included, correctEnd - 1000);
+		const { id: atCorrectEnd } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(atCorrectEnd, correctEnd);
+		const { id: withinOldOverflowWindow } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(withinOldOverflowWindow, overflowEnd - 1000);
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "deals_created",
+			period: "month",
+			periodStart,
+			value: 1,
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(1);
+	});
+
+	it("clamps a quarter-end target period instead of overflowing into a later month", async () => {
+		const periodStart = Math.floor(Date.UTC(2023, 0, 31) / 1000);
+		const correctEnd = Math.floor(Date.UTC(2023, 3, 30) / 1000);
+		const overflowEnd = Math.floor(Date.UTC(2023, 4, 1) / 1000);
+
+		const { id: included } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(included, correctEnd - 1000);
+		const { id: withinOldOverflowWindow } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(withinOldOverflowWindow, overflowEnd - 1000);
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "deals_created",
+			period: "quarter",
+			periodStart,
+			value: 1,
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(1);
+	});
+
+	it("clamps a year-end target period starting on a leap day instead of overflowing into a later month", async () => {
+		const periodStart = Math.floor(Date.UTC(2024, 1, 29) / 1000);
+		const correctEnd = Math.floor(Date.UTC(2025, 1, 28) / 1000);
+		const overflowEnd = Math.floor(Date.UTC(2025, 2, 1) / 1000);
+
+		const { id: included } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(included, correctEnd - 1000);
+		const { id: withinOldOverflowWindow } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(withinOldOverflowWindow, overflowEnd - 1000);
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "deals_created",
+			period: "year",
+			periodStart,
+			value: 1,
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(1);
+	});
+
+	it("counts a won deal that never went through setDealLines or a valueOverride update as 0 toward won_value (documented behaviour)", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
+		const { id: dealNoValuation } = await createDeal(ctx, {
+			orgId,
+			currency: "USD",
+			wonAt: IN_WINDOW,
+		});
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "won_value",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 1,
+			currency: "USD",
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(0);
+		expect((await getDeal(ctx, dealNoValuation)).valueBase).toBeNull();
+	});
+
+	it("clears wonAt and excludes the deal from deals_won/won_value when it regresses out of a won stage", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
+		const { id: wonStageId } = await createStage(ctx, {
+			pipelineId,
+			name: "Won",
+			position: 2,
+			kind: "won",
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD", pipelineId, stageId });
+
+		await moveDealStage(ctx, dealId, wonStageId, {});
+		await env.DB.prepare("UPDATE crm_deals SET won_at = ? WHERE id = ?")
+			.bind(IN_WINDOW, dealId)
+			.run();
+		await updateDeal(ctx, dealId, { valueOverride: 5000 });
+
+		const { id: targetWon } = await createTarget(ctx, {
+			metric: "deals_won",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 1,
+		});
+		const { id: targetValue } = await createTarget(ctx, {
+			metric: "won_value",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 1,
+			currency: "USD",
+		});
+		expect((await getTargetProgress(ctx, targetWon)).actual).toBe(1);
+		expect((await getTargetProgress(ctx, targetValue)).actual).toBe(5000);
+
+		await moveDealStage(ctx, dealId, stageId, { reason: "Deal fell through after signing" });
+
+		expect((await getDeal(ctx, dealId)).wonAt).toBeNull();
+		expect((await getTargetProgress(ctx, targetWon)).actual).toBe(0);
+		expect((await getTargetProgress(ctx, targetValue)).actual).toBe(0);
 	});
 });

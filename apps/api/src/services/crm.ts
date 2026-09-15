@@ -1,9 +1,8 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gte, isNotNull, lt } from "drizzle-orm";
 import type { z } from "zod";
 import {
 	CreateContactSchema,
-	CreateDealLineSchema,
 	CreateDealSchema,
 	CreateInteractionSchema,
 	CreateOrganisationSchema,
@@ -18,7 +17,6 @@ import {
 	SetDealLinesSchema,
 	SetFxRateSchema,
 	UpdateContactSchema,
-	UpdateDealLineSchema,
 	UpdateDealSchema,
 	UpdateInteractionSchema,
 	UpdateOrganisationSchema,
@@ -366,7 +364,6 @@ export async function createDeal(ctx: ServiceCtx, raw: unknown) {
 		expectedClose,
 		currency,
 		valueOverride,
-		fxRate,
 		lostReason,
 		wonAt,
 	} = result.data;
@@ -389,7 +386,7 @@ export async function createDeal(ctx: ServiceCtx, raw: unknown) {
 		currency,
 		valueOverride: valueOverride ?? null,
 		valueBase: null,
-		fxRate: fxRate ?? null,
+		fxRate: null,
 		lostReason: lostReason ?? null,
 		wonAt: wonAt ?? null,
 		createdAt: ts,
@@ -430,8 +427,6 @@ function buildDealSetData(data: DealUpdateData, ts: number) {
 		expectedClose?: number | null;
 		currency?: string;
 		valueOverride?: number | null;
-		valueBase?: number | null;
-		fxRate?: number | null;
 	} = { updatedAt: ts };
 
 	if ("pipelineId" in data) setData.pipelineId = data.pipelineId ?? null;
@@ -439,8 +434,6 @@ function buildDealSetData(data: DealUpdateData, ts: number) {
 	if ("expectedClose" in data) setData.expectedClose = data.expectedClose ?? null;
 	if (data.currency !== undefined) setData.currency = data.currency;
 	if ("valueOverride" in data) setData.valueOverride = data.valueOverride ?? null;
-	if ("valueBase" in data) setData.valueBase = data.valueBase ?? null;
-	if ("fxRate" in data) setData.fxRate = data.fxRate ?? null;
 
 	return setData;
 }
@@ -455,6 +448,14 @@ export async function updateDeal(ctx: ServiceCtx, id: string, raw: unknown) {
 		throw new ValidationError({
 			formErrors: [
 				"stageId, wonAt, and lostReason cannot be set via updateDeal — use moveDealStage instead",
+			],
+			fieldErrors: {},
+		});
+	}
+	if (raw && typeof raw === "object" && ("valueBase" in raw || "fxRate" in raw)) {
+		throw new ValidationError({
+			formErrors: [
+				"valueBase and fxRate are computed by the service and cannot be set via updateDeal",
 			],
 			fieldErrors: {},
 		});
@@ -502,32 +503,6 @@ export async function updateDeal(ctx: ServiceCtx, id: string, raw: unknown) {
 	return { ok: true };
 }
 
-export async function createDealLine(ctx: ServiceCtx, raw: unknown) {
-	assertCanMutate(ctx);
-	const result = CreateDealLineSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { dealId, productId, planId, qty, currency, amount } = result.data;
-
-	await requireDeal(ctx, dealId);
-
-	const orm = drizzle(ctx.db, { schema });
-	const id = crypto.randomUUID();
-
-	await orm.insert(schema.crmDealLines).values({
-		id,
-		workspaceId: ctx.workspaceId,
-		dealId,
-		productId: productId ?? null,
-		planId: planId ?? null,
-		qty,
-		currency,
-		amount,
-		createdAt: now(),
-	});
-
-	return { id };
-}
-
 export async function getDealLine(ctx: ServiceCtx, id: string) {
 	const orm = drizzle(ctx.db, { schema });
 	const line = await orm
@@ -554,52 +529,6 @@ export async function listDealLinesByDeal(ctx: ServiceCtx, dealId: string) {
 		)
 		.orderBy(asc(schema.crmDealLines.createdAt));
 	return { items };
-}
-
-type DealLineUpdateData = z.infer<typeof UpdateDealLineSchema>;
-
-function buildDealLineSetData(data: DealLineUpdateData) {
-	const setData: {
-		productId?: string | null;
-		planId?: string | null;
-		qty?: number;
-		currency?: string;
-		amount?: number;
-	} = {};
-
-	if ("productId" in data) setData.productId = data.productId ?? null;
-	if ("planId" in data) setData.planId = data.planId ?? null;
-	if (data.qty !== undefined) setData.qty = data.qty;
-	if (data.currency !== undefined) setData.currency = data.currency;
-	if (data.amount !== undefined) setData.amount = data.amount;
-
-	return setData;
-}
-
-export async function updateDealLine(ctx: ServiceCtx, id: string, raw: unknown) {
-	assertCanMutate(ctx);
-	const result = UpdateDealLineSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-
-	const orm = drizzle(ctx.db, { schema });
-	const existing = await orm
-		.select({ id: schema.crmDealLines.id })
-		.from(schema.crmDealLines)
-		.where(
-			and(eq(schema.crmDealLines.id, id), eq(schema.crmDealLines.workspaceId, ctx.workspaceId))
-		)
-		.get();
-	if (!existing) throw new NotFoundError("Deal line not found");
-
-	const setData = buildDealLineSetData(result.data);
-	await orm
-		.update(schema.crmDealLines)
-		.set(setData)
-		.where(
-			and(eq(schema.crmDealLines.id, id), eq(schema.crmDealLines.workspaceId, ctx.workspaceId))
-		);
-
-	return { ok: true };
 }
 
 export async function createInteraction(ctx: ServiceCtx, raw: unknown) {
@@ -1165,9 +1094,10 @@ export async function moveDealStage(
 	}
 
 	let currentPosition = -1;
+	let currentKind: "open" | "won" | "lost" | null = null;
 	if (deal.stageId) {
 		const currentStage = await orm
-			.select({ position: schema.crmStages.position })
+			.select({ position: schema.crmStages.position, kind: schema.crmStages.kind })
 			.from(schema.crmStages)
 			.where(
 				and(
@@ -1176,7 +1106,10 @@ export async function moveDealStage(
 				)
 			)
 			.get();
-		if (currentStage) currentPosition = currentStage.position;
+		if (currentStage) {
+			currentPosition = currentStage.position;
+			currentKind = currentStage.kind;
+		}
 	}
 
 	if (newStage.position > currentPosition) {
@@ -1216,6 +1149,7 @@ export async function moveDealStage(
 		lostReason?: string | null;
 	} = { stageId: newStageId, updatedAt: ts };
 	if (newStage.kind === "won") setData.wonAt = ts;
+	else if (currentKind === "won") setData.wonAt = null;
 	if (newStage.kind === "lost") setData.lostReason = lostReason ?? null;
 
 	await orm
@@ -1503,7 +1437,7 @@ export async function deletePricingPlan(ctx: ServiceCtx, id: string) {
 	return { ok: true };
 }
 
-const BASE_CURRENCY_KEY = "base_currency";
+const BASE_CURRENCY_KEY = "crm.base_currency";
 
 async function getWorkspaceSetting(ctx: ServiceCtx, key: string): Promise<string | null> {
 	const orm = drizzle(ctx.db, { schema });
@@ -1536,6 +1470,23 @@ export async function setWorkspaceBaseCurrency(ctx: ServiceCtx, baseCurrency: st
 	assertCanMutate(ctx);
 	const result = SetBaseCurrencySchema.safeParse({ baseCurrency });
 	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	const current = await getWorkspaceSetting(ctx, BASE_CURRENCY_KEY);
+	if (current !== null && current !== result.data.baseCurrency) {
+		const orm = drizzle(ctx.db, { schema });
+		const dealWithValue = await orm
+			.select({ id: schema.crmDeals.id })
+			.from(schema.crmDeals)
+			.where(
+				and(eq(schema.crmDeals.workspaceId, ctx.workspaceId), isNotNull(schema.crmDeals.valueBase))
+			)
+			.get();
+		if (dealWithValue) {
+			throw new ConflictError(
+				"Changing base currency would leave existing deals' value_base stale and mixed-currency — reconcile or recompute them manually before changing it"
+			);
+		}
+	}
 
 	await setWorkspaceSetting(ctx, BASE_CURRENCY_KEY, result.data.baseCurrency);
 	return { ok: true };
@@ -1644,12 +1595,7 @@ async function computeDealLineValue(ctx: ServiceCtx, dealId: string): Promise<nu
 	return total;
 }
 
-async function recomputeDealValuation(
-	ctx: ServiceCtx,
-	dealId: string,
-	dealCurrency: string,
-	computedValue: number
-): Promise<void> {
+async function resolveDealFxRate(ctx: ServiceCtx, dealCurrency: string): Promise<number> {
 	const baseCurrency = await getWorkspaceSetting(ctx, BASE_CURRENCY_KEY);
 	if (!baseCurrency) {
 		throw new ValidationError({
@@ -1657,25 +1603,39 @@ async function recomputeDealValuation(
 			fieldErrors: {},
 		});
 	}
+	if (dealCurrency === baseCurrency) return 1;
 
-	let fxRate = 1;
-	if (dealCurrency !== baseCurrency) {
-		const rate = await getFxRate(ctx, dealCurrency, baseCurrency);
-		if (rate === null) {
-			throw new ValidationError({
-				formErrors: [`Missing FX rate for ${dealCurrency} -> ${baseCurrency}`],
-				fieldErrors: {},
-			});
-		}
-		fxRate = rate;
+	const rate = await getFxRate(ctx, dealCurrency, baseCurrency);
+	if (rate === null) {
+		throw new ValidationError({
+			formErrors: [`Missing FX rate for ${dealCurrency} -> ${baseCurrency}`],
+			fieldErrors: {},
+		});
 	}
+	return rate;
+}
 
-	const valueBase = Math.round(computedValue * fxRate);
+async function applyDealValuation(
+	ctx: ServiceCtx,
+	dealId: string,
+	valueBase: number,
+	fxRate: number
+): Promise<void> {
 	const orm = drizzle(ctx.db, { schema });
 	await orm
 		.update(schema.crmDeals)
 		.set({ valueBase, fxRate, updatedAt: now() })
 		.where(and(eq(schema.crmDeals.id, dealId), eq(schema.crmDeals.workspaceId, ctx.workspaceId)));
+}
+
+async function recomputeDealValuation(
+	ctx: ServiceCtx,
+	dealId: string,
+	dealCurrency: string,
+	computedValue: number
+): Promise<void> {
+	const fxRate = await resolveDealFxRate(ctx, dealCurrency);
+	await applyDealValuation(ctx, dealId, Math.round(computedValue * fxRate), fxRate);
 }
 
 export async function setDealLines(ctx: ServiceCtx, dealId: string, rawLines: unknown) {
@@ -1727,6 +1687,13 @@ export async function setDealLines(ctx: ServiceCtx, dealId: string, rawLines: un
 		});
 	}
 
+	const computedValue =
+		deal.valueOverride !== null
+			? deal.valueOverride
+			: resolvedLines.reduce((sum, l) => sum + l.amount * l.qty * annualMultiplier(l.interval), 0);
+
+	const fxRate = await resolveDealFxRate(ctx, deal.currency);
+
 	const ts = now();
 	await orm
 		.delete(schema.crmDealLines)
@@ -1751,12 +1718,7 @@ export async function setDealLines(ctx: ServiceCtx, dealId: string, rawLines: un
 		});
 	}
 
-	const computedValue =
-		deal.valueOverride !== null
-			? deal.valueOverride
-			: resolvedLines.reduce((sum, l) => sum + l.amount * l.qty * annualMultiplier(l.interval), 0);
-
-	await recomputeDealValuation(ctx, dealId, deal.currency, computedValue);
+	await applyDealValuation(ctx, dealId, Math.round(computedValue * fxRate), fxRate);
 
 	return { ok: true };
 }
@@ -1862,6 +1824,10 @@ export async function deleteTarget(ctx: ServiceCtx, id: string) {
 	return { ok: true };
 }
 
+function daysInUtcMonth(year: number, monthIndex0: number): number {
+	return new Date(Date.UTC(year, monthIndex0 + 1, 0)).getUTCDate();
+}
+
 function periodEndUtcFromWorkspaceUtcClock(
 	period: "week" | "month" | "quarter" | "year",
 	periodStart: number
@@ -1870,10 +1836,14 @@ function periodEndUtcFromWorkspaceUtcClock(
 
 	const monthsToAdd = period === "month" ? 1 : period === "quarter" ? 3 : 12;
 	const d = new Date(periodStart * 1000);
+	const normalized = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + monthsToAdd, 1));
+	const targetYear = normalized.getUTCFullYear();
+	const targetMonth = normalized.getUTCMonth();
+	const clampedDay = Math.min(d.getUTCDate(), daysInUtcMonth(targetYear, targetMonth));
 	const end = Date.UTC(
-		d.getUTCFullYear(),
-		d.getUTCMonth() + monthsToAdd,
-		d.getUTCDate(),
+		targetYear,
+		targetMonth,
+		clampedDay,
 		d.getUTCHours(),
 		d.getUTCMinutes(),
 		d.getUTCSeconds()

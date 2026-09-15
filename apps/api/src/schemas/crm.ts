@@ -48,7 +48,6 @@ export const CreateDealSchema = z.object({
 	expectedClose: z.number().int().optional(),
 	currency: CurrencySchema,
 	valueOverride: z.number().int().optional(),
-	fxRate: z.number().optional(),
 	lostReason: z.string().max(1000).optional(),
 	wonAt: z.number().int().optional(),
 });
@@ -60,27 +59,6 @@ export const UpdateDealSchema = z
 		expectedClose: z.number().int().nullable().optional(),
 		currency: CurrencySchema.optional(),
 		valueOverride: z.number().int().nullable().optional(),
-		valueBase: z.number().int().nullable().optional(),
-		fxRate: z.number().nullable().optional(),
-	})
-	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
-
-export const CreateDealLineSchema = z.object({
-	dealId: z.string().uuid(),
-	productId: z.string().max(255).optional(),
-	planId: z.string().max(255).optional(),
-	qty: z.number().int().positive(),
-	currency: CurrencySchema,
-	amount: z.number().int(),
-});
-
-export const UpdateDealLineSchema = z
-	.object({
-		productId: z.string().max(255).nullable().optional(),
-		planId: z.string().max(255).nullable().optional(),
-		qty: z.number().int().positive().optional(),
-		currency: CurrencySchema.optional(),
-		amount: z.number().int().optional(),
 	})
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 
@@ -196,7 +174,7 @@ export const SetDealLineSchema = z.object({
 });
 
 export const SetDealLinesSchema = z.object({
-	lines: z.array(SetDealLineSchema),
+	lines: z.array(SetDealLineSchema).max(50),
 });
 
 const TargetMetricEnum = z.enum([
@@ -208,13 +186,16 @@ const TargetMetricEnum = z.enum([
 ]);
 const TargetPeriodEnum = z.enum(["week", "month", "quarter", "year"]);
 
+const TARGET_PERIOD_START_MIN = 0;
+const TARGET_PERIOD_START_MAX = 4102444800;
+
 export const CreateTargetSchema = z
 	.object({
 		metric: TargetMetricEnum,
 		stageId: z.string().uuid().optional(),
 		period: TargetPeriodEnum,
-		periodStart: z.number().int(),
-		value: z.number().int(),
+		periodStart: z.number().int().min(TARGET_PERIOD_START_MIN).max(TARGET_PERIOD_START_MAX),
+		value: z.number().int().nonnegative(),
 		currency: CurrencySchema.optional(),
 	})
 	.refine((obj) => obj.metric === "stage_entered" || obj.stageId === undefined, {
