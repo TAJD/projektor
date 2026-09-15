@@ -186,6 +186,87 @@ export const crmStages = sqliteTable(
 	})
 );
 
+export const crmProducts = sqliteTable(
+	"crm_products",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		onboardingTemplate: text("onboarding_template"),
+		archivedAt: integer("archived_at"),
+		createdAt: integer("created_at").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	(t) => ({
+		workspaceIdx: index("crm_products_workspace_idx").on(t.workspaceId),
+	})
+);
+
+export const crmPricingPlans = sqliteTable(
+	"crm_pricing_plans",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		productId: text("product_id")
+			.notNull()
+			.references(() => crmProducts.id, { onDelete: "cascade" }),
+		name: text("name").notNull(),
+		interval: text("interval", { enum: ["one_off", "monthly", "annual"] }).notNull(),
+		currency: text("currency").notNull(),
+		amount: integer("amount").notNull(),
+		archivedAt: integer("archived_at"),
+		createdAt: integer("created_at").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	(t) => ({
+		workspaceIdx: index("crm_pricing_plans_workspace_idx").on(t.workspaceId),
+		productIdx: index("crm_pricing_plans_product_idx").on(t.productId),
+	})
+);
+
+export const crmFxRates = sqliteTable(
+	"crm_fx_rates",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		fromCurrency: text("from_currency").notNull(),
+		toCurrency: text("to_currency").notNull(),
+		rate: text("rate").notNull(),
+		asOf: integer("as_of").notNull(),
+		source: text("source", { enum: ["manual", "auto"] }).notNull(),
+		createdAt: integer("created_at").notNull(),
+	},
+	(t) => ({
+		workspaceIdx: index("crm_fx_rates_workspace_idx").on(t.workspaceId),
+		workspacePairUniqueIdx: uniqueIndex("crm_fx_rates_workspace_pair_idx").on(
+			t.workspaceId,
+			t.fromCurrency,
+			t.toCurrency
+		),
+	})
+);
+
+export const workspaceSettings = sqliteTable(
+	"workspace_settings",
+	{
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		key: text("key").notNull(),
+		value: text("value").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	(t) => ({
+		pk: primaryKey({ columns: [t.workspaceId, t.key] }),
+	})
+);
+
 export const crmInteractionContacts = sqliteTable(
 	"crm_interaction_contacts",
 	{

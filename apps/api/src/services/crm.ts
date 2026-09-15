@@ -8,15 +8,22 @@ import {
 	CreateInteractionSchema,
 	CreateOrganisationSchema,
 	CreatePipelineSchema,
+	CreatePricingPlanSchema,
+	CreateProductSchema,
 	CreateStageSchema,
 	LinkInteractionContactSchema,
 	MoveDealStageSchema,
+	SetBaseCurrencySchema,
+	SetDealLinesSchema,
+	SetFxRateSchema,
 	UpdateContactSchema,
 	UpdateDealLineSchema,
 	UpdateDealSchema,
 	UpdateInteractionSchema,
 	UpdateOrganisationSchema,
 	UpdatePipelineSchema,
+	UpdatePricingPlanSchema,
+	UpdateProductSchema,
 	UpdateStageSchema,
 } from "../schemas/crm";
 import { recordActivity } from "./activity";
@@ -471,6 +478,24 @@ export async function updateDeal(ctx: ServiceCtx, id: string, raw: unknown) {
 		.update(schema.crmDeals)
 		.set(setData)
 		.where(and(eq(schema.crmDeals.id, id), eq(schema.crmDeals.workspaceId, ctx.workspaceId)));
+
+	if ("valueOverride" in result.data) {
+		const baseCurrency = await getWorkspaceSetting(ctx, BASE_CURRENCY_KEY);
+		if (baseCurrency) {
+			const refreshed = await orm
+				.select()
+				.from(schema.crmDeals)
+				.where(and(eq(schema.crmDeals.id, id), eq(schema.crmDeals.workspaceId, ctx.workspaceId)))
+				.get();
+			if (refreshed) {
+				const value =
+					refreshed.valueOverride !== null
+						? refreshed.valueOverride
+						: await computeDealLineValue(ctx, id);
+				await recomputeDealValuation(ctx, id, refreshed.currency, value);
+			}
+		}
+	}
 
 	return { ok: true };
 }
@@ -1206,6 +1231,530 @@ export async function moveDealStage(
 			...(reason ? { reason } : {}),
 		},
 	});
+
+	return { ok: true };
+}
+
+async function requireProduct(ctx: ServiceCtx, id: string) {
+	const orm = drizzle(ctx.db, { schema });
+	const product = await orm
+		.select()
+		.from(schema.crmProducts)
+		.where(and(eq(schema.crmProducts.id, id), eq(schema.crmProducts.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!product) throw new NotFoundError("Product not found");
+	return product;
+}
+
+async function requirePricingPlan(ctx: ServiceCtx, id: string) {
+	const orm = drizzle(ctx.db, { schema });
+	const plan = await orm
+		.select()
+		.from(schema.crmPricingPlans)
+		.where(
+			and(
+				eq(schema.crmPricingPlans.id, id),
+				eq(schema.crmPricingPlans.workspaceId, ctx.workspaceId)
+			)
+		)
+		.get();
+	if (!plan) throw new NotFoundError("Pricing plan not found");
+	return plan;
+}
+
+export async function createProduct(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = CreateProductSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { name, onboardingTemplate } = result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+	const id = crypto.randomUUID();
+	const ts = now();
+
+	await orm.insert(schema.crmProducts).values({
+		id,
+		workspaceId: ctx.workspaceId,
+		name,
+		onboardingTemplate: onboardingTemplate ?? null,
+		archivedAt: null,
+		createdAt: ts,
+		updatedAt: ts,
+	});
+
+	return { id };
+}
+
+export async function getProduct(ctx: ServiceCtx, id: string) {
+	return requireProduct(ctx, id);
+}
+
+export async function listProducts(ctx: ServiceCtx) {
+	const orm = drizzle(ctx.db, { schema });
+	const items = await orm
+		.select()
+		.from(schema.crmProducts)
+		.where(eq(schema.crmProducts.workspaceId, ctx.workspaceId))
+		.orderBy(asc(schema.crmProducts.createdAt));
+	return { items };
+}
+
+type ProductUpdateData = z.infer<typeof UpdateProductSchema>;
+
+function buildProductSetData(data: ProductUpdateData, ts: number) {
+	const setData: { updatedAt: number; name?: string; onboardingTemplate?: string | null } = {
+		updatedAt: ts,
+	};
+	if (data.name !== undefined) setData.name = data.name;
+	if ("onboardingTemplate" in data) setData.onboardingTemplate = data.onboardingTemplate ?? null;
+	return setData;
+}
+
+export async function updateProduct(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = UpdateProductSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	await requireProduct(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	const setData = buildProductSetData(result.data, now());
+	await orm
+		.update(schema.crmProducts)
+		.set(setData)
+		.where(and(eq(schema.crmProducts.id, id), eq(schema.crmProducts.workspaceId, ctx.workspaceId)));
+
+	return { ok: true };
+}
+
+export async function archiveProduct(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
+	await requireProduct(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	await orm
+		.update(schema.crmProducts)
+		.set({ archivedAt: now(), updatedAt: now() })
+		.where(and(eq(schema.crmProducts.id, id), eq(schema.crmProducts.workspaceId, ctx.workspaceId)));
+
+	return { ok: true };
+}
+
+export async function deleteProduct(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
+	await requireProduct(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	const plan = await orm
+		.select({ id: schema.crmPricingPlans.id })
+		.from(schema.crmPricingPlans)
+		.where(
+			and(
+				eq(schema.crmPricingPlans.productId, id),
+				eq(schema.crmPricingPlans.workspaceId, ctx.workspaceId)
+			)
+		)
+		.get();
+	if (plan)
+		throw new ConflictError("Cannot delete a product with pricing plans — archive it instead");
+
+	await orm
+		.delete(schema.crmProducts)
+		.where(and(eq(schema.crmProducts.id, id), eq(schema.crmProducts.workspaceId, ctx.workspaceId)));
+
+	return { ok: true };
+}
+
+export async function createPricingPlan(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = CreatePricingPlanSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { productId, name, interval, currency, amount } = result.data;
+
+	await requireProduct(ctx, productId);
+
+	const orm = drizzle(ctx.db, { schema });
+	const id = crypto.randomUUID();
+	const ts = now();
+
+	await orm.insert(schema.crmPricingPlans).values({
+		id,
+		workspaceId: ctx.workspaceId,
+		productId,
+		name,
+		interval,
+		currency,
+		amount,
+		archivedAt: null,
+		createdAt: ts,
+		updatedAt: ts,
+	});
+
+	return { id };
+}
+
+export async function getPricingPlan(ctx: ServiceCtx, id: string) {
+	return requirePricingPlan(ctx, id);
+}
+
+export async function listPricingPlansByProduct(ctx: ServiceCtx, productId: string) {
+	await requireProduct(ctx, productId);
+
+	const orm = drizzle(ctx.db, { schema });
+	const items = await orm
+		.select()
+		.from(schema.crmPricingPlans)
+		.where(
+			and(
+				eq(schema.crmPricingPlans.productId, productId),
+				eq(schema.crmPricingPlans.workspaceId, ctx.workspaceId)
+			)
+		)
+		.orderBy(asc(schema.crmPricingPlans.createdAt));
+	return { items };
+}
+
+type PricingPlanUpdateData = z.infer<typeof UpdatePricingPlanSchema>;
+
+function buildPricingPlanSetData(data: PricingPlanUpdateData, ts: number) {
+	const setData: {
+		updatedAt: number;
+		name?: string;
+		interval?: "one_off" | "monthly" | "annual";
+		currency?: string;
+		amount?: number;
+	} = { updatedAt: ts };
+	if (data.name !== undefined) setData.name = data.name;
+	if (data.interval !== undefined) setData.interval = data.interval;
+	if (data.currency !== undefined) setData.currency = data.currency;
+	if (data.amount !== undefined) setData.amount = data.amount;
+	return setData;
+}
+
+export async function updatePricingPlan(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = UpdatePricingPlanSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	await requirePricingPlan(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	const setData = buildPricingPlanSetData(result.data, now());
+	await orm
+		.update(schema.crmPricingPlans)
+		.set(setData)
+		.where(
+			and(
+				eq(schema.crmPricingPlans.id, id),
+				eq(schema.crmPricingPlans.workspaceId, ctx.workspaceId)
+			)
+		);
+
+	return { ok: true };
+}
+
+export async function archivePricingPlan(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
+	await requirePricingPlan(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	await orm
+		.update(schema.crmPricingPlans)
+		.set({ archivedAt: now(), updatedAt: now() })
+		.where(
+			and(
+				eq(schema.crmPricingPlans.id, id),
+				eq(schema.crmPricingPlans.workspaceId, ctx.workspaceId)
+			)
+		);
+
+	return { ok: true };
+}
+
+export async function deletePricingPlan(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
+	await requirePricingPlan(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	const line = await orm
+		.select({ id: schema.crmDealLines.id })
+		.from(schema.crmDealLines)
+		.where(
+			and(eq(schema.crmDealLines.planId, id), eq(schema.crmDealLines.workspaceId, ctx.workspaceId))
+		)
+		.get();
+	if (line) {
+		throw new ConflictError(
+			"Cannot delete a pricing plan referenced by a deal line — archive it instead"
+		);
+	}
+
+	await orm
+		.delete(schema.crmPricingPlans)
+		.where(
+			and(
+				eq(schema.crmPricingPlans.id, id),
+				eq(schema.crmPricingPlans.workspaceId, ctx.workspaceId)
+			)
+		);
+
+	return { ok: true };
+}
+
+const BASE_CURRENCY_KEY = "base_currency";
+
+async function getWorkspaceSetting(ctx: ServiceCtx, key: string): Promise<string | null> {
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ value: schema.workspaceSettings.value })
+		.from(schema.workspaceSettings)
+		.where(
+			and(
+				eq(schema.workspaceSettings.workspaceId, ctx.workspaceId),
+				eq(schema.workspaceSettings.key, key)
+			)
+		)
+		.get();
+	return row?.value ?? null;
+}
+
+async function setWorkspaceSetting(ctx: ServiceCtx, key: string, value: string): Promise<void> {
+	const orm = drizzle(ctx.db, { schema });
+	const ts = now();
+	await orm
+		.insert(schema.workspaceSettings)
+		.values({ workspaceId: ctx.workspaceId, key, value, updatedAt: ts })
+		.onConflictDoUpdate({
+			target: [schema.workspaceSettings.workspaceId, schema.workspaceSettings.key],
+			set: { value, updatedAt: ts },
+		});
+}
+
+export async function setWorkspaceBaseCurrency(ctx: ServiceCtx, baseCurrency: string) {
+	assertCanMutate(ctx);
+	const result = SetBaseCurrencySchema.safeParse({ baseCurrency });
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	await setWorkspaceSetting(ctx, BASE_CURRENCY_KEY, result.data.baseCurrency);
+	return { ok: true };
+}
+
+export async function getWorkspaceBaseCurrency(ctx: ServiceCtx): Promise<string | null> {
+	return getWorkspaceSetting(ctx, BASE_CURRENCY_KEY);
+}
+
+export async function setFxRate(
+	ctx: ServiceCtx,
+	fromCurrency: string,
+	toCurrency: string,
+	rate: number
+) {
+	assertCanMutate(ctx);
+	const result = SetFxRateSchema.safeParse({ fromCurrency, toCurrency, rate });
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	const orm = drizzle(ctx.db, { schema });
+	const ts = now();
+	const rateStr = result.data.rate.toString();
+
+	await orm
+		.insert(schema.crmFxRates)
+		.values({
+			id: crypto.randomUUID(),
+			workspaceId: ctx.workspaceId,
+			fromCurrency: result.data.fromCurrency,
+			toCurrency: result.data.toCurrency,
+			rate: rateStr,
+			asOf: ts,
+			source: "manual",
+			createdAt: ts,
+		})
+		.onConflictDoUpdate({
+			target: [
+				schema.crmFxRates.workspaceId,
+				schema.crmFxRates.fromCurrency,
+				schema.crmFxRates.toCurrency,
+			],
+			set: { rate: rateStr, asOf: ts, source: "manual" },
+		});
+
+	return { ok: true };
+}
+
+async function getFxRate(
+	ctx: ServiceCtx,
+	fromCurrency: string,
+	toCurrency: string
+): Promise<number | null> {
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ rate: schema.crmFxRates.rate })
+		.from(schema.crmFxRates)
+		.where(
+			and(
+				eq(schema.crmFxRates.workspaceId, ctx.workspaceId),
+				eq(schema.crmFxRates.fromCurrency, fromCurrency),
+				eq(schema.crmFxRates.toCurrency, toCurrency)
+			)
+		)
+		.get();
+	return row ? Number(row.rate) : null;
+}
+
+function annualMultiplier(interval: "one_off" | "monthly" | "annual"): number {
+	return interval === "monthly" ? 12 : 1;
+}
+
+async function computeDealLineValue(ctx: ServiceCtx, dealId: string): Promise<number> {
+	const orm = drizzle(ctx.db, { schema });
+	const lines = await orm
+		.select({
+			amount: schema.crmDealLines.amount,
+			qty: schema.crmDealLines.qty,
+			planId: schema.crmDealLines.planId,
+		})
+		.from(schema.crmDealLines)
+		.where(
+			and(
+				eq(schema.crmDealLines.dealId, dealId),
+				eq(schema.crmDealLines.workspaceId, ctx.workspaceId)
+			)
+		);
+
+	let total = 0;
+	for (const line of lines) {
+		let multiplier = 1;
+		if (line.planId) {
+			const plan = await orm
+				.select({ interval: schema.crmPricingPlans.interval })
+				.from(schema.crmPricingPlans)
+				.where(
+					and(
+						eq(schema.crmPricingPlans.id, line.planId),
+						eq(schema.crmPricingPlans.workspaceId, ctx.workspaceId)
+					)
+				)
+				.get();
+			if (plan) multiplier = annualMultiplier(plan.interval);
+		}
+		total += line.amount * line.qty * multiplier;
+	}
+	return total;
+}
+
+async function recomputeDealValuation(
+	ctx: ServiceCtx,
+	dealId: string,
+	dealCurrency: string,
+	computedValue: number
+): Promise<void> {
+	const baseCurrency = await getWorkspaceSetting(ctx, BASE_CURRENCY_KEY);
+	if (!baseCurrency) {
+		throw new ValidationError({
+			formErrors: ["Workspace base_currency is not configured"],
+			fieldErrors: {},
+		});
+	}
+
+	let fxRate = 1;
+	if (dealCurrency !== baseCurrency) {
+		const rate = await getFxRate(ctx, dealCurrency, baseCurrency);
+		if (rate === null) {
+			throw new ValidationError({
+				formErrors: [`Missing FX rate for ${dealCurrency} -> ${baseCurrency}`],
+				fieldErrors: {},
+			});
+		}
+		fxRate = rate;
+	}
+
+	const valueBase = Math.round(computedValue * fxRate);
+	const orm = drizzle(ctx.db, { schema });
+	await orm
+		.update(schema.crmDeals)
+		.set({ valueBase, fxRate, updatedAt: now() })
+		.where(and(eq(schema.crmDeals.id, dealId), eq(schema.crmDeals.workspaceId, ctx.workspaceId)));
+}
+
+export async function setDealLines(ctx: ServiceCtx, dealId: string, rawLines: unknown) {
+	assertCanMutate(ctx);
+	const result = SetDealLinesSchema.safeParse({ lines: rawLines });
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { lines } = result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+	const deal = await orm
+		.select()
+		.from(schema.crmDeals)
+		.where(and(eq(schema.crmDeals.id, dealId), eq(schema.crmDeals.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!deal) throw new NotFoundError("Deal not found");
+
+	const resolvedLines: {
+		productId: string;
+		planId: string;
+		qty: number;
+		currency: string;
+		amount: number;
+		interval: "one_off" | "monthly" | "annual";
+	}[] = [];
+
+	for (const line of lines) {
+		const plan = await requirePricingPlan(ctx, line.planId);
+		if (plan.productId !== line.productId) {
+			throw new ValidationError({
+				formErrors: [`planId ${line.planId} does not belong to productId ${line.productId}`],
+				fieldErrors: {},
+			});
+		}
+		if (plan.currency !== deal.currency) {
+			throw new ValidationError({
+				formErrors: [
+					`Plan currency ${plan.currency} does not match deal currency ${deal.currency}`,
+				],
+				fieldErrors: {},
+			});
+		}
+		resolvedLines.push({
+			productId: line.productId,
+			planId: line.planId,
+			qty: line.qty,
+			currency: plan.currency,
+			amount: plan.amount,
+			interval: plan.interval,
+		});
+	}
+
+	const ts = now();
+	await orm
+		.delete(schema.crmDealLines)
+		.where(
+			and(
+				eq(schema.crmDealLines.dealId, dealId),
+				eq(schema.crmDealLines.workspaceId, ctx.workspaceId)
+			)
+		);
+
+	for (const line of resolvedLines) {
+		await orm.insert(schema.crmDealLines).values({
+			id: crypto.randomUUID(),
+			workspaceId: ctx.workspaceId,
+			dealId,
+			productId: line.productId,
+			planId: line.planId,
+			qty: line.qty,
+			currency: line.currency,
+			amount: line.amount,
+			createdAt: ts,
+		});
+	}
+
+	const computedValue =
+		deal.valueOverride !== null
+			? deal.valueOverride
+			: resolvedLines.reduce((sum, l) => sum + l.amount * l.qty * annualMultiplier(l.interval), 0);
+
+	await recomputeDealValuation(ctx, dealId, deal.currency, computedValue);
 
 	return { ok: true };
 }

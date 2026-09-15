@@ -58,6 +58,7 @@ import m0054 from "../../../../packages/db/migrations/0054_project_archived_at.s
 import m0055 from "../../../../packages/db/migrations/0055_crm.sql?raw";
 import m0056 from "../../../../packages/db/migrations/0056_crm_pipelines.sql?raw";
 import m0057 from "../../../../packages/db/migrations/0057_crm_constraints.sql?raw";
+import m0058 from "../../../../packages/db/migrations/0058_crm_products.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -118,4 +119,5 @@ export const MIGRATIONS = [
 	m0055,
 	m0056,
 	m0057,
+	m0058,
 ];

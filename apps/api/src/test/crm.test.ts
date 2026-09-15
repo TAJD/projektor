@@ -1,15 +1,20 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	archivePricingPlan,
+	archiveProduct,
 	createContact,
 	createDeal,
 	createDealLine,
 	createInteraction,
 	createOrganisation,
 	createPipeline,
+	createPricingPlan,
+	createProduct,
 	createStage,
 	deleteContact,
 	deleteOrganisation,
+	deletePricingPlan,
 	deleteStage,
 	getContact,
 	getDeal,
@@ -24,6 +29,9 @@ import {
 	listStages,
 	moveDealStage,
 	seedDefaultPipeline,
+	setDealLines,
+	setFxRate,
+	setWorkspaceBaseCurrency,
 	updateContact,
 	updateDeal,
 	updateDealLine,
@@ -506,5 +514,134 @@ describe("CRM default pipeline seeding", () => {
 
 		const { items: stages } = await listStages(ctx, pipelines[0].id);
 		expect(stages.map((s) => s.name)).toEqual(["Lead", "Qualified", "Proposal", "Won", "Lost"]);
+	});
+});
+
+describe("CRM products, pricing plans, and multi-currency deal valuation", () => {
+	let ctx: ServiceCtx;
+	let orgId: string;
+
+	beforeEach(async () => {
+		ctx = await ctxFor();
+		({ id: orgId } = await createOrganisation(ctx, { name: "Valuation Org" }));
+	});
+
+	it("computes a deal's value_base and fx_rate from EUR-priced lines against a GBP workspace base currency", async () => {
+		await setWorkspaceBaseCurrency(ctx, "GBP");
+		await setFxRate(ctx, "EUR", "GBP", 0.85);
+
+		const { id: productId } = await createProduct(ctx, { name: "Widgets" });
+		const { id: planId } = await createPricingPlan(ctx, {
+			productId,
+			name: "Monthly Widgets",
+			interval: "monthly",
+			currency: "EUR",
+			amount: 1000,
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "EUR" });
+
+		await setDealLines(ctx, dealId, [{ productId, planId, qty: 2 }]);
+
+		const deal = await getDeal(ctx, dealId);
+		expect(deal.valueBase).toBe(20400);
+		expect(deal.fxRate).toBe(0.85);
+	});
+
+	it("freezes value_base and fx_rate at write time — a later setFxRate change does not retroactively alter them", async () => {
+		await setWorkspaceBaseCurrency(ctx, "GBP");
+		await setFxRate(ctx, "EUR", "GBP", 0.85);
+
+		const { id: productId } = await createProduct(ctx, { name: "Widgets" });
+		const { id: planId } = await createPricingPlan(ctx, {
+			productId,
+			name: "Annual Widgets",
+			interval: "annual",
+			currency: "EUR",
+			amount: 5000,
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "EUR" });
+
+		await setDealLines(ctx, dealId, [{ productId, planId, qty: 1 }]);
+		const before = await getDeal(ctx, dealId);
+		expect(before.valueBase).toBe(4250);
+		expect(before.fxRate).toBe(0.85);
+
+		await setFxRate(ctx, "EUR", "GBP", 0.5);
+
+		const after = await getDeal(ctx, dealId);
+		expect(after.valueBase).toBe(4250);
+		expect(after.fxRate).toBe(0.85);
+	});
+
+	it("throws a structured ValidationError, not a 0 value, when no fx rate exists for the deal/base currency pair", async () => {
+		await setWorkspaceBaseCurrency(ctx, "GBP");
+
+		const { id: productId } = await createProduct(ctx, { name: "Widgets" });
+		const { id: planId } = await createPricingPlan(ctx, {
+			productId,
+			name: "One-off Widgets",
+			interval: "one_off",
+			currency: "EUR",
+			amount: 1000,
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "EUR" });
+
+		await expect(setDealLines(ctx, dealId, [{ productId, planId, qty: 1 }])).rejects.toBeInstanceOf(
+			ValidationError
+		);
+
+		const deal = await getDeal(ctx, dealId);
+		expect(deal.valueBase).toBeNull();
+	});
+
+	it("normalises a monthly plan times qty to annual in the value sum", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
+
+		const { id: productId } = await createProduct(ctx, { name: "SaaS Seats" });
+		const { id: planId } = await createPricingPlan(ctx, {
+			productId,
+			name: "Monthly Seat",
+			interval: "monthly",
+			currency: "USD",
+			amount: 100,
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+
+		await setDealLines(ctx, dealId, [{ productId, planId, qty: 3 }]);
+
+		const deal = await getDeal(ctx, dealId);
+		expect(deal.valueBase).toBe(3600);
+		expect(deal.fxRate).toBe(1);
+	});
+
+	it("rejects hard-deleting a pricing plan referenced by a deal line, but allows archiving it", async () => {
+		await setWorkspaceBaseCurrency(ctx, "USD");
+
+		const { id: productId } = await createProduct(ctx, { name: "Referenced Product" });
+		const { id: planId } = await createPricingPlan(ctx, {
+			productId,
+			name: "Referenced Plan",
+			interval: "one_off",
+			currency: "USD",
+			amount: 500,
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealLines(ctx, dealId, [{ productId, planId, qty: 1 }]);
+
+		await expect(deletePricingPlan(ctx, planId)).rejects.toBeInstanceOf(ConflictError);
+		await expect(archivePricingPlan(ctx, planId)).resolves.toEqual({ ok: true });
+	});
+
+	it("allows archiving a product but rejects hard-deleting one with pricing plans", async () => {
+		const { id: productId } = await createProduct(ctx, { name: "Has Plans" });
+		await createPricingPlan(ctx, {
+			productId,
+			name: "Some Plan",
+			interval: "one_off",
+			currency: "USD",
+			amount: 100,
+		});
+
+		await expect(archiveProduct(ctx, productId)).resolves.toEqual({ ok: true });
 	});
 });

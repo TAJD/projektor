@@ -147,3 +147,54 @@ export const MoveDealStageSchema = z.object({
 	reason: z.string().min(1).optional(),
 	lostReason: z.string().min(1).max(1000).optional(),
 });
+
+const PlanIntervalEnum = z.enum(["one_off", "monthly", "annual"]);
+
+export const CreateProductSchema = z.object({
+	name: z.string().min(1).max(255),
+	onboardingTemplate: z.string().max(500).optional(),
+});
+
+export const UpdateProductSchema = z
+	.object({
+		name: z.string().min(1).max(255).optional(),
+		onboardingTemplate: z.string().max(500).nullable().optional(),
+	})
+	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
+
+export const CreatePricingPlanSchema = z.object({
+	productId: z.string().uuid(),
+	name: z.string().min(1).max(255),
+	interval: PlanIntervalEnum,
+	currency: CurrencySchema,
+	amount: z.number().int().nonnegative(),
+});
+
+export const UpdatePricingPlanSchema = z
+	.object({
+		name: z.string().min(1).max(255).optional(),
+		interval: PlanIntervalEnum.optional(),
+		currency: CurrencySchema.optional(),
+		amount: z.number().int().nonnegative().optional(),
+	})
+	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
+
+export const SetFxRateSchema = z.object({
+	fromCurrency: CurrencySchema,
+	toCurrency: CurrencySchema,
+	rate: z.number().positive(),
+});
+
+export const SetBaseCurrencySchema = z.object({
+	baseCurrency: CurrencySchema,
+});
+
+export const SetDealLineSchema = z.object({
+	productId: z.string().uuid(),
+	planId: z.string().uuid(),
+	qty: z.number().int().positive(),
+});
+
+export const SetDealLinesSchema = z.object({
+	lines: z.array(SetDealLineSchema),
+});
