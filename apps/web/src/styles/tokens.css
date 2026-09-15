@@ -1,22 +1,22 @@
 @property --chart-seq-1 {
 	syntax: "<color>";
 	inherits: true;
-	initial-value: #4f46e5;
+	initial-value: #007a87;
 }
 @property --chart-seq-2 {
 	syntax: "<color>";
 	inherits: true;
-	initial-value: #4f46e5;
+	initial-value: #007a87;
 }
 @property --chart-seq-3 {
 	syntax: "<color>";
 	inherits: true;
-	initial-value: #4f46e5;
+	initial-value: #007a87;
 }
 @property --chart-seq-4 {
 	syntax: "<color>";
 	inherits: true;
-	initial-value: #4f46e5;
+	initial-value: #007a87;
 }
 
 :root {
@@ -27,19 +27,26 @@
 	--sidebar-width-collapsed: 56px;
 	--topbar-height: 56px;
 
+	--radius-sm: 4px;
+	--radius-md: 6px;
+	--radius-lg: 8px;
+	--radius-sheet: 10px;
+	--radius-full: 999px;
+	--radius-round: 50%;
+
 	--priority-urgent-solid: #dc2626;
 	--priority-high-solid: #d97706;
 	--priority-low-solid: #6b7280;
 	--chart-secondary: #d97706;
 
-	--light-bg: #ffffff;
-	--light-surface: #f8fafc;
+	--light-bg: oklch(99% 0.003 250);
+	--light-surface: oklch(98% 0.005 250);
 	--light-text: #111827;
 	--light-text-strong: #030712;
 	--light-text-muted: #6b7280;
 	--light-border: #e2e8f0;
-	--light-nav-bg: #ffffff;
-	--light-accent: #4f46e5;
+	--light-nav-bg: oklch(99% 0.003 250);
+	--light-accent: oklch(52% 0.11 205);
 	--light-on-accent: #fff;
 	--light-elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
 	--light-priority-urgent-text: #dc2626;
@@ -89,8 +96,8 @@
 	--dark-text-muted: #94a3b8;
 	--dark-border: #2a3242;
 	--dark-nav-bg: #12161f;
-	--dark-accent: #6366f1;
-	--dark-on-accent: #fff;
+	--dark-accent: oklch(73% 0.12 205);
+	--dark-on-accent: oklch(18% 0.03 205);
 	--dark-elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
 	--dark-priority-urgent-text: #fca5a5;
 	--dark-priority-urgent-bg: rgba(248, 113, 113, 0.18);

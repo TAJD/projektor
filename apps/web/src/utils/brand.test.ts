@@ -16,8 +16,8 @@ function setupHead() {
 		<meta property="og:title" content="Projektor">
 		<meta property="og:description" content="Projektor — project management for humans and agents.">
 		<meta name="apple-mobile-web-app-title" content="Projektor">
-		<meta name="theme-color" content="#4f46e5" media="(prefers-color-scheme: light)">
-		<meta name="theme-color" content="#6366f1" media="(prefers-color-scheme: dark)">
+		<meta name="theme-color" content="#007a87" media="(prefers-color-scheme: light)">
+		<meta name="theme-color" content="#1fbdcb" media="(prefers-color-scheme: dark)">
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 		<link rel="apple-touch-icon" href="/icon-192.png">
 	`;
