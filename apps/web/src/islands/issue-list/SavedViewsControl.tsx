@@ -61,8 +61,7 @@ function SaveViewControl({ saved }: { saved: Saved }) {
 				placeholder="View name…"
 				// biome-ignore lint/a11y/noAutofocus: intentional — triggered by user action
 				autoFocus
-				class="py-1 px-[0.625rem] border border-border rounded bg-bg text-text-base text-[0.8rem] outline-hidden"
-				style={{ width: "8rem" }}
+				class="py-1 px-[0.625rem] border border-border rounded bg-bg text-text-base text-[0.8rem] outline-hidden w-32"
 			/>
 			<button
 				type="button"

@@ -136,7 +136,7 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 	}
 	if (error) {
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				Failed to load feedback sources: {error}
 			</p>
 		);
@@ -147,10 +147,7 @@ export default function FeedbackSourceGrid({ workspaceSlug, projectId: projectId
 	return (
 		<section>
 			<h1 class="text-xl font-bold text-text-base mb-4">Feedback sources</h1>
-			<div
-				class="grid gap-4"
-				style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}
-			>
+			<div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
 				{sources.map((s) => (
 					<SourceCard key={s.id} source={s} summary={summaryBySource.get(s.id)} />
 				))}

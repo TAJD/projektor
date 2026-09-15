@@ -65,6 +65,11 @@ export interface Env {
 	// free-tier/1-click deployments; present when opt-in real-time features are enabled.
 	WORKSPACE_HUB?: DurableObjectNamespace;
 	RATE_LIMIT_TEST_NOW_MS?: string;
+	BRAND_NAME?: string;
+	BRAND_MARK?: string;
+	BRAND_ACCENT?: string;
+	BRAND_ON_ACCENT?: string;
+	BRAND_LOGO_URL?: string;
 }
 
 export interface RealtimeEvent<T = unknown> {

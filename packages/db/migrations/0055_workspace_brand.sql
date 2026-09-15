@@ -1,0 +1,1 @@
+ALTER TABLE workspaces ADD COLUMN brand TEXT NOT NULL DEFAULT '{}';

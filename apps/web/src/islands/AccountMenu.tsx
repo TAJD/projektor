@@ -1,6 +1,13 @@
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { clearAllDrafts } from "../utils/drafts";
+import {
+	applyPrefsToDocument,
+	type DensityPref,
+	readPrefs,
+	type SidebarPref,
+	writePrefs,
+} from "../utils/prefs";
 import { PUBLIC_VIEWER_EMAIL } from "../utils/public-viewer";
 import { resolveWorkspaceSlug } from "../utils/workspace";
 import { Popover } from "./ui/Popover";
@@ -20,6 +27,80 @@ function initials(name: string, email: string): string {
 	const parts = source.split(/\s+/).filter(Boolean);
 	if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
 	return source.slice(0, 2).toUpperCase();
+}
+
+function PreferencesSection() {
+	const [density, setDensity] = useState<DensityPref>("comfortable");
+	const [sidebar, setSidebar] = useState<SidebarPref>("expanded");
+
+	useEffect(() => {
+		const prefs = readPrefs();
+		setDensity(prefs.density);
+		setSidebar(prefs.sidebar);
+	}, []);
+
+	function update(patch: Partial<{ density: DensityPref; sidebar: SidebarPref }>) {
+		const prefs = { ...readPrefs(), ...patch };
+		writePrefs(prefs);
+		applyPrefsToDocument(prefs);
+		setDensity(prefs.density);
+		setSidebar(prefs.sidebar);
+		const collapseToggle = document.querySelector(".sidebar-collapse-toggle");
+		collapseToggle?.setAttribute(
+			"aria-label",
+			prefs.sidebar === "collapsed" ? "Expand sidebar" : "Collapse sidebar"
+		);
+		collapseToggle?.setAttribute("aria-expanded", prefs.sidebar === "collapsed" ? "false" : "true");
+	}
+
+	return (
+		<div class="preferences-section">
+			<div class="preferences-row">
+				<span>Density</span>
+				<fieldset class="preferences-toggle-group">
+					<legend class="sr-only">Density</legend>
+					<button
+						type="button"
+						class="preferences-toggle-btn"
+						aria-pressed={density === "comfortable"}
+						onClick={() => update({ density: "comfortable" })}
+					>
+						Comfortable
+					</button>
+					<button
+						type="button"
+						class="preferences-toggle-btn"
+						aria-pressed={density === "compact"}
+						onClick={() => update({ density: "compact" })}
+					>
+						Compact
+					</button>
+				</fieldset>
+			</div>
+			<div class="preferences-row">
+				<span>Sidebar</span>
+				<fieldset class="preferences-toggle-group">
+					<legend class="sr-only">Sidebar</legend>
+					<button
+						type="button"
+						class="preferences-toggle-btn"
+						aria-pressed={sidebar === "expanded"}
+						onClick={() => update({ sidebar: "expanded" })}
+					>
+						Expanded
+					</button>
+					<button
+						type="button"
+						class="preferences-toggle-btn"
+						aria-pressed={sidebar === "collapsed"}
+						onClick={() => update({ sidebar: "collapsed" })}
+					>
+						Collapsed
+					</button>
+				</fieldset>
+			</div>
+		</div>
+	);
 }
 
 function AccountMenuPopover({
@@ -65,6 +146,7 @@ function AccountMenuPopover({
 					Log out
 				</a>
 			</div>
+			<PreferencesSection />
 		</Popover>
 	);
 }

@@ -5,6 +5,7 @@ import { GlossaryHelp } from '../islands/GlossaryHelp';
 import { OfflineBanner } from '../islands/OfflineBanner';
 import type { GlossaryTermId } from '../islands/glossary-definitions';
 import pkg from '../../package.json';
+import '../styles/tokens.css';
 import '../styles/global.css';
 
 interface Props {
@@ -22,11 +23,12 @@ const isActive = (href: string): boolean =>
 
 // PROJ-395: glossaryId flags nav items whose label is jargon a newcomer wouldn't
 // know (Groups, Tokens) — those get an inline GlossaryHelp toggletip.
-const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId }> = [
-  { href: '/', label: 'Projects' },
-  { href: '/my-issues', label: 'My Issues' },
-  { href: '/settings/groups', label: 'Groups', glossaryId: 'groups' },
-  { href: '/settings/tokens', label: 'Connect Agent', glossaryId: 'tokens' },
+type NavIcon = 'projects' | 'my-issues' | 'groups' | 'tokens';
+const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?: GlossaryTermId }> = [
+  { href: '/', label: 'Projects', icon: 'projects' },
+  { href: '/my-issues', label: 'My Issues', icon: 'my-issues' },
+  { href: '/settings/groups', label: 'Groups', icon: 'groups', glossaryId: 'groups' },
+  { href: '/settings/tokens', label: 'Connect Agent', icon: 'tokens', glossaryId: 'tokens' },
 ];
 ---
 <!DOCTYPE html>
@@ -35,8 +37,10 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="theme-color" content="#6366f1" />
+    <meta name="theme-color" content="#007a87" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1fbdcb" media="(prefers-color-scheme: dark)" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="preload" href="/fonts/IBMPlexSans-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <!-- CD-293: the manifest link defaults to a no-credentials fetch, which behind
          Cloudflare Access comes back as the login redirect instead of the manifest —
          so the browser sees no manifest at all and never offers to install. -->
@@ -63,21 +67,44 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
       import { registerSW } from 'virtual:pwa-register';
       registerSW({ immediate: true });
     </script>
-    <!-- safe-ls: 'theme' is a cosmetic preference (dark/light). No API dependency - a
-         stale or missing value falls back to the system color-scheme media query.
-         Astro's ClientRouter swaps <html>'s attributes to match the incoming (server-
-         rendered, theme-unaware) document on every client-side nav, wiping data-theme -
-         so this re-applies on astro:after-swap, not just on first load. -->
+    <!-- safe-ls: 'prefs' (theme/density/sidebar) is cosmetic-only, no API dependency - a
+         stale or missing value falls back to the defaults below (theme also falls back
+         further to the system color-scheme media query). Astro's ClientRouter swaps
+         <html>'s attributes to match the incoming (server-rendered, prefs-unaware)
+         document on every client-side nav, wiping data-theme/data-density/data-sidebar -
+         so this re-applies on astro:after-swap, not just on first load. Kept as
+         self-contained inline JS (mirrors utils/prefs.ts logic) so it can run
+         synchronously pre-paint without waiting on a module import. -->
     <script is:inline>
       (function () {
-        function applyTheme() {
+        function readPrefs() {
           try {
-            var t = localStorage.getItem('theme');
-            if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+            var raw = localStorage.getItem('prefs');
+            if (raw) {
+              var p = JSON.parse(raw);
+              return {
+                theme: (p && (p.theme === 'dark' || p.theme === 'light')) ? p.theme : 'system',
+                density: (p && p.density === 'compact') ? 'compact' : 'comfortable',
+                sidebar: (p && p.sidebar === 'collapsed') ? 'collapsed' : 'expanded'
+              };
+            }
+            var legacyTheme = localStorage.getItem('theme');
+            if (legacyTheme === 'dark' || legacyTheme === 'light') {
+              return { theme: legacyTheme, density: 'comfortable', sidebar: 'expanded' };
+            }
           } catch (e) {}
+          return { theme: 'system', density: 'comfortable', sidebar: 'expanded' };
         }
-        applyTheme();
-        document.addEventListener('astro:after-swap', applyTheme);
+        function applyPrefs() {
+          var p = readPrefs();
+          var root = document.documentElement;
+          if (p.theme === 'system') root.removeAttribute('data-theme');
+          else root.setAttribute('data-theme', p.theme);
+          root.setAttribute('data-density', p.density);
+          root.setAttribute('data-sidebar', p.sidebar);
+        }
+        applyPrefs();
+        document.addEventListener('astro:after-swap', applyPrefs);
       })();
     </script>
     <style is:global>
@@ -88,735 +115,12 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         font-style: normal;
         font-display: swap;
       }
-      :root {
-        --bg: #ffffff;
-        --surface: #f8fafc;
-        --text: #111827;
-        --text-strong: #030712;
-        --text-muted: #6b7280;
-        --border: #e2e8f0;
-        --nav-bg: #ffffff;
-        --accent: #4f46e5;
-        --on-accent: #fff;
-        /* Layout */
-        --sidebar-width: 220px;
-        --sidebar-width-collapsed: 56px;
-        --topbar-height: 56px;
-        /* Elevation. Named --elevation-sm rather than --shadow-sm because Tailwind v4 emits
-           its own theme as real custom properties on :root, and global.css loads after this
-           block — so an app token sharing a Tailwind namespace loses the cascade silently
-           (PROJ-302). Dark mode was unaffected, since [data-theme] outranks :root, which is
-           exactly what would have made it hard to spot. */
-        --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
-        /* Priority badge tokens (light) */
-        --priority-urgent-text: #dc2626;
-        --priority-urgent-bg: rgba(220, 38, 38, 0.15);
-        --priority-high-text: #d97706;
-        --priority-high-bg: rgba(217, 119, 6, 0.15);
-        --priority-medium-text: #4f46e5;
-        --priority-medium-bg: rgba(79, 70, 229, 0.12);
-        --priority-low-text: #6b7280;
-        --priority-low-bg: rgba(107, 114, 128, 0.12);
-        --priority-none-text: var(--priority-low-text);
-        --priority-none-bg: var(--priority-low-bg);
-        /* Priority solid pill tokens - filled swatches (e.g. filter pills) under fixed white
-           (--on-accent) text, not text-on-surface. Intentionally identical across all four
-           theme blocks: unlike the translucent tint tokens above (retuned lighter/higher-alpha
-           for dark mode since they sit under token-colored text), these are opaque brand fills
-           with fixed-color text on top, so lightening them for dark mode would move the fill
-           toward the white text and tank contrast. */
-        --priority-urgent-solid: #dc2626;
-        --priority-high-solid: #d97706;
-        --priority-medium-solid: #2563eb;
-        --priority-low-solid: #6b7280;
-        /* Code tokens (light) - dark text on clearly-distinct slate-200 bg */
-        --code-color: #1e293b;
-        --code-bg: #dde3ea;
-        /* Epic badge tokens (light) - violet-700 on near-white bg */
-        --epic-text: #7c3aed;
-        --epic-bg: rgba(124, 58, 237, 0.10);
-        --epic-border: rgba(124, 58, 237, 0.30);
-        /* Status category tokens (light) */
-        --status-todo: #6b7280;
-        --status-in-progress: #4f46e5;
-        --status-in-review: #7c3aed;
-        --status-done: #16a34a;
-        --status-cancelled: #dc2626;
-        /* Sprint status badge tokens (light) */
-        --sprint-active-bg: rgba(37, 99, 235, 0.12);
-        --sprint-active-border: rgba(37, 99, 235, 0.3);
-        --sprint-completed-bg: rgba(22, 163, 74, 0.12);
-        --sprint-completed-border: rgba(22, 163, 74, 0.3);
-        --status-done-bg: rgba(22, 163, 74, 0.12);
-        /* Danger action tokens (light) */
-        --danger-text: #dc2626;
-        --danger-bg: rgba(220, 38, 38, 0.10);
-        --danger-border: rgba(220, 38, 38, 0.30);
-        /* Warning banner tokens (light) */
-        --warning-bg: rgba(251, 191, 36, 0.12);
-        --warning-border: rgba(251, 191, 36, 0.5);
-        /* Success banner tokens (light) */
-        --success-bg: rgba(22, 163, 74, 0.06);
-        --success-border: rgba(22, 163, 74, 0.3);
-        /* Board dropzone token (light) */
-        --dropzone-bg: rgba(37, 99, 235, 0.04);
-        /* Sprint notice banner tokens (light) */
-        --sprint-notice-bg: rgba(37, 99, 235, 0.08);
-        --sprint-notice-border: rgba(37, 99, 235, 0.25);
-        /* Velocity chart bar-track token (light) */
-        --velocity-bar-bg: rgba(37, 99, 235, 0.15);
-        /* Chart series tokens (light) - metrics dashboard */
-        --chart-secondary: #d97706;
-        --chart-seq-1: #86b6ef;
-        --chart-seq-2: #5598e7;
-        --chart-seq-3: #2a78d6;
-        --chart-seq-4: #1c5cab;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root {
-          /* Cool near-black base with one clear step up to surface (Linear/Vercel feel) */
-          --bg: #0d1117;
-          --surface: #1a1f2e;
-          --text: #f3f5f9;
-          --text-strong: #ffffff;
-          --text-muted: #94a3b8;     /* slate-400 - ~7.4:1 on --bg, passes WCAG AA */
-          --border: #2a3242;
-          --nav-bg: #12161f;          /* sits between bg and surface */
-          --accent: #6366f1;          /* indigo-500 - distinctive on dark */
-          --on-accent: #fff;
-          --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
-          /* Priority badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
-          --priority-urgent-text: #fca5a5;
-          --priority-urgent-bg: rgba(248, 113, 113, 0.18);
-          --priority-high-text: #fcd34d;
-          --priority-high-bg: rgba(251, 191, 36, 0.18);
-          --priority-medium-text: #a5b4fc;   /* indigo-300 - aligns with accent */
-          --priority-medium-bg: rgba(129, 140, 248, 0.18);
-          --priority-low-text: #cbd5e1;
-          --priority-low-bg: rgba(148, 163, 184, 0.18);
-          /* Priority solid pill tokens - kept identical to :root (see comment there); not
-             retuned for dark mode since these are opaque fills under fixed white text */
-          --priority-urgent-solid: #dc2626;
-          --priority-high-solid: #d97706;
-          --priority-medium-solid: #2563eb;
-          --priority-low-solid: #6b7280;
-          /* Code tokens (dark) - light text on slightly deeper slate bg */
-          --code-color: #e2e8f0;
-          --code-bg: #141b2b;
-          /* Epic badge tokens (dark) - violet-300 on near-black bg */
-          --epic-text: #c4b5fd;
-          --epic-bg: rgba(196, 181, 253, 0.15);
-          --epic-border: rgba(196, 181, 253, 0.30);
-          /* Status category tokens (dark) */
-          --status-todo: #94a3b8;
-          --status-in-progress: #818cf8;
-          --status-in-review: #c4b5fd;
-          --status-done: #4ade80;
-          --status-cancelled: #f87171;
-          /* Sprint status badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
-          --sprint-active-bg: rgba(129, 140, 248, 0.18);
-          --sprint-active-border: rgba(129, 140, 248, 0.4);
-          --sprint-completed-bg: rgba(74, 222, 128, 0.18);
-          --sprint-completed-border: rgba(74, 222, 128, 0.4);
-          --status-done-bg: rgba(74, 222, 128, 0.18);
-          /* Danger action tokens (dark) - brighter red stays readable on near-black */
-          --danger-text: #f87171;
-          --danger-bg: rgba(248, 113, 113, 0.12);
-          --danger-border: rgba(248, 113, 113, 0.32);
-          /* Warning banner tokens (dark) - lighter amber tint at higher alpha */
-          --warning-bg: rgba(252, 211, 77, 0.18);
-          --warning-border: rgba(252, 211, 77, 0.55);
-          /* Success banner tokens (dark) - lighter green tint at higher alpha */
-          --success-bg: rgba(74, 222, 128, 0.12);
-          --success-border: rgba(74, 222, 128, 0.4);
-          /* Board dropzone token (dark) - lighter indigo tint at higher alpha */
-          --dropzone-bg: rgba(129, 140, 248, 0.08);
-          /* Sprint notice banner tokens (dark) - lighter indigo tint at higher alpha */
-          --sprint-notice-bg: rgba(129, 140, 248, 0.12);
-          --sprint-notice-border: rgba(129, 140, 248, 0.35);
-          /* Velocity chart bar-track token (dark) - lighter indigo tint at higher alpha */
-          --velocity-bar-bg: rgba(129, 140, 248, 0.20);
-          /* Chart series tokens (dark) - metrics dashboard */
-          --chart-secondary: #d97706;
-          --chart-seq-1: #bcd7f7;
-          --chart-seq-2: #8ab8f0;
-          --chart-seq-3: #5a94e4;
-          --chart-seq-4: #3a72c8;
-        }
-      }
-      [data-theme='dark'] {
-        --bg: #0d1117;
-        --surface: #1a1f2e;
-        --text: #f3f5f9;
-        --text-strong: #ffffff;
-        --text-muted: #94a3b8;
-        --border: #2a3242;
-        --nav-bg: #12161f;
-        --accent: #6366f1;
-        --on-accent: #fff;
-        --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
-        --priority-urgent-text: #fca5a5;
-        --priority-urgent-bg: rgba(248, 113, 113, 0.18);
-        --priority-high-text: #fcd34d;
-        --priority-high-bg: rgba(251, 191, 36, 0.18);
-        --priority-medium-text: #a5b4fc;
-        --priority-medium-bg: rgba(129, 140, 248, 0.18);
-        --priority-low-text: #cbd5e1;
-        --priority-low-bg: rgba(148, 163, 184, 0.18);
-        --priority-urgent-solid: #dc2626;
-        --priority-high-solid: #d97706;
-        --priority-medium-solid: #2563eb;
-        --priority-low-solid: #6b7280;
-        --code-color: #e2e8f0;
-        --code-bg: #141b2b;
-        --epic-text: #c4b5fd;
-        --epic-bg: rgba(196, 181, 253, 0.15);
-        --epic-border: rgba(196, 181, 253, 0.30);
-        --status-todo: #94a3b8;
-        --status-in-progress: #818cf8;
-        --status-in-review: #c4b5fd;
-        --status-done: #4ade80;
-        --status-cancelled: #f87171;
-        --sprint-active-bg: rgba(129, 140, 248, 0.18);
-        --sprint-active-border: rgba(129, 140, 248, 0.4);
-        --sprint-completed-bg: rgba(74, 222, 128, 0.18);
-        --sprint-completed-border: rgba(74, 222, 128, 0.4);
-        --status-done-bg: rgba(74, 222, 128, 0.18);
-        --danger-text: #f87171;
-        --danger-bg: rgba(248, 113, 113, 0.12);
-        --danger-border: rgba(248, 113, 113, 0.32);
-        --warning-bg: rgba(252, 211, 77, 0.18);
-        --warning-border: rgba(252, 211, 77, 0.55);
-        --success-bg: rgba(74, 222, 128, 0.12);
-        --success-border: rgba(74, 222, 128, 0.4);
-        --dropzone-bg: rgba(129, 140, 248, 0.08);
-        --sprint-notice-bg: rgba(129, 140, 248, 0.12);
-        --sprint-notice-border: rgba(129, 140, 248, 0.35);
-        --velocity-bar-bg: rgba(129, 140, 248, 0.20);
-        --chart-secondary: #d97706;
-        --chart-seq-1: #bcd7f7;
-        --chart-seq-2: #8ab8f0;
-        --chart-seq-3: #5a94e4;
-        --chart-seq-4: #3a72c8;
-      }
-      [data-theme='light'] {
-        --bg: #ffffff;
-        --surface: #f8fafc;
-        --text: #111827;
-        --text-strong: #030712;
-        --text-muted: #6b7280;
-        --border: #e2e8f0;
-        --nav-bg: #ffffff;
-        --accent: #4f46e5;
-        --on-accent: #fff;
-        --priority-urgent-text: #dc2626;
-        --priority-urgent-bg: rgba(220, 38, 38, 0.15);
-        --priority-high-text: #d97706;
-        --priority-high-bg: rgba(217, 119, 6, 0.15);
-        --priority-medium-text: #4f46e5;
-        --priority-medium-bg: rgba(79, 70, 229, 0.12);
-        --priority-low-text: #6b7280;
-        --priority-low-bg: rgba(107, 114, 128, 0.12);
-        --priority-urgent-solid: #dc2626;
-        --priority-high-solid: #d97706;
-        --priority-medium-solid: #2563eb;
-        --priority-low-solid: #6b7280;
-        --code-color: #1e293b;
-        --code-bg: #dde3ea;
-        --epic-text: #7c3aed;
-        --epic-bg: rgba(124, 58, 237, 0.10);
-        --epic-border: rgba(124, 58, 237, 0.30);
-        --status-todo: #6b7280;
-        --status-in-progress: #4f46e5;
-        --status-in-review: #7c3aed;
-        --status-done: #16a34a;
-        --status-cancelled: #dc2626;
-        --sprint-active-bg: rgba(37, 99, 235, 0.12);
-        --sprint-active-border: rgba(37, 99, 235, 0.3);
-        --sprint-completed-bg: rgba(22, 163, 74, 0.12);
-        --sprint-completed-border: rgba(22, 163, 74, 0.3);
-        --status-done-bg: rgba(22, 163, 74, 0.12);
-        --danger-text: #dc2626;
-        --danger-bg: rgba(220, 38, 38, 0.10);
-        --danger-border: rgba(220, 38, 38, 0.30);
-        --warning-bg: rgba(251, 191, 36, 0.12);
-        --warning-border: rgba(251, 191, 36, 0.5);
-        --success-bg: rgba(22, 163, 74, 0.06);
-        --success-border: rgba(22, 163, 74, 0.3);
-        --dropzone-bg: rgba(37, 99, 235, 0.04);
-        --sprint-notice-bg: rgba(37, 99, 235, 0.08);
-        --sprint-notice-border: rgba(37, 99, 235, 0.25);
-        --velocity-bar-bg: rgba(37, 99, 235, 0.15);
-        --chart-secondary: #d97706;
-        --chart-seq-1: #86b6ef;
-        --chart-seq-2: #5598e7;
-        --chart-seq-3: #2a78d6;
-        --chart-seq-4: #1c5cab;
-      }
-      *, *::before, *::after { box-sizing: border-box; }
-      body {
-        margin: 0;
-        background: var(--bg);
-        color: var(--text);
-        font-family: 'Monaspace Neon', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
-        line-height: 1.5;
-        -webkit-font-smoothing: antialiased;
-        text-rendering: optimizeLegibility;
-        overflow-x: hidden; /* guard against accidental horizontal overflow on mobile */
-      }
-      /* Kill the 300ms tap delay on interactive elements */
-      a, button, [role="button"], input, select, textarea, summary, label {
-        touch-action: manipulation;
-      }
-      h1, h2, h3, h4 { letter-spacing: -0.01em; }
-
-      /* ── Shared button utility ─────────────────────────────────────── */
-      .btn {
-        display: inline-flex; align-items: center; gap: 0.375rem;
-        padding: 0.375rem 0.75rem; border-radius: 4px;
-        font-size: 0.875rem; font-weight: 500; line-height: 1.25;
-        cursor: pointer; border: 1px solid transparent;
-        white-space: nowrap; text-decoration: none;
-        transition: opacity 0.1s;
-      }
-      .btn:hover:not(:disabled) { opacity: 0.82; }
-      .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-      .btn-primary { background: var(--accent); color: var(--on-accent); }
-      .btn-outline { background: var(--bg); border-color: var(--border); color: var(--text); }
-      .btn-danger  { background: var(--danger-bg); border-color: var(--danger-border); color: var(--danger-text); }
-      .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.8rem; }
-
-      /* ── Shared badge utility ──────────────────────────────────────── */
-      .badge {
-        display: inline-flex; align-items: center;
-        padding: 0.125rem 0.5rem; border-radius: 4px;
-        font-size: 0.75rem; font-weight: 500; white-space: nowrap;
-      }
-      /* ── Page padding utility (responsive) ─────────────────────────── */
-      .page-container { padding: 2rem; }
-      @media (max-width: 640px) { .page-container { padding: 1rem; } }
-
-      /* ── App shell: fixed left sidebar + offset main ───────────────── */
-      .app-shell { min-height: 100vh; }
-      .sidebar {
-        position: fixed;
-        top: 0;
-        left: 0;
-        bottom: 0;
-        width: var(--sidebar-width);
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
-        padding: calc(1rem + var(--topbar-height)) 0.75rem 1rem;
-        background: var(--nav-bg);
-        border-right: 1px solid var(--border);
-        z-index: 100;
-        overflow-y: auto;
-      }
-      .app-main {
-        margin-left: var(--sidebar-width);
-        min-width: 0;
-        padding-top: var(--topbar-height);
-      }
-      .topbar-brand {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        text-decoration: none;
-        color: var(--text);
-        font-weight: 700;
-        font-size: 1.0625rem;
-        letter-spacing: -0.02em;
-      }
-      .topbar-brand .brand-mark {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.75rem;
-        height: 1.75rem;
-        flex-shrink: 0;
-        border-radius: 6px;
-        background: var(--accent);
-        color: var(--on-accent);
-        font-size: 0.95rem;
-        font-weight: 700;
-      }
-      .sidebar-section-label {
-        padding: 0.5rem 0.5rem 0.25rem;
-        font-size: 0.6875rem;
-        font-weight: 600;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--text-muted);
-      }
-      .sidebar-nav {
-        display: flex;
-        flex-direction: column;
-        gap: 0.125rem;
-      }
-      .sidebar-link-row {
-        display: flex;
-        align-items: center;
-        gap: 0.25rem;
-      }
-      .sidebar-link {
-        display: flex;
-        align-items: center;
-        gap: 0.625rem;
-        padding: 0.5rem 0.625rem;
-        border-radius: 6px;
-        color: var(--text-muted);
-        text-decoration: none;
-        font-size: 0.875rem;
-        font-weight: 500;
-        line-height: 1.25;
-        flex: 1;
-        min-width: 0;
-        transition: background 0.1s, color 0.1s;
-      }
-      .sidebar-link svg { flex-shrink: 0; }
-      .sidebar-link:hover { background: var(--surface); color: var(--text); }
-      .sidebar-link.active { background: var(--accent); color: var(--on-accent); }
-      .sidebar-link .link-label { white-space: nowrap; }
-      .sidebar-spacer { flex: 1; }
-      .sidebar-footer {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding-top: 0.5rem;
-        border-top: 1px solid var(--border);
-      }
-      .theme-toggle {
-        background: none;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 0.375rem 0.5rem;
-        cursor: pointer;
-        font-size: 1rem;
-        color: var(--text-muted);
-        line-height: 1;
-      }
-      .theme-toggle:hover { color: var(--text); }
-
-      .sidebar-version {
-        padding: 0.375rem 0.5rem 0;
-        font-size: 0.6875rem;
-        color: var(--text-muted);
-        user-select: none;
-      }
-
-      /* ── App top bar: brand, hamburger (mobile only), account menu ────── */
-      .app-topbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.5rem;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: var(--topbar-height);
-        padding: 0 0.75rem;
-        background: var(--nav-bg);
-        border-bottom: 1px solid var(--border);
-        z-index: 110;
-        transition: transform 0.2s ease;
-      }
-      .app-topbar.topbar-hidden { transform: translateY(-100%); }
-      .app-topbar-start {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        min-width: 0;
-      }
-      .hamburger {
-        display: none;
-        align-items: center;
-        justify-content: center;
-        width: 44px;
-        height: 44px;
-        flex-shrink: 0;
-        border: none;
-        background: none;
-        color: var(--text);
-        cursor: pointer;
-        border-radius: 8px;
-      }
-      .hamburger:hover { background: var(--surface); }
-      .hamburger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      .drawer-overlay { display: none; }
-
-      @media (max-width: 640px) {
-        .hamburger { display: inline-flex; }
-
-        /* Sidebar becomes an off-canvas drawer */
-        .sidebar {
-          width: min(82vw, 280px);
-          transform: translateX(-100%);
-          transition: transform 0.22s ease;
-          padding: calc(1rem + var(--topbar-height)) 0.875rem 1rem;
-          box-shadow: none;
-        }
-        .app-shell.drawer-open .sidebar {
-          transform: translateX(0);
-          box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
-        }
-
-        /* Dim + capture taps behind the drawer */
-        .drawer-overlay {
-          display: block;
-          position: fixed;
-          inset: 0;
-          background: rgba(0, 0, 0, 0.45);
-          opacity: 0;
-          pointer-events: none;
-          transition: opacity 0.22s ease;
-          z-index: 99;
-        }
-        .app-shell.drawer-open .drawer-overlay {
-          opacity: 1;
-          pointer-events: auto;
-        }
-
-        /* Content fills the width; sidebar's own margin collapses too */
-        .app-main { margin-left: 0; }
-
-        /* Roomier tap targets inside the drawer */
-        .sidebar-link { padding: 0.6875rem 0.75rem; }
-        .theme-toggle { padding: 0.5rem 0.625rem; min-height: 44px; }
-
-        /* iOS Safari auto-zooms the page on focus of any form control rendered
-           below 16px; forcing 16px here (PROJ-304) prevents that zoom-in. */
-        input, textarea, select {
-          font-size: 16px;
-        }
-
-        /* PROJ-397: the hand-rolled Select (islands/Select.tsx) shrink-wraps to
-           its label by default, producing a ragged, uneven grid when several
-           sit in a wrapping toolbar. Full-width + stacked (each forces its own
-           line inside the toolbar's flex-wrap row) reads as a tidy list. */
-        .select { width: 100%; }
-        .select-button { width: 100%; justify-content: space-between; }
-      }
-
-      /* ── Custom Select (islands) ───────────────────────────────────── */
-      .select { position: relative; display: inline-block; }
-      .select-button {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.375rem;
-        padding: 0.25rem 0.5rem;
-        border: 1px solid var(--border);
-        border-radius: 4px;
-        background: var(--bg);
-        color: var(--text);
-        font: inherit;
-        font-size: 0.875rem;
-        line-height: 1.25;
-        cursor: pointer;
-        white-space: nowrap;
-        transition: border-color 0.1s;
-      }
-      .select-button:hover:not(:disabled) { border-color: var(--text-muted); }
-      .select-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-      .select-button:disabled { opacity: 0.6; cursor: wait; }
-      .select-caret { font-size: 0.625rem; opacity: 0.6; margin-left: auto; }
-      .select-menu {
-        position: absolute;
-        z-index: 200;
-        top: calc(100% + 4px);
-        left: 0;
-        min-width: 100%;
-        max-height: 16rem;
-        overflow-y: auto;
-        padding: 0.25rem;
-        margin: 0;
-        list-style: none;
-        background: var(--bg);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        box-shadow: var(--elevation-sm);
-      }
-      .select-option {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.375rem 0.5rem;
-        border-radius: 4px;
-        font-size: 0.875rem;
-        color: var(--text);
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      .select-option:hover,
-      .select-option.highlighted { background: var(--surface); }
-      .select-option[data-selected="true"] { font-weight: 600; }
-      .select-option[data-selected="true"]::after {
-        content: "✓";
-        margin-left: auto;
-        font-size: 0.75rem;
-        color: var(--accent);
-      }
-
-      /* CD-294: phone-sized Select menu. A fixed menu anchored under its trigger
-         can't survive iOS Safari's chrome/keyboard resizing the visual viewport,
-         and one opened low on the screen extends past the fold with no way to
-         scroll it into view. Below this breakpoint it becomes a bottom-anchored
-         sheet instead, and Select.tsx omits its inline coordinates so these rules
-         own the position (inline styles beat class rules at any specificity).
-         Must stay AFTER the base `.select-*` rules above: equal specificity, so
-         source order decides. Extends the PROJ-397 mobile `.select` block. */
-      @media (max-width: 640px) {
-        .select-menu {
-          position: fixed;
-          top: auto;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          width: 100%;
-          min-width: 0;
-          max-height: 50dvh;
-          overscroll-behavior: contain;
-          border-radius: 10px 10px 0 0;
-          padding-bottom: max(0.25rem, env(safe-area-inset-bottom));
-        }
-        /* 44px minimum touch target, matching .hamburger/.theme-toggle above. */
-        .select-option { min-height: 44px; }
-        .select-button { min-height: 44px; }
-      }
-
-      /* ── Metric help (islands) ─────────────────────────────────────── */
-      .metric-help { position: relative; display: inline-flex; }
-      .metric-help-trigger {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1rem;
-        height: 1rem;
-        padding: 0;
-        border: none;
-        background: none;
-        color: var(--text-muted);
-        font-size: 0.85rem;
-        line-height: 1;
-        cursor: pointer;
-      }
-      .metric-help-trigger:hover { color: var(--text); }
-      .metric-help-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-      /* ── Shared popover primitive (islands/ui/Popover) ────────────────── */
-      .popover {
-        background: var(--bg);
-        border: 1px solid var(--border);
-        box-shadow: var(--elevation-sm);
-        z-index: 200;
-      }
-      .popover-metric-help {
-        position: absolute;
-        top: calc(100% + 4px);
-        left: 0;
-        width: 16rem;
-        max-width: min(16rem, 80vw);
-        padding: 0.625rem 0.75rem;
-        border-radius: 6px;
-        font-weight: normal;
-        text-transform: none;
-        letter-spacing: normal;
-      }
-      .popover-account-menu {
-        width: 14rem;
-        max-width: min(14rem, 85vw);
-        border-radius: 8px;
-        padding: 0.375rem;
-        font-size: 0.875rem;
-      }
-
-      /* ── Account menu (island) ─────────────────────────────────────── */
-      .account-menu { position: relative; display: inline-flex; }
-      .account-menu-trigger {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.25rem 0.625rem 0.25rem 0.25rem;
-        border: 1px solid var(--border);
-        border-radius: 999px;
-        background: none;
-        color: var(--text);
-        font: inherit;
-        font-size: 0.8125rem;
-        font-weight: 500;
-        cursor: pointer;
-        line-height: 1;
-      }
-      .account-menu-trigger:hover { background: var(--surface); }
-      .account-menu-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      .account-menu-trigger:disabled { cursor: default; opacity: 0.6; }
-      .account-menu-avatar {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 1.5rem;
-        height: 1.5rem;
-        border-radius: 50%;
-        background: var(--accent);
-        color: var(--on-accent);
-        font-size: 0.6875rem;
-        font-weight: 700;
-        flex-shrink: 0;
-      }
-      .account-menu-name {
-        white-space: nowrap;
-        max-width: 9rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .account-menu-caret { font-size: 0.625rem; opacity: 0.6; }
-      .account-menu-login {
-        display: inline-flex;
-        align-items: center;
-        padding: 0.375rem 0.75rem;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--text-muted);
-        text-decoration: none;
-        font-size: 0.8125rem;
-      }
-      .account-menu-login:hover { color: var(--text); }
-      .account-menu-popover {
-        z-index: 200;
-        background: var(--bg);
-        border: 1px solid var(--border);
-        box-shadow: var(--elevation-sm);
-        width: 14rem;
-        max-width: min(14rem, 85vw);
-        border-radius: 8px;
-        padding: 0.375rem;
-        font-size: 0.875rem;
-      }
-      .account-menu-identity {
-        padding: 0.375rem 0.5rem 0.5rem;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: 0.25rem;
-      }
-      .account-menu-identity-name { font-weight: 600; color: var(--text); }
-      .account-menu-identity-email {
-        font-size: 0.75rem;
-        color: var(--text-muted);
-        overflow-wrap: break-word;
-      }
-      .account-menu-item {
-        display: block;
-        padding: 0.5rem 0.5rem;
-        border-radius: 6px;
-        color: var(--text);
-        text-decoration: none;
-        font-size: 0.8125rem;
-      }
-      .account-menu-item:hover { background: var(--surface); }
-      .account-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-
-      @media (max-width: 640px) {
-        .account-menu-name { display: none; }
+      @font-face {
+        font-family: 'IBM Plex Sans Var';
+        src: url('/fonts/IBMPlexSans-Variable.woff2') format('woff2-variations');
+        font-weight: 100 700;
+        font-style: normal;
+        font-display: swap;
       }
     </style>
   </head>
@@ -836,7 +140,7 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
           </button>
           <a href="/" class="topbar-brand">
             <span class="brand-mark">P</span>
-            <span>Projektor</span>
+            <span class="brand-name">Projektor</span>
           </a>
         </div>
         <AccountMenu client:load />
@@ -852,17 +156,18 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
                 href={item.href}
                 class:list={['sidebar-link', { active: isActive(item.href) }]}
                 aria-current={isActive(item.href) ? 'page' : undefined}
+                aria-label={item.label}
               >
-                {item.label === 'Projects' && (
+                {item.icon === 'projects' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
                 )}
-                {item.label === 'My Issues' && (
+                {item.icon === 'my-issues' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
                 )}
-                {item.label === 'Groups' && (
+                {item.icon === 'groups' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                 )}
-                {item.label === 'Tokens' && (
+                {item.icon === 'tokens' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                 )}
                 <span class="link-label">{item.label}</span>
@@ -875,8 +180,15 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         <div class="sidebar-spacer"></div>
 
         <div class="sidebar-footer">
-          <a href="/help" class="theme-toggle" aria-label="Help — glossary of terms" title="Help">?</a>
-          <button class="theme-toggle" aria-label="Toggle colour scheme">🌙</button>
+          <a href="/help" class="theme-toggle" aria-label="Help — glossary of terms" title="Help">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </a>
+          <button class="theme-toggle" type="button" aria-label="Theme">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </button>
+          <button class="theme-toggle sidebar-collapse-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true" aria-controls="app-sidebar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="10" y1="4" x2="10" y2="20"/></svg>
+          </button>
         </div>
         <div class="sidebar-version">v{appVersion}</div>
       </aside>
@@ -934,32 +246,92 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
     </script>
     <script is:inline>
       (function () {
-        function updateThemeIcon(themeBtn) {
-          if (!themeBtn) return;
+        var ORDER = ['system', 'light', 'dark'];
+        var LABELS = { system: 'System', light: 'Light', dark: 'Dark' };
+        var ICONS = {
+          system: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+          light: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+          dark: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
+        };
+
+        function getCurrentState() {
           var t = document.documentElement.getAttribute('data-theme');
-          var isDark = t === 'dark' ||
-            (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          themeBtn.textContent = isDark ? '☀️' : '🌙';
-          themeBtn.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+          return t === 'dark' || t === 'light' ? t : 'system';
+        }
+
+        function updateThemeIcon(themeBtn, state) {
+          if (!themeBtn) return;
+          var svg = themeBtn.querySelector('svg');
+          if (svg) svg.innerHTML = ICONS[state];
+          var next = ORDER[(ORDER.indexOf(state) + 1) % ORDER.length];
+          themeBtn.setAttribute('aria-label', 'Theme: ' + LABELS[state] + ' — switch to ' + LABELS[next]);
         }
 
         function bindThemeToggle() {
           var themeBtn = document.querySelector('button.theme-toggle');
           if (!themeBtn) return;
-          updateThemeIcon(themeBtn);
+          updateThemeIcon(themeBtn, getCurrentState());
           themeBtn.addEventListener('click', function () {
-            var cur = document.documentElement.getAttribute('data-theme');
-            var isDark = cur === 'dark' ||
-              (!cur && window.matchMedia('(prefers-color-scheme: dark)').matches);
-            var next = isDark ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', next);
-            try { localStorage.setItem('theme', next); } catch (e) {} // safe-ls: cosmetic only
-            updateThemeIcon(themeBtn);
+            var next = ORDER[(ORDER.indexOf(getCurrentState()) + 1) % ORDER.length];
+            try {
+              var raw = localStorage.getItem('prefs');
+              var parsed = raw ? JSON.parse(raw) : null;
+              var p = (parsed && typeof parsed === 'object') ? parsed : {};
+              p.theme = next;
+              if (p.density !== 'compact') p.density = 'comfortable';
+              if (p.sidebar !== 'collapsed') p.sidebar = 'expanded';
+              localStorage.setItem('prefs', JSON.stringify(p));
+              localStorage.removeItem('theme');
+            } catch (e) {} // safe-ls: cosmetic only
+            if (next === 'system') document.documentElement.removeAttribute('data-theme');
+            else document.documentElement.setAttribute('data-theme', next);
+            updateThemeIcon(themeBtn, next);
           });
         }
 
         document.addEventListener('astro:page-load', bindThemeToggle);
       })();
+    </script>
+    <script is:inline>
+      (function () {
+        function isCollapsed() {
+          return document.documentElement.getAttribute('data-sidebar') === 'collapsed';
+        }
+        function updateCollapseToggle(btn, collapsed) {
+          if (!btn) return;
+          btn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+          btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        }
+        function bindSidebarCollapseToggle() {
+          var btn = document.querySelector('.sidebar-collapse-toggle');
+          if (!btn) return;
+          updateCollapseToggle(btn, isCollapsed());
+          btn.addEventListener('click', function () {
+            var next = isCollapsed() ? 'expanded' : 'collapsed';
+            try {
+              var raw = localStorage.getItem('prefs');
+              var parsed = raw ? JSON.parse(raw) : null;
+              var p = (parsed && typeof parsed === 'object') ? parsed : {};
+              p.sidebar = next;
+              if (p.theme !== 'dark' && p.theme !== 'light') {
+                var domTheme = document.documentElement.getAttribute('data-theme');
+                p.theme = (domTheme === 'dark' || domTheme === 'light') ? domTheme : 'system';
+              }
+              if (p.density !== 'compact') p.density = 'comfortable';
+              localStorage.setItem('prefs', JSON.stringify(p));
+              localStorage.removeItem('theme');
+            } catch (e) {} // safe-ls: cosmetic only
+            document.documentElement.setAttribute('data-sidebar', next);
+            updateCollapseToggle(btn, next === 'collapsed');
+          });
+        }
+        document.addEventListener('astro:page-load', bindSidebarCollapseToggle);
+      })();
+    </script>
+    <script>
+      import { applyBrand, applyCachedBrand } from '../utils/brand';
+      document.addEventListener('astro:after-swap', applyCachedBrand);
+      document.addEventListener('astro:page-load', () => applyBrand());
     </script>
     <!-- PROJ-428: hide the top bar on scroll-down, reveal on scroll-up, so it
          doesn't permanently eat vertical space on long pages. Suppressed while

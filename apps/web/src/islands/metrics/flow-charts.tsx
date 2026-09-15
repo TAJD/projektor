@@ -50,10 +50,10 @@ export function formatFullDate(iso: string): string {
 // read from the --chart-seq-* tokens (Base.astro) so the ramp repaints on theme toggle.
 export function readChartSeqColors() {
 	return {
-		backlogTodo: readThemeColor("--chart-seq-1", "#86b6ef"),
-		inProgress: readThemeColor("--chart-seq-2", "#5598e7"),
-		inReview: readThemeColor("--chart-seq-3", "#2a78d6"),
-		done: readThemeColor("--chart-seq-4", "#1c5cab"),
+		backlogTodo: readThemeColor("--chart-seq-1", "#94c2c8"),
+		inProgress: readThemeColor("--chart-seq-2", "#54a1aa"),
+		inReview: readThemeColor("--chart-seq-3", "#007a87"),
+		done: readThemeColor("--chart-seq-4", "#005963"),
 	};
 }
 
@@ -82,7 +82,7 @@ export function ThroughputChart({ data }: { data: ThroughputPoint[] }) {
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			const accent = readThemeColor("--accent", "#4f46e5");
+			const accent = readThemeColor("--accent", "#007a87");
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 

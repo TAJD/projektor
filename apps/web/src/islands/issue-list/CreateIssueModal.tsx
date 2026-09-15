@@ -170,7 +170,7 @@ export default function CreateIssueModal(props: CreateIssueModalProps) {
 				<form onSubmit={submitCreate} class="flex flex-col flex-1 min-h-0">
 					<div class="flex-1 min-h-0 overflow-y-auto overscroll-contain px-6">
 						{createError && (
-							<p role="alert" class="text-[var(--danger-text)] mb-3 text-sm">
+							<p role="alert" class="text-danger-text mb-3 text-sm">
 								{createError}
 							</p>
 						)}

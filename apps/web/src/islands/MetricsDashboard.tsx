@@ -372,7 +372,7 @@ function BugShareChart({
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			const accent = readThemeColor("--accent", "#4f46e5");
+			const accent = readThemeColor("--accent", "#007a87");
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
@@ -428,7 +428,7 @@ function ReviewLatencyChart({ data }: { data: FlowMetrics["reviewLatencyOverTime
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			const accent = readThemeColor("--accent", "#4f46e5");
+			const accent = readThemeColor("--accent", "#007a87");
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
@@ -482,7 +482,7 @@ function WipChart({ data }: { data: FlowMetrics["wipOverTime"] }) {
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			const accent = readThemeColor("--accent", "#4f46e5");
+			const accent = readThemeColor("--accent", "#007a87");
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
 
@@ -539,7 +539,7 @@ function ArrivalVsCompletionChart({ data }: { data: FlowMetrics["arrivalVsComple
 
 	const buildOptions = useMemo(() => {
 		return (width: number, height: number): uPlot.Options => {
-			const accent = readThemeColor("--accent", "#4f46e5");
+			const accent = readThemeColor("--accent", "#007a87");
 			const chartSecondary = readThemeColor("--chart-secondary", "#d97706");
 			const border = readThemeColor("--border", "#e2e8f0");
 			const textMuted = readThemeColor("--text-muted", "#6b7280");
@@ -851,7 +851,7 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 
 			{loading && <p aria-live="polite">Loading metrics…</p>}
 			{!loading && error && (
-				<p role="alert" class="text-[var(--danger-text)]">
+				<p role="alert" class="text-danger-text">
 					{error}
 				</p>
 			)}

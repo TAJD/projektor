@@ -66,14 +66,11 @@ function StatusPills({
 								active ? prev.filter((id) => id !== s.id) : [...prev, s.id]
 							)
 						}
+						class="py-1 px-[0.625rem] rounded-full cursor-pointer text-[0.8rem]"
 						style={{
-							padding: "0.25rem 0.625rem",
-							borderRadius: "9999px",
 							border: active ? "none" : "1px solid var(--border)",
 							background: active ? categoryColor(s.category) : "var(--bg)",
 							color: active ? "var(--on-accent)" : "var(--text)",
-							cursor: "pointer",
-							fontSize: "0.8rem",
 							fontWeight: active ? 600 : 400,
 						}}
 					>
@@ -105,16 +102,12 @@ function PriorityPills({
 						onClick={() =>
 							setFilterPriorities((prev) => (active ? prev.filter((k) => k !== p) : [...prev, p]))
 						}
+						class="py-1 px-[0.625rem] rounded-full cursor-pointer text-[0.8rem] capitalize"
 						style={{
-							padding: "0.25rem 0.625rem",
-							borderRadius: "9999px",
 							border: active ? "none" : "1px solid var(--border)",
 							background: active ? col.bg : "var(--bg)",
 							color: active ? col.text : "var(--text)",
-							cursor: "pointer",
-							fontSize: "0.8rem",
 							fontWeight: active ? 600 : 400,
-							textTransform: "capitalize" as const,
 						}}
 					>
 						{p}
@@ -229,13 +222,10 @@ function FiltersToggleButton({
 			type="button"
 			disabled={isSearchActive}
 			onClick={onToggle}
+			class="py-1 px-[0.625rem] rounded-full text-[0.8rem] transition-opacity duration-150"
 			style={{
-				padding: "0.25rem 0.625rem",
-				borderRadius: "9999px",
 				...activeStyle,
 				...searchState,
-				fontSize: "0.8rem",
-				transition: "opacity 0.15s",
 			}}
 		>
 			{activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
@@ -378,30 +368,11 @@ export default function FiltersPopover({
 			{showFiltersPopover && popoverPos && (
 				<div
 					ref={popoverRef}
+					class="fixed z-[200] bg-surface border border-border rounded-lg p-3 shadow-elevation-sm min-w-64 max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain"
 					style={{
-						position: "fixed",
 						top: `${popoverPos.top}px`,
 						left: `${popoverPos.left}px`,
-						// CD-294: 200 is the popover layer (Base.astro's `.popover`). At 100 this
-						// sat *under* the fixed topbar (110), which it can slide beneath — the
-						// coordinates are captured once on open and never track the page scroll.
-						zIndex: 200,
-						background: "var(--surface)",
-						border: "1px solid var(--border)",
-						borderRadius: "0.5rem",
-						padding: "0.75rem",
-						boxShadow: "var(--elevation-sm)",
-						minWidth: "16rem",
-						// PROJ-588 review: the left clamp assumes POPOVER_WIDTH (256px); without a
-						// matching maxWidth, content wider than that could still push the right edge
-						// past the viewport.
-						maxWidth: "calc(100vw - 16px)",
-						// PROJ-588: clamp+flip alone isn't enough on a short phone viewport where
-						// even the flipped side can't fit every field — scroll within the panel
-						// rather than letting it (or its contents) run off-screen.
 						maxHeight: `${popoverPos.maxHeight}px`,
-						overflowY: "auto",
-						overscrollBehavior: "contain",
 					}}
 				>
 					<FiltersPopoverContent

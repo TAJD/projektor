@@ -51,7 +51,7 @@ export default function FeedbackSummary({ workspaceSlug, projectId, sourceId }: 
 
 	if (error) {
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				{error}
 			</p>
 		);

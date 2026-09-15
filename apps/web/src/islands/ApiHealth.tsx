@@ -11,5 +11,5 @@ export default function ApiHealth() {
 			.then(setStatus);
 	}, []);
 
-	return <p style={{ fontSize: "0.9rem", color: "var(--text-muted)" }}>API status: {status}</p>;
+	return <p class="text-[0.9rem] text-text-muted">API status: {status}</p>;
 }

@@ -21,6 +21,14 @@ const SHARED_ISSUE = {
 	created_at: 1700000000,
 	expires_at: 1700600000,
 	customFields: [{ key: "story_points", label: "Story Points", type: "text", value: "5" }],
+	brand: {
+		displayName: null,
+		accent: null,
+		onAccent: null,
+		fontFamily: null,
+		fontUrl: null,
+		logoUrl: null,
+	},
 };
 
 function setupFetch(body: unknown = SHARED_ISSUE, ok = true, status = 200) {
@@ -158,6 +166,46 @@ describe("ShareView — mermaid hydration", () => {
 
 		await screen.findByText("Shared Bug Report");
 		expect(run).not.toHaveBeenCalled();
+	});
+});
+
+describe("ShareView — workspace branding (PROJ-762)", () => {
+	beforeEach(() => {
+		document.title = "Shared Issue — Projektor";
+	});
+
+	it("applies the workspace brand from the share response to the document", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				if (url === "/api/config/brand")
+					return Promise.resolve({
+						ok: true,
+						json: () =>
+							Promise.resolve({
+								name: "Projektor",
+								mark: "P",
+								accent: null,
+								onAccent: null,
+								logoUrl: null,
+							}),
+					});
+				return Promise.resolve({
+					ok: true,
+					status: 200,
+					json: () =>
+						Promise.resolve({
+							...SHARED_ISSUE,
+							brand: { ...SHARED_ISSUE.brand, displayName: "Acme Tracker", accent: "#ff8800" },
+						}),
+				});
+			})
+		);
+		render(<ShareView />);
+
+		await screen.findByText("Shared Bug Report");
+		await waitFor(() => expect(document.title).toBe("Shared Issue — Acme Tracker"));
+		expect(document.documentElement.style.getPropertyValue("--light-accent")).toBe("#ff8800");
 	});
 });
 

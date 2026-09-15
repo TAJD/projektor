@@ -65,17 +65,12 @@ export default function HeaderRow({
 								key={v}
 								aria-pressed={view === v}
 								onClick={() => setView(v)}
+								class="border-none py-1 px-3 cursor-pointer text-[0.8rem] capitalize transition-colors duration-100"
 								style={{
-									padding: "0.25rem 0.75rem",
-									border: "none",
 									borderRight: v !== "backlog" ? "1px solid var(--border)" : "none",
 									background: view === v ? "var(--accent)" : "var(--bg)",
 									color: view === v ? "var(--on-accent)" : "var(--text-muted)",
-									cursor: "pointer",
-									fontSize: "0.8rem",
 									fontWeight: view === v ? 600 : 400,
-									textTransform: "capitalize" as const,
-									transition: "background 0.1s, color 0.1s",
 								}}
 							>
 								{v}

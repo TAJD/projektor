@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/preact";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountMenu } from "./AccountMenu";
 
 function stubMeFetch(outcome: { ok: true; name: string; email: string } | { ok: false }) {
@@ -112,5 +112,68 @@ describe("AccountMenu — signed-in state", () => {
 		fireEvent.mouseDown(menu);
 
 		expect(screen.getByRole("menu", { name: "Account" })).toBeTruthy();
+	});
+});
+
+describe("AccountMenu — density and sidebar preferences (PROJ-760)", () => {
+	beforeEach(() => {
+		localStorage.clear();
+		document.documentElement.removeAttribute("data-density");
+		document.documentElement.removeAttribute("data-sidebar");
+	});
+
+	it("defaults to Comfortable and Expanded when no prefs are stored yet", async () => {
+		stubMeFetch({ ok: true, name: "Jane Doe", email: "jane@example.com" });
+		render(<AccountMenu />);
+		fireEvent.click(await screen.findByRole("button", { name: /Jane Doe/ }));
+
+		expect(screen.getByRole("button", { name: "Comfortable" }).getAttribute("aria-pressed")).toBe(
+			"true"
+		);
+		expect(screen.getByRole("button", { name: "Expanded" }).getAttribute("aria-pressed")).toBe(
+			"true"
+		);
+	});
+
+	it("persists Compact density and applies it to the document immediately", async () => {
+		stubMeFetch({ ok: true, name: "Jane Doe", email: "jane@example.com" });
+		render(<AccountMenu />);
+		fireEvent.click(await screen.findByRole("button", { name: /Jane Doe/ }));
+
+		fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+
+		expect(document.documentElement.getAttribute("data-density")).toBe("compact");
+		expect(JSON.parse(localStorage.getItem("prefs") ?? "{}").density).toBe("compact");
+	});
+
+	it("persists a collapsed sidebar and applies it to the document immediately", async () => {
+		stubMeFetch({ ok: true, name: "Jane Doe", email: "jane@example.com" });
+		render(<AccountMenu />);
+		fireEvent.click(await screen.findByRole("button", { name: /Jane Doe/ }));
+
+		fireEvent.click(screen.getByRole("button", { name: "Collapsed" }));
+
+		expect(document.documentElement.getAttribute("data-sidebar")).toBe("collapsed");
+		expect(JSON.parse(localStorage.getItem("prefs") ?? "{}").sidebar).toBe("collapsed");
+	});
+
+	it("preserves an existing dark theme when switching to Compact, and flips aria-pressed on the sibling button", async () => {
+		localStorage.setItem(
+			"prefs",
+			JSON.stringify({ theme: "dark", density: "comfortable", sidebar: "expanded" })
+		);
+		stubMeFetch({ ok: true, name: "Jane Doe", email: "jane@example.com" });
+		render(<AccountMenu />);
+		fireEvent.click(await screen.findByRole("button", { name: /Jane Doe/ }));
+
+		fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+
+		expect(JSON.parse(localStorage.getItem("prefs") ?? "{}").theme).toBe("dark");
+		expect(screen.getByRole("button", { name: "Compact" }).getAttribute("aria-pressed")).toBe(
+			"true"
+		);
+		expect(screen.getByRole("button", { name: "Comfortable" }).getAttribute("aria-pressed")).toBe(
+			"false"
+		);
 	});
 });

@@ -177,7 +177,7 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 
 	if (!project) {
 		return error ? (
-			<p role="alert" class="text-[var(--danger-text)] px-3 py-2 text-sm">
+			<p role="alert" class="text-danger-text px-3 py-2 text-sm">
 				{error}
 			</p>
 		) : null;
@@ -198,7 +198,7 @@ export default function ProjectNav({ workspaceSlug, pageLabel }: Props) {
 	const activeInOverflow = activeIndex !== -1 && activeIndex >= visibleCount;
 
 	return (
-		<div class="border-b border-border bg-[var(--nav-bg)]">
+		<div class="border-b border-border bg-nav-bg">
 			<div class="flex items-center gap-2 px-6 pt-3 pb-[0.375rem] max-sm:px-3 max-sm:pt-1.5 max-sm:pb-1">
 				<a href={overviewHref} class="no-underline">
 					<h2 class="m-0 text-[0.9375rem] max-sm:text-[0.8125rem] font-semibold text-text-base">

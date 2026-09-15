@@ -231,7 +231,7 @@ function DescriptionEditForm({
 				aria-label="Project description"
 			/>
 			{saveError && (
-				<p role="alert" class="text-[var(--danger-text)] text-[0.8rem] my-1">
+				<p role="alert" class="text-danger-text text-[0.8rem] my-1">
 					{saveError}
 				</p>
 			)}
@@ -450,7 +450,7 @@ export default function ProjectLanding({ workspaceSlug }: Props) {
 	if (loading) return <p aria-live="polite">Loading…</p>;
 	if (error)
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				{error}
 			</p>
 		);

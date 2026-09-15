@@ -1,3 +1,4 @@
+import type { WorkspaceBrand } from "@projektor/db";
 import { drizzle, schema } from "@projektor/db";
 import { buildMcpAddCommand } from "@projektor/types";
 import { and, asc, desc, eq } from "drizzle-orm";
@@ -7,10 +8,18 @@ import {
 	CreateWorkspaceSchema,
 	InviteMemberSchema,
 	UpdateRoleSchema,
+	UpdateWorkspaceBrandSchema,
 	UpdateWorkspaceSchema,
 } from "../schemas/workspaces";
 import { seedDefaultCustomFields } from "./custom-fields";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import {
+	ConflictError,
+	ForbiddenError,
+	NotFoundError,
+	PayloadTooLargeError,
+	UnsupportedMediaTypeError,
+	ValidationError,
+} from "./errors";
 import { seedDefaultTaskStatuses } from "./task-statuses";
 import { seedDefaultTaskTypes } from "./task-types";
 import type { ServiceCtx } from "./types";
@@ -304,7 +313,13 @@ export async function deleteWorkspace(
 		throw new ConflictError("Delete all projects before deleting the workspace");
 	}
 
+	const brand = await readBrand(ctx);
 	await orm.delete(schema.workspaces).where(eq(schema.workspaces.id, ctx.workspaceId));
+	if (brand.logoR2Key) {
+		try {
+			await ctx.r2.delete(brand.logoR2Key);
+		} catch {}
+	}
 	return { ok: true };
 }
 
@@ -330,4 +345,159 @@ export async function getWorkspaceMcpInfo(
 		workspaceSlug: workspace.slug,
 		mcpAddCommandTemplate,
 	};
+}
+
+export interface WorkspaceBrandDto {
+	displayName: string | null;
+	accent: string | null;
+	onAccent: string | null;
+	fontFamily: string | null;
+	fontUrl: string | null;
+	logoUrl: string | null;
+}
+
+function requireBrandWrite(ctx: ServiceCtx): void {
+	if (ctx.role !== "owner" && ctx.role !== "admin") throw new ForbiddenError();
+}
+
+async function readBrand(ctx: ServiceCtx): Promise<WorkspaceBrand> {
+	const orm = drizzle(ctx.db, { schema });
+	const row = await orm
+		.select({ brand: schema.workspaces.brand })
+		.from(schema.workspaces)
+		.where(eq(schema.workspaces.id, ctx.workspaceId))
+		.get();
+	return row?.brand ?? {};
+}
+
+async function writeBrand(ctx: ServiceCtx, brand: WorkspaceBrand): Promise<void> {
+	const orm = drizzle(ctx.db, { schema });
+	await orm
+		.update(schema.workspaces)
+		.set({ brand })
+		.where(eq(schema.workspaces.id, ctx.workspaceId));
+}
+
+function toBrandDto(brand: WorkspaceBrand, workspaceSlug: string): WorkspaceBrandDto {
+	return {
+		displayName: brand.displayName ?? null,
+		accent: brand.accent ?? null,
+		onAccent: brand.onAccent ?? null,
+		fontFamily: brand.fontFamily ?? null,
+		fontUrl: brand.fontUrl ?? null,
+		logoUrl: brand.logoR2Key ? `/api/workspaces/${workspaceSlug}/brand/logo` : null,
+	};
+}
+
+export async function getWorkspaceBrand(
+	ctx: ServiceCtx,
+	workspaceSlug: string
+): Promise<WorkspaceBrandDto> {
+	return toBrandDto(await readBrand(ctx), workspaceSlug);
+}
+
+export async function getWorkspaceBrandForShare(
+	db: D1Database,
+	workspaceId: string,
+	workspaceSlug: string
+): Promise<WorkspaceBrandDto> {
+	const orm = drizzle(db, { schema });
+	const row = await orm
+		.select({ brand: schema.workspaces.brand })
+		.from(schema.workspaces)
+		.where(eq(schema.workspaces.id, workspaceId))
+		.get();
+	return toBrandDto(row?.brand ?? {}, workspaceSlug);
+}
+
+export async function getWorkspaceBrandLogoR2Key(
+	db: D1Database,
+	workspaceId: string
+): Promise<string | null> {
+	const orm = drizzle(db, { schema });
+	const row = await orm
+		.select({ brand: schema.workspaces.brand })
+		.from(schema.workspaces)
+		.where(eq(schema.workspaces.id, workspaceId))
+		.get();
+	return row?.brand?.logoR2Key ?? null;
+}
+
+const BRAND_FIELDS = ["displayName", "accent", "onAccent", "fontFamily", "fontUrl"] as const;
+
+export async function updateWorkspaceBrand(
+	ctx: ServiceCtx,
+	workspaceSlug: string,
+	input: unknown
+): Promise<WorkspaceBrandDto> {
+	requireBrandWrite(ctx);
+	const parsed = UpdateWorkspaceBrandSchema.safeParse(input);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+
+	const current = await readBrand(ctx);
+	const next: WorkspaceBrand = { ...current };
+	for (const key of BRAND_FIELDS) {
+		if (!(key in parsed.data)) continue;
+		const value = parsed.data[key];
+		if (value === null || value === undefined) delete next[key];
+		else next[key] = value;
+	}
+
+	await writeBrand(ctx, next);
+	return toBrandDto(next, workspaceSlug);
+}
+
+const MAX_LOGO_SIZE = 2 * 1024 * 1024;
+const ALLOWED_LOGO_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+export async function uploadWorkspaceLogo(
+	ctx: ServiceCtx,
+	file: Readonly<{ size: number; type: string; arrayBuffer: () => Promise<ArrayBuffer> }>
+): Promise<{ ok: true }> {
+	requireBrandWrite(ctx);
+	if (file.size > MAX_LOGO_SIZE) throw new PayloadTooLargeError("Logo too large (max 2 MB)");
+	const contentType = file.type || "";
+	if (!ALLOWED_LOGO_TYPES.has(contentType)) {
+		throw new UnsupportedMediaTypeError("Logo must be PNG, JPEG or WebP");
+	}
+
+	const current = await readBrand(ctx);
+	const r2Key = `${ctx.workspaceId}/brand-logo/${crypto.randomUUID()}`;
+	await ctx.r2.put(r2Key, await file.arrayBuffer(), { httpMetadata: { contentType } });
+
+	try {
+		await writeBrand(ctx, { ...current, logoR2Key: r2Key });
+	} catch (e) {
+		await ctx.r2.delete(r2Key);
+		throw e;
+	}
+	if (current.logoR2Key) {
+		try {
+			await ctx.r2.delete(current.logoR2Key);
+		} catch {}
+	}
+
+	return { ok: true };
+}
+
+export async function deleteWorkspaceLogo(ctx: ServiceCtx): Promise<{ ok: true }> {
+	requireBrandWrite(ctx);
+	const current = await readBrand(ctx);
+	if (current.logoR2Key) {
+		const next = { ...current };
+		delete next.logoR2Key;
+		await writeBrand(ctx, next);
+		await ctx.r2.delete(current.logoR2Key);
+	}
+	return { ok: true };
+}
+
+function ownsLogoKey(workspaceId: string, r2Key: string): boolean {
+	return r2Key.startsWith(`${workspaceId}/brand-logo/`);
+}
+
+export async function getWorkspaceLogoObject(ctx: ServiceCtx): Promise<R2ObjectBody | null> {
+	const current = await readBrand(ctx);
+	if (!current.logoR2Key || !ownsLogoKey(ctx.workspaceId, current.logoR2Key)) return null;
+	return ctx.r2.get(current.logoR2Key);
 }

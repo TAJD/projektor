@@ -8,6 +8,9 @@ import { ctxFromHono } from "../services/types";
 import {
 	createToken,
 	deleteWorkspace,
+	deleteWorkspaceLogo,
+	getWorkspaceBrand,
+	getWorkspaceLogoObject,
 	getWorkspaceMcpInfo,
 	getWorkspaceWithMembers,
 	inviteMember,
@@ -16,6 +19,8 @@ import {
 	revokeToken,
 	updateMemberRole,
 	updateWorkspace,
+	updateWorkspaceBrand,
+	uploadWorkspaceLogo,
 } from "../services/workspaces";
 
 const router = new Hono<HonoEnv>();
@@ -149,6 +154,68 @@ router.delete("/:slug", async (c) => {
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
+});
+
+router.get("/:slug/brand", async (c) => {
+	const ctx = ctxFromHono(c);
+	const workspace = c.get("workspace") as { slug: string };
+	try {
+		return c.json(await getWorkspaceBrand(ctx, workspace.slug));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.patch("/:slug/brand", async (c) => {
+	const ctx = ctxFromHono(c);
+	const workspace = c.get("workspace") as { slug: string };
+	try {
+		return c.json(await updateWorkspaceBrand(ctx, workspace.slug, await c.req.json()));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.post("/:slug/brand/logo", async (c) => {
+	const ctx = ctxFromHono(c);
+	const formData = await c.req.formData().catch(() => null);
+	if (!formData) return c.json({ error: "Expected multipart/form-data" }, 400);
+	const fileRaw = formData.get("file");
+	if (!fileRaw || typeof fileRaw === "string") return c.json({ error: "Missing file field" }, 400);
+	try {
+		return c.json(await uploadWorkspaceLogo(ctx, fileRaw as File), 201);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.delete("/:slug/brand/logo", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		await deleteWorkspaceLogo(ctx);
+		return new Response(null, { status: 204 });
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+router.get("/:slug/brand/logo", async (c) => {
+	const ctx = ctxFromHono(c);
+	let obj: Awaited<ReturnType<typeof getWorkspaceLogoObject>>;
+	try {
+		obj = await getWorkspaceLogoObject(ctx);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+	if (!obj) return c.json({ error: "No logo set" }, 404);
+	const body = await obj.arrayBuffer();
+	return new Response(body, {
+		headers: {
+			"Content-Type": obj.httpMetadata?.contentType ?? "application/octet-stream",
+			"Cache-Control": "public, max-age=300",
+			"X-Content-Type-Options": "nosniff",
+		},
+	});
 });
 
 router.get("/:slug/mcp-info", async (c) => {

@@ -1,10 +1,23 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export interface WorkspaceBrand {
+	displayName?: string;
+	accent?: string;
+	onAccent?: string;
+	logoR2Key?: string;
+	fontFamily?: string;
+	fontUrl?: string;
+}
+
 export const workspaces = sqliteTable("workspaces", {
 	id: text("id").primaryKey(),
 	name: text("name").notNull(),
 	slug: text("slug").notNull().unique(),
 	createdAt: integer("created_at").notNull(),
+	brand: text("brand", { mode: "json" })
+		.$type<WorkspaceBrand>()
+		.notNull()
+		.$defaultFn(() => ({})),
 });
 
 export const users = sqliteTable("users", {

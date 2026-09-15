@@ -1,5 +1,10 @@
 import { ForbiddenError, NotFoundError } from "./errors";
 import type { ServiceCtx } from "./types";
+import {
+	getWorkspaceBrandForShare,
+	getWorkspaceBrandLogoR2Key,
+	type WorkspaceBrandDto,
+} from "./workspaces";
 
 async function hashToken(token: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
@@ -50,14 +55,17 @@ interface SharedIssueRow {
 	assignee_name: string | null;
 	created_at: number;
 	expires_at: number;
+	workspace_id: string;
+	workspace_slug: string;
 }
 
 export async function getSharedIssue(
 	db: D1Database,
 	token: string
 ): Promise<
-	SharedIssueRow & {
+	Omit<SharedIssueRow, "workspace_id" | "workspace_slug"> & {
 		customFields: Array<{ key: string; label: string; type: string; value: string }>;
+		brand: WorkspaceBrandDto;
 	}
 > {
 	const now = Math.floor(Date.now() / 1000);
@@ -70,9 +78,12 @@ export async function getSharedIssue(
         ts.name AS status_name, ts.category AS status_category,
         p.key AS project_key, p.name AS project_name,
         u.name AS assignee_name,
-        st.expires_at
+        st.expires_at,
+        st.workspace_id AS workspace_id,
+        w.slug AS workspace_slug
       FROM share_tokens st
       JOIN issues i ON i.id = st.issue_id
+      JOIN workspaces w ON w.id = st.workspace_id
       LEFT JOIN task_statuses ts ON ts.id = i.status_id
       LEFT JOIN projects p ON p.id = i.project_id
       LEFT JOIN users u ON u.id = i.assignee_id
@@ -100,7 +111,31 @@ export async function getSharedIssue(
 		.bind(tokenMeta.issue_id)
 		.all<{ key: string; label: string; type: string; value: string }>();
 
-	return { ...row, customFields: cfRows.results ?? [] };
+	const brandDto = await getWorkspaceBrandForShare(db, row.workspace_id, row.workspace_slug);
+	const brand = brandDto.logoUrl ? { ...brandDto, logoUrl: `/api/share/${token}/logo` } : brandDto;
+	const { workspace_id, workspace_slug, ...rest } = row;
+
+	return { ...rest, customFields: cfRows.results ?? [], brand };
+}
+
+export async function getSharedLogo(
+	db: D1Database,
+	r2: R2Bucket,
+	token: string
+): Promise<R2ObjectBody | null> {
+	const now = Math.floor(Date.now() / 1000);
+	const id = await hashToken(token);
+
+	const row = await db
+		.prepare("SELECT workspace_id FROM share_tokens WHERE id = ? AND expires_at > ?")
+		.bind(id, now)
+		.first<{ workspace_id: string }>();
+	if (!row) return null;
+
+	const r2Key = await getWorkspaceBrandLogoR2Key(db, row.workspace_id);
+	if (!r2Key) return null;
+
+	return r2.get(r2Key);
 }
 
 export async function revokeShareToken(ctx: ServiceCtx, issueId: string): Promise<void> {

@@ -3,6 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
 import { resolveWorkspaceSlug } from "../utils/workspace";
 import { Button } from "./ui/Button";
+import { EmptyState } from "./ui/EmptyState";
+import { Input } from "./ui/Input";
+import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "./ui/Table";
 
 interface ApiToken {
 	id: string;
@@ -30,18 +33,11 @@ type TokenScope = "read" | "readwrite";
 const SCOPE_READ = ["read"];
 const SCOPE_READWRITE = ["read", "write"];
 
-const FORM_INPUT_CLASS =
-	"px-[0.625rem] py-[0.4rem] border border-border rounded text-[0.875rem] bg-bg text-text-base " +
-	"font-[inherit] focus:outline-[2px] focus:outline-accent focus:outline-offset-1";
 const TOKEN_CODE_CLASS =
 	"flex-1 font-mono text-[0.8rem] px-2 py-[0.375rem] bg-bg border border-border rounded text-text-base break-all";
 const MCP_COMMAND_CLASS =
 	"font-mono text-xs px-3 py-2 bg-bg border border-border rounded text-text-muted break-all " +
 	"whitespace-pre-wrap leading-[1.6]";
-const TD_BASE = "px-3 py-2 border-b border-border align-middle [tr:last-child_&]:border-b-0";
-const TD_MUTED = `${TD_BASE} font-mono text-[0.8rem] text-text-muted`;
-const TH_CLASS =
-	"text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base whitespace-nowrap";
 
 function parseScopes(raw: string): string[] {
 	try {
@@ -238,7 +234,7 @@ function NewTokenPanel({
 			<p class="m-0 mb-2 font-semibold text-[0.9rem] text-text-base">
 				Token created: <span class="font-mono text-[0.8rem] text-text-muted">{newToken.name}</span>
 			</p>
-			<p class="text-[var(--danger-text)] text-[0.8rem] my-1">
+			<p class="text-danger-text text-[0.8rem] my-1">
 				⚠ Copy this token now — you won't be able to see it again.
 			</p>
 			<div class="flex items-center gap-2 my-2">
@@ -307,10 +303,9 @@ function CreateTokenForm({
 				<label class="text-[0.8rem] font-semibold text-text-muted" for="tok-name">
 					Name *
 				</label>
-				<input
-					ref={nameInputRef}
+				<Input
+					inputRef={nameInputRef}
 					id="tok-name"
-					class={`w-full ${FORM_INPUT_CLASS}`}
 					type="text"
 					placeholder="e.g. Claude Code agent"
 					value={createName}
@@ -348,9 +343,9 @@ function CreateTokenForm({
 				<label class="text-[0.8rem] font-semibold text-text-muted" for="tok-expiry">
 					Expires in (days, optional)
 				</label>
-				<input
+				<Input
 					id="tok-expiry"
-					class={`w-full sm:max-w-[240px] ${FORM_INPUT_CLASS}`}
+					class="sm:max-w-[240px]"
 					type="number"
 					min={1}
 					max={365}
@@ -361,7 +356,7 @@ function CreateTokenForm({
 			</div>
 
 			{createError && (
-				<p role="alert" class="text-[var(--danger-text)] text-[0.8rem] m-0 mb-3">
+				<p role="alert" class="text-danger-text text-[0.8rem] m-0 mb-3">
 					{createError}
 				</p>
 			)}
@@ -446,21 +441,19 @@ function TokenTableRow({
 	onCancelRevoke,
 	onConfirmRevoke,
 }: TokenTableRowProps) {
-	const expiresClass = `${TD_BASE} font-mono text-[0.8rem] ${
-		tok.expiresAt && tok.expiresAt < Date.now() / 1000
-			? "text-[var(--danger-text)]"
-			: "text-text-muted"
+	const expiresClass = `font-mono text-[0.8rem] ${
+		tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-danger-text" : "text-text-muted"
 	}`;
 	return (
-		<tr>
-			<td class={`${TD_BASE} text-text-base font-medium`}>{tok.name}</td>
-			<td class={TD_MUTED}>{formatScopes(tok.scopes)}</td>
-			<td class={TD_MUTED}>{formatDate(tok.createdAt)}</td>
-			<td class={expiresClass}>
+		<TableRow>
+			<TableCell class="text-text-base font-medium">{tok.name}</TableCell>
+			<TableCell muted>{formatScopes(tok.scopes)}</TableCell>
+			<TableCell muted>{formatDate(tok.createdAt)}</TableCell>
+			<TableCell class={expiresClass}>
 				{tok.expiresAt === null ? "No expiry" : formatDate(tok.expiresAt)}
-			</td>
-			<td class={TD_MUTED}>{formatDate(tok.lastUsedAt)}</td>
-			<td class={`${TD_BASE} whitespace-nowrap`}>
+			</TableCell>
+			<TableCell muted>{formatDate(tok.lastUsedAt)}</TableCell>
+			<TableCell class="whitespace-nowrap">
 				<TokenRevokeControl
 					tok={tok}
 					revokeId={revokeId}
@@ -470,8 +463,8 @@ function TokenTableRow({
 					onCancelRevoke={onCancelRevoke}
 					onConfirmRevoke={onConfirmRevoke}
 				/>
-			</td>
-		</tr>
+			</TableCell>
+		</TableRow>
 	);
 }
 
@@ -499,7 +492,7 @@ function TokenRevokeControl({
 				<Button variant="outline" size="sm" disabled={revoking} onClick={onCancelRevoke}>
 					No
 				</Button>
-				{revokeError && <span class="text-[var(--danger-text)] text-xs">{revokeError}</span>}
+				{revokeError && <span class="text-danger-text text-xs">{revokeError}</span>}
 			</span>
 		);
 	}
@@ -507,7 +500,7 @@ function TokenRevokeControl({
 		<Button
 			variant="outline"
 			size="sm"
-			class="text-[var(--danger-text)] border-[var(--danger-border)]"
+			class="text-danger-text border-danger-border"
 			onClick={() => onSelectRevoke(tok.id)}
 		>
 			Revoke
@@ -536,7 +529,7 @@ function TokenMobileCards({
 						<dd class="m-0">{formatDate(tok.createdAt)}</dd>
 						<dt class="font-semibold">Expires</dt>
 						<dd
-							class={`m-0 ${tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-[var(--danger-text)]" : ""}`}
+							class={`m-0 ${tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-danger-text" : ""}`}
 						>
 							{tok.expiresAt === null ? "No expiry" : formatDate(tok.expiresAt)}
 						</dd>
@@ -579,27 +572,28 @@ function TokenTable({
 }: TokenTableProps) {
 	if (tokens.length === 0) {
 		return (
-			<div class="p-8 text-center text-text-muted bg-surface rounded-lg border border-border">
-				<p class="m-0 mb-2">No API tokens yet.</p>
-				<p class="m-0 text-sm">Create a token to allow agents and scripts to authenticate.</p>
-			</div>
+			<EmptyState
+				class="bg-surface rounded-lg border border-border"
+				title="No API tokens yet."
+				description="Create a token to allow agents and scripts to authenticate."
+			/>
 		);
 	}
 	return (
 		<>
 			<div class="overflow-x-auto max-sm:hidden">
-				<table class="w-full border-collapse text-[0.9rem]">
-					<thead>
-						<tr>
-							<th class={TH_CLASS}>Name</th>
-							<th class={TH_CLASS}>Scope</th>
-							<th class={TH_CLASS}>Created</th>
-							<th class={TH_CLASS}>Expires</th>
-							<th class={TH_CLASS}>Last used</th>
-							<th class={TH_CLASS}></th>
-						</tr>
-					</thead>
-					<tbody>
+				<Table>
+					<TableHead>
+						<TableRow>
+							<TableHeaderCell>Name</TableHeaderCell>
+							<TableHeaderCell>Scope</TableHeaderCell>
+							<TableHeaderCell>Created</TableHeaderCell>
+							<TableHeaderCell>Expires</TableHeaderCell>
+							<TableHeaderCell>Last used</TableHeaderCell>
+							<TableHeaderCell></TableHeaderCell>
+						</TableRow>
+					</TableHead>
+					<TableBody>
 						{tokens.map((tok) => (
 							<TokenTableRow
 								key={tok.id}
@@ -612,8 +606,8 @@ function TokenTable({
 								onConfirmRevoke={onConfirmRevoke}
 							/>
 						))}
-					</tbody>
-				</table>
+					</TableBody>
+				</Table>
 			</div>
 			<TokenMobileCards
 				tokens={tokens}
@@ -821,7 +815,7 @@ export default function TokenManager({ workspaceSlug: propWorkspaceSlug }: Props
 
 	if (error) {
 		return (
-			<p role="alert" class="text-[var(--danger-text)]">
+			<p role="alert" class="text-danger-text">
 				Failed to load tokens: {error}
 			</p>
 		);

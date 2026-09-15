@@ -256,7 +256,7 @@ function CodeHeatmapPanel({
 		<>
 			{loading && <p aria-live="polite">Loading…</p>}
 			{!loading && error && (
-				<p role="alert" class="text-[var(--danger-text)]">
+				<p role="alert" class="text-danger-text">
 					{error}
 				</p>
 			)}

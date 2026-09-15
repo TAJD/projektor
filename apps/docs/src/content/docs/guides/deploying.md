@@ -243,6 +243,41 @@ wrangler deploy                                       # upload worker + assets
 Your `wrangler.toml` points `main`, `[assets].directory`, and `migrations_dir` at
 `./vendor/...`, which the extract step populates. `vendor/` is gitignored.
 
+## Branding your instance
+
+Setting a handful of `[vars]` in your `wrangler.toml` rebrands the whole deployment —
+topbar, favicon/app icon, `theme-color`, and the accent colour used throughout the UI.
+Every field is optional and falls back to Projektor's own look; these are read at
+runtime from `GET /api/config/brand` and applied client-side, so re-deploying the
+shared release artifact (a version bump, no rebuild) picks up a change immediately.
+
+```toml
+[vars]
+BRAND_NAME = "Acme Projects"
+BRAND_MARK = "A"
+BRAND_ACCENT = "#16a34a"
+BRAND_ON_ACCENT = "#ffffff"
+BRAND_LOGO_URL = "/brand/logo.svg"
+```
+
+| Var | Effect | Default |
+|-----|--------|---------|
+| `BRAND_NAME` | Topbar text, page title, PWA/OG metadata | `Projektor` |
+| `BRAND_MARK` | The single-character topbar mark | first letter of `BRAND_NAME`, or `P` |
+| `BRAND_ACCENT` | Overrides `--accent` in both light and dark themes, and `theme-color` | `#4f46e5` light / `#6366f1` dark |
+| `BRAND_ON_ACCENT` | Text colour drawn on top of `--accent` — set this if your accent is pale, since it is not auto-derived | `#ffffff` |
+| `BRAND_LOGO_URL` | Replaces the favicon and Apple touch icon | Projektor's own icons |
+
+`BRAND_LOGO_URL` must be same-origin (an absolute path served by your own instance) or
+a `data:` URI — the response's `Content-Security-Policy` restricts `img-src` to
+`'self' data: blob:` and is generated once at release-build time, so it cannot be
+widened per deployment. Host your logo under `/public` in a fork, or via R2/`/api/files`,
+rather than pointing at a third-party URL.
+
+Branding applies after the page's first paint (there's a brief flash of Projektor's
+own name/mark before the fetch resolves) and does not yet reach the PWA manifest's
+app name or icons — tracked as a known follow-up, not blocking for a v1.
+
 ## Upgrade notes
 
 **Subdomain-based workspace routing is now opt-in.** Set `WORKSPACE_SUBDOMAIN_ROUTING=true`
