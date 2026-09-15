@@ -4,6 +4,9 @@ import { resolveWorkspaceSlug } from "../utils/workspace";
 import type { ProjectLookup as ProjectLite } from "./board-utils";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
+import { EmptyState } from "./ui/EmptyState";
+import { Input } from "./ui/Input";
+import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "./ui/Table";
 
 type GrantRole = "viewer" | "member" | "admin";
 
@@ -63,10 +66,6 @@ const ROLE_TAG =
 const CHIP =
 	"inline-flex items-center px-2 py-[0.1rem] mr-1 mb-1 rounded-full text-[0.72rem] " +
 	"bg-bg border border-border text-text-base";
-const TH =
-	"text-left px-3 py-2 border-b-2 border-border font-semibold text-text-base text-[0.8rem]";
-const TD =
-	"px-3 py-2 border-b border-border align-middle text-[0.85rem] [tr:last-child_&]:border-b-0";
 const H2 = "text-[1.05rem] font-bold text-text-base m-0 mb-3";
 const TAB_LIST = "flex gap-1 border-b border-border mb-4";
 const tabBtnClass = (active: boolean) =>
@@ -289,29 +288,29 @@ function MembersOverview(
 		<section class={CARD}>
 			<h2 class={H2}>Members</h2>
 			<div class="overflow-x-auto max-sm:hidden">
-				<table class="w-full border-collapse">
-					<thead>
-						<tr>
-							<th class={TH}>Member</th>
-							<th class={TH}>Workspace role</th>
-							<th class={TH}>Groups</th>
-						</tr>
-					</thead>
-					<tbody>
+				<Table>
+					<TableHead>
+						<TableRow>
+							<TableHeaderCell>Member</TableHeaderCell>
+							<TableHeaderCell>Workspace role</TableHeaderCell>
+							<TableHeaderCell>Groups</TableHeaderCell>
+						</TableRow>
+					</TableHead>
+					<TableBody>
 						{props.members.map((m) => (
-							<tr key={m.id}>
-								<td class={TD}>
+							<TableRow key={m.id}>
+								<TableCell>
 									<div class="font-medium text-text-base">{m.name || m.email}</div>
 									<div class="text-[0.75rem] text-text-muted">{m.email}</div>
-								</td>
-								<td class={TD}>{m.role}</td>
-								<td class={TD}>
+								</TableCell>
+								<TableCell>{m.role}</TableCell>
+								<TableCell>
 									<MemberGroupsCell member={m} groups={groupsByUser.get(m.id) ?? []} />
-								</td>
-							</tr>
+								</TableCell>
+							</TableRow>
 						))}
-					</tbody>
-				</table>
+					</TableBody>
+				</Table>
 			</div>
 			<MembersMobileCards members={props.members} groupsByUser={groupsByUser} />
 		</section>
@@ -654,9 +653,9 @@ function GroupNameHeader({
 			<label class="sr-only" for="group-name">
 				Group name
 			</label>
-			<input
+			<Input
 				id="group-name"
-				class={`${INPUT} flex-1 font-semibold`}
+				class="flex-1 font-semibold"
 				value={nameDraft}
 				disabled={busy}
 				onInput={(e) => setNameDraft((e.target as HTMLInputElement).value)}
@@ -760,19 +759,19 @@ interface GroupsTableProps {
 function GroupsTable({ groups, isAdmin, busy, onSelect, onDelete }: GroupsTableProps) {
 	return (
 		<div class="overflow-x-auto max-sm:hidden">
-			<table class="w-full border-collapse">
-				<thead>
-					<tr>
-						<th class={TH}>Name</th>
-						<th class={TH}>Members</th>
-						<th class={TH}>Projects</th>
-						{isAdmin && <th class={TH} />}
-					</tr>
-				</thead>
-				<tbody>
+			<Table>
+				<TableHead>
+					<TableRow>
+						<TableHeaderCell>Name</TableHeaderCell>
+						<TableHeaderCell>Members</TableHeaderCell>
+						<TableHeaderCell>Projects</TableHeaderCell>
+						{isAdmin && <TableHeaderCell></TableHeaderCell>}
+					</TableRow>
+				</TableHead>
+				<TableBody>
 					{groups.map((g) => (
-						<tr key={g.id}>
-							<td class={TD}>
+						<TableRow key={g.id}>
+							<TableCell>
 								{isAdmin ? (
 									<button
 										type="button"
@@ -784,20 +783,20 @@ function GroupsTable({ groups, isAdmin, busy, onSelect, onDelete }: GroupsTableP
 								) : (
 									<span class="font-medium text-text-base">{g.name}</span>
 								)}
-							</td>
-							<td class={TD}>{g.memberCount}</td>
-							<td class={TD}>{g.grantCount}</td>
+							</TableCell>
+							<TableCell>{g.memberCount}</TableCell>
+							<TableCell>{g.grantCount}</TableCell>
 							{isAdmin && (
-								<td class={TD}>
+								<TableCell>
 									<Button variant="danger" size="sm" disabled={busy} onClick={() => onDelete(g.id)}>
 										Delete
 									</Button>
-								</td>
+								</TableCell>
 							)}
-						</tr>
+						</TableRow>
 					))}
-				</tbody>
-			</table>
+				</TableBody>
+			</Table>
 		</div>
 	);
 }
@@ -857,8 +856,7 @@ function GroupsSection(props: GroupsSectionProps) {
 				<h2 class={H2}>{isAdmin ? "Groups" : "Your groups"}</h2>
 				{isAdmin && (
 					<div class="flex items-center gap-2 mb-4">
-						<input
-							class={INPUT}
+						<Input
 							placeholder="New group name"
 							value={props.newName}
 							onInput={(e) => props.setNewName((e.target as HTMLInputElement).value)}
@@ -880,11 +878,13 @@ function GroupsSection(props: GroupsSectionProps) {
 				)}
 
 				{data.groups.length === 0 ? (
-					<div class="text-[0.85rem] text-text-muted">
-						{isAdmin
-							? "No groups yet."
-							: "You don't belong to any groups yet. An owner or admin can add you to one."}
-					</div>
+					<EmptyState
+						title={
+							isAdmin
+								? "No groups yet."
+								: "You don't belong to any groups yet. An owner or admin can add you to one."
+						}
+					/>
 				) : (
 					<>
 						<GroupsTable

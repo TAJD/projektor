@@ -16,6 +16,9 @@ import { applyDateRangeParams } from "./IssueList-helpers";
 import type { DateField } from "./issue-list/FiltersPopover";
 import FiltersPopover from "./issue-list/FiltersPopover";
 import { Button } from "./ui/Button";
+import { Card } from "./ui/Card";
+import { EmptyState } from "./ui/EmptyState";
+import { Input } from "./ui/Input";
 import Select from "./ui/Select";
 
 interface Props {
@@ -489,12 +492,10 @@ interface EpicsTableProps {
 
 function EpicsTable({ epics, filteredEpics, sortBy, sortDir, toggleSort }: EpicsTableProps) {
 	if (epics.length === 0) {
-		return (
-			<p class="text-text-muted text-sm">No epics found. Use the button above to create one.</p>
-		);
+		return <EmptyState title="No epics found. Use the button above to create one." />;
 	}
 	if (filteredEpics.length === 0) {
-		return <p class="text-text-muted text-sm">No epics match the active filters.</p>;
+		return <EmptyState title="No epics match the active filters." />;
 	}
 	// sortIssues' signature is Issue[] => Issue[]; the sort is a pure reorder, so the
 	// rollup field carried by EpicItem survives — safe to cast back.
@@ -535,7 +536,7 @@ function EpicsTable({ epics, filteredEpics, sortBy, sortDir, toggleSort }: Epics
 function EpicMobileCard({ ep, rollup }: EpicRowProps) {
 	const statusColor = CATEGORY_COLORS[ep.status_category ?? ""] ?? "var(--text-muted)";
 	return (
-		<div class="py-3 px-4 border border-border rounded-md bg-surface">
+		<Card>
 			<a
 				href={issueUrl(ep.project_key, ep.number, ep.title, ep.id)}
 				class="text-text-base no-underline font-medium hover:underline"
@@ -553,7 +554,7 @@ function EpicMobileCard({ ep, rollup }: EpicRowProps) {
 					? "—"
 					: `${rollup.done} done · ${rollup.remaining} remaining`}
 			</div>
-		</div>
+		</Card>
 	);
 }
 
@@ -654,16 +655,14 @@ function CreateEpicModal({
 						>
 							Title *
 						</label>
-						<input
+						<Input
 							id="create-epic-title"
 							type="text"
 							value={createTitle}
 							onInput={(e) => setCreateTitle((e.target as HTMLInputElement).value)}
 							placeholder="Epic title"
 							required
-							// biome-ignore lint/a11y/noAutofocus: intentional — modal opens on user action
 							autoFocus
-							class="w-full px-3 py-2 border border-border rounded bg-bg text-text-base box-border text-[0.9rem]"
 						/>
 					</div>
 

@@ -4,6 +4,9 @@ import { apiFetch } from "../utils/api-client";
 import { usePublicViewer } from "../utils/public-viewer";
 import AccessPending from "./AccessPending";
 import { Button } from "./ui/Button";
+import { Card } from "./ui/Card";
+import { EmptyState } from "./ui/EmptyState";
+import { Input } from "./ui/Input";
 
 interface Project {
 	id: string;
@@ -26,13 +29,6 @@ function deriveKey(name: string): string {
 		.replace(/[^A-Z0-9]/g, "")
 		.slice(0, 10);
 }
-
-const INPUT_BASE_CLASS =
-	"w-full px-2 py-1.5 text-sm border border-border rounded bg-bg text-text-base";
-
-const PROJECT_CARD_CLASS =
-	"flex flex-col gap-2 p-4 bg-surface border border-border rounded-lg no-underline shadow-xs" +
-	" transition-all duration-150 hover:border-accent hover:-translate-y-px";
 
 const KEY_BADGE_CLASS =
 	"font-mono text-[0.7rem] font-medium px-1.5 py-0.5 rounded bg-surface border border-border" +
@@ -81,7 +77,7 @@ function ProjectCreateForm({
 							*
 						</span>
 					</label>
-					<input
+					<Input
 						ref={nameRef}
 						id="new-project-name"
 						type="text"
@@ -90,7 +86,6 @@ function ProjectCreateForm({
 						placeholder="My Project"
 						value={formName}
 						onInput={(e) => onNameInput((e.target as HTMLInputElement).value)}
-						class={INPUT_BASE_CLASS}
 					/>
 				</div>
 				<div class="flex-[1_1_100px] min-w-0">
@@ -100,7 +95,7 @@ function ProjectCreateForm({
 							*
 						</span>
 					</label>
-					<input
+					<Input
 						id="new-project-key"
 						type="text"
 						required
@@ -108,7 +103,7 @@ function ProjectCreateForm({
 						placeholder="MYPROJ"
 						value={formKey}
 						onInput={(e) => onKeyInput((e.target as HTMLInputElement).value.toUpperCase())}
-						class={`${INPUT_BASE_CLASS} font-mono uppercase`}
+						class="font-mono uppercase"
 					/>
 				</div>
 				<div class="flex-[3_1_220px] min-w-0">
@@ -118,14 +113,13 @@ function ProjectCreateForm({
 					>
 						Description
 					</label>
-					<input
+					<Input
 						id="new-project-desc"
 						type="text"
 						maxLength={500}
 						placeholder="Optional description"
 						value={formDesc}
 						onInput={(e) => onDescInput((e.target as HTMLInputElement).value)}
-						class={INPUT_BASE_CLASS}
 					/>
 				</div>
 			</div>
@@ -262,13 +256,15 @@ function ProjectCard({ project }: { project: Project }) {
 	const archived = project.archived_at != null;
 
 	return (
-		<a
+		<Card
+			as="a"
 			href={
 				project.slug
 					? `/projects/view/${encodeURIComponent(project.slug)}`
 					: `/projects/view?projectId=${encodeURIComponent(project.id)}`
 			}
-			class={`${PROJECT_CARD_CLASS}${archived ? " opacity-60" : ""}`}
+			interactive
+			class={archived ? "opacity-60" : undefined}
 		>
 			<div class="flex items-center gap-2">
 				<span class="font-bold text-text-base text-base">{project.name}</span>
@@ -281,13 +277,13 @@ function ProjectCard({ project }: { project: Project }) {
 					{project.description}
 				</span>
 			)}
-		</a>
+		</Card>
 	);
 }
 
 function ProjectGrid({ projects }: { projects: Project[] }) {
 	if (projects.length === 0) {
-		return <p class="text-text-muted text-center py-12">No projects yet.</p>;
+		return <EmptyState title="No projects yet." />;
 	}
 	return (
 		<div class="grid gap-4 grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
