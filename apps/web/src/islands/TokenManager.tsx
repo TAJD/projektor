@@ -304,7 +304,7 @@ function CreateTokenForm({
 					Name *
 				</label>
 				<Input
-					ref={nameInputRef}
+					inputRef={nameInputRef}
 					id="tok-name"
 					type="text"
 					placeholder="e.g. Claude Code agent"

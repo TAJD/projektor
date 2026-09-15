@@ -38,6 +38,12 @@ describe("Input", () => {
 		expect(input.className).toContain("disabled:opacity-60");
 		expect(input.className).toContain("disabled:cursor-not-allowed");
 	});
+
+	it("forwards inputRef to the underlying DOM input", () => {
+		const ref: { current: HTMLInputElement | null } = { current: null };
+		render(<Input placeholder="Name" inputRef={ref} />);
+		expect(ref.current).toBe(screen.getByPlaceholderText("Name"));
+	});
 });
 
 describe("Textarea", () => {

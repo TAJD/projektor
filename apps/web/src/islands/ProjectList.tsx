@@ -6,6 +6,7 @@ import AccessPending from "./AccessPending";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { EmptyState } from "./ui/EmptyState";
+import { Field } from "./ui/Field";
 import { Input } from "./ui/Input";
 
 interface Project {
@@ -67,18 +68,9 @@ function ProjectCreateForm({
 			class="bg-surface border border-border rounded-lg p-4 mb-5 flex flex-col gap-3"
 		>
 			<div class="flex gap-3 flex-wrap">
-				<div class="flex-[2_1_160px] min-w-0">
-					<label
-						htmlFor="new-project-name"
-						class="block mb-1 text-xs font-semibold text-text-muted"
-					>
-						Name{" "}
-						<span aria-hidden="true" class="text-accent">
-							*
-						</span>
-					</label>
+				<Field label="Name" htmlFor="new-project-name" required class="flex-[2_1_160px] min-w-0">
 					<Input
-						ref={nameRef}
+						inputRef={nameRef}
 						id="new-project-name"
 						type="text"
 						required
@@ -87,14 +79,8 @@ function ProjectCreateForm({
 						value={formName}
 						onInput={(e) => onNameInput((e.target as HTMLInputElement).value)}
 					/>
-				</div>
-				<div class="flex-[1_1_100px] min-w-0">
-					<label htmlFor="new-project-key" class="block mb-1 text-xs font-semibold text-text-muted">
-						Key{" "}
-						<span aria-hidden="true" class="text-accent">
-							*
-						</span>
-					</label>
+				</Field>
+				<Field label="Key" htmlFor="new-project-key" required class="flex-[1_1_100px] min-w-0">
 					<Input
 						id="new-project-key"
 						type="text"
@@ -105,14 +91,8 @@ function ProjectCreateForm({
 						onInput={(e) => onKeyInput((e.target as HTMLInputElement).value.toUpperCase())}
 						class="font-mono uppercase"
 					/>
-				</div>
-				<div class="flex-[3_1_220px] min-w-0">
-					<label
-						htmlFor="new-project-desc"
-						class="block mb-1 text-xs font-semibold text-text-muted"
-					>
-						Description
-					</label>
+				</Field>
+				<Field label="Description" htmlFor="new-project-desc" class="flex-[3_1_220px] min-w-0">
 					<Input
 						id="new-project-desc"
 						type="text"
@@ -121,7 +101,7 @@ function ProjectCreateForm({
 						value={formDesc}
 						onInput={(e) => onDescInput((e.target as HTMLInputElement).value)}
 					/>
-				</div>
+				</Field>
 			</div>
 
 			{formError && (
@@ -264,7 +244,7 @@ function ProjectCard({ project }: { project: Project }) {
 					: `/projects/view?projectId=${encodeURIComponent(project.id)}`
 			}
 			interactive
-			class={archived ? "opacity-60" : undefined}
+			class={`shadow-xs${archived ? " opacity-60" : ""}`}
 		>
 			<div class="flex items-center gap-2">
 				<span class="font-bold text-text-base text-base">{project.name}</span>

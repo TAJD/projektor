@@ -543,13 +543,13 @@ function EpicMobileCard({ ep, rollup }: EpicRowProps) {
 			>
 				{ep.title}
 			</a>
-			<div class="flex justify-between items-center gap-2 mt-1">
+			<div class="flex justify-between items-center gap-2">
 				<span class="font-medium text-[0.8rem]" style={{ color: statusColor }}>
 					{statusDisplayName(ep.status_name, ep.status_key)}
 				</span>
 				<span class="text-xs font-medium">{PRIORITY_LABEL[ep.priority] ?? ep.priority}</span>
 			</div>
-			<div class="text-xs text-text-muted mt-1">
+			<div class="text-xs text-text-muted">
 				{!rollup || rollup.total === 0
 					? "—"
 					: `${rollup.done} done · ${rollup.remaining} remaining`}

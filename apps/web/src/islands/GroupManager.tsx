@@ -288,7 +288,7 @@ function MembersOverview(
 		<section class={CARD}>
 			<h2 class={H2}>Members</h2>
 			<div class="overflow-x-auto max-sm:hidden">
-				<Table>
+				<Table class="text-[0.85rem]">
 					<TableHead>
 						<TableRow>
 							<TableHeaderCell>Member</TableHeaderCell>
@@ -759,7 +759,7 @@ interface GroupsTableProps {
 function GroupsTable({ groups, isAdmin, busy, onSelect, onDelete }: GroupsTableProps) {
 	return (
 		<div class="overflow-x-auto max-sm:hidden">
-			<Table>
+			<Table class="text-[0.85rem]">
 				<TableHead>
 					<TableRow>
 						<TableHeaderCell>Name</TableHeaderCell>

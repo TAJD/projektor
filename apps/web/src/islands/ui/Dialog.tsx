@@ -36,6 +36,7 @@ export function Dialog({ open, onClose, ariaLabel, class: extraClass, children }
 		if (!open) return;
 		function onKeyDown(e: KeyboardEvent) {
 			if (e.key === "Escape") {
+				if (e.defaultPrevented) return;
 				e.preventDefault();
 				onClose();
 				return;
@@ -50,7 +51,10 @@ export function Dialog({ open, onClose, ariaLabel, class: extraClass, children }
 			}
 			const first = items[0];
 			const last = items[items.length - 1];
-			if (e.shiftKey && document.activeElement === first) {
+			if (!panel.contains(document.activeElement)) {
+				e.preventDefault();
+				(e.shiftKey ? last : first)?.focus();
+			} else if (e.shiftKey && document.activeElement === first) {
 				e.preventDefault();
 				last?.focus();
 			} else if (!e.shiftKey && document.activeElement === last) {

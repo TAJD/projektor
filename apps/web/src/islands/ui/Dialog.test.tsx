@@ -58,6 +58,38 @@ describe("Dialog", () => {
 		expect(document.body.style.overflow).toBe("hidden");
 	});
 
+	it("does not close on Escape when a nested handler already handled it", () => {
+		const onClose = vi.fn();
+		const preventOnEscape = (e: KeyboardEvent) => {
+			if (e.key === "Escape") e.preventDefault();
+		};
+		document.addEventListener("keydown", preventOnEscape);
+		render(
+			<Dialog open={true} onClose={onClose} ariaLabel="Test dialog">
+				<p>Body</p>
+			</Dialog>
+		);
+		fireEvent.keyDown(document, { key: "Escape" });
+		document.removeEventListener("keydown", preventOnEscape);
+		expect(onClose).not.toHaveBeenCalled();
+	});
+
+	it("recaptures focus into the panel when Tab is pressed while focus has left it", () => {
+		render(
+			<Dialog open={true} onClose={() => {}} ariaLabel="Test dialog">
+				<button type="button">First</button>
+				<button type="button">Last</button>
+			</Dialog>
+		);
+		(document.body as unknown as HTMLElement).focus();
+		fireEvent.keyDown(document, { key: "Tab" });
+		expect(document.activeElement?.textContent).toBe("First");
+
+		(document.body as unknown as HTMLElement).focus();
+		fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+		expect(document.activeElement?.textContent).toBe("Last");
+	});
+
 	it("traps Tab focus between the first and last focusable elements", () => {
 		render(
 			<Dialog open={true} onClose={() => {}} ariaLabel="Test dialog">
