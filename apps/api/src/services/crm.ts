@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gte, lt } from "drizzle-orm";
 import type { z } from "zod";
 import {
 	CreateContactSchema,
@@ -11,6 +11,7 @@ import {
 	CreatePricingPlanSchema,
 	CreateProductSchema,
 	CreateStageSchema,
+	CreateTargetSchema,
 	LinkInteractionContactSchema,
 	MoveDealStageSchema,
 	SetBaseCurrencySchema,
@@ -25,6 +26,7 @@ import {
 	UpdatePricingPlanSchema,
 	UpdateProductSchema,
 	UpdateStageSchema,
+	UpdateTargetSchema,
 } from "../schemas/crm";
 import { recordActivity } from "./activity";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
@@ -1757,4 +1759,210 @@ export async function setDealLines(ctx: ServiceCtx, dealId: string, rawLines: un
 	await recomputeDealValuation(ctx, dealId, deal.currency, computedValue);
 
 	return { ok: true };
+}
+
+async function requireTargetRow(ctx: ServiceCtx, id: string) {
+	const orm = drizzle(ctx.db, { schema });
+	const target = await orm
+		.select()
+		.from(schema.crmTargets)
+		.where(and(eq(schema.crmTargets.id, id), eq(schema.crmTargets.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!target) throw new NotFoundError("Target not found");
+	return target;
+}
+
+export async function createTarget(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = CreateTargetSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { metric, stageId, period, periodStart, value, currency } = result.data;
+
+	if (stageId) await requireStageRow(ctx, stageId);
+
+	const orm = drizzle(ctx.db, { schema });
+	const id = crypto.randomUUID();
+	const ts = now();
+
+	await orm.insert(schema.crmTargets).values({
+		id,
+		workspaceId: ctx.workspaceId,
+		metric,
+		stageId: stageId ?? null,
+		period,
+		periodStart,
+		value,
+		currency: currency ?? null,
+		createdAt: ts,
+		updatedAt: ts,
+	});
+
+	return { id };
+}
+
+export async function getTarget(ctx: ServiceCtx, id: string) {
+	return requireTargetRow(ctx, id);
+}
+
+export async function listTargets(ctx: ServiceCtx) {
+	const orm = drizzle(ctx.db, { schema });
+	const items = await orm
+		.select()
+		.from(schema.crmTargets)
+		.where(eq(schema.crmTargets.workspaceId, ctx.workspaceId))
+		.orderBy(asc(schema.crmTargets.periodStart));
+	return { items };
+}
+
+type TargetUpdateData = z.infer<typeof UpdateTargetSchema>;
+
+function buildTargetSetData(data: TargetUpdateData, ts: number) {
+	const setData: {
+		updatedAt: number;
+		period?: "week" | "month" | "quarter" | "year";
+		periodStart?: number;
+		value?: number;
+		currency?: string | null;
+	} = { updatedAt: ts };
+
+	if (data.period !== undefined) setData.period = data.period;
+	if (data.periodStart !== undefined) setData.periodStart = data.periodStart;
+	if (data.value !== undefined) setData.value = data.value;
+	if ("currency" in data) setData.currency = data.currency ?? null;
+
+	return setData;
+}
+
+export async function updateTarget(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = UpdateTargetSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	await requireTargetRow(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	const setData = buildTargetSetData(result.data, now());
+	await orm
+		.update(schema.crmTargets)
+		.set(setData)
+		.where(and(eq(schema.crmTargets.id, id), eq(schema.crmTargets.workspaceId, ctx.workspaceId)));
+
+	return { ok: true };
+}
+
+export async function deleteTarget(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
+	await requireTargetRow(ctx, id);
+
+	const orm = drizzle(ctx.db, { schema });
+	await orm
+		.delete(schema.crmTargets)
+		.where(and(eq(schema.crmTargets.id, id), eq(schema.crmTargets.workspaceId, ctx.workspaceId)));
+
+	return { ok: true };
+}
+
+function periodEndUtcFromWorkspaceUtcClock(
+	period: "week" | "month" | "quarter" | "year",
+	periodStart: number
+): number {
+	if (period === "week") return periodStart + 7 * 86400;
+
+	const monthsToAdd = period === "month" ? 1 : period === "quarter" ? 3 : 12;
+	const d = new Date(periodStart * 1000);
+	const end = Date.UTC(
+		d.getUTCFullYear(),
+		d.getUTCMonth() + monthsToAdd,
+		d.getUTCDate(),
+		d.getUTCHours(),
+		d.getUTCMinutes(),
+		d.getUTCSeconds()
+	);
+	return Math.floor(end / 1000);
+}
+
+type CrmTargetRow = Awaited<ReturnType<typeof requireTargetRow>>;
+
+async function computeOnboardingsCompletedActualStubbedUntilOnboardingLands(): Promise<number> {
+	return 0;
+}
+
+async function computeTargetActual(
+	ctx: ServiceCtx,
+	target: CrmTargetRow,
+	periodEnd: number
+): Promise<number> {
+	const orm = drizzle(ctx.db, { schema });
+
+	switch (target.metric) {
+		case "deals_created": {
+			const rows = await orm
+				.select({ id: schema.crmDeals.id })
+				.from(schema.crmDeals)
+				.where(
+					and(
+						eq(schema.crmDeals.workspaceId, ctx.workspaceId),
+						gte(schema.crmDeals.createdAt, target.periodStart),
+						lt(schema.crmDeals.createdAt, periodEnd)
+					)
+				);
+			return rows.length;
+		}
+		case "deals_won": {
+			const rows = await orm
+				.select({ id: schema.crmDeals.id })
+				.from(schema.crmDeals)
+				.where(
+					and(
+						eq(schema.crmDeals.workspaceId, ctx.workspaceId),
+						gte(schema.crmDeals.wonAt, target.periodStart),
+						lt(schema.crmDeals.wonAt, periodEnd)
+					)
+				);
+			return rows.length;
+		}
+		case "won_value": {
+			const rows = await orm
+				.select({ valueBase: schema.crmDeals.valueBase })
+				.from(schema.crmDeals)
+				.where(
+					and(
+						eq(schema.crmDeals.workspaceId, ctx.workspaceId),
+						gte(schema.crmDeals.wonAt, target.periodStart),
+						lt(schema.crmDeals.wonAt, periodEnd)
+					)
+				);
+			return rows.reduce((sum, r) => sum + (r.valueBase ?? 0), 0);
+		}
+		case "stage_entered": {
+			if (!target.stageId) return 0;
+			const rows = await orm
+				.select({ diff: schema.activity.diff })
+				.from(schema.activity)
+				.where(
+					and(
+						eq(schema.activity.workspaceId, ctx.workspaceId),
+						eq(schema.activity.entityType, "deal"),
+						gte(schema.activity.createdAt, target.periodStart),
+						lt(schema.activity.createdAt, periodEnd)
+					)
+				);
+			return rows.filter(
+				(r) => (r.diff as { toStageId?: string } | null)?.toStageId === target.stageId
+			).length;
+		}
+		case "onboardings_completed":
+			return computeOnboardingsCompletedActualStubbedUntilOnboardingLands();
+	}
+}
+
+export async function getTargetProgress(ctx: ServiceCtx, targetId: string) {
+	const target = await requireTargetRow(ctx, targetId);
+	const periodEnd = periodEndUtcFromWorkspaceUtcClock(target.period, target.periodStart);
+	const actual = await computeTargetActual(ctx, target, periodEnd);
+	const percentOrNullWhenTargetValueIsZero =
+		target.value === 0 ? null : (actual / target.value) * 100;
+	const daysRemaining = Math.ceil((periodEnd - now()) / 86400);
+
+	return { target, actual, percent: percentOrNullWhenTargetValueIsZero, daysRemaining };
 }

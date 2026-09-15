@@ -267,6 +267,30 @@ export const workspaceSettings = sqliteTable(
 	})
 );
 
+export const crmTargets = sqliteTable(
+	"crm_targets",
+	{
+		id: text("id").primaryKey(),
+		workspaceId: text("workspace_id")
+			.notNull()
+			.references(() => workspaces.id, { onDelete: "cascade" }),
+		metric: text("metric", {
+			enum: ["deals_created", "deals_won", "won_value", "stage_entered", "onboardings_completed"],
+		}).notNull(),
+		stageId: text("stage_id").references(() => crmStages.id, { onDelete: "cascade" }),
+		period: text("period", { enum: ["week", "month", "quarter", "year"] }).notNull(),
+		periodStart: integer("period_start").notNull(),
+		value: integer("value").notNull(),
+		currency: text("currency"),
+		createdAt: integer("created_at").notNull(),
+		updatedAt: integer("updated_at").notNull(),
+	},
+	(t) => ({
+		workspaceIdx: index("crm_targets_workspace_idx").on(t.workspaceId),
+		workspacePeriodIdx: index("crm_targets_workspace_period_idx").on(t.workspaceId, t.periodStart),
+	})
+);
+
 export const crmInteractionContacts = sqliteTable(
 	"crm_interaction_contacts",
 	{

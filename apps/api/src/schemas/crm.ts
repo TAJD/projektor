@@ -198,3 +198,39 @@ export const SetDealLineSchema = z.object({
 export const SetDealLinesSchema = z.object({
 	lines: z.array(SetDealLineSchema),
 });
+
+const TargetMetricEnum = z.enum([
+	"deals_created",
+	"deals_won",
+	"won_value",
+	"stage_entered",
+	"onboardings_completed",
+]);
+const TargetPeriodEnum = z.enum(["week", "month", "quarter", "year"]);
+
+export const CreateTargetSchema = z
+	.object({
+		metric: TargetMetricEnum,
+		stageId: z.string().uuid().optional(),
+		period: TargetPeriodEnum,
+		periodStart: z.number().int(),
+		value: z.number().int(),
+		currency: CurrencySchema.optional(),
+	})
+	.refine((obj) => obj.metric === "stage_entered" || obj.stageId === undefined, {
+		message: "stageId is only allowed when metric is stage_entered",
+		path: ["stageId"],
+	})
+	.refine((obj) => obj.metric !== "stage_entered" || obj.stageId !== undefined, {
+		message: "stageId is required when metric is stage_entered",
+		path: ["stageId"],
+	});
+
+export const UpdateTargetSchema = z
+	.object({
+		period: TargetPeriodEnum.optional(),
+		periodStart: z.number().int().optional(),
+		value: z.number().int().optional(),
+		currency: CurrencySchema.nullable().optional(),
+	})
+	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });

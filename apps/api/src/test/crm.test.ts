@@ -12,21 +12,26 @@ import {
 	createPricingPlan,
 	createProduct,
 	createStage,
+	createTarget,
 	deleteContact,
 	deleteOrganisation,
 	deletePricingPlan,
 	deleteStage,
+	deleteTarget,
 	getContact,
 	getDeal,
 	getDealLine,
 	getInteraction,
 	getOrganisation,
 	getPipeline,
+	getTarget,
+	getTargetProgress,
 	linkInteractionContact,
 	listContactsForInteraction,
 	listOrganisations,
 	listPipelines,
 	listStages,
+	listTargets,
 	moveDealStage,
 	seedDefaultPipeline,
 	setDealLines,
@@ -38,6 +43,7 @@ import {
 	updateInteraction,
 	updateOrganisation,
 	updatePipeline,
+	updateTarget,
 } from "../services/crm";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
 import type { ServiceCtx } from "../services/types";
@@ -643,5 +649,234 @@ describe("CRM products, pricing plans, and multi-currency deal valuation", () =>
 		});
 
 		await expect(archiveProduct(ctx, productId)).resolves.toEqual({ ok: true });
+	});
+});
+
+describe("CRM targets and progress computation", () => {
+	let ctx: ServiceCtx;
+	let orgId: string;
+	let pipelineId: string;
+	let stageId: string;
+
+	const PERIOD_START = Math.floor(Date.UTC(2024, 5, 1) / 1000);
+	const PERIOD_END_EXCLUSIVE = Math.floor(Date.UTC(2024, 6, 1) / 1000);
+	const IN_WINDOW = PERIOD_START + 1000;
+	const BEFORE_WINDOW = PERIOD_START - 1000;
+
+	beforeEach(async () => {
+		ctx = await ctxFor();
+		({ id: orgId } = await createOrganisation(ctx, { name: "Target Org" }));
+		({ id: pipelineId } = await createPipeline(ctx, { name: "Target Pipeline" }));
+		({ id: stageId } = await createStage(ctx, {
+			pipelineId,
+			name: "Qualified",
+			position: 1,
+			kind: "open",
+		}));
+	});
+
+	async function setDealCreatedAt(dealId: string, createdAt: number): Promise<void> {
+		await env.DB.prepare("UPDATE crm_deals SET created_at = ? WHERE id = ?")
+			.bind(createdAt, dealId)
+			.run();
+	}
+
+	async function setLatestActivityCreatedAt(dealId: string, createdAt: number): Promise<void> {
+		const row = await env.DB.prepare(
+			"SELECT id FROM activity WHERE entity_type = 'deal' AND entity_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1"
+		)
+			.bind(dealId)
+			.first<{ id: string }>();
+		await env.DB.prepare("UPDATE activity SET created_at = ? WHERE id = ?")
+			.bind(createdAt, row!.id)
+			.run();
+	}
+
+	it("creates, reads, lists, updates, and deletes a target", async () => {
+		const { id } = await createTarget(ctx, {
+			metric: "deals_created",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 5,
+		});
+
+		const target = await getTarget(ctx, id);
+		expect(target.metric).toBe("deals_created");
+		expect(target.value).toBe(5);
+
+		const { items } = await listTargets(ctx);
+		expect(items).toHaveLength(1);
+
+		await updateTarget(ctx, id, { value: 10 });
+		expect((await getTarget(ctx, id)).value).toBe(10);
+
+		await deleteTarget(ctx, id);
+		await expect(getTarget(ctx, id)).rejects.toBeInstanceOf(NotFoundError);
+	});
+
+	it("computes actual deals_created within the target period", async () => {
+		const { id: included } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(included, IN_WINDOW);
+		const { id: excluded } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(excluded, BEFORE_WINDOW);
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "deals_created",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 2,
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(1);
+		expect(progress.percent).toBe(50);
+	});
+
+	it("computes actual deals_won within the target period", async () => {
+		await createDeal(ctx, { orgId, currency: "USD", wonAt: IN_WINDOW });
+		await createDeal(ctx, { orgId, currency: "USD", wonAt: BEFORE_WINDOW });
+		await createDeal(ctx, { orgId, currency: "USD" });
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "deals_won",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 1,
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(1);
+	});
+
+	it("computes actual won_value in base currency within the target period", async () => {
+		const { id: dealA } = await createDeal(ctx, { orgId, currency: "USD", wonAt: IN_WINDOW });
+		await updateDeal(ctx, dealA, { valueBase: 10000 });
+		const { id: dealB } = await createDeal(ctx, { orgId, currency: "USD", wonAt: IN_WINDOW });
+		await updateDeal(ctx, dealB, { valueBase: 5000 });
+		const { id: dealOutside } = await createDeal(ctx, {
+			orgId,
+			currency: "USD",
+			wonAt: BEFORE_WINDOW,
+		});
+		await updateDeal(ctx, dealOutside, { valueBase: 999999 });
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "won_value",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 15000,
+			currency: "USD",
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(15000);
+		expect(progress.percent).toBe(100);
+	});
+
+	it("computes actual stage_entered from activity events moving into the target stage", async () => {
+		const { id: dealA } = await createDeal(ctx, { orgId, currency: "USD", pipelineId });
+		await moveDealStage(ctx, dealA, stageId, {});
+		await setLatestActivityCreatedAt(dealA, IN_WINDOW);
+
+		const { id: dealB } = await createDeal(ctx, { orgId, currency: "USD", pipelineId });
+		await moveDealStage(ctx, dealB, stageId, {});
+		await setLatestActivityCreatedAt(dealB, BEFORE_WINDOW);
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "stage_entered",
+			stageId,
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 1,
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(1);
+	});
+
+	it("returns 0 for onboardings_completed, which is not yet computed", async () => {
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "onboardings_completed",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 1,
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(0);
+		expect(progress.percent).toBe(0);
+	});
+
+	it("includes a deal at the exact period start and excludes one at the exact period end", async () => {
+		const { id: atStart } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(atStart, PERIOD_START);
+		const { id: atEnd } = await createDeal(ctx, { orgId, currency: "USD" });
+		await setDealCreatedAt(atEnd, PERIOD_END_EXCLUSIVE);
+
+		const { id: targetId } = await createTarget(ctx, {
+			metric: "deals_created",
+			period: "month",
+			periodStart: PERIOD_START,
+			value: 1,
+		});
+
+		const progress = await getTargetProgress(ctx, targetId);
+		expect(progress.actual).toBe(1);
+	});
+
+	it("rejects a stage_entered target without a stageId", async () => {
+		await expect(
+			createTarget(ctx, {
+				metric: "stage_entered",
+				period: "month",
+				periodStart: PERIOD_START,
+				value: 1,
+			})
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("rejects a stage_entered target whose stageId is from another workspace", async () => {
+		const ctxB = await ctxFor();
+		const { id: pipelineIdB } = await createPipeline(ctxB, { name: "Other Workspace Pipeline" });
+		const { id: stageIdB } = await createStage(ctxB, {
+			pipelineId: pipelineIdB,
+			name: "Other Stage",
+			position: 1,
+			kind: "open",
+		});
+
+		await expect(
+			createTarget(ctx, {
+				metric: "stage_entered",
+				stageId: stageIdB,
+				period: "month",
+				periodStart: PERIOD_START,
+				value: 1,
+			})
+		).rejects.toBeInstanceOf(NotFoundError);
+	});
+
+	it("rejects a non-stage_entered target that carries a stageId", async () => {
+		await expect(
+			createTarget(ctx, {
+				metric: "deals_created",
+				stageId,
+				period: "month",
+				periodStart: PERIOD_START,
+				value: 1,
+			})
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("blocks a viewer from creating a target", async () => {
+		const viewerCtx: ServiceCtx = { ...ctx, role: "viewer" };
+		await expect(
+			createTarget(viewerCtx, {
+				metric: "deals_created",
+				period: "month",
+				periodStart: PERIOD_START,
+				value: 1,
+			})
+		).rejects.toBeInstanceOf(ForbiddenError);
 	});
 });
