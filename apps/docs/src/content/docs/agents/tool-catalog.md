@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**117 tools across 22 domains.**
+**119 tools across 22 domains.**
 
 ## Coordination
 
@@ -75,6 +75,8 @@ running server.
 | `invite_member` | Invite a user to the workspace by email. Admin+ only. Creates the user record if they do not exist yet. |
 | `remove_member` | Remove a member from the workspace. Owner only. Cannot remove yourself. |
 | `update_member_role` | Change a workspace member's role. Owner only. |
+| `get_workspace_brand` | Get the current workspace's white-label branding overrides (display name, accent colors, logo, font). Unset fields are null. |
+| `update_workspace_brand` | Update the current workspace's white-label branding overrides. Admin+ only. Pass a field as null to clear it back to the deploy-level default; omit a field to leave it unchanged. |
 
 ### Groups & access
 
