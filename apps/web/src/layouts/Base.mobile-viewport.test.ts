@@ -2,7 +2,7 @@
 // @testing-library/preact — this asserts directly on the source instead.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 const source = readFileSync(join(__dirname, "Base.astro"), "utf-8");
 const shellCss = readFileSync(join(__dirname, "../styles/shell.css"), "utf-8");
@@ -118,12 +118,74 @@ describe("Base layout — icon consistency and tri-state theme control (PROJ-758
 		}
 	});
 
-	it("clears the stored preference so the bootstrap's missing-value fallback still applies", () => {
+	it("writes the chosen theme into the shared prefs object and clears the legacy standalone key", () => {
 		const scriptStart = source.indexOf("var ORDER = ['system', 'light', 'dark'];");
 		const scriptEnd = source.indexOf("</script>", scriptStart);
 		const script = source.slice(scriptStart, scriptEnd);
-		expect(script).toMatch(/if \(next === 'system'\) localStorage\.removeItem\('theme'\);/);
+		expect(script).toMatch(/p\.theme = next;/);
+		expect(script).toMatch(/localStorage\.setItem\('prefs', JSON\.stringify\(p\)\);/);
+		expect(script).toMatch(/localStorage\.removeItem\('theme'\);/);
 		expect(script).toMatch(/if \(next === 'system'\) document\.documentElement\.removeAttribute\('data-theme'\);/);
+	});
+});
+
+describe("Base layout — preferences bootstrap and sidebar collapse (PROJ-760)", () => {
+	beforeEach(() => {
+		document.documentElement.removeAttribute("data-theme");
+		document.documentElement.removeAttribute("data-density");
+		document.documentElement.removeAttribute("data-sidebar");
+	});
+
+	function bootstrapScript() {
+		const scriptStart = source.indexOf("function readPrefs() {");
+		const scriptEnd = source.indexOf("})();", scriptStart);
+		return source.slice(scriptStart, scriptEnd);
+	}
+
+	it("applies stored density and sidebar prefs to the document on load", () => {
+		localStorage.setItem("prefs", JSON.stringify({ theme: "system", density: "compact", sidebar: "collapsed" }));
+		try {
+			new Function(bootstrapScript())();
+			expect(document.documentElement.getAttribute("data-density")).toBe("compact");
+			expect(document.documentElement.getAttribute("data-sidebar")).toBe("collapsed");
+		} finally {
+			localStorage.removeItem("prefs");
+		}
+	});
+
+	it("migrates a legacy standalone theme key into the prefs bootstrap when no prefs object exists", () => {
+		localStorage.setItem("theme", "dark");
+		try {
+			new Function(bootstrapScript())();
+			expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+			expect(document.documentElement.getAttribute("data-density")).toBe("comfortable");
+			expect(document.documentElement.getAttribute("data-sidebar")).toBe("expanded");
+		} finally {
+			localStorage.removeItem("theme");
+		}
+	});
+
+	it("re-applies prefs on astro:after-swap so a client-side nav doesn't revert to the server-rendered defaults", () => {
+		expect(bootstrapScript()).toMatch(/document\.addEventListener\('astro:after-swap', applyPrefs\);/);
+	});
+
+	it("cycles the sidebar collapse toggle and persists the choice without clobbering theme/density", () => {
+		localStorage.setItem("prefs", JSON.stringify({ theme: "dark", density: "compact", sidebar: "expanded" }));
+		document.body.innerHTML = '<button class="sidebar-collapse-toggle"></button>';
+		const scriptStart = source.indexOf("function isCollapsed() {");
+		const scriptEnd = source.indexOf("})();", scriptStart);
+		const script = source.slice(scriptStart, scriptEnd);
+		try {
+			new Function(script)();
+			document.dispatchEvent(new Event("astro:page-load"));
+			const btn = document.querySelector(".sidebar-collapse-toggle") as HTMLButtonElement;
+			btn.click();
+			expect(document.documentElement.getAttribute("data-sidebar")).toBe("collapsed");
+			const stored = JSON.parse(localStorage.getItem("prefs") ?? "{}");
+			expect(stored).toEqual({ theme: "dark", density: "compact", sidebar: "collapsed" });
+		} finally {
+			localStorage.removeItem("prefs");
+		}
 	});
 });
 

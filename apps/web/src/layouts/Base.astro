@@ -67,21 +67,44 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
       import { registerSW } from 'virtual:pwa-register';
       registerSW({ immediate: true });
     </script>
-    <!-- safe-ls: 'theme' is a cosmetic preference (dark/light). No API dependency - a
-         stale or missing value falls back to the system color-scheme media query.
-         Astro's ClientRouter swaps <html>'s attributes to match the incoming (server-
-         rendered, theme-unaware) document on every client-side nav, wiping data-theme -
-         so this re-applies on astro:after-swap, not just on first load. -->
+    <!-- safe-ls: 'prefs' (theme/density/sidebar) is cosmetic-only, no API dependency - a
+         stale or missing value falls back to the defaults below (theme also falls back
+         further to the system color-scheme media query). Astro's ClientRouter swaps
+         <html>'s attributes to match the incoming (server-rendered, prefs-unaware)
+         document on every client-side nav, wiping data-theme/data-density/data-sidebar -
+         so this re-applies on astro:after-swap, not just on first load. Kept as
+         self-contained inline JS (mirrors utils/prefs.ts logic) so it can run
+         synchronously pre-paint without waiting on a module import. -->
     <script is:inline>
       (function () {
-        function applyTheme() {
+        function readPrefs() {
           try {
-            var t = localStorage.getItem('theme');
-            if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+            var raw = localStorage.getItem('prefs');
+            if (raw) {
+              var p = JSON.parse(raw);
+              return {
+                theme: (p && (p.theme === 'dark' || p.theme === 'light')) ? p.theme : 'system',
+                density: (p && p.density === 'compact') ? 'compact' : 'comfortable',
+                sidebar: (p && p.sidebar === 'collapsed') ? 'collapsed' : 'expanded'
+              };
+            }
+            var legacyTheme = localStorage.getItem('theme');
+            if (legacyTheme === 'dark' || legacyTheme === 'light') {
+              return { theme: legacyTheme, density: 'comfortable', sidebar: 'expanded' };
+            }
           } catch (e) {}
+          return { theme: 'system', density: 'comfortable', sidebar: 'expanded' };
         }
-        applyTheme();
-        document.addEventListener('astro:after-swap', applyTheme);
+        function applyPrefs() {
+          var p = readPrefs();
+          var root = document.documentElement;
+          if (p.theme === 'system') root.removeAttribute('data-theme');
+          else root.setAttribute('data-theme', p.theme);
+          root.setAttribute('data-density', p.density);
+          root.setAttribute('data-sidebar', p.sidebar);
+        }
+        applyPrefs();
+        document.addEventListener('astro:after-swap', applyPrefs);
       })();
     </script>
     <style is:global>
@@ -133,6 +156,7 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
                 href={item.href}
                 class:list={['sidebar-link', { active: isActive(item.href) }]}
                 aria-current={isActive(item.href) ? 'page' : undefined}
+                aria-label={item.label}
               >
                 {item.icon === 'projects' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
@@ -161,6 +185,9 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
           </a>
           <button class="theme-toggle" type="button" aria-label="Theme">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </button>
+          <button class="theme-toggle sidebar-collapse-toggle" type="button" aria-label="Collapse sidebar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="10" y1="4" x2="10" y2="20"/></svg>
           </button>
         </div>
         <div class="sidebar-version">v{appVersion}</div>
@@ -247,8 +274,13 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
           themeBtn.addEventListener('click', function () {
             var next = ORDER[(ORDER.indexOf(getCurrentState()) + 1) % ORDER.length];
             try {
-              if (next === 'system') localStorage.removeItem('theme');
-              else localStorage.setItem('theme', next);
+              var raw = localStorage.getItem('prefs');
+              var p = raw ? JSON.parse(raw) : {};
+              p.theme = next;
+              if (p.density !== 'compact') p.density = 'comfortable';
+              if (p.sidebar !== 'collapsed') p.sidebar = 'expanded';
+              localStorage.setItem('prefs', JSON.stringify(p));
+              localStorage.removeItem('theme');
             } catch (e) {} // safe-ls: cosmetic only
             if (next === 'system') document.documentElement.removeAttribute('data-theme');
             else document.documentElement.setAttribute('data-theme', next);
@@ -257,6 +289,40 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
         }
 
         document.addEventListener('astro:page-load', bindThemeToggle);
+      })();
+    </script>
+    <script is:inline>
+      (function () {
+        function isCollapsed() {
+          return document.documentElement.getAttribute('data-sidebar') === 'collapsed';
+        }
+        function updateCollapseToggle(btn, collapsed) {
+          if (!btn) return;
+          btn.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+        function bindSidebarCollapseToggle() {
+          var btn = document.querySelector('.sidebar-collapse-toggle');
+          if (!btn) return;
+          updateCollapseToggle(btn, isCollapsed());
+          btn.addEventListener('click', function () {
+            var next = isCollapsed() ? 'expanded' : 'collapsed';
+            try {
+              var raw = localStorage.getItem('prefs');
+              var p = raw ? JSON.parse(raw) : {};
+              p.sidebar = next;
+              if (p.theme !== 'dark' && p.theme !== 'light') {
+                var domTheme = document.documentElement.getAttribute('data-theme');
+                p.theme = (domTheme === 'dark' || domTheme === 'light') ? domTheme : 'system';
+              }
+              if (p.density !== 'compact') p.density = 'comfortable';
+              localStorage.setItem('prefs', JSON.stringify(p));
+              localStorage.removeItem('theme');
+            } catch (e) {} // safe-ls: cosmetic only
+            document.documentElement.setAttribute('data-sidebar', next);
+            updateCollapseToggle(btn, next === 'collapsed');
+          });
+        }
+        document.addEventListener('astro:page-load', bindSidebarCollapseToggle);
       })();
     </script>
     <script>

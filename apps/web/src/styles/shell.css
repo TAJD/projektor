@@ -110,11 +110,11 @@ h4 {
 	display: flex;
 	align-items: center;
 	gap: 0.625rem;
-	padding: 0.5rem 0.625rem;
+	padding: var(--row-py) 0.625rem;
 	border-radius: var(--radius-md);
 	color: var(--text-muted);
 	text-decoration: none;
-	font-size: 0.875rem;
+	font-size: var(--font-size-base);
 	font-weight: 500;
 	line-height: 1.25;
 	flex: 1;
@@ -168,6 +168,21 @@ h4 {
 	font-size: 0.6875rem;
 	color: var(--text-muted);
 	user-select: none;
+}
+
+[data-sidebar="collapsed"] .sidebar {
+	width: var(--sidebar-width-collapsed);
+}
+[data-sidebar="collapsed"] .app-main {
+	margin-left: var(--sidebar-width-collapsed);
+}
+[data-sidebar="collapsed"] .sidebar-section-label,
+[data-sidebar="collapsed"] .sidebar-link .link-label,
+[data-sidebar="collapsed"] .sidebar-version {
+	display: none;
+}
+[data-sidebar="collapsed"] .sidebar-link {
+	justify-content: center;
 }
 
 /* ── App top bar: brand, hamburger (mobile only), account menu ────── */
@@ -266,6 +281,23 @@ h4 {
 	.theme-toggle {
 		padding: 0.5rem 0.625rem;
 		min-height: 44px;
+	}
+	.sidebar-collapse-toggle {
+		display: none;
+	}
+	[data-sidebar="collapsed"] .sidebar {
+		width: min(82vw, 280px);
+	}
+	[data-sidebar="collapsed"] .app-main {
+		margin-left: 0;
+	}
+	[data-sidebar="collapsed"] .sidebar-section-label,
+	[data-sidebar="collapsed"] .sidebar-link .link-label,
+	[data-sidebar="collapsed"] .sidebar-version {
+		display: block;
+	}
+	[data-sidebar="collapsed"] .sidebar-link {
+		justify-content: flex-start;
 	}
 
 	/* iOS Safari auto-zooms the page on focus of any form control rendered
