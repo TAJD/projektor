@@ -11,7 +11,10 @@ import {
 	CreateProductSchema,
 	CreateStageSchema,
 	CreateTargetSchema,
+	DraftFollowupSchema,
+	LinkDealSchema,
 	LinkInteractionContactSchema,
+	ListStaleDealsSchema,
 	MoveDealStageSchema,
 	SetBaseCurrencySchema,
 	SetDealLinesSchema,
@@ -29,6 +32,7 @@ import {
 } from "../schemas/crm";
 import { recordActivity } from "./activity";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { createLinkAttachment } from "./files";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -2065,4 +2069,128 @@ export async function getTargetProgress(ctx: ServiceCtx, targetId: string) {
 	const daysRemaining = Math.ceil((periodEnd - now()) / 86400);
 
 	return { target, actual, percent: percentOrNullWhenTargetValueIsZero, daysRemaining };
+}
+
+export async function linkDeal(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = LinkDealSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { dealId, ...rest } = result.data;
+
+	await requireDeal(ctx, dealId);
+
+	return createLinkAttachment(ctx, { ...rest, entityType: "deal", entityId: dealId });
+}
+
+const STALE_DEAL_DAYS_KEY = "crm.stale_deal_days";
+const DEFAULT_STALE_DEAL_DAYS = 14;
+
+export async function listStaleDeals(ctx: ServiceCtx, raw: unknown) {
+	const result = ListStaleDealsSchema.safeParse(raw ?? {});
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	const settingRaw = await getWorkspaceSetting(ctx, STALE_DEAL_DAYS_KEY);
+	const days =
+		result.data.days ?? (settingRaw !== null ? Number(settingRaw) : DEFAULT_STALE_DEAL_DAYS);
+	const cutoff = now() - days * 86400;
+
+	const orm = drizzle(ctx.db, { schema });
+	const deals = await orm
+		.select()
+		.from(schema.crmDeals)
+		.where(eq(schema.crmDeals.workspaceId, ctx.workspaceId));
+
+	const lastInteractionRows = await inChunks(
+		deals.map((d) => d.id),
+		(chunk) =>
+			orm
+				.select({
+					dealId: schema.crmInteractions.dealId,
+					occurredAt: schema.crmInteractions.occurredAt,
+				})
+				.from(schema.crmInteractions)
+				.where(
+					and(
+						inArray(schema.crmInteractions.dealId, chunk),
+						eq(schema.crmInteractions.workspaceId, ctx.workspaceId)
+					)
+				)
+	);
+
+	const lastByDeal = new Map<string, number>();
+	for (const row of lastInteractionRows) {
+		const cur = lastByDeal.get(row.dealId);
+		if (cur === undefined || row.occurredAt > cur) lastByDeal.set(row.dealId, row.occurredAt);
+	}
+
+	const items = deals.filter((d) => {
+		const last = lastByDeal.get(d.id);
+		return last === undefined || last < cutoff;
+	});
+
+	return { items, days };
+}
+
+export async function getPipelineSummary(ctx: ServiceCtx, pipelineId: string) {
+	await requirePipeline(ctx, pipelineId);
+	const { items: stages } = await listStages(ctx, pipelineId);
+
+	const orm = drizzle(ctx.db, { schema });
+	const deals = await orm
+		.select({
+			stageId: schema.crmDeals.stageId,
+			valueBase: schema.crmDeals.valueBase,
+		})
+		.from(schema.crmDeals)
+		.where(
+			and(
+				eq(schema.crmDeals.pipelineId, pipelineId),
+				eq(schema.crmDeals.workspaceId, ctx.workspaceId)
+			)
+		);
+
+	const byStage = new Map<string, { dealCount: number; totalValueBase: number }>();
+	for (const d of deals) {
+		if (!d.stageId) continue;
+		const cur = byStage.get(d.stageId) ?? { dealCount: 0, totalValueBase: 0 };
+		cur.dealCount += 1;
+		cur.totalValueBase += d.valueBase ?? 0;
+		byStage.set(d.stageId, cur);
+	}
+
+	const items = stages.map((s) => ({
+		stageId: s.id,
+		stageName: s.name,
+		kind: s.kind,
+		position: s.position,
+		dealCount: byStage.get(s.id)?.dealCount ?? 0,
+		totalValueBase: byStage.get(s.id)?.totalValueBase ?? 0,
+	}));
+
+	return { pipelineId, stages: items };
+}
+
+export async function draftFollowup(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = DraftFollowupSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { dealId, occurredAt, summary, author } = result.data;
+
+	await requireDeal(ctx, dealId);
+
+	const orm = drizzle(ctx.db, { schema });
+	const id = crypto.randomUUID();
+
+	await orm.insert(schema.crmInteractions).values({
+		id,
+		workspaceId: ctx.workspaceId,
+		dealId,
+		type: "draft",
+		occurredAt,
+		summary,
+		author,
+		createdAt: now(),
+	});
+
+	return { id };
 }

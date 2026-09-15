@@ -220,3 +220,31 @@ export const UpdateTargetSchema = z
 		currency: CurrencySchema.nullable().optional(),
 	})
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
+
+export const ListStaleDealsSchema = z.object({
+	days: z.number().int().positive().max(3650).optional(),
+});
+
+export const DraftFollowupSchema = z.object({
+	dealId: z.string().uuid(),
+	occurredAt: z.number().int(),
+	summary: z.string().min(1).max(5000),
+	author: z.string().min(1).max(255),
+});
+
+export const LinkDealSchema = z.discriminatedUnion("kind", [
+	z.object({
+		kind: z.literal("wiki_ref"),
+		dealId: z.string().uuid(),
+		wikiPageId: z.string().min(1),
+	}),
+	z.object({
+		kind: z.literal("url"),
+		dealId: z.string().uuid(),
+		url: z
+			.string()
+			.url()
+			.refine((u) => /^https?:\/[/]/i.test(u), "URL must be http or https"),
+		label: z.string().trim().max(200).optional(),
+	}),
+]);

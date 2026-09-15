@@ -105,6 +105,14 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
 	"wiki.ts:purgeExpiredWikiPages": "purge_wiki_trash",
 	"wiki.ts:getWikiTree": "wiki_tree",
 	"workspaces.ts:getWorkspaceWithMembers": "list_members",
+	"crm.ts:createOrganisation": "create_org",
+	"crm.ts:updateOrganisation": "update_org",
+	"crm.ts:listOrganisations": "list_orgs",
+	"crm.ts:getOrganisation": "get_org",
+	"crm.ts:listContactsByOrg": "list_contacts",
+	"crm.ts:listDealsByOrg": "list_deals",
+	"crm.ts:createInteraction": "log_interaction",
+	"crm.ts:listInteractionsByDeal": "list_interactions",
 };
 
 // ---------------------------------------------------------------------------

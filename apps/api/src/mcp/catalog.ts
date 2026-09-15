@@ -3,6 +3,7 @@ import { agentMessagesTools } from "./agent-messages";
 import { agentsTools } from "./agents";
 import { codeHeatmapTools } from "./code-heatmap";
 import { commentsTools } from "./comments";
+import { crmTools } from "./crm";
 import { customFieldsTools } from "./custom-fields";
 import { feedbackTools } from "./feedback";
 import { fileClaimsTools } from "./file-claims";
@@ -94,6 +95,7 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 		group: "Project data",
 		tools: codeHeatmapTools,
 	},
+	{ domain: "crm", title: "CRM", group: "Project data", tools: crmTools },
 ];
 
 /** Total number of MCP tools across all domains. */

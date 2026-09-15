@@ -125,7 +125,7 @@ export const crmInteractions = sqliteTable(
 		dealId: text("deal_id")
 			.notNull()
 			.references(() => crmDeals.id, { onDelete: "cascade" }),
-		type: text("type", { enum: ["call", "email", "demo", "note"] }).notNull(),
+		type: text("type", { enum: ["call", "email", "demo", "note", "draft"] }).notNull(),
 		occurredAt: integer("occurred_at").notNull(),
 		summary: text("summary").notNull(),
 		author: text("author").notNull(),

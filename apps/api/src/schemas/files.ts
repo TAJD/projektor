@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const EntityTypeSchema = z.enum(["issue", "wiki_page"]);
+export const EntityTypeSchema = z.enum(["issue", "wiki_page", "deal"]);
 
 export const ListAttachmentsSchema = z.object({
 	entityType: EntityTypeSchema,

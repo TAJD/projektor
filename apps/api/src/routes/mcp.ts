@@ -7,6 +7,7 @@ import { agentsTools } from "../mcp/agents";
 import { TOOL_DOMAIN_SLUGS, toolNamesForDomains } from "../mcp/catalog";
 import { codeHeatmapTools } from "../mcp/code-heatmap";
 import { commentsTools } from "../mcp/comments";
+import { crmTools } from "../mcp/crm";
 import { customFieldsTools } from "../mcp/custom-fields";
 import { toMcpError } from "../mcp/error-adapter";
 import { feedbackTools } from "../mcp/feedback";
@@ -274,6 +275,7 @@ export const coreMCPTools: MCPTool[] = [
 	...playbooksTools,
 	...flowMetricsTools,
 	...codeHeatmapTools,
+	...crmTools,
 ];
 
 function jsonRpcResult(id: unknown, result: unknown) {

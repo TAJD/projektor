@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**117 tools across 22 domains.**
+**149 tools across 23 domains.**
 
 ## Coordination
 
@@ -243,5 +243,42 @@ running server.
 | Tool | Description |
 |------|-------------|
 | `get_code_heatmap` | Where work lands in the codebase, from file-claim history — no git integration needed. Aggregates claims one path segment below `prefix` (omit for the top level), sized by distinctIssueCount (distinct issues that claimed a path under that segment, claimedAt within [since, until]) plus claimCount (raw claim count, including released ones). Each entry's `path` is the drill-down cursor: re-call with `prefix` set to it to see what's under a directory; `isLeaf` marks an entry that is itself a claimed file path, not a directory. Defaults to the current ISO week plus the preceding 5 weeks, matching get_flow_metrics. `mode` switches sizing between claim volume and claim contention (claim_conflicts). |
+
+### CRM
+
+| Tool | Description |
+|------|-------------|
+| `create_org` | Create a CRM organisation (company/account) |
+| `update_org` | Update a CRM organisation |
+| `list_orgs` | List CRM organisations in the workspace |
+| `get_org` | Get a CRM organisation by id |
+| `create_contact` | Create a contact for a CRM organisation, recording consent basis and timestamp |
+| `update_contact` | Update a contact |
+| `list_contacts` | List contacts for a CRM organisation |
+| `create_deal` | Create a deal for a CRM organisation |
+| `update_deal` | Update a deal's pipeline, owner, expected close, currency, or value override. stageId/wonAt/lostReason cannot be set here — use move_deal_stage. |
+| `set_deal_lines` | Replace a deal's line items (product + pricing plan + quantity) and recompute its valuation |
+| `move_deal_stage` | Move a deal to a new stage in its pipeline. A reason is required to move a deal backward; a lostReason is required when moving into a lost-kind stage. |
+| `list_deals` | List deals for a CRM organisation |
+| `get_deal` | Get a deal by id |
+| `log_interaction` | Log a completed interaction (call, email, demo, or note) against a deal |
+| `list_interactions` | List interactions logged against a deal |
+| `link_deal` | Attach a wiki-page reference or an external URL (e.g. a related issue or feedback item) to a deal |
+| `list_stale_deals` | List deals with no interaction logged in the last N days (default: workspace's crm.stale_deal_days setting, else 14) |
+| `get_pipeline_summary` | Deal counts and total value (in the workspace base currency) per stage of a pipeline |
+| `get_target_progress` | Get a target's actual-vs-value progress for its current period |
+| `draft_followup` | Store a drafted follow-up interaction against a deal without sending anything — the interaction is recorded with type 'draft' for a human to review and send |
+| `export_contact` | Export a contact's full record — profile, linked interactions, and deals — for GDPR data export |
+| `anonymise_contact` | Anonymise a contact's name and email in place (GDPR right to erasure) |
+| `delete_contact` | Delete a contact |
+| `list_pipelines` | List sales pipelines in the workspace |
+| `create_pipeline` | Create a sales pipeline |
+| `update_pipeline` | Update a sales pipeline |
+| `list_products` | List CRM products |
+| `create_product` | Create a CRM product |
+| `create_pricing_plan` | Create a pricing plan for a product |
+| `create_target` | Create a sales target for a metric and period |
+| `list_targets` | List sales targets |
+| `set_fx_rate` | Set (or update) the manual FX rate between two currencies |
 
 <!-- gen-mcp-catalog:end -->

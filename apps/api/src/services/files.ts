@@ -65,9 +65,17 @@ function ownerVisibleFilter(ctx: ServiceCtx): { sql: string; params: unknown[] }
  */
 async function assertEntityWritable(
 	ctx: ServiceCtx,
-	entityType: "issue" | "wiki_page",
+	entityType: "issue" | "wiki_page" | "deal",
 	entityId: string
 ): Promise<void> {
+	if (entityType === "deal") {
+		const deal = await ctx.db
+			.prepare("SELECT id FROM crm_deals WHERE id = ? AND workspace_id = ?")
+			.bind(entityId, ctx.workspaceId)
+			.first();
+		if (!deal) throw new NotFoundError("Deal not found");
+		return;
+	}
 	const table = entityType === "issue" ? "issues" : "wiki_pages";
 	const row = await ctx.db
 		.prepare(`SELECT project_id FROM ${table} WHERE id = ? AND workspace_id = ?`)

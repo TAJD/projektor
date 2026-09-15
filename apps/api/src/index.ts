@@ -22,6 +22,7 @@ import { agentsRouter } from "./routes/agents";
 import { authRouter } from "./routes/auth";
 import { codeHeatmapRouter } from "./routes/code-heatmap";
 import { commentsRouter } from "./routes/comments";
+import { crmRouter } from "./routes/crm";
 import { customFieldsRouter } from "./routes/custom-fields";
 import { feedbackPublicRouter, feedbackRouter } from "./routes/feedback";
 import { feedbackSourceLookupRouter, feedbackSourcesRouter } from "./routes/feedback-sources";
@@ -286,6 +287,8 @@ app.use("/api/file-claims", authMiddleware, workspaceMiddleware);
 app.use("/api/file-claims/*", authMiddleware, workspaceMiddleware);
 app.use("/api/agent-messages", authMiddleware, workspaceMiddleware);
 app.use("/api/agent-messages/*", authMiddleware, workspaceMiddleware);
+app.use("/api/crm", authMiddleware, workspaceMiddleware);
+app.use("/api/crm/*", authMiddleware, workspaceMiddleware);
 app.use("/api/feedback-sources/*", authMiddleware, workspaceMiddleware);
 // No workspaceMiddleware: the workflow spec is global, not workspace-scoped.
 app.use("/api/workflow", authMiddleware);
@@ -336,6 +339,7 @@ app.route("/api/file-claims", fileClaimsRouter);
 app.route("/api/agent-messages", agentMessagesRouter);
 app.route("/api/workflow", workflowRouter);
 app.route("/api/playbooks", playbooksRouter);
+app.route("/api/crm", crmRouter);
 app.route("/api", realtimeRouter);
 
 // PROJ-487 fix-up: /wiki is a static asset (wiki/index.html) that Cloudflare serves
