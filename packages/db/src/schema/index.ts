@@ -2,6 +2,7 @@ export * from "./agent-messages";
 export * from "./agents";
 export * from "./attachments";
 export * from "./core";
+export * from "./crm";
 export * from "./custom-fields";
 export * from "./file-claims";
 export * from "./groups";
