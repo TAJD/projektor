@@ -1,0 +1,265 @@
+:root {
+  --bg: #ffffff;
+  --surface: #f8fafc;
+  --text: #111827;
+  --text-strong: #030712;
+  --text-muted: #6b7280;
+  --border: #e2e8f0;
+  --nav-bg: #ffffff;
+  --accent: #4f46e5;
+  --on-accent: #fff;
+  /* Layout */
+  --sidebar-width: 220px;
+  --sidebar-width-collapsed: 56px;
+  --topbar-height: 56px;
+  /* Elevation. Named --elevation-sm rather than --shadow-sm because Tailwind v4 emits
+     its own theme as real custom properties on :root, and global.css loads after this
+     block — so an app token sharing a Tailwind namespace loses the cascade silently
+     (PROJ-302). Dark mode was unaffected, since [data-theme] outranks :root, which is
+     exactly what would have made it hard to spot. */
+  --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+  /* Priority badge tokens (light) */
+  --priority-urgent-text: #dc2626;
+  --priority-urgent-bg: rgba(220, 38, 38, 0.15);
+  --priority-high-text: #d97706;
+  --priority-high-bg: rgba(217, 119, 6, 0.15);
+  --priority-medium-text: #4f46e5;
+  --priority-medium-bg: rgba(79, 70, 229, 0.12);
+  --priority-low-text: #6b7280;
+  --priority-low-bg: rgba(107, 114, 128, 0.12);
+  --priority-none-text: var(--priority-low-text);
+  --priority-none-bg: var(--priority-low-bg);
+  /* Priority solid pill tokens - filled swatches (e.g. filter pills) under fixed white
+     (--on-accent) text, not text-on-surface. Intentionally identical across all four
+     theme blocks: unlike the translucent tint tokens above (retuned lighter/higher-alpha
+     for dark mode since they sit under token-colored text), these are opaque brand fills
+     with fixed-color text on top, so lightening them for dark mode would move the fill
+     toward the white text and tank contrast. */
+  --priority-urgent-solid: #dc2626;
+  --priority-high-solid: #d97706;
+  --priority-medium-solid: #2563eb;
+  --priority-low-solid: #6b7280;
+  /* Code tokens (light) - dark text on clearly-distinct slate-200 bg */
+  --code-color: #1e293b;
+  --code-bg: #dde3ea;
+  /* Epic badge tokens (light) - violet-700 on near-white bg */
+  --epic-text: #7c3aed;
+  --epic-bg: rgba(124, 58, 237, 0.10);
+  --epic-border: rgba(124, 58, 237, 0.30);
+  /* Status category tokens (light) */
+  --status-todo: #6b7280;
+  --status-in-progress: #4f46e5;
+  --status-in-review: #7c3aed;
+  --status-done: #16a34a;
+  --status-cancelled: #dc2626;
+  /* Sprint status badge tokens (light) */
+  --sprint-active-bg: rgba(37, 99, 235, 0.12);
+  --sprint-active-border: rgba(37, 99, 235, 0.3);
+  --sprint-completed-bg: rgba(22, 163, 74, 0.12);
+  --sprint-completed-border: rgba(22, 163, 74, 0.3);
+  --status-done-bg: rgba(22, 163, 74, 0.12);
+  /* Danger action tokens (light) */
+  --danger-text: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.10);
+  --danger-border: rgba(220, 38, 38, 0.30);
+  /* Warning banner tokens (light) */
+  --warning-bg: rgba(251, 191, 36, 0.12);
+  --warning-border: rgba(251, 191, 36, 0.5);
+  /* Success banner tokens (light) */
+  --success-bg: rgba(22, 163, 74, 0.06);
+  --success-border: rgba(22, 163, 74, 0.3);
+  /* Board dropzone token (light) */
+  --dropzone-bg: rgba(37, 99, 235, 0.04);
+  /* Sprint notice banner tokens (light) */
+  --sprint-notice-bg: rgba(37, 99, 235, 0.08);
+  --sprint-notice-border: rgba(37, 99, 235, 0.25);
+  /* Velocity chart bar-track token (light) */
+  --velocity-bar-bg: rgba(37, 99, 235, 0.15);
+  /* Chart series tokens (light) - metrics dashboard */
+  --chart-secondary: #d97706;
+  --chart-seq-1: #86b6ef;
+  --chart-seq-2: #5598e7;
+  --chart-seq-3: #2a78d6;
+  --chart-seq-4: #1c5cab;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Cool near-black base with one clear step up to surface (Linear/Vercel feel) */
+    --bg: #0d1117;
+    --surface: #1a1f2e;
+    --text: #f3f5f9;
+    --text-strong: #ffffff;
+    --text-muted: #94a3b8;     /* slate-400 - ~7.4:1 on --bg, passes WCAG AA */
+    --border: #2a3242;
+    --nav-bg: #12161f;          /* sits between bg and surface */
+    --accent: #6366f1;          /* indigo-500 - distinctive on dark */
+    --on-accent: #fff;
+    --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+    /* Priority badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
+    --priority-urgent-text: #fca5a5;
+    --priority-urgent-bg: rgba(248, 113, 113, 0.18);
+    --priority-high-text: #fcd34d;
+    --priority-high-bg: rgba(251, 191, 36, 0.18);
+    --priority-medium-text: #a5b4fc;   /* indigo-300 - aligns with accent */
+    --priority-medium-bg: rgba(129, 140, 248, 0.18);
+    --priority-low-text: #cbd5e1;
+    --priority-low-bg: rgba(148, 163, 184, 0.18);
+    /* Priority solid pill tokens - kept identical to :root (see comment there); not
+       retuned for dark mode since these are opaque fills under fixed white text */
+    --priority-urgent-solid: #dc2626;
+    --priority-high-solid: #d97706;
+    --priority-medium-solid: #2563eb;
+    --priority-low-solid: #6b7280;
+    /* Code tokens (dark) - light text on slightly deeper slate bg */
+    --code-color: #e2e8f0;
+    --code-bg: #141b2b;
+    /* Epic badge tokens (dark) - violet-300 on near-black bg */
+    --epic-text: #c4b5fd;
+    --epic-bg: rgba(196, 181, 253, 0.15);
+    --epic-border: rgba(196, 181, 253, 0.30);
+    /* Status category tokens (dark) */
+    --status-todo: #94a3b8;
+    --status-in-progress: #818cf8;
+    --status-in-review: #c4b5fd;
+    --status-done: #4ade80;
+    --status-cancelled: #f87171;
+    /* Sprint status badge tokens (dark) - lighter tints for WCAG AA on dark surfaces */
+    --sprint-active-bg: rgba(129, 140, 248, 0.18);
+    --sprint-active-border: rgba(129, 140, 248, 0.4);
+    --sprint-completed-bg: rgba(74, 222, 128, 0.18);
+    --sprint-completed-border: rgba(74, 222, 128, 0.4);
+    --status-done-bg: rgba(74, 222, 128, 0.18);
+    /* Danger action tokens (dark) - brighter red stays readable on near-black */
+    --danger-text: #f87171;
+    --danger-bg: rgba(248, 113, 113, 0.12);
+    --danger-border: rgba(248, 113, 113, 0.32);
+    /* Warning banner tokens (dark) - lighter amber tint at higher alpha */
+    --warning-bg: rgba(252, 211, 77, 0.18);
+    --warning-border: rgba(252, 211, 77, 0.55);
+    /* Success banner tokens (dark) - lighter green tint at higher alpha */
+    --success-bg: rgba(74, 222, 128, 0.12);
+    --success-border: rgba(74, 222, 128, 0.4);
+    /* Board dropzone token (dark) - lighter indigo tint at higher alpha */
+    --dropzone-bg: rgba(129, 140, 248, 0.08);
+    /* Sprint notice banner tokens (dark) - lighter indigo tint at higher alpha */
+    --sprint-notice-bg: rgba(129, 140, 248, 0.12);
+    --sprint-notice-border: rgba(129, 140, 248, 0.35);
+    /* Velocity chart bar-track token (dark) - lighter indigo tint at higher alpha */
+    --velocity-bar-bg: rgba(129, 140, 248, 0.20);
+    /* Chart series tokens (dark) - metrics dashboard */
+    --chart-secondary: #d97706;
+    --chart-seq-1: #bcd7f7;
+    --chart-seq-2: #8ab8f0;
+    --chart-seq-3: #5a94e4;
+    --chart-seq-4: #3a72c8;
+  }
+}
+[data-theme='dark'] {
+  --bg: #0d1117;
+  --surface: #1a1f2e;
+  --text: #f3f5f9;
+  --text-strong: #ffffff;
+  --text-muted: #94a3b8;
+  --border: #2a3242;
+  --nav-bg: #12161f;
+  --accent: #6366f1;
+  --on-accent: #fff;
+  --elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --priority-urgent-text: #fca5a5;
+  --priority-urgent-bg: rgba(248, 113, 113, 0.18);
+  --priority-high-text: #fcd34d;
+  --priority-high-bg: rgba(251, 191, 36, 0.18);
+  --priority-medium-text: #a5b4fc;
+  --priority-medium-bg: rgba(129, 140, 248, 0.18);
+  --priority-low-text: #cbd5e1;
+  --priority-low-bg: rgba(148, 163, 184, 0.18);
+  --priority-urgent-solid: #dc2626;
+  --priority-high-solid: #d97706;
+  --priority-medium-solid: #2563eb;
+  --priority-low-solid: #6b7280;
+  --code-color: #e2e8f0;
+  --code-bg: #141b2b;
+  --epic-text: #c4b5fd;
+  --epic-bg: rgba(196, 181, 253, 0.15);
+  --epic-border: rgba(196, 181, 253, 0.30);
+  --status-todo: #94a3b8;
+  --status-in-progress: #818cf8;
+  --status-in-review: #c4b5fd;
+  --status-done: #4ade80;
+  --status-cancelled: #f87171;
+  --sprint-active-bg: rgba(129, 140, 248, 0.18);
+  --sprint-active-border: rgba(129, 140, 248, 0.4);
+  --sprint-completed-bg: rgba(74, 222, 128, 0.18);
+  --sprint-completed-border: rgba(74, 222, 128, 0.4);
+  --status-done-bg: rgba(74, 222, 128, 0.18);
+  --danger-text: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.12);
+  --danger-border: rgba(248, 113, 113, 0.32);
+  --warning-bg: rgba(252, 211, 77, 0.18);
+  --warning-border: rgba(252, 211, 77, 0.55);
+  --success-bg: rgba(74, 222, 128, 0.12);
+  --success-border: rgba(74, 222, 128, 0.4);
+  --dropzone-bg: rgba(129, 140, 248, 0.08);
+  --sprint-notice-bg: rgba(129, 140, 248, 0.12);
+  --sprint-notice-border: rgba(129, 140, 248, 0.35);
+  --velocity-bar-bg: rgba(129, 140, 248, 0.20);
+  --chart-secondary: #d97706;
+  --chart-seq-1: #bcd7f7;
+  --chart-seq-2: #8ab8f0;
+  --chart-seq-3: #5a94e4;
+  --chart-seq-4: #3a72c8;
+}
+[data-theme='light'] {
+  --bg: #ffffff;
+  --surface: #f8fafc;
+  --text: #111827;
+  --text-strong: #030712;
+  --text-muted: #6b7280;
+  --border: #e2e8f0;
+  --nav-bg: #ffffff;
+  --accent: #4f46e5;
+  --on-accent: #fff;
+  --priority-urgent-text: #dc2626;
+  --priority-urgent-bg: rgba(220, 38, 38, 0.15);
+  --priority-high-text: #d97706;
+  --priority-high-bg: rgba(217, 119, 6, 0.15);
+  --priority-medium-text: #4f46e5;
+  --priority-medium-bg: rgba(79, 70, 229, 0.12);
+  --priority-low-text: #6b7280;
+  --priority-low-bg: rgba(107, 114, 128, 0.12);
+  --priority-urgent-solid: #dc2626;
+  --priority-high-solid: #d97706;
+  --priority-medium-solid: #2563eb;
+  --priority-low-solid: #6b7280;
+  --code-color: #1e293b;
+  --code-bg: #dde3ea;
+  --epic-text: #7c3aed;
+  --epic-bg: rgba(124, 58, 237, 0.10);
+  --epic-border: rgba(124, 58, 237, 0.30);
+  --status-todo: #6b7280;
+  --status-in-progress: #4f46e5;
+  --status-in-review: #7c3aed;
+  --status-done: #16a34a;
+  --status-cancelled: #dc2626;
+  --sprint-active-bg: rgba(37, 99, 235, 0.12);
+  --sprint-active-border: rgba(37, 99, 235, 0.3);
+  --sprint-completed-bg: rgba(22, 163, 74, 0.12);
+  --sprint-completed-border: rgba(22, 163, 74, 0.3);
+  --status-done-bg: rgba(22, 163, 74, 0.12);
+  --danger-text: #dc2626;
+  --danger-bg: rgba(220, 38, 38, 0.10);
+  --danger-border: rgba(220, 38, 38, 0.30);
+  --warning-bg: rgba(251, 191, 36, 0.12);
+  --warning-border: rgba(251, 191, 36, 0.5);
+  --success-bg: rgba(22, 163, 74, 0.06);
+  --success-border: rgba(22, 163, 74, 0.3);
+  --dropzone-bg: rgba(37, 99, 235, 0.04);
+  --sprint-notice-bg: rgba(37, 99, 235, 0.08);
+  --sprint-notice-border: rgba(37, 99, 235, 0.25);
+  --velocity-bar-bg: rgba(37, 99, 235, 0.15);
+  --chart-secondary: #d97706;
+  --chart-seq-1: #86b6ef;
+  --chart-seq-2: #5598e7;
+  --chart-seq-3: #2a78d6;
+  --chart-seq-4: #1c5cab;
+}

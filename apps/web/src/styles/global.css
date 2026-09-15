@@ -4,6 +4,8 @@
    the standalone share view, which imports it directly. */
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+@import "./shell.css";
+@import "./components.css";
 
 /* v3 declared a `content` glob over src for astro/tsx/ts/js. v4 auto-detects sources, but
    the detection root is inferred rather than declared, so pin it at src/. The directory

@@ -5,31 +5,33 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(join(__dirname, "Base.astro"), "utf-8");
+const shellCss = readFileSync(join(__dirname, "../styles/shell.css"), "utf-8");
+const componentsCss = readFileSync(join(__dirname, "../styles/components.css"), "utf-8");
 
 describe("Base layout — mobile viewport", () => {
 	it("forces 16px form-control font-size on mobile so iOS Safari doesn't auto-zoom on focus (PROJ-304)", () => {
 		// PROJ-428 added a second, unrelated `@media (max-width: 640px)` block
 		// (account-menu), so anchor on the iOS-zoom comment instead of the
 		// (no longer unique) media-query text itself.
-		const mobileQueryStart = source.indexOf("/* iOS Safari auto-zooms");
+		const mobileQueryStart = shellCss.indexOf("/* iOS Safari auto-zooms");
 		expect(mobileQueryStart).toBeGreaterThan(-1);
 
-		const mobileQueryEnd = source.indexOf("\n      }", mobileQueryStart);
-		const mobileQuery = source.slice(mobileQueryStart, mobileQueryEnd);
+		const mobileQueryEnd = shellCss.indexOf("\n  }", mobileQueryStart);
+		const mobileQuery = shellCss.slice(mobileQueryStart, mobileQueryEnd);
 
 		expect(mobileQuery).toMatch(/input,\s*textarea,\s*select\s*{\s*font-size:\s*16px;/);
 	});
 });
 
 describe("Base layout — mobile Select menu sheet (CD-294)", () => {
-	const blockStart = source.indexOf("/* CD-294: phone-sized Select menu.");
-	const block = source.slice(blockStart, source.indexOf("\n      }\n", blockStart));
+	const blockStart = componentsCss.indexOf("/* CD-294: phone-sized Select menu.");
+	const block = componentsCss.slice(blockStart, componentsCss.indexOf("\n}\n", blockStart));
 
 	it("has the mobile block, and places it after the base .select-* rules so it wins on source order", () => {
 		expect(blockStart).toBeGreaterThan(-1);
 		// Equal specificity (single class each), so the later rule wins — if the
 		// base `.select-menu` ever moves below this block, the sheet silently dies.
-		expect(blockStart).toBeGreaterThan(source.indexOf("      .select-menu {"));
+		expect(blockStart).toBeGreaterThan(componentsCss.indexOf(".select-menu {"));
 	});
 
 	it("anchors the menu to the bottom of the viewport instead of under its trigger", () => {
