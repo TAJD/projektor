@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+	anonymiseContact,
 	archivePricingPlan,
 	archiveProduct,
 	createContact,
@@ -17,6 +18,7 @@ import {
 	deletePricingPlan,
 	deleteStage,
 	deleteTarget,
+	exportContact,
 	getContact,
 	getDeal,
 	getInteraction,
@@ -25,6 +27,7 @@ import {
 	getTarget,
 	getTargetProgress,
 	linkInteractionContact,
+	listContactsByOrg,
 	listContactsForInteraction,
 	listDealLinesByDeal,
 	listOrganisations,
@@ -36,6 +39,7 @@ import {
 	setDealLines,
 	setFxRate,
 	setWorkspaceBaseCurrency,
+	setWorkspaceRetentionDays,
 	updateContact,
 	updateDeal,
 	updateInteraction,
@@ -185,6 +189,160 @@ describe("CRM contacts", () => {
 		await expect(linkInteractionContact(ctx, { interactionId, contactId })).rejects.toBeInstanceOf(
 			ConflictError
 		);
+	});
+
+	it("rejects creating a contact without consentBasis", async () => {
+		await expect(
+			createContact(ctx, {
+				orgId,
+				name: "No Consent",
+				email: "noconsent@example.com",
+				consentAt: Math.floor(Date.now() / 1000),
+			})
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("computes retentionUntil from consentBasis default retention days on create", async () => {
+		const consentAt = Math.floor(Date.now() / 1000);
+
+		const { id: contractId } = await createContact(ctx, {
+			orgId,
+			name: "Contract Contact",
+			email: "contract@example.com",
+			consentBasis: "contract",
+			consentAt,
+		});
+		const { id: liId } = await createContact(ctx, {
+			orgId,
+			name: "LI Contact",
+			email: "li@example.com",
+			consentBasis: "legitimate_interest",
+			consentAt,
+		});
+		const { id: consentId } = await createContact(ctx, {
+			orgId,
+			name: "Consent Contact",
+			email: "consent@example.com",
+			consentBasis: "consent",
+			consentAt,
+		});
+
+		expect((await getContact(ctx, contractId)).retentionUntil).toBe(consentAt + 2555 * 86400);
+		expect((await getContact(ctx, liId)).retentionUntil).toBe(consentAt + 730 * 86400);
+		expect((await getContact(ctx, consentId)).retentionUntil).toBe(consentAt + 365 * 86400);
+	});
+
+	it("recomputes retentionUntil when consentBasis changes via update", async () => {
+		const consentAt = Math.floor(Date.now() / 1000);
+		const { id } = await createContact(ctx, {
+			orgId,
+			name: "Recompute Contact",
+			email: "recompute@example.com",
+			consentBasis: "consent",
+			consentAt,
+		});
+		expect((await getContact(ctx, id)).retentionUntil).toBe(consentAt + 365 * 86400);
+
+		await updateContact(ctx, id, { consentBasis: "contract" });
+		expect((await getContact(ctx, id)).retentionUntil).toBe(consentAt + 2555 * 86400);
+	});
+
+	it("respects a workspace override of retention days", async () => {
+		await setWorkspaceRetentionDays(ctx, { consent: 30 });
+		const consentAt = Math.floor(Date.now() / 1000);
+		const { id } = await createContact(ctx, {
+			orgId,
+			name: "Override Contact",
+			email: "override@example.com",
+			consentBasis: "consent",
+			consentAt,
+		});
+		expect((await getContact(ctx, id)).retentionUntil).toBe(consentAt + 30 * 86400);
+	});
+
+	it("anonymises a contact, replacing name/email and no longer matching search by original values", async () => {
+		const { id } = await createContact(ctx, {
+			orgId,
+			name: "Original Name",
+			email: "original@example.com",
+			consentBasis: "consent",
+			consentAt: Math.floor(Date.now() / 1000),
+		});
+
+		await anonymiseContact(ctx, id);
+
+		const anonymised = await getContact(ctx, id);
+		expect(anonymised.name).not.toBe("Original Name");
+		expect(anonymised.email).not.toBe("original@example.com");
+		expect(anonymised.anonymisedAt).not.toBeNull();
+
+		const { items } = await listContactsByOrg(ctx, orgId);
+		const matches = items.filter(
+			(c) => c.name === "Original Name" || c.email === "original@example.com"
+		);
+		expect(matches).toHaveLength(0);
+	});
+
+	it("blocks a viewer from anonymising a contact", async () => {
+		const { id } = await createContact(ctx, {
+			orgId,
+			name: "Viewer Blocked",
+			email: "viewerblocked@example.com",
+			consentBasis: "consent",
+			consentAt: Math.floor(Date.now() / 1000),
+		});
+		const viewerCtx: ServiceCtx = { ...ctx, role: "viewer" };
+		await expect(anonymiseContact(viewerCtx, id)).rejects.toBeInstanceOf(ForbiddenError);
+	});
+
+	it("hard-deletes a contact without affecting the org's deals", async () => {
+		const { id: contactId } = await createContact(ctx, {
+			orgId,
+			name: "Delete Contact",
+			email: "deletecontact@example.com",
+			consentBasis: "consent",
+			consentAt: Math.floor(Date.now() / 1000),
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+
+		await deleteContact(ctx, contactId);
+
+		await expect(getContact(ctx, contactId)).rejects.toBeInstanceOf(NotFoundError);
+		const deal = await getDeal(ctx, dealId);
+		expect(deal.id).toBe(dealId);
+	});
+
+	it("exports a contact's full record, interactions, and org deals", async () => {
+		const { id: contactId } = await createContact(ctx, {
+			orgId,
+			name: "Export Contact",
+			email: "export@example.com",
+			role: "CTO",
+			consentBasis: "contract",
+			consentAt: Math.floor(Date.now() / 1000),
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+		const { id: interactionId } = await createInteraction(ctx, {
+			dealId,
+			type: "call",
+			occurredAt: Math.floor(Date.now() / 1000),
+			summary: "Export call",
+			author: ctx.userId,
+		});
+		await linkInteractionContact(ctx, { interactionId, contactId });
+
+		const exported = await exportContact(ctx, contactId);
+
+		expect(exported.contact.id).toBe(contactId);
+		expect(exported.contact.name).toBe("Export Contact");
+		expect(exported.contact.email).toBe("export@example.com");
+		expect(exported.contact.role).toBe("CTO");
+		expect(exported.contact.consentBasis).toBe("contract");
+		expect(exported.contact.orgId).toBe(orgId);
+		expect(exported.interactions).toHaveLength(1);
+		expect(exported.interactions[0]?.id).toBe(interactionId);
+		expect(exported.deals).toHaveLength(1);
+		expect(exported.deals[0]?.id).toBe(dealId);
 	});
 });
 

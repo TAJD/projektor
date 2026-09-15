@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, gte, isNotNull, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, lt } from "drizzle-orm";
 import type { z } from "zod";
 import {
 	CreateContactSchema,
@@ -16,6 +16,7 @@ import {
 	SetBaseCurrencySchema,
 	SetDealLinesSchema,
 	SetFxRateSchema,
+	SetRetentionDaysSchema,
 	UpdateContactSchema,
 	UpdateDealSchema,
 	UpdateInteractionSchema,
@@ -28,6 +29,7 @@ import {
 } from "../schemas/crm";
 import { recordActivity } from "./activity";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 function now(): number {
@@ -239,13 +241,14 @@ export async function createContact(ctx: ServiceCtx, raw: unknown) {
 	assertCanMutate(ctx);
 	const result = CreateContactSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { orgId, name, email, role, consentBasis, consentAt, retentionUntil } = result.data;
+	const { orgId, name, email, role, consentBasis, consentAt } = result.data;
 
 	await requireOrganisation(ctx, orgId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const id = crypto.randomUUID();
 	const ts = now();
+	const retentionUntil = await computeRetentionUntil(ctx, consentBasis, consentAt);
 
 	await orm.insert(schema.crmContacts).values({
 		id,
@@ -256,7 +259,7 @@ export async function createContact(ctx: ServiceCtx, raw: unknown) {
 		role: role ?? null,
 		consentBasis,
 		consentAt,
-		retentionUntil: retentionUntil ?? null,
+		retentionUntil,
 		anonymisedAt: null,
 		createdAt: ts,
 		updatedAt: ts,
@@ -290,7 +293,7 @@ export async function listContactsByOrg(ctx: ServiceCtx, orgId: string) {
 
 type ContactUpdateData = z.infer<typeof UpdateContactSchema>;
 
-function buildContactSetData(data: ContactUpdateData, ts: number) {
+function buildContactSetData(data: ContactUpdateData, ts: number, retentionUntil: number | null) {
 	const setData: {
 		updatedAt: number;
 		name?: string;
@@ -299,16 +302,19 @@ function buildContactSetData(data: ContactUpdateData, ts: number) {
 		consentBasis?: "contract" | "legitimate_interest" | "consent";
 		consentAt?: number;
 		retentionUntil?: number | null;
-		anonymisedAt?: number | null;
 	} = { updatedAt: ts };
 
 	if (data.name !== undefined) setData.name = data.name;
 	if (data.email !== undefined) setData.email = data.email;
 	if ("role" in data) setData.role = data.role ?? null;
-	if (data.consentBasis !== undefined) setData.consentBasis = data.consentBasis;
-	if (data.consentAt !== undefined) setData.consentAt = data.consentAt;
-	if ("retentionUntil" in data) setData.retentionUntil = data.retentionUntil ?? null;
-	if ("anonymisedAt" in data) setData.anonymisedAt = data.anonymisedAt ?? null;
+	if (data.consentBasis !== undefined) {
+		setData.consentBasis = data.consentBasis;
+		setData.retentionUntil = retentionUntil;
+	}
+	if (data.consentAt !== undefined) {
+		setData.consentAt = data.consentAt;
+		setData.retentionUntil = retentionUntil;
+	}
 
 	return setData;
 }
@@ -320,13 +326,25 @@ export async function updateContact(ctx: ServiceCtx, id: string, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
-		.select({ id: schema.crmContacts.id })
+		.select({
+			consentBasis: schema.crmContacts.consentBasis,
+			consentAt: schema.crmContacts.consentAt,
+		})
 		.from(schema.crmContacts)
 		.where(and(eq(schema.crmContacts.id, id), eq(schema.crmContacts.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!existing) throw new NotFoundError("Contact not found");
 
-	const setData = buildContactSetData(result.data, now());
+	let retentionUntil: number | null = null;
+	if (result.data.consentBasis !== undefined || result.data.consentAt !== undefined) {
+		retentionUntil = await computeRetentionUntil(
+			ctx,
+			result.data.consentBasis ?? existing.consentBasis,
+			result.data.consentAt ?? existing.consentAt
+		);
+	}
+
+	const setData = buildContactSetData(result.data, now(), retentionUntil);
 	await orm
 		.update(schema.crmContacts)
 		.set(setData)
@@ -350,6 +368,80 @@ export async function deleteContact(ctx: ServiceCtx, id: string) {
 		.where(and(eq(schema.crmContacts.id, id), eq(schema.crmContacts.workspaceId, ctx.workspaceId)));
 
 	return { ok: true };
+}
+
+async function hashEmailForAnonymisation(email: string): Promise<string> {
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email));
+	return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0"))
+		.join("")
+		.slice(0, 16);
+}
+
+export async function anonymiseContact(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
+	const orm = drizzle(ctx.db, { schema });
+	const existing = await orm
+		.select({ email: schema.crmContacts.email })
+		.from(schema.crmContacts)
+		.where(and(eq(schema.crmContacts.id, id), eq(schema.crmContacts.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!existing) throw new NotFoundError("Contact not found");
+
+	const hash = await hashEmailForAnonymisation(existing.email);
+	const ts = now();
+
+	await orm
+		.update(schema.crmContacts)
+		.set({
+			name: "Anonymised Contact",
+			email: `anon-${hash}@anonymised.invalid`,
+			anonymisedAt: ts,
+			updatedAt: ts,
+		})
+		.where(and(eq(schema.crmContacts.id, id), eq(schema.crmContacts.workspaceId, ctx.workspaceId)));
+
+	return { ok: true };
+}
+
+export async function exportContact(ctx: ServiceCtx, id: string) {
+	const orm = drizzle(ctx.db, { schema });
+	const contact = await orm
+		.select()
+		.from(schema.crmContacts)
+		.where(and(eq(schema.crmContacts.id, id), eq(schema.crmContacts.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!contact) throw new NotFoundError("Contact not found");
+
+	const links = await orm
+		.select({ interactionId: schema.crmInteractionContacts.interactionId })
+		.from(schema.crmInteractionContacts)
+		.where(eq(schema.crmInteractionContacts.contactId, id));
+
+	const interactions = await inChunks(
+		links.map((l) => l.interactionId),
+		(chunk) =>
+			orm
+				.select()
+				.from(schema.crmInteractions)
+				.where(
+					and(
+						inArray(schema.crmInteractions.id, chunk),
+						eq(schema.crmInteractions.workspaceId, ctx.workspaceId)
+					)
+				)
+	);
+
+	const deals = await orm
+		.select()
+		.from(schema.crmDeals)
+		.where(
+			and(
+				eq(schema.crmDeals.orgId, contact.orgId),
+				eq(schema.crmDeals.workspaceId, ctx.workspaceId)
+			)
+		);
+
+	return { contact, interactions, deals };
 }
 
 export async function createDeal(ctx: ServiceCtx, raw: unknown) {
@@ -1494,6 +1586,44 @@ export async function setWorkspaceBaseCurrency(ctx: ServiceCtx, baseCurrency: st
 
 export async function getWorkspaceBaseCurrency(ctx: ServiceCtx): Promise<string | null> {
 	return getWorkspaceSetting(ctx, BASE_CURRENCY_KEY);
+}
+
+const RETENTION_DAYS_KEY = "crm.retention_days";
+
+type ConsentBasis = "contract" | "legitimate_interest" | "consent";
+
+const DEFAULT_RETENTION_DAYS: Record<ConsentBasis, number> = {
+	contract: 2555,
+	legitimate_interest: 730,
+	consent: 365,
+};
+
+export async function getWorkspaceRetentionDays(
+	ctx: ServiceCtx
+): Promise<Record<ConsentBasis, number>> {
+	const raw = await getWorkspaceSetting(ctx, RETENTION_DAYS_KEY);
+	const overrides = raw ? (JSON.parse(raw) as Partial<Record<ConsentBasis, number>>) : {};
+	return { ...DEFAULT_RETENTION_DAYS, ...overrides };
+}
+
+export async function setWorkspaceRetentionDays(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
+	const result = SetRetentionDaysSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+
+	const current = await getWorkspaceRetentionDays(ctx);
+	const merged = { ...current, ...result.data };
+	await setWorkspaceSetting(ctx, RETENTION_DAYS_KEY, JSON.stringify(merged));
+	return { ok: true };
+}
+
+async function computeRetentionUntil(
+	ctx: ServiceCtx,
+	consentBasis: ConsentBasis,
+	consentAt: number
+): Promise<number> {
+	const retentionDays = await getWorkspaceRetentionDays(ctx);
+	return consentAt + retentionDays[consentBasis] * 86400;
 }
 
 export async function setFxRate(

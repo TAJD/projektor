@@ -25,7 +25,6 @@ export const CreateContactSchema = z.object({
 	role: z.string().max(255).optional(),
 	consentBasis: ConsentBasisEnum,
 	consentAt: z.number().int(),
-	retentionUntil: z.number().int().optional(),
 });
 
 export const UpdateContactSchema = z
@@ -35,8 +34,14 @@ export const UpdateContactSchema = z
 		role: z.string().max(255).nullable().optional(),
 		consentBasis: ConsentBasisEnum.optional(),
 		consentAt: z.number().int().optional(),
-		retentionUntil: z.number().int().nullable().optional(),
-		anonymisedAt: z.number().int().nullable().optional(),
+	})
+	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
+
+export const SetRetentionDaysSchema = z
+	.object({
+		contract: z.number().int().positive().optional(),
+		legitimate_interest: z.number().int().positive().optional(),
+		consent: z.number().int().positive().optional(),
 	})
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 
