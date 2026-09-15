@@ -23,11 +23,12 @@ const isActive = (href: string): boolean =>
 
 // PROJ-395: glossaryId flags nav items whose label is jargon a newcomer wouldn't
 // know (Groups, Tokens) — those get an inline GlossaryHelp toggletip.
-const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId }> = [
-  { href: '/', label: 'Projects' },
-  { href: '/my-issues', label: 'My Issues' },
-  { href: '/settings/groups', label: 'Groups', glossaryId: 'groups' },
-  { href: '/settings/tokens', label: 'Connect Agent', glossaryId: 'tokens' },
+type NavIcon = 'projects' | 'my-issues' | 'groups' | 'tokens';
+const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?: GlossaryTermId }> = [
+  { href: '/', label: 'Projects', icon: 'projects' },
+  { href: '/my-issues', label: 'My Issues', icon: 'my-issues' },
+  { href: '/settings/groups', label: 'Groups', icon: 'groups', glossaryId: 'groups' },
+  { href: '/settings/tokens', label: 'Connect Agent', icon: 'tokens', glossaryId: 'tokens' },
 ];
 ---
 <!DOCTYPE html>
@@ -132,16 +133,16 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
                 class:list={['sidebar-link', { active: isActive(item.href) }]}
                 aria-current={isActive(item.href) ? 'page' : undefined}
               >
-                {item.label === 'Projects' && (
+                {item.icon === 'projects' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
                 )}
-                {item.label === 'My Issues' && (
+                {item.icon === 'my-issues' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
                 )}
-                {item.label === 'Groups' && (
+                {item.icon === 'groups' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                 )}
-                {item.label === 'Tokens' && (
+                {item.icon === 'tokens' && (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
                 )}
                 <span class="link-label">{item.label}</span>
@@ -154,8 +155,12 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
         <div class="sidebar-spacer"></div>
 
         <div class="sidebar-footer">
-          <a href="/help" class="theme-toggle" aria-label="Help — glossary of terms" title="Help">?</a>
-          <button class="theme-toggle" aria-label="Toggle colour scheme">🌙</button>
+          <a href="/help" class="theme-toggle" aria-label="Help — glossary of terms" title="Help">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </a>
+          <button class="theme-toggle" type="button" aria-label="Theme">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </button>
         </div>
         <div class="sidebar-version">v{appVersion}</div>
       </aside>
@@ -213,27 +218,44 @@ const navItems: Array<{ href: string; label: string; glossaryId?: GlossaryTermId
     </script>
     <script is:inline>
       (function () {
-        function updateThemeIcon(themeBtn) {
+        var ORDER = ['system', 'light', 'dark'];
+        var LABELS = { system: 'System', light: 'Light', dark: 'Dark' };
+        var ICONS = {
+          system: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+          light: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+          dark: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
+        };
+
+        function getStored() {
+          try {
+            var t = localStorage.getItem('theme');
+            return t === 'dark' || t === 'light' ? t : 'system';
+          } catch (e) {
+            return 'system';
+          }
+        }
+
+        function updateThemeIcon(themeBtn, state) {
           if (!themeBtn) return;
-          var t = document.documentElement.getAttribute('data-theme');
-          var isDark = t === 'dark' ||
-            (!t && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          themeBtn.textContent = isDark ? '☀️' : '🌙';
-          themeBtn.setAttribute('aria-label', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+          var svg = themeBtn.querySelector('svg');
+          if (svg) svg.innerHTML = ICONS[state];
+          var next = ORDER[(ORDER.indexOf(state) + 1) % ORDER.length];
+          themeBtn.setAttribute('aria-label', 'Theme: ' + LABELS[state] + ' — switch to ' + LABELS[next]);
         }
 
         function bindThemeToggle() {
           var themeBtn = document.querySelector('button.theme-toggle');
           if (!themeBtn) return;
-          updateThemeIcon(themeBtn);
+          updateThemeIcon(themeBtn, getStored());
           themeBtn.addEventListener('click', function () {
-            var cur = document.documentElement.getAttribute('data-theme');
-            var isDark = cur === 'dark' ||
-              (!cur && window.matchMedia('(prefers-color-scheme: dark)').matches);
-            var next = isDark ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', next);
-            try { localStorage.setItem('theme', next); } catch (e) {} // safe-ls: cosmetic only
-            updateThemeIcon(themeBtn);
+            var next = ORDER[(ORDER.indexOf(getStored()) + 1) % ORDER.length];
+            try {
+              if (next === 'system') localStorage.removeItem('theme');
+              else localStorage.setItem('theme', next);
+            } catch (e) {} // safe-ls: cosmetic only
+            if (next === 'system') document.documentElement.removeAttribute('data-theme');
+            else document.documentElement.setAttribute('data-theme', next);
+            updateThemeIcon(themeBtn, next);
           });
         }
 

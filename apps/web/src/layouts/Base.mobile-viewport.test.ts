@@ -63,6 +63,36 @@ describe("Base layout — account menu replaces legacy login/logout emoji", () =
 	});
 });
 
+describe("Base layout — icon consistency and tri-state theme control (PROJ-758)", () => {
+	it("has no leftover emoji or bare glyph controls in the sidebar footer", () => {
+		expect(source).not.toContain("🌙");
+		expect(source).not.toContain("☀️");
+		expect(source).not.toContain('title="Help">?<');
+	});
+
+	it("keys nav icons off an explicit icon field, not the label text", () => {
+		expect(source).not.toMatch(/item\.label === 'Tokens'/);
+		expect(source).toMatch(/icon:\s*'tokens'/);
+		expect(source).toMatch(/item\.icon === 'tokens'/);
+	});
+
+	it("cycles the theme control across system, light and dark", () => {
+		const scriptStart = source.indexOf("var ORDER = ['system', 'light', 'dark'];");
+		expect(scriptStart).toBeGreaterThan(-1);
+		const scriptEnd = source.indexOf("</script>", scriptStart);
+		const script = source.slice(scriptStart, scriptEnd);
+		expect(script).toMatch(/ORDER\[\(ORDER\.indexOf\(getStored\(\)\) \+ 1\) % ORDER\.length\]/);
+	});
+
+	it("clears the stored preference so the bootstrap's missing-value fallback still applies", () => {
+		const scriptStart = source.indexOf("var ORDER = ['system', 'light', 'dark'];");
+		const scriptEnd = source.indexOf("</script>", scriptStart);
+		const script = source.slice(scriptStart, scriptEnd);
+		expect(script).toMatch(/if \(next === 'system'\) localStorage\.removeItem\('theme'\);/);
+		expect(script).toMatch(/if \(next === 'system'\) document\.documentElement\.removeAttribute\('data-theme'\);/);
+	});
+});
+
 describe("Base layout — topbar hide-on-scroll thresholds (PROJ-569)", () => {
 	it("requires a deliberate scroll in each direction before toggling, not a single pixel", () => {
 		// PROJ-569: an 8px hide threshold with an un-thresholded reveal flickered the
