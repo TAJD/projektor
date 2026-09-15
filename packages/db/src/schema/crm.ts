@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
 	index,
 	integer,
@@ -86,6 +87,8 @@ export const crmDeals = sqliteTable(
 	(t) => ({
 		workspaceIdx: index("crm_deals_workspace_idx").on(t.workspaceId),
 		orgIdx: index("crm_deals_org_idx").on(t.orgId),
+		workspaceStageIdx: index("crm_deals_workspace_stage_idx").on(t.workspaceId, t.stageId),
+		workspacePipelineIdx: index("crm_deals_workspace_pipeline_idx").on(t.workspaceId, t.pipelineId),
 	})
 );
 
@@ -149,6 +152,9 @@ export const crmPipelines = sqliteTable(
 	},
 	(t) => ({
 		workspaceIdx: index("crm_pipelines_workspace_idx").on(t.workspaceId),
+		workspaceDefaultUniqueIdx: uniqueIndex("crm_pipelines_workspace_default_idx")
+			.on(t.workspaceId)
+			.where(sql`${t.isDefault} = 1`),
 	})
 );
 
@@ -173,6 +179,10 @@ export const crmStages = sqliteTable(
 	(t) => ({
 		workspaceIdx: index("crm_stages_workspace_idx").on(t.workspaceId),
 		pipelineIdx: index("crm_stages_pipeline_idx").on(t.pipelineId),
+		pipelinePositionUniqueIdx: uniqueIndex("crm_stages_pipeline_position_idx").on(
+			t.pipelineId,
+			t.position
+		),
 	})
 );
 

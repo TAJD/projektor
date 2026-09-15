@@ -45,6 +45,7 @@ import { taskTypesRouter } from "./routes/task-types";
 import { wikiRouter } from "./routes/wiki";
 import { workflowRouter } from "./routes/workflow";
 import { workspacesRouter } from "./routes/workspaces";
+import { seedDefaultPipeline } from "./services/crm";
 import { seedDefaultCustomFields } from "./services/custom-fields";
 import { listProjectsAcrossWorkspaces } from "./services/projects";
 import { seedDefaultTaskStatuses } from "./services/task-statuses";
@@ -183,6 +184,8 @@ app.get("/bootstrap", async (c) => {
 	await seedDefaultTaskStatuses(c.env.DB, ws!.id);
 	// biome-ignore lint/style/noNonNullAssertion: ws was just upserted above; SELECT after guarantees it exists
 	await seedDefaultCustomFields(c.env.DB, ws!.id);
+	// biome-ignore lint/style/noNonNullAssertion: ws was just upserted above; SELECT after guarantees it exists
+	await seedDefaultPipeline(c.env.DB, ws!.id);
 
 	// Generate token
 	const tokenBytes = crypto.getRandomValues(new Uint8Array(32));

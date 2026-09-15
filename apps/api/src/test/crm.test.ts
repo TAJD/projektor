@@ -31,7 +31,7 @@ import {
 	updateOrganisation,
 	updatePipeline,
 } from "../services/crm";
-import { ConflictError, NotFoundError, ValidationError } from "../services/errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
 import type { ServiceCtx } from "../services/types";
 import { seedFixture } from "./helpers";
 
@@ -78,6 +78,20 @@ describe("CRM organisations", () => {
 		await createDeal(ctx, { orgId, currency: "USD" });
 
 		await expect(deleteOrganisation(ctx, orgId)).rejects.toBeInstanceOf(ConflictError);
+	});
+
+	it("blocks a viewer from creating an organisation", async () => {
+		const viewerCtx: ServiceCtx = { ...ctx, role: "viewer" };
+		await expect(createOrganisation(viewerCtx, { name: "Nope" })).rejects.toBeInstanceOf(
+			ForbiddenError
+		);
+	});
+
+	it("rejects creating an organisation with a domain already used in the workspace", async () => {
+		await createOrganisation(ctx, { name: "First", domain: "dup.test" });
+		await expect(
+			createOrganisation(ctx, { name: "Second", domain: "dup.test" })
+		).rejects.toBeInstanceOf(ConflictError);
 	});
 });
 
@@ -137,6 +151,29 @@ describe("CRM contacts", () => {
 		const interaction = await getInteraction(ctx, interactionId);
 		expect(interaction.id).toBe(interactionId);
 	});
+
+	it("rejects linking the same contact to an interaction twice", async () => {
+		const { id: contactId } = await createContact(ctx, {
+			orgId,
+			name: "Dup Link Contact",
+			email: "duplink@example.com",
+			consentBasis: "consent",
+			consentAt: Math.floor(Date.now() / 1000),
+		});
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+		const { id: interactionId } = await createInteraction(ctx, {
+			dealId,
+			type: "call",
+			occurredAt: Math.floor(Date.now() / 1000),
+			summary: "Intro call",
+			author: ctx.userId,
+		});
+		await linkInteractionContact(ctx, { interactionId, contactId });
+
+		await expect(linkInteractionContact(ctx, { interactionId, contactId })).rejects.toBeInstanceOf(
+			ConflictError
+		);
+	});
 });
 
 describe("CRM deals, deal lines, and interactions", () => {
@@ -155,9 +192,50 @@ describe("CRM deals, deal lines, and interactions", () => {
 		expect(deal.currency).toBe("USD");
 		expect(deal.valueOverride).toBe(10000);
 
-		await updateDeal(ctx, id, { stageId: "negotiation" });
+		await updateDeal(ctx, id, { valueOverride: 20000 });
 		const updated = await getDeal(ctx, id);
-		expect(updated.stageId).toBe("negotiation");
+		expect(updated.valueOverride).toBe(20000);
+	});
+
+	it("rejects updateDeal attempting to set stageId directly, requiring moveDealStage instead", async () => {
+		const { id } = await createDeal(ctx, { orgId, currency: "USD" });
+		await expect(updateDeal(ctx, id, { stageId: "some-stage-id" })).rejects.toBeInstanceOf(
+			ValidationError
+		);
+	});
+
+	it("rejects creating a deal with a pipeline from another workspace", async () => {
+		const ctxB = await ctxFor();
+		const { id: pipelineIdB } = await createPipeline(ctxB, { name: "Other Workspace Pipeline" });
+
+		await expect(
+			createDeal(ctx, { orgId, currency: "USD", pipelineId: pipelineIdB })
+		).rejects.toBeInstanceOf(NotFoundError);
+	});
+
+	it("rejects creating a deal whose stage doesn't belong to the given pipeline", async () => {
+		const { id: pipelineA } = await createPipeline(ctx, { name: "Pipeline A" });
+		const { id: pipelineB } = await createPipeline(ctx, { name: "Pipeline B" });
+		const { id: stageInB } = await createStage(ctx, {
+			pipelineId: pipelineB,
+			name: "Stage In B",
+			position: 1,
+			kind: "open",
+		});
+
+		await expect(
+			createDeal(ctx, { orgId, currency: "USD", pipelineId: pipelineA, stageId: stageInB })
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("rejects updating a deal's pipelineId to one from another workspace", async () => {
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+		const ctxB = await ctxFor();
+		const { id: pipelineIdB } = await createPipeline(ctxB, { name: "Other Workspace Pipeline" });
+
+		await expect(updateDeal(ctx, dealId, { pipelineId: pipelineIdB })).rejects.toBeInstanceOf(
+			NotFoundError
+		);
 	});
 
 	it("creates, reads, and updates a deal line", async () => {
@@ -253,6 +331,32 @@ describe("CRM pipelines and stages", () => {
 		});
 
 		await expect(deleteStage(ctx, lostId)).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("rejects a second default pipeline in the same workspace", async () => {
+		await createPipeline(ctx, { name: "Default A", isDefault: true });
+		await expect(
+			createPipeline(ctx, { name: "Default B", isDefault: true })
+		).rejects.toBeInstanceOf(ConflictError);
+	});
+
+	it("rejects creating a stage with a position already used in the same pipeline", async () => {
+		await createStage(ctx, { pipelineId, name: "A", position: 1, kind: "open" });
+		await expect(
+			createStage(ctx, { pipelineId, name: "B", position: 1, kind: "open" })
+		).rejects.toBeInstanceOf(ConflictError);
+	});
+
+	it("rejects a stage whose requiredFields names an unknown deal field", async () => {
+		await expect(
+			createStage(ctx, {
+				pipelineId,
+				name: "Weird",
+				position: 1,
+				kind: "open",
+				requiredFields: ["notARealDealField"],
+			})
+		).rejects.toBeInstanceOf(ValidationError);
 	});
 
 	it("rejects deleting a stage that still has deals in it", async () => {
@@ -365,6 +469,19 @@ describe("CRM deal stage moves", () => {
 		const deal = await getDeal(ctx, dealId);
 		expect(deal.stageId).toBe(lostId);
 		expect(deal.lostReason).toBe("Budget cut");
+	});
+
+	it("rejects an over-length lostReason via moveDealStage's schema validation", async () => {
+		await expect(
+			moveDealStage(ctx, dealId, lostId, { lostReason: "x".repeat(1001) })
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("blocks a viewer from moving a deal's stage", async () => {
+		const viewerCtx: ServiceCtx = { ...ctx, role: "viewer" };
+		await expect(
+			moveDealStage(viewerCtx, dealId, lostId, { lostReason: "x" })
+		).rejects.toBeInstanceOf(ForbiddenError);
 	});
 });
 

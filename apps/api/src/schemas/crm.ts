@@ -56,15 +56,12 @@ export const CreateDealSchema = z.object({
 export const UpdateDealSchema = z
 	.object({
 		pipelineId: z.string().max(255).nullable().optional(),
-		stageId: z.string().max(255).nullable().optional(),
 		ownerUserId: z.string().uuid().nullable().optional(),
 		expectedClose: z.number().int().nullable().optional(),
 		currency: CurrencySchema.optional(),
 		valueOverride: z.number().int().nullable().optional(),
 		valueBase: z.number().int().nullable().optional(),
 		fxRate: z.number().nullable().optional(),
-		lostReason: z.string().max(1000).nullable().optional(),
-		wonAt: z.number().int().nullable().optional(),
 	})
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 
@@ -145,6 +142,7 @@ export const UpdateStageSchema = z
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 
 export const MoveDealStageSchema = z.object({
+	dealId: z.string().uuid(),
 	newStageId: z.string().uuid(),
 	reason: z.string().min(1).optional(),
 	lostReason: z.string().min(1).max(1000).optional(),

@@ -74,6 +74,7 @@ const REST_ONLY: Record<string, string> = {
 	"custom-fields.ts:seedDefaultCustomFields": "bootstrap seed for a new workspace",
 	"task-statuses.ts:seedDefaultTaskStatuses": "bootstrap seed for a new workspace",
 	"task-types.ts:seedDefaultTaskTypes": "bootstrap seed for a new workspace",
+	"crm.ts:seedDefaultPipeline": "bootstrap seed for a new workspace",
 	// OAuth consent (PROJ-656) — the browser-only half of the connector flow. An agent
 	// is the *subject* of these, never the caller: it cannot decide who may connect it.
 	"oauth.ts:parseConsentRequest": "validates a browser authorization request before consent",

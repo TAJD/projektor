@@ -10,6 +10,7 @@ import {
 	CreatePipelineSchema,
 	CreateStageSchema,
 	LinkInteractionContactSchema,
+	MoveDealStageSchema,
 	UpdateContactSchema,
 	UpdateDealLineSchema,
 	UpdateDealSchema,
@@ -19,11 +20,48 @@ import {
 	UpdateStageSchema,
 } from "../schemas/crm";
 import { recordActivity } from "./activity";
-import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
 function now(): number {
 	return Math.floor(Date.now() / 1000);
+}
+
+function assertCanMutate(ctx: ServiceCtx): void {
+	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+}
+
+function isUniqueConstraintError(e: unknown): boolean {
+	let cur: unknown = e;
+	for (let i = 0; i < 5 && cur instanceof Error; i++) {
+		if (/UNIQUE constraint failed/i.test(cur.message)) return true;
+		cur = cur.cause;
+	}
+	return false;
+}
+
+const DEAL_FIELD_ALLOWLIST = new Set([
+	"orgId",
+	"pipelineId",
+	"stageId",
+	"ownerUserId",
+	"expectedClose",
+	"currency",
+	"valueOverride",
+	"valueBase",
+	"fxRate",
+	"lostReason",
+	"wonAt",
+]);
+
+function assertRequiredFieldsKnown(fields: readonly string[]): void {
+	const unknown = fields.filter((f) => !DEAL_FIELD_ALLOWLIST.has(f));
+	if (unknown.length > 0) {
+		throw new ValidationError({
+			formErrors: [`Unknown deal field(s) in requiredFields: ${unknown.join(", ")}`],
+			fieldErrors: {},
+		});
+	}
 }
 
 async function requireOrganisation(ctx: ServiceCtx, orgId: string): Promise<void> {
@@ -52,6 +90,7 @@ async function requireDeal(ctx: ServiceCtx, dealId: string): Promise<void> {
 }
 
 export async function createOrganisation(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = CreateOrganisationSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { name, domain, sourceRef } = result.data;
@@ -60,15 +99,22 @@ export async function createOrganisation(ctx: ServiceCtx, raw: unknown) {
 	const id = crypto.randomUUID();
 	const ts = now();
 
-	await orm.insert(schema.crmOrganisations).values({
-		id,
-		workspaceId: ctx.workspaceId,
-		name,
-		domain: domain ?? null,
-		sourceRef: sourceRef ?? null,
-		createdAt: ts,
-		updatedAt: ts,
-	});
+	try {
+		await orm.insert(schema.crmOrganisations).values({
+			id,
+			workspaceId: ctx.workspaceId,
+			name,
+			domain: domain ?? null,
+			sourceRef: sourceRef ?? null,
+			createdAt: ts,
+			updatedAt: ts,
+		});
+	} catch (e) {
+		if (isUniqueConstraintError(e)) {
+			throw new ConflictError(`Domain '${domain}' is already in use`);
+		}
+		throw e;
+	}
 
 	return { id };
 }
@@ -117,6 +163,7 @@ function buildOrganisationSetData(data: OrganisationUpdateData, ts: number) {
 }
 
 export async function updateOrganisation(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = UpdateOrganisationSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 
@@ -148,6 +195,7 @@ export async function updateOrganisation(ctx: ServiceCtx, id: string, raw: unkno
 }
 
 export async function deleteOrganisation(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
 		.select({ id: schema.crmOrganisations.id })
@@ -181,6 +229,7 @@ export async function deleteOrganisation(ctx: ServiceCtx, id: string) {
 }
 
 export async function createContact(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = CreateContactSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { orgId, name, email, role, consentBasis, consentAt, retentionUntil } = result.data;
@@ -258,6 +307,7 @@ function buildContactSetData(data: ContactUpdateData, ts: number) {
 }
 
 export async function updateContact(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = UpdateContactSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 
@@ -279,6 +329,7 @@ export async function updateContact(ctx: ServiceCtx, id: string, raw: unknown) {
 }
 
 export async function deleteContact(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
 		.select({ id: schema.crmContacts.id })
@@ -295,6 +346,7 @@ export async function deleteContact(ctx: ServiceCtx, id: string) {
 }
 
 export async function createDeal(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = CreateDealSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const {
@@ -311,6 +363,7 @@ export async function createDeal(ctx: ServiceCtx, raw: unknown) {
 	} = result.data;
 
 	await requireOrganisation(ctx, orgId);
+	await assertPipelineStageConsistent(ctx, pipelineId, stageId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const id = crypto.randomUUID();
@@ -364,32 +417,40 @@ function buildDealSetData(data: DealUpdateData, ts: number) {
 	const setData: {
 		updatedAt: number;
 		pipelineId?: string | null;
-		stageId?: string | null;
 		ownerUserId?: string | null;
 		expectedClose?: number | null;
 		currency?: string;
 		valueOverride?: number | null;
 		valueBase?: number | null;
 		fxRate?: number | null;
-		lostReason?: string | null;
-		wonAt?: number | null;
 	} = { updatedAt: ts };
 
 	if ("pipelineId" in data) setData.pipelineId = data.pipelineId ?? null;
-	if ("stageId" in data) setData.stageId = data.stageId ?? null;
 	if ("ownerUserId" in data) setData.ownerUserId = data.ownerUserId ?? null;
 	if ("expectedClose" in data) setData.expectedClose = data.expectedClose ?? null;
 	if (data.currency !== undefined) setData.currency = data.currency;
 	if ("valueOverride" in data) setData.valueOverride = data.valueOverride ?? null;
 	if ("valueBase" in data) setData.valueBase = data.valueBase ?? null;
 	if ("fxRate" in data) setData.fxRate = data.fxRate ?? null;
-	if ("lostReason" in data) setData.lostReason = data.lostReason ?? null;
-	if ("wonAt" in data) setData.wonAt = data.wonAt ?? null;
 
 	return setData;
 }
 
 export async function updateDeal(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
+	if (
+		raw &&
+		typeof raw === "object" &&
+		("stageId" in raw || "wonAt" in raw || "lostReason" in raw)
+	) {
+		throw new ValidationError({
+			formErrors: [
+				"stageId, wonAt, and lostReason cannot be set via updateDeal — use moveDealStage instead",
+			],
+			fieldErrors: {},
+		});
+	}
+
 	const result = UpdateDealSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 
@@ -401,6 +462,10 @@ export async function updateDeal(ctx: ServiceCtx, id: string, raw: unknown) {
 		.get();
 	if (!existing) throw new NotFoundError("Deal not found");
 
+	if ("pipelineId" in result.data && result.data.pipelineId) {
+		await requirePipeline(ctx, result.data.pipelineId);
+	}
+
 	const setData = buildDealSetData(result.data, now());
 	await orm
 		.update(schema.crmDeals)
@@ -411,6 +476,7 @@ export async function updateDeal(ctx: ServiceCtx, id: string, raw: unknown) {
 }
 
 export async function createDealLine(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = CreateDealLineSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { dealId, productId, planId, qty, currency, amount } = result.data;
@@ -484,6 +550,7 @@ function buildDealLineSetData(data: DealLineUpdateData) {
 }
 
 export async function updateDealLine(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = UpdateDealLineSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 
@@ -509,6 +576,7 @@ export async function updateDealLine(ctx: ServiceCtx, id: string, raw: unknown) 
 }
 
 export async function createInteraction(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = CreateInteractionSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { dealId, type, occurredAt, summary, author } = result.data;
@@ -582,6 +650,7 @@ function buildInteractionSetData(data: InteractionUpdateData) {
 }
 
 export async function updateInteraction(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = UpdateInteractionSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 
@@ -613,6 +682,7 @@ export async function updateInteraction(ctx: ServiceCtx, id: string, raw: unknow
 }
 
 export async function linkInteractionContact(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = LinkInteractionContactSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { interactionId, contactId } = result.data;
@@ -639,7 +709,14 @@ export async function linkInteractionContact(ctx: ServiceCtx, raw: unknown) {
 		.get();
 	if (!contact) throw new NotFoundError("Contact not found");
 
-	await orm.insert(schema.crmInteractionContacts).values({ interactionId, contactId });
+	try {
+		await orm.insert(schema.crmInteractionContacts).values({ interactionId, contactId });
+	} catch (e) {
+		if (isUniqueConstraintError(e)) {
+			throw new ConflictError("Contact is already linked to this interaction");
+		}
+		throw e;
+	}
 
 	return { ok: true };
 }
@@ -688,6 +765,23 @@ async function requireStageRow(ctx: ServiceCtx, id: string) {
 		.get();
 	if (!stage) throw new NotFoundError("Stage not found");
 	return stage;
+}
+
+async function assertPipelineStageConsistent(
+	ctx: ServiceCtx,
+	pipelineId: string | undefined,
+	stageId: string | undefined
+): Promise<void> {
+	if (pipelineId) await requirePipeline(ctx, pipelineId);
+	if (stageId) {
+		const stage = await requireStageRow(ctx, stageId);
+		if (pipelineId && stage.pipelineId !== pipelineId) {
+			throw new ValidationError({
+				formErrors: ["stageId does not belong to the given pipelineId"],
+				fieldErrors: {},
+			});
+		}
+	}
 }
 
 async function listPipelineStageKinds(
@@ -743,6 +837,7 @@ function assertWonLostInvariant(
 }
 
 export async function createPipeline(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = CreatePipelineSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { name, defaultOnboardingTemplate, isDefault } = result.data;
@@ -751,15 +846,22 @@ export async function createPipeline(ctx: ServiceCtx, raw: unknown) {
 	const id = crypto.randomUUID();
 	const ts = now();
 
-	await orm.insert(schema.crmPipelines).values({
-		id,
-		workspaceId: ctx.workspaceId,
-		name,
-		defaultOnboardingTemplate: defaultOnboardingTemplate ?? null,
-		isDefault: isDefault ? 1 : 0,
-		createdAt: ts,
-		updatedAt: ts,
-	});
+	try {
+		await orm.insert(schema.crmPipelines).values({
+			id,
+			workspaceId: ctx.workspaceId,
+			name,
+			defaultOnboardingTemplate: defaultOnboardingTemplate ?? null,
+			isDefault: isDefault ? 1 : 0,
+			createdAt: ts,
+			updatedAt: ts,
+		});
+	} catch (e) {
+		if (isUniqueConstraintError(e)) {
+			throw new ConflictError("Only one default pipeline is allowed per workspace");
+		}
+		throw e;
+	}
 
 	return { id };
 }
@@ -797,6 +899,7 @@ function buildPipelineSetData(data: PipelineUpdateData, ts: number) {
 }
 
 export async function updatePipeline(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = UpdatePipelineSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 
@@ -804,22 +907,31 @@ export async function updatePipeline(ctx: ServiceCtx, id: string, raw: unknown) 
 
 	const orm = drizzle(ctx.db, { schema });
 	const setData = buildPipelineSetData(result.data, now());
-	await orm
-		.update(schema.crmPipelines)
-		.set(setData)
-		.where(
-			and(eq(schema.crmPipelines.id, id), eq(schema.crmPipelines.workspaceId, ctx.workspaceId))
-		);
+	try {
+		await orm
+			.update(schema.crmPipelines)
+			.set(setData)
+			.where(
+				and(eq(schema.crmPipelines.id, id), eq(schema.crmPipelines.workspaceId, ctx.workspaceId))
+			);
+	} catch (e) {
+		if (isUniqueConstraintError(e)) {
+			throw new ConflictError("Only one default pipeline is allowed per workspace");
+		}
+		throw e;
+	}
 
 	return { ok: true };
 }
 
 export async function createStage(ctx: ServiceCtx, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = CreateStageSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { pipelineId, name, position, kind, probability, requiredFields } = result.data;
 
 	await requirePipeline(ctx, pipelineId);
+	if (requiredFields) assertRequiredFieldsKnown(requiredFields);
 
 	const current = await listPipelineStageKinds(ctx, pipelineId);
 	assertWonLostInvariant(current, [...current, { id: "new", kind }]);
@@ -828,18 +940,27 @@ export async function createStage(ctx: ServiceCtx, raw: unknown) {
 	const id = crypto.randomUUID();
 	const ts = now();
 
-	await orm.insert(schema.crmStages).values({
-		id,
-		workspaceId: ctx.workspaceId,
-		pipelineId,
-		name,
-		position,
-		kind,
-		probability: probability ?? null,
-		requiredFields: JSON.stringify(requiredFields ?? []),
-		createdAt: ts,
-		updatedAt: ts,
-	});
+	try {
+		await orm.insert(schema.crmStages).values({
+			id,
+			workspaceId: ctx.workspaceId,
+			pipelineId,
+			name,
+			position,
+			kind,
+			probability: probability ?? null,
+			requiredFields: JSON.stringify(requiredFields ?? []),
+			createdAt: ts,
+			updatedAt: ts,
+		});
+	} catch (e) {
+		if (isUniqueConstraintError(e)) {
+			throw new ConflictError(
+				`Position ${position} is already used by another stage in this pipeline`
+			);
+		}
+		throw e;
+	}
 
 	return { id };
 }
@@ -884,8 +1005,10 @@ function buildStageSetData(data: StageUpdateData, ts: number) {
 }
 
 export async function updateStage(ctx: ServiceCtx, id: string, raw: unknown) {
+	assertCanMutate(ctx);
 	const result = UpdateStageSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
+	if (result.data.requiredFields) assertRequiredFieldsKnown(result.data.requiredFields);
 
 	const existing = await requireStageRow(ctx, id);
 
@@ -898,15 +1021,23 @@ export async function updateStage(ctx: ServiceCtx, id: string, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 	const setData = buildStageSetData(result.data, now());
-	await orm
-		.update(schema.crmStages)
-		.set(setData)
-		.where(and(eq(schema.crmStages.id, id), eq(schema.crmStages.workspaceId, ctx.workspaceId)));
+	try {
+		await orm
+			.update(schema.crmStages)
+			.set(setData)
+			.where(and(eq(schema.crmStages.id, id), eq(schema.crmStages.workspaceId, ctx.workspaceId)));
+	} catch (e) {
+		if (isUniqueConstraintError(e)) {
+			throw new ConflictError("Position is already used by another stage in this pipeline");
+		}
+		throw e;
+	}
 
 	return { ok: true };
 }
 
 export async function deleteStage(ctx: ServiceCtx, id: string) {
+	assertCanMutate(ctx);
 	const existing = await requireStageRow(ctx, id);
 
 	const orm = drizzle(ctx.db, { schema });
@@ -980,6 +1111,16 @@ export async function moveDealStage(
 	newStageId: string,
 	opts?: Readonly<{ reason?: string; lostReason?: string }>
 ) {
+	assertCanMutate(ctx);
+	const parsed = MoveDealStageSchema.safeParse({
+		dealId,
+		newStageId,
+		reason: opts?.reason,
+		lostReason: opts?.lostReason,
+	});
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const { reason, lostReason } = parsed.data;
+
 	const orm = drizzle(ctx.db, { schema });
 	const deal = await orm
 		.select()
@@ -1025,7 +1166,7 @@ export async function moveDealStage(
 			});
 		}
 	} else if (newStage.position < currentPosition) {
-		if (!opts?.reason || opts.reason.trim().length === 0) {
+		if (!reason || reason.trim().length === 0) {
 			throw new ValidationError({
 				formErrors: ["A reason is required to move a deal back to an earlier stage"],
 				fieldErrors: {},
@@ -1033,7 +1174,7 @@ export async function moveDealStage(
 		}
 	}
 
-	if (newStage.kind === "lost" && (!opts?.lostReason || opts.lostReason.trim().length === 0)) {
+	if (newStage.kind === "lost" && (!lostReason || lostReason.trim().length === 0)) {
 		throw new ValidationError({
 			formErrors: ["lostReason is required when moving a deal to a lost stage"],
 			fieldErrors: {},
@@ -1048,7 +1189,7 @@ export async function moveDealStage(
 		lostReason?: string | null;
 	} = { stageId: newStageId, updatedAt: ts };
 	if (newStage.kind === "won") setData.wonAt = ts;
-	if (newStage.kind === "lost") setData.lostReason = opts?.lostReason ?? null;
+	if (newStage.kind === "lost") setData.lostReason = lostReason ?? null;
 
 	await orm
 		.update(schema.crmDeals)
@@ -1062,7 +1203,7 @@ export async function moveDealStage(
 		diff: {
 			fromStageId: deal.stageId,
 			toStageId: newStageId,
-			...(opts?.reason ? { reason: opts.reason } : {}),
+			...(reason ? { reason } : {}),
 		},
 	});
 
