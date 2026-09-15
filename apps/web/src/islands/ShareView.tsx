@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { applyShareBrand, type WorkspaceBrandDto } from "../utils/brand";
 import { renderMd, renderMermaidDiagrams } from "../utils/markdown";
 import { Badge } from "./ui/Badge";
 
@@ -15,6 +16,7 @@ interface SharedIssue {
 	created_at: number;
 	expires_at: number;
 	customFields: Array<{ key: string; label: string; type: string; value: string }>;
+	brand: WorkspaceBrandDto;
 }
 
 const PRIORITY_LABELS: Record<string, string> = {
@@ -151,6 +153,7 @@ export default function ShareView() {
 		// missing workspace header are both no-ops here since /api/share is open.
 		apiFetch<SharedIssue>(`/api/share/${token}`)
 			.then((data) => {
+				applyShareBrand(data.brand);
 				setIssue(data);
 				setLoading(false);
 			})

@@ -203,6 +203,47 @@ describe("Share tokens", () => {
 		expect(res.status).toBe(404);
 	});
 
+	it("PROJ-762: GET /api/share/:token includes the owning workspace's brand", async () => {
+		const owner = await seedIssueFixture({ role: "owner" });
+		const patchRes = await SELF.fetch(`http://localhost/api/workspaces/${owner.slug}/brand`, {
+			method: "PATCH",
+			headers: authHeaders(owner.token, owner.slug),
+			body: JSON.stringify({ displayName: "Acme Tracker", accent: "#ff8800" }),
+		});
+		expect(patchRes.status).toBe(200);
+
+		const createRes = await SELF.fetch(`http://localhost/api/issues/${owner.issueId}/share`, {
+			method: "POST",
+			headers: authHeaders(owner.token, owner.slug),
+		});
+		const { token: shareToken } = (await createRes.json()) as { token: string; url: string };
+
+		const res = await SELF.fetch(`http://localhost/api/share/${shareToken}`);
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as {
+			brand: { displayName: string | null; accent: string | null; logoUrl: string | null };
+		};
+		expect(data.brand.displayName).toBe("Acme Tracker");
+		expect(data.brand.accent).toBe("#ff8800");
+		expect(data.brand.logoUrl).toBeNull();
+	});
+
+	it("PROJ-762: GET /api/share/:token returns a null-fielded brand when the workspace has none set", async () => {
+		const createRes = await SELF.fetch(`http://localhost/api/issues/${issueId}/share`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		const { token: shareToken } = (await createRes.json()) as { token: string; url: string };
+
+		const res = await SELF.fetch(`http://localhost/api/share/${shareToken}`);
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as {
+			brand: { displayName: string | null; accent: string | null };
+		};
+		expect(data.brand.displayName).toBeNull();
+		expect(data.brand.accent).toBeNull();
+	});
+
 	it("PROJ-242: viewer role cannot revoke a share link", async () => {
 		const viewerFixture = await seedIssueFixture({ role: "viewer" });
 		const { env } = await import("cloudflare:test");

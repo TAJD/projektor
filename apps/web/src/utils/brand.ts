@@ -8,7 +8,7 @@ export interface BrandConfig {
 	logoUrl: string | null;
 }
 
-interface WorkspaceBrandDto {
+export interface WorkspaceBrandDto {
 	displayName: string | null;
 	accent: string | null;
 	onAccent: string | null;
@@ -99,6 +99,31 @@ export function applyBrandToDocument(brand: BrandConfig): void {
 
 export function applyCachedBrand(): void {
 	if (cached) applyBrandToDocument(cached);
+}
+
+/**
+ * For standalone unauthenticated pages (the public share view) that already have a
+ * workspace brand in hand — from the share API response, resolved server-side from the
+ * token — rather than a workspace slug to fetch separately. Still layers over the
+ * deploy-level brand so a self-hoster's defaults hold when the workspace has none set.
+ */
+export async function applyShareBrand(
+	wsBrand: WorkspaceBrandDto,
+	fetchImpl: typeof fetch = fetch
+): Promise<void> {
+	let brand: BrandConfig = {
+		name: DEFAULT_NAME,
+		mark: DEFAULT_MARK,
+		accent: null,
+		onAccent: null,
+		logoUrl: null,
+	};
+	try {
+		const res = await fetchImpl("/api/config/brand");
+		if (res.ok) brand = (await res.json()) as BrandConfig;
+	} catch {}
+
+	applyBrandToDocument(layerWorkspaceBrand(brand, wsBrand));
 }
 
 export async function applyBrand(fetchImpl: typeof fetch = fetch): Promise<void> {

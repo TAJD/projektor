@@ -390,6 +390,20 @@ export async function getWorkspaceBrand(
 	return toBrandDto(await readBrand(ctx), workspaceSlug);
 }
 
+export async function getWorkspaceBrandForShare(
+	db: D1Database,
+	workspaceId: string,
+	workspaceSlug: string
+): Promise<WorkspaceBrandDto> {
+	const orm = drizzle(db, { schema });
+	const row = await orm
+		.select({ brand: schema.workspaces.brand })
+		.from(schema.workspaces)
+		.where(eq(schema.workspaces.id, workspaceId))
+		.get();
+	return toBrandDto(row?.brand ?? {}, workspaceSlug);
+}
+
 const BRAND_FIELDS = ["displayName", "accent", "onAccent", "fontFamily", "fontUrl"] as const;
 
 export async function updateWorkspaceBrand(
