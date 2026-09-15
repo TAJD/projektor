@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, gte, inArray, isNotNull, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, lt, ne } from "drizzle-orm";
 import type { z } from "zod";
 import {
 	CreateContactSchema,
@@ -333,11 +333,16 @@ export async function updateContact(ctx: ServiceCtx, id: string, raw: unknown) {
 		.select({
 			consentBasis: schema.crmContacts.consentBasis,
 			consentAt: schema.crmContacts.consentAt,
+			anonymisedAt: schema.crmContacts.anonymisedAt,
 		})
 		.from(schema.crmContacts)
 		.where(and(eq(schema.crmContacts.id, id), eq(schema.crmContacts.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!existing) throw new NotFoundError("Contact not found");
+	const changesIdentity = result.data.name !== undefined || result.data.email !== undefined;
+	if (existing.anonymisedAt !== null && changesIdentity) {
+		throw new ConflictError("Contact is anonymised; name and email cannot be changed");
+	}
 
 	let retentionUntil: number | null = null;
 	if (result.data.consentBasis !== undefined || result.data.consentAt !== undefined) {
@@ -374,31 +379,23 @@ export async function deleteContact(ctx: ServiceCtx, id: string) {
 	return { ok: true };
 }
 
-async function hashEmailForAnonymisation(email: string): Promise<string> {
-	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(email));
-	return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0"))
-		.join("")
-		.slice(0, 16);
-}
-
 export async function anonymiseContact(ctx: ServiceCtx, id: string) {
 	assertCanMutate(ctx);
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
-		.select({ email: schema.crmContacts.email })
+		.select({ id: schema.crmContacts.id })
 		.from(schema.crmContacts)
 		.where(and(eq(schema.crmContacts.id, id), eq(schema.crmContacts.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!existing) throw new NotFoundError("Contact not found");
 
-	const hash = await hashEmailForAnonymisation(existing.email);
 	const ts = now();
 
 	await orm
 		.update(schema.crmContacts)
 		.set({
 			name: "Anonymised Contact",
-			email: `anon-${hash}@anonymised.invalid`,
+			email: `anon-${crypto.randomUUID()}@anonymised.invalid`,
 			anonymisedAt: ts,
 			updatedAt: ts,
 		})
@@ -2090,8 +2087,12 @@ export async function listStaleDeals(ctx: ServiceCtx, raw: unknown) {
 	if (!result.success) throw new ValidationError(result.error.flatten());
 
 	const settingRaw = await getWorkspaceSetting(ctx, STALE_DEAL_DAYS_KEY);
-	const days =
-		result.data.days ?? (settingRaw !== null ? Number(settingRaw) : DEFAULT_STALE_DEAL_DAYS);
+	const parsedSetting = settingRaw !== null ? Number(settingRaw) : null;
+	const settingDays =
+		parsedSetting !== null && Number.isInteger(parsedSetting) && parsedSetting > 0
+			? parsedSetting
+			: DEFAULT_STALE_DEAL_DAYS;
+	const days = result.data.days ?? settingDays;
 	const cutoff = now() - days * 86400;
 
 	const orm = drizzle(ctx.db, { schema });
@@ -2112,7 +2113,8 @@ export async function listStaleDeals(ctx: ServiceCtx, raw: unknown) {
 				.where(
 					and(
 						inArray(schema.crmInteractions.dealId, chunk),
-						eq(schema.crmInteractions.workspaceId, ctx.workspaceId)
+						eq(schema.crmInteractions.workspaceId, ctx.workspaceId),
+						ne(schema.crmInteractions.type, "draft")
 					)
 				)
 	);

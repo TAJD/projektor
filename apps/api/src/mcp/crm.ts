@@ -1,5 +1,4 @@
 import type { MCPTool } from "@projektor/types";
-import { ValidationError } from "../services/errors";
 import {
 	anonymiseContact,
 	createContact,
@@ -34,6 +33,7 @@ import {
 	updateOrganisation,
 	updatePipeline,
 } from "../services/crm";
+import { ValidationError } from "../services/errors";
 
 function requireId(input: unknown): { id: string; rest: Record<string, unknown> } {
 	const { id, ...rest } = (input ?? {}) as { id?: string; [k: string]: unknown };
@@ -198,7 +198,8 @@ export const crmTools: MCPTool[] = [
 	},
 	{
 		name: "set_deal_lines",
-		description: "Replace a deal's line items (product + pricing plan + quantity) and recompute its valuation",
+		description:
+			"Replace a deal's line items (product + pricing plan + quantity) and recompute its valuation",
 		inputSchema: {
 			type: "object",
 			required: ["dealId", "lines"],
@@ -321,7 +322,8 @@ export const crmTools: MCPTool[] = [
 	},
 	{
 		name: "link_deal",
-		description: "Attach a wiki-page reference or an external URL (e.g. a related issue or feedback item) to a deal",
+		description:
+			"Attach a wiki-page reference or an external URL (e.g. a related issue or feedback item) to a deal",
 		inputSchema: {
 			type: "object",
 			required: ["kind", "dealId"],
@@ -354,7 +356,8 @@ export const crmTools: MCPTool[] = [
 	},
 	{
 		name: "get_pipeline_summary",
-		description: "Deal counts and total value (in the workspace base currency) per stage of a pipeline",
+		description:
+			"Deal counts and total value (in the workspace base currency) per stage of a pipeline",
 		inputSchema: {
 			type: "object",
 			required: ["pipelineId"],
@@ -405,7 +408,8 @@ export const crmTools: MCPTool[] = [
 	},
 	{
 		name: "export_contact",
-		description: "Export a contact's full record — profile, linked interactions, and deals — for GDPR data export",
+		description:
+			"Export a contact's full record — profile, linked interactions, and deals — for GDPR data export",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
@@ -534,7 +538,13 @@ export const crmTools: MCPTool[] = [
 			properties: {
 				metric: {
 					type: "string",
-					enum: ["deals_created", "deals_won", "won_value", "stage_entered", "onboardings_completed"],
+					enum: [
+						"deals_created",
+						"deals_won",
+						"won_value",
+						"stage_entered",
+						"onboardings_completed",
+					],
 				},
 				stageId: { type: "string", description: "Required when metric is stage_entered" },
 				period: { type: "string", enum: ["week", "month", "quarter", "year"] },

@@ -2,22 +2,17 @@ import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	createPipeline,
-	createProduct,
 	createPricingPlan,
+	createProduct,
 	createStage,
 	setWorkspaceBaseCurrency,
 } from "../services/crm";
 import type { ServiceCtx } from "../services/types";
-import {
-	authHeaders,
-	type JsonRpcError,
-	type JsonRpcResult,
-	seedWorkspaceRoles,
-} from "./helpers";
+import { authHeaders, type JsonRpcError, type JsonRpcResult, seedWorkspaceRoles } from "./helpers";
 
 type Roles = Awaited<ReturnType<typeof seedWorkspaceRoles>>;
 
-async function mcpCall<T>(
+async function mcpCall<_T>(
 	workspaceId: string,
 	name: string,
 	args: unknown,
@@ -269,7 +264,12 @@ describe("CRM MCP domain (PROJ-770)", () => {
 	});
 
 	it("blocks a viewer from mutating orgs and pipelines", async () => {
-		const orgResult = await mcpCall(roles.workspace.id, "create_org", { name: "Nope" }, viewerHeaders);
+		const orgResult = await mcpCall(
+			roles.workspace.id,
+			"create_org",
+			{ name: "Nope" },
+			viewerHeaders
+		);
 		expect(isMcpError(orgResult)).toBe(true);
 
 		const pipelineResult = await mcpCall(
@@ -301,7 +301,12 @@ describe("CRM MCP domain (PROJ-770)", () => {
 		const otherRoles = await seedWorkspaceRoles();
 		const otherHeaders = authHeaders(otherRoles.owner.token, otherRoles.workspace.slug);
 
-		const orgResult = await mcpCall(otherRoles.workspace.id, "get_org", { id: orgId }, otherHeaders);
+		const orgResult = await mcpCall(
+			otherRoles.workspace.id,
+			"get_org",
+			{ id: orgId },
+			otherHeaders
+		);
 		expect(isMcpError(orgResult)).toBe(true);
 		expect((orgResult as JsonRpcError).error.message.toLowerCase()).toContain("not found");
 

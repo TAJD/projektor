@@ -196,4 +196,59 @@ describe("schema constraints", () => {
 		expect(slugs).toContain("start-line");
 		expect(slugs).toContain("start-line-2");
 	});
+
+	it("0060_crm_interaction_draft_type preserves crm_interaction_contacts rows across the table rebuild", () => {
+		const migrationFiles = readdirSync(MIGRATIONS_DIR)
+			.filter((f) => f.endsWith(".sql"))
+			.sort();
+		const preFiles = migrationFiles.filter((f) => f < "0060");
+		const targetFile = migrationFiles.find((f) => f.startsWith("0060"));
+		if (!targetFile) throw new Error("expected a 0060 migration file");
+
+		const db = new DatabaseSync(":memory:");
+		db.exec("PRAGMA foreign_keys = ON;");
+		const splitStatements = (sql: string) =>
+			sql
+				.replace(/--[^\n]*/g, "")
+				.split(";")
+				.map((s) => s.trim())
+				.filter((s) => s.length > 0);
+		for (const file of preFiles) {
+			const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf8");
+			for (const stmt of splitStatements(sql)) {
+				if (/\bfts5\b/i.test(stmt) || /\b(issues|wiki)_fts\b/i.test(stmt)) continue;
+				db.exec(stmt);
+			}
+		}
+
+		db.prepare("INSERT INTO workspaces (id, name, slug, created_at) VALUES (?, ?, ?, ?)").run(
+			"w1",
+			"Acme",
+			"acme",
+			0
+		);
+		db.prepare(
+			"INSERT INTO crm_organisations (id, workspace_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)"
+		).run("o1", "w1", "Acme Org", 0, 0);
+		db.prepare(
+			`INSERT INTO crm_contacts (id, workspace_id, org_id, name, email, consent_basis, consent_at, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		).run("c1", "w1", "o1", "Jane Doe", "jane@example.com", "consent", 0, 0, 0);
+		db.prepare(
+			"INSERT INTO crm_deals (id, workspace_id, org_id, currency, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+		).run("d1", "w1", "o1", "USD", 0, 0);
+		db.prepare(
+			`INSERT INTO crm_interactions (id, workspace_id, deal_id, type, occurred_at, summary, author, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+		).run("i1", "w1", "d1", "call", 0, "Intro call", "Rep", 0);
+		db.prepare(
+			"INSERT INTO crm_interaction_contacts (interaction_id, contact_id) VALUES (?, ?)"
+		).run("i1", "c1");
+
+		const targetSql = readFileSync(join(MIGRATIONS_DIR, targetFile), "utf8");
+		for (const stmt of splitStatements(targetSql)) db.exec(stmt);
+
+		const rows = db.prepare("SELECT * FROM crm_interaction_contacts").all();
+		expect(rows).toHaveLength(1);
+	});
 });

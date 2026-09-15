@@ -10,8 +10,14 @@ CREATE TABLE crm_interactions_new (
 );
 
 INSERT INTO crm_interactions_new SELECT * FROM crm_interactions;
+
+CREATE TABLE crm_interaction_contacts_bak AS SELECT * FROM crm_interaction_contacts;
+
 DROP TABLE crm_interactions;
 ALTER TABLE crm_interactions_new RENAME TO crm_interactions;
 
 CREATE INDEX crm_interactions_workspace_idx ON crm_interactions (workspace_id);
 CREATE INDEX crm_interactions_deal_idx ON crm_interactions (deal_id);
+
+INSERT INTO crm_interaction_contacts SELECT * FROM crm_interaction_contacts_bak;
+DROP TABLE crm_interaction_contacts_bak;

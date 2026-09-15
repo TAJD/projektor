@@ -18,6 +18,7 @@ import {
 	deletePricingPlan,
 	deleteStage,
 	deleteTarget,
+	draftFollowup,
 	exportContact,
 	getContact,
 	getDeal,
@@ -33,6 +34,7 @@ import {
 	listOrganisations,
 	listPipelines,
 	listStages,
+	listStaleDeals,
 	listTargets,
 	moveDealStage,
 	seedDefaultPipeline,
@@ -295,6 +297,55 @@ describe("CRM contacts", () => {
 		await expect(anonymiseContact(viewerCtx, id)).rejects.toBeInstanceOf(ForbiddenError);
 	});
 
+	it("anonymises the same email content in two workspaces to different, unlinkable pseudonyms", async () => {
+		const otherCtx = await ctxFor();
+		const { id: otherOrgId } = await createOrganisation(otherCtx, { name: "Other Org" });
+
+		const { id: id1 } = await createContact(ctx, {
+			orgId,
+			name: "Shared Name",
+			email: "shared@example.com",
+			consentBasis: "consent",
+			consentAt: Math.floor(Date.now() / 1000),
+		});
+		const { id: id2 } = await createContact(otherCtx, {
+			orgId: otherOrgId,
+			name: "Shared Name",
+			email: "shared@example.com",
+			consentBasis: "consent",
+			consentAt: Math.floor(Date.now() / 1000),
+		});
+
+		await anonymiseContact(ctx, id1);
+		await anonymiseContact(otherCtx, id2);
+
+		const contact1 = await getContact(ctx, id1);
+		const contact2 = await getContact(otherCtx, id2);
+		expect(contact1.email).not.toBe(contact2.email);
+	});
+
+	it("rejects changing name/email on an anonymised contact but allows other fields", async () => {
+		const { id } = await createContact(ctx, {
+			orgId,
+			name: "To Anonymise",
+			email: "toanonymise@example.com",
+			consentBasis: "consent",
+			consentAt: Math.floor(Date.now() / 1000),
+		});
+		await anonymiseContact(ctx, id);
+
+		await expect(updateContact(ctx, id, { name: "New Name" })).rejects.toBeInstanceOf(
+			ConflictError
+		);
+		await expect(updateContact(ctx, id, { email: "new@example.com" })).rejects.toBeInstanceOf(
+			ConflictError
+		);
+
+		await updateContact(ctx, id, { role: "Still Updatable" });
+		const updated = await getContact(ctx, id);
+		expect(updated.role).toBe("Still Updatable");
+	});
+
 	it("hard-deletes a contact without affecting the org's deals", async () => {
 		const { id: contactId } = await createContact(ctx, {
 			orgId,
@@ -452,6 +503,43 @@ describe("CRM deals, deal lines, and interactions", () => {
 		await updateInteraction(ctx, id, { summary: "Updated note" });
 		const updated = await getInteraction(ctx, id);
 		expect(updated.summary).toBe("Updated note");
+	});
+});
+
+describe("CRM stale deals", () => {
+	let ctx: ServiceCtx;
+	let orgId: string;
+
+	beforeEach(async () => {
+		ctx = await ctxFor();
+		({ id: orgId } = await createOrganisation(ctx, { name: "Stale Deal Org" }));
+	});
+
+	it("still lists a deal as stale when its only interaction is a draft followup", async () => {
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+		await draftFollowup(ctx, {
+			dealId,
+			occurredAt: Math.floor(Date.now() / 1000),
+			summary: "Draft only",
+			author: "Rep",
+		});
+
+		const { items } = await listStaleDeals(ctx, { days: 3650 });
+		expect(items.map((d) => d.id)).toContain(dealId);
+	});
+
+	it("falls back to the default staleness window when the stored setting is corrupt", async () => {
+		await env.DB.prepare(
+			"INSERT INTO workspace_settings (workspace_id, key, value, updated_at) VALUES (?, ?, ?, ?)"
+		)
+			.bind(ctx.workspaceId, "crm.stale_deal_days", "not-a-number", Math.floor(Date.now() / 1000))
+			.run();
+
+		const { id: dealId } = await createDeal(ctx, { orgId, currency: "USD" });
+
+		const { days, items } = await listStaleDeals(ctx, {});
+		expect(days).toBe(14);
+		expect(items.map((d) => d.id)).toContain(dealId);
 	});
 });
 
