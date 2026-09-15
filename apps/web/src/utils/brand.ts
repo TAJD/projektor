@@ -1,3 +1,5 @@
+import { resolveWorkspaceSlug } from "./workspace";
+
 export interface BrandConfig {
 	name: string;
 	mark: string;
@@ -6,8 +8,36 @@ export interface BrandConfig {
 	logoUrl: string | null;
 }
 
+interface WorkspaceBrandDto {
+	displayName: string | null;
+	accent: string | null;
+	onAccent: string | null;
+	fontFamily: string | null;
+	fontUrl: string | null;
+	logoUrl: string | null;
+}
+
 const DEFAULT_NAME = "Projektor";
 const DEFAULT_MARK = "P";
+
+function firstChar(value: string): string {
+	return [...value][0] ?? "";
+}
+
+function deriveMark(name: string): string {
+	const trimmed = name.trim();
+	return trimmed ? firstChar(trimmed).toUpperCase() : DEFAULT_MARK;
+}
+
+function layerWorkspaceBrand(base: BrandConfig, ws: WorkspaceBrandDto): BrandConfig {
+	return {
+		name: ws.displayName ?? base.name,
+		mark: ws.displayName ? deriveMark(ws.displayName) : base.mark,
+		accent: ws.accent ?? base.accent,
+		onAccent: ws.onAccent ?? base.onAccent,
+		logoUrl: ws.logoUrl ?? base.logoUrl,
+	};
+}
 
 let cached: BrandConfig | null = null;
 
@@ -76,11 +106,26 @@ export async function applyBrand(fetchImpl: typeof fetch = fetch): Promise<void>
 		applyBrandToDocument(cached);
 		return;
 	}
+	let brand: BrandConfig;
 	try {
 		const res = await fetchImpl("/api/config/brand");
 		if (!res.ok) return;
-		const brand = (await res.json()) as BrandConfig;
-		cached = brand;
-		applyBrandToDocument(brand);
-	} catch {}
+		brand = (await res.json()) as BrandConfig;
+	} catch {
+		return;
+	}
+
+	const workspaceSlug = resolveWorkspaceSlug();
+	if (workspaceSlug) {
+		try {
+			const wsRes = await fetchImpl(`/api/workspaces/${workspaceSlug}/brand`, {
+				credentials: "include",
+				headers: { "X-Workspace-Slug": workspaceSlug },
+			});
+			if (wsRes.ok) brand = layerWorkspaceBrand(brand, (await wsRes.json()) as WorkspaceBrandDto);
+		} catch {}
+	}
+
+	cached = brand;
+	applyBrandToDocument(brand);
 }

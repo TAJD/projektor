@@ -1,18 +1,31 @@
 import { drizzle, schema } from "@projektor/db";
-import type { MCPTool } from "@projektor/types";
+import type { MCPTool, PluginContext } from "@projektor/types";
 import { eq } from "drizzle-orm";
 import { DeleteWorkspaceInput } from "../schemas/workspaces";
 import { NotFoundError, ValidationError } from "../services/errors";
 import {
 	createWorkspace,
 	deleteWorkspace,
+	getWorkspaceBrand,
 	getWorkspaceWithMembers,
 	inviteMember,
 	listWorkspaces,
 	removeMember,
 	updateMemberRole,
 	updateWorkspace,
+	updateWorkspaceBrand,
 } from "../services/workspaces";
+
+async function currentWorkspaceSlug(ctx: PluginContext): Promise<string> {
+	const orm = drizzle(ctx.db, { schema });
+	const ws = await orm
+		.select({ slug: schema.workspaces.slug })
+		.from(schema.workspaces)
+		.where(eq(schema.workspaces.id, ctx.workspaceId))
+		.get();
+	if (!ws) throw new NotFoundError("Workspace not found");
+	return ws.slug;
+}
 
 export const workspacesTools: MCPTool[] = [
 	{
@@ -160,6 +173,42 @@ export const workspacesTools: MCPTool[] = [
 		async handler(input, ctx) {
 			const { userId, role } = input as { userId: string; role: string };
 			return updateMemberRole(ctx, userId, { role });
+		},
+	},
+	{
+		name: "get_workspace_brand",
+		description:
+			"Get the current workspace's white-label branding overrides (display name, accent colors, logo, font). Unset fields are null.",
+		inputSchema: { type: "object", properties: {} },
+		async handler(_input, ctx) {
+			return getWorkspaceBrand(ctx, await currentWorkspaceSlug(ctx));
+		},
+	},
+	{
+		name: "update_workspace_brand",
+		description:
+			"Update the current workspace's white-label branding overrides. Admin+ only. Pass a field as null to clear it back to the deploy-level default; omit a field to leave it unchanged.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				displayName: { type: ["string", "null"], description: "Workspace display name override" },
+				accent: {
+					type: ["string", "null"],
+					description: "Accent color as a hex string, e.g. #ff8800",
+				},
+				onAccent: {
+					type: ["string", "null"],
+					description: "Text/icon color to use on top of the accent color, as a hex string",
+				},
+				fontFamily: { type: ["string", "null"], description: "CSS font-family override" },
+				fontUrl: {
+					type: ["string", "null"],
+					description: "URL of a stylesheet defining fontFamily",
+				},
+			},
+		},
+		async handler(input, ctx) {
+			return updateWorkspaceBrand(ctx, await currentWorkspaceSlug(ctx), input);
 		},
 	},
 ];

@@ -150,3 +150,65 @@ describe("applyBrand and getBrandName caching", () => {
 		expect(getBrandName()).toBe("Projektor");
 	});
 });
+
+describe("applyBrand layers a per-workspace override on top of the deploy-level brand", () => {
+	let originalLocation: Location;
+
+	beforeEach(() => {
+		vi.resetModules();
+		originalLocation = window.location;
+		Object.defineProperty(window, "location", {
+			configurable: true,
+			value: { ...originalLocation, hostname: "acme.projektor.example" },
+		});
+	});
+
+	afterEach(() => {
+		Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+	});
+
+	it("overrides displayName/accent/logo from the workspace brand endpoint", async () => {
+		const { applyBrand: freshApplyBrand } = await import("./brand");
+		const fetchImpl = vi.fn().mockImplementation((url: string) => {
+			if (url === "/api/config/brand")
+				return Promise.resolve(new Response(JSON.stringify(DEFAULT_BRAND)));
+			if (url === "/api/workspaces/acme/brand") {
+				return Promise.resolve(
+					new Response(
+						JSON.stringify({
+							displayName: "Acme Tracker",
+							accent: "#ff8800",
+							onAccent: null,
+							fontFamily: null,
+							fontUrl: null,
+							logoUrl: "/api/workspaces/acme/brand/logo",
+						})
+					)
+				);
+			}
+			return Promise.resolve(new Response("", { status: 404 }));
+		});
+
+		await freshApplyBrand(fetchImpl);
+
+		expect(document.title).toBe("Issues — Acme Tracker");
+		expect(document.querySelector(".brand-mark")?.textContent).toBe("A");
+		expect(document.documentElement.style.getPropertyValue("--light-accent")).toBe("#ff8800");
+		expect(document.querySelector('link[rel="icon"]')?.getAttribute("href")).toBe(
+			"/api/workspaces/acme/brand/logo"
+		);
+	});
+
+	it("falls back to the deploy-level brand when the workspace brand request fails", async () => {
+		const { applyBrand: freshApplyBrand } = await import("./brand");
+		const fetchImpl = vi.fn().mockImplementation((url: string) => {
+			if (url === "/api/config/brand")
+				return Promise.resolve(new Response(JSON.stringify({ ...DEFAULT_BRAND, name: "Acme" })));
+			return Promise.reject(new Error("network error"));
+		});
+
+		await freshApplyBrand(fetchImpl);
+
+		expect(document.title).toBe("Issues — Acme");
+	});
+});

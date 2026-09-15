@@ -491,3 +491,200 @@ describe("GET /api/workspaces/:slug/mcp-info (PROJ-83)", () => {
 		);
 	});
 });
+
+describe("Workspace brand (PROJ-761)", () => {
+	let slug: string;
+	let ownerHeaders: Record<string, string>;
+	let memberHeaders: Record<string, string>;
+
+	beforeEach(async () => {
+		const owner = await seedFixture({ role: "owner" });
+		slug = owner.workspace.slug;
+		ownerHeaders = authHeaders(owner.token, slug);
+
+		const memberUser = await seedUser(`m-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		await seedMember(owner.workspace.id, memberUser.id, "member");
+		const memberToken = await seedToken(owner.workspace.id, memberUser.id);
+		memberHeaders = authHeaders(memberToken, slug);
+	});
+
+	it("GET /:slug/brand returns all-null defaults for a workspace with no brand set", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			headers: memberHeaders,
+		});
+		expect(res.status).toBe(200);
+		expect(await res.json()).toEqual({
+			displayName: null,
+			accent: null,
+			onAccent: null,
+			fontFamily: null,
+			fontUrl: null,
+			logoUrl: null,
+		});
+	});
+
+	it("owner can PATCH accent/displayName and a member can read the result back", async () => {
+		const patchRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ displayName: "Acme Tracker", accent: "#ff8800" }),
+		});
+		expect(patchRes.status).toBe(200);
+		const patched = (await patchRes.json()) as { displayName: string; accent: string };
+		expect(patched.displayName).toBe("Acme Tracker");
+		expect(patched.accent).toBe("#ff8800");
+
+		const getRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			headers: memberHeaders,
+		});
+		const brand = (await getRes.json()) as { displayName: string; accent: string };
+		expect(brand.displayName).toBe("Acme Tracker");
+		expect(brand.accent).toBe("#ff8800");
+	});
+
+	it("a member (non admin/owner) gets 403 on PATCH", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			method: "PATCH",
+			headers: memberHeaders,
+			body: JSON.stringify({ displayName: "Should Fail" }),
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("rejects a non-hex accent value with 400", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ accent: "orange" }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("explicit null clears a previously-set field without touching the others", async () => {
+		await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ displayName: "Acme Tracker", accent: "#ff8800" }),
+		});
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ accent: null }),
+		});
+		const body = (await res.json()) as { displayName: string; accent: string | null };
+		expect(body.displayName).toBe("Acme Tracker");
+		expect(body.accent).toBeNull();
+	});
+
+	it("owner can upload a logo, it's servable, and a re-upload replaces (not duplicates) the R2 object", async () => {
+		const pngBytes = new Uint8Array([
+			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+			0x52,
+		]);
+		const form = new FormData();
+		form.append("file", new File([pngBytes], "logo.png", { type: "image/png" }));
+		const uploadRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			method: "POST",
+			headers: { Authorization: ownerHeaders.Authorization, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		expect(uploadRes.status).toBe(201);
+
+		const brandRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			headers: memberHeaders,
+		});
+		const brand = (await brandRes.json()) as { logoUrl: string };
+		expect(brand.logoUrl).toBe(`/api/workspaces/${slug}/brand/logo`);
+
+		const logoRes = await SELF.fetch(`http://localhost${brand.logoUrl}`, {
+			headers: memberHeaders,
+		});
+		expect(logoRes.status).toBe(200);
+		expect(logoRes.headers.get("Content-Type")).toBe("image/png");
+		expect(new Uint8Array(await logoRes.arrayBuffer())).toEqual(pngBytes);
+
+		const form2 = new FormData();
+		form2.append("file", new File([pngBytes], "logo2.png", { type: "image/png" }));
+		const reuploadRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			method: "POST",
+			headers: { Authorization: ownerHeaders.Authorization, "X-Workspace-Slug": slug },
+			body: form2,
+		});
+		expect(reuploadRes.status).toBe(201);
+	});
+
+	it("rejects an oversized logo with 413", async () => {
+		const big = new Uint8Array(2 * 1024 * 1024 + 1);
+		const form = new FormData();
+		form.append("file", new File([big], "big.png", { type: "image/png" }));
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			method: "POST",
+			headers: { Authorization: ownerHeaders.Authorization, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		expect(res.status).toBe(413);
+	});
+
+	it("rejects a disallowed logo content type with 415", async () => {
+		const form = new FormData();
+		form.append("file", new File(["<svg></svg>"], "logo.svg", { type: "image/svg+xml" }));
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			method: "POST",
+			headers: { Authorization: ownerHeaders.Authorization, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		expect(res.status).toBe(415);
+	});
+
+	it("a member (non admin/owner) gets 403 on logo upload", async () => {
+		const form = new FormData();
+		form.append("file", new File([new Uint8Array([1, 2, 3])], "logo.png", { type: "image/png" }));
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			method: "POST",
+			headers: { Authorization: memberHeaders.Authorization, "X-Workspace-Slug": slug },
+			body: form,
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("GET logo → 404 when no logo has been uploaded", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			headers: memberHeaders,
+		});
+		expect(res.status).toBe(404);
+	});
+
+	it("owner can delete the logo, which then 404s", async () => {
+		const form = new FormData();
+		form.append("file", new File([new Uint8Array([1, 2, 3])], "logo.png", { type: "image/png" }));
+		await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			method: "POST",
+			headers: { Authorization: ownerHeaders.Authorization, "X-Workspace-Slug": slug },
+			body: form,
+		});
+
+		const delRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			method: "DELETE",
+			headers: ownerHeaders,
+		});
+		expect(delRes.status).toBe(204);
+
+		const getRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			headers: memberHeaders,
+		});
+		expect(getRes.status).toBe(404);
+
+		const brandRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
+			headers: memberHeaders,
+		});
+		expect(((await brandRes.json()) as { logoUrl: string | null }).logoUrl).toBeNull();
+	});
+
+	it("a member (non admin/owner) gets 403 on logo delete", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand/logo`, {
+			method: "DELETE",
+			headers: memberHeaders,
+		});
+		expect(res.status).toBe(403);
+	});
+});

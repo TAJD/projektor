@@ -33,3 +33,15 @@ export const CreateTokenSchema = z.object({
 export const DeleteWorkspaceInput = z.object({
 	workspaceSlug: z.string(),
 });
+
+const HexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+
+export const UpdateWorkspaceBrandSchema = z
+	.object({
+		displayName: z.string().min(1).max(100).nullable().optional(),
+		accent: HexColor.nullable().optional(),
+		onAccent: HexColor.nullable().optional(),
+		fontFamily: z.string().min(1).max(100).nullable().optional(),
+		fontUrl: z.string().url().nullable().optional(),
+	})
+	.strict();

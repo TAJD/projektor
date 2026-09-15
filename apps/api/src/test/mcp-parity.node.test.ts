@@ -89,6 +89,9 @@ const REST_ONLY: Record<string, string> = {
 	"projects.ts:listProjectsAcrossWorkspaces":
 		"cross-workspace summary for the browser's project switcher; MCP is scoped to one workspace per endpoint",
 	"wiki-export.ts:exportWiki": "file download response, not a JSON operation",
+	"workspaces.ts:uploadWorkspaceLogo": "second half of the multipart logo-upload handshake",
+	"workspaces.ts:deleteWorkspaceLogo": "browser settings-UI action",
+	"workspaces.ts:getWorkspaceLogoObject": "streams bytes for the browser, no JSON operation",
 };
 
 /**
