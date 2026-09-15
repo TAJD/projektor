@@ -63,16 +63,19 @@ against white text (see below).
 
 Measured against the current default accents (light `#4f46e5`, dark `#6366f1`):
 
-| Pair | Ratio | AA (4.5:1) |
-|---|---|---|
-| light `--accent` vs `--light-on-accent` (white) | 6.29:1 | pass |
-| dark `--accent` vs `--dark-on-accent` (white) | 4.47:1 | pass (marginal) |
-| light `--priority-medium-text` (= accent) vs `--light-surface` | 6.01:1 | pass |
-| dark `--priority-medium-text` (55% white / 45% accent mix) vs `--dark-surface` | 8.92:1 | pass |
+| Pair | Ratio | AA text (4.5:1) | AA UI/large text (3:1) |
+|---|---|---|---|
+| light `--accent` vs `--light-on-accent` (white) | 6.29:1 | pass | pass |
+| dark `--accent` vs `--dark-on-accent` (white) | 4.47:1 | fail | pass |
+| light `--priority-medium-text` (= accent) vs `--light-surface` | 6.01:1 | pass | pass |
+| dark `--priority-medium-text` (55% white / 45% accent mix) vs `--dark-surface` | 8.92:1 | pass | pass |
 
-The dark on-accent ratio is the tightest of the set. It isn't something this token
-split changes — it's inherent to the shipped dark accent color — but it's worth
-keeping in mind if the dark accent itself ever moves.
+The dark on-accent pairing fails the 4.5:1 body-text threshold (it clears the looser
+3:1 UI-component/large-text one). It isn't something this token split changes — it's
+inherent to the shipped dark accent color, and `--on-accent` is only ever used on
+short UI labels (button text, badges, the sidebar brand mark), not body copy — but a
+future ticket touching `--dark-accent` should either darken it slightly or shrink this
+gap another way.
 
 ## Reading tokens from JS
 
@@ -82,3 +85,9 @@ resolved color string. These read the live custom property via a `readThemeColor
 helper with a literal fallback for the rare case the property isn't resolvable yet.
 The fallback is a safety net, not a second source of truth — the token itself is
 still what actually renders.
+
+The four `--chart-seq-*` tokens are `color-mix()` expressions, and an *unregistered*
+custom property's computed value is only var()-substituted, not fully resolved — so
+`getComputedStyle` would hand the canvas an unresolved `color-mix(...)` string instead
+of a color. `tokens.css` registers them with `@property { syntax: "<color>"; ... }` so
+the UA resolves them to a real color at computed-value time before JS ever reads them.

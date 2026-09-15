@@ -50,10 +50,10 @@ export function formatFullDate(iso: string): string {
 // read from the --chart-seq-* tokens (Base.astro) so the ramp repaints on theme toggle.
 export function readChartSeqColors() {
 	return {
-		backlogTodo: readThemeColor("--chart-seq-1", "#86b6ef"),
-		inProgress: readThemeColor("--chart-seq-2", "#5598e7"),
-		inReview: readThemeColor("--chart-seq-3", "#2a78d6"),
-		done: readThemeColor("--chart-seq-4", "#1c5cab"),
+		backlogTodo: readThemeColor("--chart-seq-1", "#a6b1f9"),
+		inProgress: readThemeColor("--chart-seq-2", "#7a84f2"),
+		inReview: readThemeColor("--chart-seq-3", "#4f46e5"),
+		done: readThemeColor("--chart-seq-4", "#3832aa"),
 	};
 }
 

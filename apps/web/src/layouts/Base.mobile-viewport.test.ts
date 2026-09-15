@@ -16,7 +16,7 @@ describe("Base layout — mobile viewport", () => {
 		const mobileQueryStart = shellCss.indexOf("/* iOS Safari auto-zooms");
 		expect(mobileQueryStart).toBeGreaterThan(-1);
 
-		const mobileQueryEnd = shellCss.indexOf("\n\t\t}", mobileQueryStart);
+		const mobileQueryEnd = shellCss.indexOf("\n\t}", mobileQueryStart);
 		const mobileQuery = shellCss.slice(mobileQueryStart, mobileQueryEnd);
 
 		expect(mobileQuery).toMatch(/input,\s*textarea,\s*select\s*{\s*font-size:\s*16px;/);
