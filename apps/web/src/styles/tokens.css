@@ -1,4 +1,7 @@
 :root {
+	--font-family-sans: "IBM Plex Sans Var", system-ui, -apple-system, sans-serif;
+	--font-family-mono: "Monaspace Neon", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+
 	--sidebar-width: 220px;
 	--sidebar-width-collapsed: 56px;
 	--topbar-height: 56px;

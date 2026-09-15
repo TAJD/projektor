@@ -7,7 +7,7 @@ body {
 	margin: 0;
 	background: var(--bg);
 	color: var(--text);
-	font-family: "Monaspace Neon", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+	font-family: var(--font-family-sans);
 	line-height: 1.5;
 	-webkit-font-smoothing: antialiased;
 	text-rendering: optimizeLegibility;

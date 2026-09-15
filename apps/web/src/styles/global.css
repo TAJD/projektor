@@ -14,13 +14,9 @@
    same set. */
 @source "../";
 
-/* The colour values live in Base.astro's :root / [data-theme='dark'] blocks (and in the
-   share page's own copy), which is what makes theme switching a pure custom-property swap
-   with no class toggling. This only teaches Tailwind the names, so `bg-accent` and
-   `text-text-muted` resolve to whichever theme is active.
-
-   v3 also set `darkMode: 'class'`; nothing used a `dark:` variant, because theming goes
-   through data-theme instead, so it is dropped rather than translated. */
+/* Colour values live in tokens.css; this only teaches Tailwind the names, so `bg-accent`
+   and `text-text-muted` resolve to whichever theme is active. v3's `darkMode: 'class'`
+   is dropped rather than translated — theming goes through data-theme, not a `dark:` variant. */
 @theme {
 	--color-accent: var(--accent);
 	--color-bg: var(--bg);
@@ -34,6 +30,9 @@
 	   produced no rule at all, so the highlight never rendered; under v4 it would have
 	   rendered solid indigo behind the text. Mixing explicitly here keeps it theme-aware. */
 	--color-accent-soft: color-mix(in oklab, var(--accent) 30%, transparent);
+
+	--font-sans: var(--font-family-sans);
+	--font-mono: var(--font-family-mono);
 }
 
 /* Translated from v3's `theme.extend.typography` override. The colour half becomes the
