@@ -37,7 +37,8 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="theme-color" content="#6366f1" />
+    <meta name="theme-color" content="#4f46e5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#6366f1" media="(prefers-color-scheme: dark)" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="preload" href="/fonts/IBMPlexSans-Variable.woff2" as="font" type="font/woff2" crossorigin />
     <!-- CD-293: the manifest link defaults to a no-credentials fetch, which behind
@@ -116,7 +117,7 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
           </button>
           <a href="/" class="topbar-brand">
             <span class="brand-mark">P</span>
-            <span>Projektor</span>
+            <span class="brand-name">Projektor</span>
           </a>
         </div>
         <AccountMenu client:load />
@@ -261,6 +262,10 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
 
         document.addEventListener('astro:page-load', bindThemeToggle);
       })();
+    </script>
+    <script>
+      import { applyBrand } from '../utils/brand';
+      document.addEventListener('astro:page-load', () => applyBrand());
     </script>
     <!-- PROJ-428: hide the top bar on scroll-down, reveal on scroll-up, so it
          doesn't permanently eat vertical space on long pages. Suppressed while

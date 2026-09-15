@@ -22,6 +22,7 @@ import { agentsRouter } from "./routes/agents";
 import { authRouter } from "./routes/auth";
 import { codeHeatmapRouter } from "./routes/code-heatmap";
 import { commentsRouter } from "./routes/comments";
+import { configRouter } from "./routes/config";
 import { customFieldsRouter } from "./routes/custom-fields";
 import { feedbackPublicRouter, feedbackRouter } from "./routes/feedback";
 import { feedbackSourceLookupRouter, feedbackSourcesRouter } from "./routes/feedback-sources";
@@ -104,6 +105,7 @@ app.get("/health", (c) => c.json({ ok: true }));
 // Same probe under /api so the served frontend (same-origin /api/*) can reach it.
 // Registered before the /api/* rate-limit + auth so it stays an open health check.
 app.get("/api/health", (c) => c.json({ ok: true }));
+app.route("/api/config", configRouter);
 
 // Rate-limit all API and MCP traffic ahead of auth and heavy handlers.
 // Keyed by bearer-token fingerprint when present, else by CF-Connecting-IP.

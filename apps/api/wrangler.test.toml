@@ -51,3 +51,5 @@ RATE_LIMIT_AUTH_FAIL_MAX = "3"
 # PROJ-378 public feedback submit — low so the 429 tests can seed straight to the limit.
 RATE_LIMIT_FEEDBACK_MAX = "5"
 RATE_LIMIT_FEEDBACK_IP_MAX = "5"
+BRAND_NAME = "Test Brand"
+BRAND_ACCENT = "#123456"
