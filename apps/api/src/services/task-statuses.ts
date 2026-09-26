@@ -194,20 +194,27 @@ export async function seedDefaultTaskStatuses(db: D1Database, workspaceId: strin
 	}
 }
 
+// PROJ-870: also returns the resolved status's category, read from the same row lookup —
+// the issue write paths previously re-queried task_statuses by id just to get it.
+// category is null when no task_statuses row backs the result (legacy key / fallback).
 export async function resolveStatus(
 	ctx: ServiceCtx,
 	statusId: string | null | undefined,
 	legacyStatus?: string
-): Promise<{ id: string | null; key: string }> {
+): Promise<{ id: string | null; key: string; category: string | null }> {
 	const orm = drizzle(ctx.db, { schema });
+	const cols = {
+		id: schema.taskStatuses.id,
+		key: schema.taskStatuses.key,
+		category: schema.taskStatuses.category,
+	};
 
 	if (statusId === null) {
-		if (legacyStatus) return { id: null, key: legacyStatus };
-		return { id: null, key: "backlog" };
+		return { id: null, key: legacyStatus || "backlog", category: null };
 	}
 	if (statusId) {
 		const found = await orm
-			.select({ id: schema.taskStatuses.id, key: schema.taskStatuses.key })
+			.select(cols)
 			.from(schema.taskStatuses)
 			.where(
 				and(
@@ -221,11 +228,11 @@ export async function resolveStatus(
 				formErrors: ["Task status not found in this workspace"],
 				fieldErrors: {},
 			});
-		return { id: found.id, key: found.key };
+		return found;
 	}
 	if (legacyStatus) {
 		const found = await orm
-			.select({ id: schema.taskStatuses.id, key: schema.taskStatuses.key })
+			.select(cols)
 			.from(schema.taskStatuses)
 			.where(
 				and(
@@ -234,11 +241,10 @@ export async function resolveStatus(
 				)
 			)
 			.get();
-		if (found) return { id: found.id, key: found.key };
-		return { id: null, key: legacyStatus };
+		return found ?? { id: null, key: legacyStatus, category: null };
 	}
 	const def = await orm
-		.select({ id: schema.taskStatuses.id, key: schema.taskStatuses.key })
+		.select(cols)
 		.from(schema.taskStatuses)
 		.where(
 			and(
@@ -247,5 +253,5 @@ export async function resolveStatus(
 			)
 		)
 		.get();
-	return def ? { id: def.id, key: def.key } : { id: null, key: "backlog" };
+	return def ?? { id: null, key: "backlog", category: null };
 }
