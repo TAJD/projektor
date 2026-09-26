@@ -1170,9 +1170,19 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
-			body: JSON.stringify({ title: "View", content: "v1" }),
+			body: JSON.stringify({ title: "View", slug: "view", content: "v1" }),
 		});
 		expect(res.status).toBe(400);
+	});
+
+	it("POST /api/wiki auto-slugs the title 'View' to 'view-page' (PROJ-811)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "View", content: "v1" }),
+		});
+		expect(res.status).toBe(201);
+		expect(((await res.json()) as { slug: string }).slug).toBe("view-page");
 	});
 
 	it("PUT /api/wiki/:slug rejects renaming to the reserved slug 'view' (PROJ-487, 400)", async () => {
@@ -1330,9 +1340,19 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		const res = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
-			body: JSON.stringify({ title: "Index", content: "v1" }),
+			body: JSON.stringify({ title: "Index", slug: "index", content: "v1" }),
 		});
 		expect(res.status).toBe(400);
+	});
+
+	it("POST /api/wiki auto-slugs the title 'Index' to 'index-page' (PROJ-811)", async () => {
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Index", content: "v1" }),
+		});
+		expect(res.status).toBe(201);
+		expect(((await res.json()) as { slug: string }).slug).toBe("index-page");
 	});
 
 	it("PUT /api/wiki/:slug rejects renaming to the reserved slug 'index' (PROJ-487, 400)", async () => {

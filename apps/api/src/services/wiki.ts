@@ -102,7 +102,27 @@ function slugify(title: string): string {
 // catch-all, so a page slugged "templates" would be shadowed by it and never load. The
 // seeded Templates parent page therefore uses "page-templates" (seedDefaultWikiTemplates
 // / migration 0047).
-const RESERVED_WIKI_SLUGS = new Set(["view", "index", "templates"]);
+//
+// PROJ-811: every other fixed first segment under /api/wiki (search, tree, trash, …) is
+// registered before the /:slug catch-all too, so a page slugged with any of them can
+// never load. test/wiki-reserved-slugs.test.ts walks the wiki router and fails if a new
+// fixed route isn't listed here; migration 0060 renamed any pages that already had one.
+export const RESERVED_WIKI_SLUGS: ReadonlySet<string> = new Set([
+	"view",
+	"index",
+	"templates",
+	"tree",
+	"search",
+	"broken-links",
+	"stale-pages",
+	"backfill-links",
+	"watches",
+	"notifications",
+	"trash",
+	"purge-trash",
+	"changes",
+	"export",
+]);
 
 // PROJ-496 (R14): 30-day trash retention — purgeExpiredWikiPages permanently removes a
 // page (and its R2 attachments) once it's been soft-deleted for at least this long.
@@ -829,8 +849,10 @@ async function resolveTemplateContent(ctx: ServiceCtx, templateSlug: string): Pr
 function deriveSlugFromTitle(title: string): string {
 	const derivedSlug = SlugSchema.safeParse(slugify(title));
 	if (!derivedSlug.success) return `page-${crypto.randomUUID().slice(0, 8)}`;
-	// PROJ-812: a title that is itself an id gets a suffix instead of an id-shaped slug.
-	return isIdShapedSlug(derivedSlug.data) ? `${derivedSlug.data}-page` : derivedSlug.data;
+	// PROJ-811/812: a title that derives a reserved or id-shaped slug gets a suffix
+	// instead (a page titled "Search" becomes search-page), so it stays loadable.
+	const needsSuffix = RESERVED_WIKI_SLUGS.has(derivedSlug.data) || isIdShapedSlug(derivedSlug.data);
+	return needsSuffix ? `${derivedSlug.data}-page` : derivedSlug.data;
 }
 
 function buildCreateWikiPageInsertStatement(
