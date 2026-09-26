@@ -1,8 +1,9 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { PostMessageSchema } from "../schemas/agent-messages";
 import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../schemas/file-claims";
 import { visibleProjectPredicate } from "./access";
-import { postMessage } from "./agent-messages";
+import { buildPostMessageStatements } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks } from "./sql";
@@ -97,169 +98,114 @@ async function loadActiveClaimsByPath(
 	);
 }
 
-/**
- * Release claims whose holding session stopped heartbeating, and drop them from the map so
- * every downstream step sees only genuinely-held paths.
- *
- * PROJ-636: this is the file-claim twin of `reclaimStaleLeaseOrThrow` in
- * services/issue-leases.ts. Before it, an agent that died without calling `end_agent` —
- * crash, OOM, killed terminal, closed worktree tab — held its paths forever, and for
- * spawned workers dying without a clean exit is the normal case rather than the exception.
- *
- * Deliberately does NOT write to `claim_conflicts`. That log feeds the heatmap's contention
- * mode, whose whole claim is that a repeatedly-contended path says something about how the
- * work was sliced. Superseding a dead agent's abandoned claim is not two live agents
- * colliding, and recording it as such would inflate the signal with fleet mortality.
- */
-async function reclaimStaleClaims(
-	orm: ReturnType<typeof drizzle>,
-	claimsByPath: Map<string, ActiveClaim>,
-	now: number
-): Promise<ActiveClaim[]> {
-	const stale = [...claimsByPath.values()].filter((c) => !c.live);
-	for (const claim of stale) {
-		await orm
-			.update(schema.issueFileClaims)
-			.set({ releasedAt: now, releaseReason: "expired" })
-			.where(eq(schema.issueFileClaims.id, claim.id));
-		claimsByPath.delete(claim.path);
-	}
-	return stale.map((c) => ({ ...c, releasedAt: now, releaseReason: "expired" }));
+// PROJ-864: multi-row insert chunk sizes, calibrated per-statement for D1's 100-bound-param
+// cap with headroom — unlike services/sql.ts#inChunks, which is calibrated for single-param
+// IN-list queries, not multi-column inserts. More chunks costs nothing here: every statement
+// these produce is folded into one ctx.db.batch() call by the caller, so it's the number of
+// batch() calls that's bounded (the AC), not the number of statements inside one.
+const CLAIM_INSERT_CHUNK_SIZE = 10; // 7 cols/row
+const CONFLICT_INSERT_CHUNK_SIZE = 8; // 9 cols/row
+// Single-param-per-item IN-list chunk size for id-keyed UPDATEs, mirroring services/sql.ts.
+const ID_CHUNK_SIZE = 90;
+
+function toD1Statement(
+	ctx: ServiceCtx,
+	query: Readonly<{ sql: string; params: unknown[] }>
+): D1PreparedStatement {
+	return ctx.db.prepare(query.sql).bind(...query.params);
 }
 
-async function assertNoConflicts(
-	orm: ReturnType<typeof drizzle>,
-	params: Readonly<{
-		workspaceId: string;
-		issueId: string;
-		agentId: string | undefined;
-		paths: string[];
-		claimsByPath: Map<string, { issueId: string; agentId: string | null }>;
-		now: number;
-	}>
-) {
-	const { workspaceId, issueId, agentId, paths, claimsByPath, now } = params;
-	// Record every contended path (rejection is all-or-nothing, but each simultaneously
-	// held path is its own contention signal for the heat map), then throw naming the first.
-	let firstConflict: { path: string; issueId: string; agentId: string | null } | undefined;
-	for (const path of paths) {
-		const existing = claimsByPath.get(path);
-		if (existing) {
-			await orm.insert(schema.claimConflicts).values({
-				id: crypto.randomUUID(),
-				workspaceId,
-				path,
-				rejectedIssueId: issueId,
-				rejectedAgentId: agentId ?? null,
-				holdingIssueId: existing.issueId,
-				holdingAgentId: existing.agentId,
-				forced: 0,
-				occurredAt: now,
-			});
-			if (!firstConflict) firstConflict = { path, ...existing };
-		}
-	}
-	if (firstConflict) {
-		throw new ConflictError(
-			`Path "${firstConflict.path}" is held by issue ${firstConflict.issueId}` +
-				`${firstConflict.agentId ? ` (agent ${firstConflict.agentId})` : ""}`
-		);
-	}
+function chunk<T>(items: readonly T[], size: number): T[][] {
+	const out: T[][] = [];
+	for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size) as T[]);
+	return out;
 }
 
-async function overrideConflictingClaims(
+// Builds (without executing) the UPDATEs that release a set of claims by id, all with the
+// same releasedAt/reason — used for stale-holder reclaim, force-override release and
+// releaseFiles. The workspace and still-active guards mean a claim another request
+// released in the meantime is left as that request wrote it; RETURNING id lets the
+// caller report only the rows this batch actually released (releasedIdsFrom below).
+function buildReleaseByIdsStatements(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
-	params: Readonly<{
-		workspaceId: string;
-		issueId: string;
-		agentId: string | undefined;
-		paths: string[];
-		claimsByPath: Map<string, typeof schema.issueFileClaims.$inferSelect>;
-		now: number;
-	}>
-) {
-	const { workspaceId, issueId, agentId, paths, claimsByPath, now } = params;
-	const overridden: (typeof schema.issueFileClaims.$inferSelect)[] = [];
-	const displacedPaths = new Map<string, string[]>();
-	for (const path of paths) {
-		const existing = claimsByPath.get(path);
-		if (existing) {
-			const list = displacedPaths.get(existing.issueId) ?? [];
-			list.push(path);
-			displacedPaths.set(existing.issueId, list);
-			await orm
+	ids: readonly string[],
+	now: number,
+	reason: string
+): D1PreparedStatement[] {
+	return chunk(ids, ID_CHUNK_SIZE).map((idChunk) =>
+		toD1Statement(
+			ctx,
+			orm
 				.update(schema.issueFileClaims)
-				.set({ releasedAt: now, releaseReason: "overridden" })
-				.where(eq(schema.issueFileClaims.id, existing.id));
-			await orm.insert(schema.claimConflicts).values({
-				id: crypto.randomUUID(),
-				workspaceId,
-				path,
-				rejectedIssueId: issueId,
-				rejectedAgentId: agentId ?? null,
-				holdingIssueId: existing.issueId,
-				holdingAgentId: existing.agentId,
-				forced: 1,
-				occurredAt: now,
-			});
-			overridden.push({ ...existing, releasedAt: now, releaseReason: "overridden" });
-		}
-	}
-	for (const [displacedIssueId, displacedIssuePaths] of displacedPaths) {
-		const pathList = displacedIssuePaths.map((p) => `"${p}"`).join(", ");
-		await postMessage(ctx, {
-			scope: `issue:${issueId}`,
-			agentId: agentId ?? undefined,
-			body: `force-claimed ${pathList}, overriding issue ${displacedIssueId}`,
-		});
-		await postMessage(ctx, {
-			scope: `issue:${displacedIssueId}`,
-			agentId: agentId ?? undefined,
-			body: `issue ${issueId} force-claimed ${pathList}, which this issue held`,
-		});
-	}
-	return overridden;
+				.set({ releasedAt: now, releaseReason: reason })
+				.where(
+					and(
+						eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+						inArray(schema.issueFileClaims.id, idChunk),
+						isNull(schema.issueFileClaims.releasedAt)
+					)
+				)
+				.returning({ id: schema.issueFileClaims.id })
+				.toSQL()
+		)
+	);
 }
 
-async function insertClaims(
-	orm: ReturnType<typeof drizzle>,
-	params: Readonly<{
-		workspaceId: string;
-		issueId: string;
-		agentId: string | undefined;
-		paths: string[];
-		now: number;
-	}>
-) {
-	const { workspaceId, issueId, agentId, paths, now } = params;
-	const created: (typeof schema.issueFileClaims.$inferSelect)[] = [];
-	for (const path of paths) {
-		const id = crypto.randomUUID();
-		await orm.insert(schema.issueFileClaims).values({
-			id,
-			workspaceId,
-			issueId,
-			agentId: agentId ?? null,
-			path,
-			claimedAt: now,
-			releasedAt: null,
-		});
-		const row = await orm
-			.select()
-			.from(schema.issueFileClaims)
-			.where(eq(schema.issueFileClaims.id, id))
-			.get();
-		// biome-ignore lint/style/noNonNullAssertion: row was just inserted; SELECT immediately after guarantees it exists
-		created.push(row!);
+function releasedIdsFrom(results: readonly D1Result[]): Set<string> {
+	return new Set(results.flatMap((r) => (r.results as Array<{ id: string }>).map((row) => row.id)));
+}
+
+// PostMessageSchema's body cap: force-claim notifications are built server-side and
+// inserted without re-validation (buildPostMessageStatements), so they must respect it
+// themselves.
+const MESSAGE_BODY_MAX = PostMessageSchema.shape.body.maxLength ?? 5000;
+
+// Quoted, comma-separated paths, cut short with "…and N more" so the result (plus the
+// caller's `overhead` characters of surrounding text) fits within MESSAGE_BODY_MAX.
+function formatPathList(paths: readonly string[], overhead: number): string {
+	const max = MESSAGE_BODY_MAX - overhead;
+	let out = "";
+	for (let i = 0; i < paths.length; i++) {
+		const next = out ? `${out}, "${paths[i]}"` : `"${paths[i]}"`;
+		const remaining = paths.length - i - 1;
+		const tail = remaining > 0 ? `, …and ${remaining} more` : "";
+		if (next.length + tail.length > max) {
+			return `${out}${out ? ", " : ""}…and ${paths.length - i} more`;
+		}
+		out = next;
 	}
-	return created;
+	return out;
+}
+
+function buildConflictInsertStatements(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	rows: readonly (typeof schema.claimConflicts.$inferInsert)[]
+): D1PreparedStatement[] {
+	return chunk(rows, CONFLICT_INSERT_CHUNK_SIZE).map((rowChunk) =>
+		toD1Statement(ctx, orm.insert(schema.claimConflicts).values(rowChunk).toSQL())
+	);
+}
+
+function buildClaimInsertStatements(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	rows: readonly (typeof schema.issueFileClaims.$inferInsert)[]
+): D1PreparedStatement[] {
+	return chunk(rows, CLAIM_INSERT_CHUNK_SIZE).map((rowChunk) =>
+		toD1Statement(ctx, orm.insert(schema.issueFileClaims).values(rowChunk).toSQL())
+	);
 }
 
 export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	const result = ClaimFilesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, agentId, paths, force } = result.data;
+	const { issueId, agentId, force } = result.data;
+	// A path listed twice would insert two active claims on it in one batch, which the
+	// active-claim unique index rejects (rolling the whole batch back). Claim it once,
+	// keeping the caller's order.
+	const paths = [...new Set(result.data.paths)];
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -270,42 +216,133 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 
 	// Pre-check all paths for active claims — all-or-nothing on conflict.
 	const claimsByPath = await loadActiveClaimsByPath(orm, ctx.workspaceId, paths, liveCutoff());
-
 	const now = Math.floor(Date.now() / 1000);
 
-	// Before conflict evaluation, so a dead holder neither blocks the claim nor lands in
-	// claim_conflicts. Removing them from the map is what keeps the two steps below
-	// unchanged — they only ever see live holders.
-	const reclaimed = await reclaimStaleClaims(orm, claimsByPath, now);
+	// PROJ-636: split stale holders out before conflict evaluation — a dead holder neither
+	// blocks the claim nor lands in claim_conflicts. Same semantics as before reclaimStaleClaims
+	// was inlined here; the release itself is now just one statement folded into the batch
+	// below instead of an immediate per-claim UPDATE.
+	const stale: ActiveClaim[] = [];
+	for (const [path, claim] of claimsByPath) {
+		if (!claim.live) {
+			stale.push(claim);
+			claimsByPath.delete(path);
+		}
+	}
+	const reclaimed = stale.map((c) => ({ ...c, releasedAt: now, releaseReason: "expired" }));
 
-	if (!force) {
-		await assertNoConflicts(orm, {
-			workspaceId: ctx.workspaceId,
-			issueId,
-			agentId: agentId ?? undefined,
-			paths,
-			claimsByPath,
-			now,
-		});
+	const statements: D1PreparedStatement[] = buildReleaseByIdsStatements(
+		ctx,
+		orm,
+		stale.map((c) => c.id),
+		now,
+		"expired"
+	);
+
+	// Every path in this request that's still (genuinely) held once stale claims are excluded.
+	const contended = paths
+		.map((path) => ({ path, existing: claimsByPath.get(path) }))
+		.filter((p): p is { path: string; existing: ActiveClaim } => Boolean(p.existing));
+
+	if (!force && contended.length > 0) {
+		// Record every contended path (rejection is all-or-nothing, but each simultaneously
+		// held path is its own contention signal for the heat map). The reclaim above and
+		// these conflict records must persist even though the claim itself is rejected, so
+		// they go out together before throwing.
+		statements.push(
+			...buildConflictInsertStatements(
+				ctx,
+				orm,
+				contended.map(({ path, existing }) => ({
+					id: crypto.randomUUID(),
+					workspaceId: ctx.workspaceId,
+					path,
+					rejectedIssueId: issueId,
+					rejectedAgentId: agentId ?? null,
+					holdingIssueId: existing.issueId,
+					holdingAgentId: existing.agentId,
+					forced: 0,
+					occurredAt: now,
+				}))
+			)
+		);
+		await ctx.db.batch(statements);
+		const first = contended[0];
+		throw new ConflictError(
+			`Path "${first.path}" is held by issue ${first.existing.issueId}` +
+				`${first.existing.agentId ? ` (agent ${first.existing.agentId})` : ""}`
+		);
 	}
 
-	// Release conflicting claims when force is true, then insert new ones
-	const overridden = await overrideConflictingClaims(ctx, orm, {
-		workspaceId: ctx.workspaceId,
-		issueId,
-		agentId: agentId ?? undefined,
-		paths,
-		claimsByPath,
-		now,
-	});
+	// force:true — release every contended claim and record the override, in the same batch
+	// as everything else (no conflict is possible when force is false and contended is empty).
+	const overridden: ActiveClaim[] = [];
+	if (force && contended.length > 0) {
+		const displacedPaths = new Map<string, string[]>();
+		for (const { path, existing } of contended) {
+			overridden.push({ ...existing, releasedAt: now, releaseReason: "overridden" });
+			const list = displacedPaths.get(existing.issueId) ?? [];
+			list.push(path);
+			displacedPaths.set(existing.issueId, list);
+		}
+		statements.push(
+			...buildReleaseByIdsStatements(
+				ctx,
+				orm,
+				contended.map(({ existing }) => existing.id),
+				now,
+				"overridden"
+			),
+			...buildConflictInsertStatements(
+				ctx,
+				orm,
+				contended.map(({ path, existing }) => ({
+					id: crypto.randomUUID(),
+					workspaceId: ctx.workspaceId,
+					path,
+					rejectedIssueId: issueId,
+					rejectedAgentId: agentId ?? null,
+					holdingIssueId: existing.issueId,
+					holdingAgentId: existing.agentId,
+					forced: 1,
+					occurredAt: now,
+				}))
+			)
+		);
+		const messages: { scope: string; agentId?: string; body: string }[] = [];
+		for (const [displacedIssueId, displacedIssuePaths] of displacedPaths) {
+			const toHolder = (list: string) =>
+				`force-claimed ${list}, overriding issue ${displacedIssueId}`;
+			const toDisplaced = (list: string) =>
+				`issue ${issueId} force-claimed ${list}, which this issue held`;
+			messages.push({
+				scope: `issue:${issueId}`,
+				agentId: agentId ?? undefined,
+				body: toHolder(formatPathList(displacedIssuePaths, toHolder("").length)),
+			});
+			messages.push({
+				scope: `issue:${displacedIssueId}`,
+				agentId: agentId ?? undefined,
+				body: toDisplaced(formatPathList(displacedIssuePaths, toDisplaced("").length)),
+			});
+		}
+		statements.push(...buildPostMessageStatements(ctx, orm, messages));
+	}
 
-	const created = await insertClaims(orm, {
+	// Every field is caller-supplied or server-generated (id, timestamp), so the inserted
+	// rows are built here directly — no RETURNING/re-SELECT needed (PROJ-864).
+	const created = paths.map((path) => ({
+		id: crypto.randomUUID(),
 		workspaceId: ctx.workspaceId,
 		issueId,
-		agentId: agentId ?? undefined,
-		paths,
-		now,
-	});
+		agentId: agentId ?? null,
+		path,
+		claimedAt: now,
+		releasedAt: null,
+	}));
+	statements.push(...buildClaimInsertStatements(ctx, orm, created));
+
+	await ctx.db.batch(statements);
 
 	await broadcastWorkspaceEvent(ctx, {
 		type: "claims.created",
@@ -324,21 +361,32 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	const orm = drizzle(ctx.db, { schema });
 	const now = Math.floor(Date.now() / 1000);
 
-	// inChunks on every variable-length IN below keeps each query under D1's
-	// 100-bound-parameter cap (paths and ids are caller-/row-scaled). See services/sql.ts.
-	// Fetch the rows that will be released
-	const toRelease = await inChunks(paths, (chunk) => {
+	// inChunks keeps each read under D1's 100-bound-parameter cap (paths are caller-scaled).
+	// projectId is joined in directly (PROJ-864) so the broadcast below needs no follow-up
+	// query, whether or not issueId was given.
+	const toRelease = await inChunks(paths, (pathChunk) => {
 		const conditions = [
 			eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-			inArray(schema.issueFileClaims.path, chunk),
+			inArray(schema.issueFileClaims.path, pathChunk),
 			isNull(schema.issueFileClaims.releasedAt),
 		];
 		if (issueId) {
 			conditions.push(eq(schema.issueFileClaims.issueId, issueId));
 		}
 		return orm
-			.select()
+			.select({
+				id: schema.issueFileClaims.id,
+				workspaceId: schema.issueFileClaims.workspaceId,
+				issueId: schema.issueFileClaims.issueId,
+				agentId: schema.issueFileClaims.agentId,
+				path: schema.issueFileClaims.path,
+				claimedAt: schema.issueFileClaims.claimedAt,
+				releasedAt: schema.issueFileClaims.releasedAt,
+				releaseReason: schema.issueFileClaims.releaseReason,
+				projectId: schema.issues.projectId,
+			})
 			.from(schema.issueFileClaims)
+			.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
 			.where(and(...conditions));
 	});
 
@@ -347,44 +395,34 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	}
 
 	const releaseIds = toRelease.map((r) => r.id);
+	const releaseStatements = buildReleaseByIdsStatements(ctx, orm, releaseIds, now, "released");
+	const releasedIds = releasedIdsFrom(await ctx.db.batch(releaseStatements));
 
-	await inChunks(releaseIds, async (chunk) => {
-		await orm
-			.update(schema.issueFileClaims)
-			.set({ releasedAt: now, releaseReason: "released" })
-			.where(
-				and(
-					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-					inArray(schema.issueFileClaims.id, chunk),
-					isNull(schema.issueFileClaims.releasedAt)
-				)
-			);
-		return [];
-	});
-
-	const released = await inChunks(releaseIds, (chunk) =>
-		orm.select().from(schema.issueFileClaims).where(inArray(schema.issueFileClaims.id, chunk))
-	);
+	// Every field is already known from the read above — the released row is just that
+	// snapshot with releasedAt/releaseReason applied, so no re-SELECT is needed (PROJ-864).
+	// Only rows this batch actually released count: one released by a concurrent request
+	// between the read and the batch is someone else's release.
+	const releasedRows = toRelease.filter((r) => releasedIds.has(r.id));
+	if (releasedRows.length === 0) {
+		return { released: [], count: 0 };
+	}
+	const released = releasedRows.map(({ projectId: _projectId, ...r }) => ({
+		...r,
+		releasedAt: now,
+		releaseReason: "released",
+	}));
 
 	// Stamp projectId on the broadcast. When issueId is provided there is exactly one
 	// project; otherwise released rows may span projects, so fan out one event per project.
 	if (issueId) {
-		const projectId = await assertIssueInWorkspace(orm, ctx.workspaceId, issueId);
 		await broadcastWorkspaceEvent(ctx, {
 			type: "claims.released",
-			projectId,
+			projectId: releasedRows[0].projectId,
 			data: { issueId, paths, count: released.length },
 		});
 	} else {
-		const releasedByProject = await inChunks(releaseIds, (chunk) =>
-			orm
-				.select({ projectId: schema.issues.projectId, path: schema.issueFileClaims.path })
-				.from(schema.issueFileClaims)
-				.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
-				.where(inArray(schema.issueFileClaims.id, chunk))
-		);
 		const grouped = new Map<string, string[]>();
-		for (const row of releasedByProject) {
+		for (const row of releasedRows) {
 			const list = grouped.get(row.projectId) ?? [];
 			list.push(row.path);
 			grouped.set(row.projectId, list);

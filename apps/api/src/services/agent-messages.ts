@@ -4,6 +4,47 @@ import { ListMessagesSchema, PostMessageSchema } from "../schemas/agent-messages
 import { NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
+function toD1Statement(
+	ctx: ServiceCtx,
+	query: Readonly<{ sql: string; params: unknown[] }>
+): D1PreparedStatement {
+	return ctx.db.prepare(query.sql).bind(...query.params);
+}
+
+// Multi-row insert chunk size for agent_messages (6 columns/row), calibrated for D1's
+// 100-bound-param cap with headroom — unlike services/sql.ts#inChunks, which is calibrated
+// for single-param IN-list queries, not multi-column inserts.
+const MESSAGE_INSERT_CHUNK_SIZE = 10;
+
+// PROJ-864: batched variant of postMessage for callers that fold several coordination
+// messages into their own db.batch() (e.g. file-claims' force-override notifications).
+// Unlike postMessage, this does NOT re-validate scope/agentId against the workspace and
+// does not read the inserted rows back — every field here is server-generated from data
+// the caller already resolved and validated for its own use (the issueId(s) the scopes
+// name), so there's nothing untrusted to check and nothing DB-generated to read back.
+export function buildPostMessageStatements(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	messages: readonly Readonly<{ scope: string; agentId?: string; body: string }>[]
+): D1PreparedStatement[] {
+	if (messages.length === 0) return [];
+	const now = Date.now();
+	const rows = messages.map((m) => ({
+		id: crypto.randomUUID(),
+		workspaceId: ctx.workspaceId,
+		scope: m.scope,
+		agentId: m.agentId ?? null,
+		body: m.body,
+		createdAt: now,
+	}));
+	const statements: D1PreparedStatement[] = [];
+	for (let i = 0; i < rows.length; i += MESSAGE_INSERT_CHUNK_SIZE) {
+		const chunk = rows.slice(i, i + MESSAGE_INSERT_CHUNK_SIZE);
+		statements.push(toD1Statement(ctx, orm.insert(schema.agentMessages).values(chunk).toSQL()));
+	}
+	return statements;
+}
+
 export async function postMessage(ctx: ServiceCtx, raw: unknown) {
 	const result = PostMessageSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
