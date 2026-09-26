@@ -145,3 +145,73 @@ describe("PROJ-810: guarded writes", () => {
 		expect(n).toBe(3);
 	});
 });
+
+describe("PROJ-919: metadata-only writes are guarded too", () => {
+	it("two interleaved title-only updates → one 409, the first title survives", async () => {
+		const { ctx, slug } = await setup();
+		interleaveBeforeNextBatch(1, async () => {
+			await updateWikiPage(ctx, slug, { title: "B's title" });
+		});
+		await expect(updateWikiPage(ctx, slug, { title: "A's title" })).rejects.toBeInstanceOf(
+			ConflictError
+		);
+		expect(((await getWikiPage(ctx, slug)) as { title: string }).title).toBe("B's title");
+	});
+
+	it("a move racing a rename → 409 for the move; the rename isn't reverted", async () => {
+		const { ctx, slug } = await setup();
+		const parent = (await createWikiPage(ctx, { title: "Parent", content: "p" })) as {
+			id: string;
+		};
+		interleaveBeforeNextBatch(1, async () => {
+			await updateWikiPage(ctx, slug, { title: "Renamed" });
+		});
+		await expect(updateWikiPage(ctx, slug, { parentId: parent.id })).rejects.toBeInstanceOf(
+			ConflictError
+		);
+		const page = (await getWikiPage(ctx, slug)) as { title: string; parent_id: string | null };
+		expect(page.title).toBe("Renamed");
+		expect(page.parent_id).toBeNull();
+	});
+
+	it("a content write racing a title-only write → 409 instead of reverting the title", async () => {
+		const { ctx, slug } = await setup();
+		interleaveBeforeNextBatch(1, async () => {
+			await updateWikiPage(ctx, slug, { title: "Concurrent title" });
+		});
+		await expect(
+			updateWikiPage(ctx, slug, { title: "Doc", content: "mine" })
+		).rejects.toBeInstanceOf(ConflictError);
+		const page = (await getWikiPage(ctx, slug)) as { title: string; content: string };
+		expect(page.title).toBe("Concurrent title");
+		expect(page.content).toBe("v1");
+	});
+
+	it("sequential metadata-only updates with no race still succeed", async () => {
+		const { ctx, slug } = await setup();
+		await updateWikiPage(ctx, slug, { title: "One" });
+		await updateWikiPage(ctx, slug, { title: "Two" });
+		expect(((await getWikiPage(ctx, slug)) as { title: string }).title).toBe("Two");
+	});
+
+	it("every write bumps the page version", async () => {
+		const { ctx, slug } = await setup();
+		const { id } = (await getWikiPage(ctx, slug)) as { id: string };
+		const versionOf = async () =>
+			(
+				await env.DB.prepare("SELECT version FROM wiki_pages WHERE id = ?")
+					.bind(id)
+					.first<{ version: number }>()
+			)?.version as number;
+		const before = await versionOf();
+		await updateWikiPage(ctx, slug, { title: "Bumped" });
+		expect(await versionOf()).toBe(before + 1);
+		const { revisionId } = (await getWikiPage(ctx, slug)) as { revisionId: string | null };
+		await patchWikiPage(ctx, slug, {
+			op: "append_to_page",
+			text: "more",
+			baseRevisionId: revisionId,
+		});
+		expect(await versionOf()).toBe(before + 2);
+	});
+});

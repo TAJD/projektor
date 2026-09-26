@@ -158,6 +158,7 @@ async function resolvePageByIdOrSlug(
 	projectId: string | null;
 	parentId: string | null;
 	isTemplate: boolean;
+	version: number;
 }> {
 	const orm = drizzle(db, { schema });
 	const direct = await orm
@@ -169,6 +170,7 @@ async function resolvePageByIdOrSlug(
 			projectId: schema.wikiPages.projectId,
 			parentId: schema.wikiPages.parentId,
 			isTemplate: schema.wikiPages.isTemplate,
+			version: schema.wikiPages.version,
 		})
 		.from(schema.wikiPages)
 		.where(
@@ -197,6 +199,7 @@ async function resolvePageByIdOrSlug(
 			parentId: redirected.parent_id,
 			// eslint-disable-next-line camelcase
 			isTemplate: redirected.is_template,
+			version: redirected.version,
 		};
 	}
 	throw new NotFoundError("Wiki page not found");
@@ -319,7 +322,12 @@ function buildWikiPageUpdateSet(
 		meta?: WikiFrontmatterMeta;
 	}>
 ): Record<string, unknown> {
-	const setData: Record<string, unknown> = { updatedAt: now, updatedById };
+	// PROJ-919: every page write bumps the version the write guard compares.
+	const setData: Record<string, unknown> = {
+		updatedAt: now,
+		updatedById,
+		version: sql`${schema.wikiPages.version} + 1`,
+	};
 	if (fields.title !== undefined) setData.title = fields.title;
 	if (fields.content !== undefined) setData.content = fields.content;
 	if (fields.parentId !== undefined) setData.parentId = fields.parentId;
@@ -693,7 +701,7 @@ async function resolveWikiPageByRedirect(
 		.get();
 	if (!redirect) return undefined;
 	return orm
-		.select(wikiPageDetailColumns)
+		.select({ ...wikiPageDetailColumns, version: schema.wikiPages.version })
 		.from(schema.wikiPages)
 		.where(
 			and(
@@ -973,17 +981,22 @@ async function getLatestRevisionId(db: D1Database, pageId: string): Promise<stri
 // back the whole batch; writeGuarded turns that into a 409.
 const STALE_WRITE_MARKER = "__projektor_stale_wiki_write__";
 
-function staleWriteGuard(
-	ctx: ServiceCtx,
-	page: Readonly<{ id: string; content: string }>
-): D1PreparedStatement {
+//
+// PROJ-919: content alone missed metadata-only races — two writes that only changed
+// title, slug or parent both passed and the second silently won. The guard now also
+// compares the row's `version`, which every write to wiki_pages bumps, so any write
+// that landed after the caller's read (metadata, trash, reparent) fails it.
+type GuardedPage = Readonly<{ id: string; content: string; version: number }>;
+
+function staleWriteGuard(ctx: ServiceCtx, page: GuardedPage): D1PreparedStatement {
 	return ctx.db
 		.prepare(
 			`SELECT CASE WHEN EXISTS (
-			   SELECT 1 FROM wiki_pages WHERE id = ? AND workspace_id = ? AND content = ?
+			   SELECT 1 FROM wiki_pages
+			   WHERE id = ? AND workspace_id = ? AND content = ? AND version = ?
 			 ) THEN 1 ELSE json('${STALE_WRITE_MARKER}') END`
 		)
-		.bind(page.id, ctx.workspaceId, page.content);
+		.bind(page.id, ctx.workspaceId, page.content, page.version);
 }
 
 class StaleWikiWriteError extends Error {}
@@ -994,7 +1007,7 @@ function isStaleWriteError(e: unknown): boolean {
 
 async function batchGuarded(
 	ctx: ServiceCtx,
-	page: Readonly<{ id: string; content: string }>,
+	page: GuardedPage,
 	statements: readonly D1PreparedStatement[]
 ): Promise<void> {
 	try {
@@ -1436,7 +1449,7 @@ async function buildUpdateWikiPageReindexStatements(
 // violation as a structured conflict, not a raw 500.
 async function writeUpdateWikiPageBatch(
 	ctx: ServiceCtx,
-	page: Readonly<{ id: string; content: string }>,
+	page: GuardedPage,
 	statements: readonly D1PreparedStatement[],
 	isRename: boolean,
 	slug: string | undefined
@@ -1519,15 +1532,14 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// and any `summary` passed alongside a title-only update is silently dropped rather
 	// than stored somewhere with no corresponding snapshot.
 	//
-	// PROJ-520 (deliberate tradeoff, not fixed): since the revision pointer only advances
-	// on a content edit, two concurrent title/parent/slug-only updates that both pass the
-	// same baseRevisionId will both pass the check above and last-write-win — and a
-	// concurrent content writer's conflict check can't see an interleaved metadata-only
-	// change either. Accepted rather than fixed: metadata-only races are rare (today's
-	// only caller is the web UI, which always sends title+content together) and adding a
-	// metadata-revision marker would mean two different "revision" concepts for callers to
-	// reason about. Revisit if an MCP caller that updates title/slug/parent alone in a
-	// concurrent setting turns out to need it.
+	// PROJ-520 / PROJ-919: the revision pointer only advances on a content edit, so
+	// baseRevisionId (the check above) says nothing about metadata. What stops a
+	// title/slug/parent-only write from being silently overwritten is the write guard:
+	// it compares the page's `version`, which every write bumps, so a write that lands
+	// between this call's read and its batch → 409, whatever it changed. Callers that
+	// hold no base at all — moves (parentId only) and renames from the web UI, and any
+	// MCP caller that omits baseRevisionId — are last-write-wins against writes that
+	// finished before their request arrived; that's documented on update_wiki_page.
 	// PROJ-511: every statement below is collected, not awaited, and executed as one
 	// ctx.db.batch() call — the content write, its revision snapshot, its wiki_fts
 	// mirror, and its wiki_links reindex all land atomically. A throw anywhere in the
@@ -2396,7 +2408,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 		await inChunks(allIds, async (chunk) => {
 			await orm
 				.update(schema.wikiPages)
-				.set({ deletedAt: now, trashBatchId })
+				.set({ deletedAt: now, trashBatchId, version: sql`${schema.wikiPages.version} + 1` })
 				.where(inArray(schema.wikiPages.id, chunk));
 			return [];
 		});
@@ -2426,7 +2438,7 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 	// the pre-R14 behavior for a hard-deleted child).
 	await orm
 		.update(schema.wikiPages)
-		.set({ parentId: page.parentId })
+		.set({ parentId: page.parentId, version: sql`${schema.wikiPages.version} + 1` })
 		.where(and(eq(schema.wikiPages.parentId, page.id), isNull(schema.wikiPages.deletedAt)));
 
 	const linkedByCount = await countBacklinkSources(ctx, [page.id]);
@@ -2441,7 +2453,11 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 	}
 	await orm
 		.update(schema.wikiPages)
-		.set({ deletedAt: now, trashBatchId: crypto.randomUUID() })
+		.set({
+			deletedAt: now,
+			trashBatchId: crypto.randomUUID(),
+			version: sql`${schema.wikiPages.version} + 1`,
+		})
 		.where(eq(schema.wikiPages.id, page.id));
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
@@ -2546,7 +2562,13 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 	await inChunks(allIds, async (chunk) => {
 		await orm
 			.update(schema.wikiPages)
-			.set({ deletedAt: null, trashBatchId: null, updatedAt: now, updatedById: ctx.userId })
+			.set({
+				deletedAt: null,
+				trashBatchId: null,
+				updatedAt: now,
+				updatedById: ctx.userId,
+				version: sql`${schema.wikiPages.version} + 1`,
+			})
 			.where(inArray(schema.wikiPages.id, chunk));
 		return [];
 	});
@@ -2697,7 +2719,7 @@ export async function purgeExpiredWikiPages(
 	for (const id of ids) {
 		await orm
 			.update(schema.wikiPages)
-			.set({ parentId: resolveReparentTarget(id) })
+			.set({ parentId: resolveReparentTarget(id), version: sql`${schema.wikiPages.version} + 1` })
 			.where(and(eq(schema.wikiPages.parentId, id), isNull(schema.wikiPages.deletedAt)));
 	}
 
