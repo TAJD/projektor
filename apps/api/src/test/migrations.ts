@@ -57,6 +57,7 @@ import m0053 from "../../../../packages/db/migrations/0053_backfill_templates_pa
 import m0054 from "../../../../packages/db/migrations/0054_project_archived_at.sql?raw";
 import m0055 from "../../../../packages/db/migrations/0055_workspace_brand.sql?raw";
 import m0056 from "../../../../packages/db/migrations/0056_hot_path_indexes.sql?raw";
+import m0057 from "../../../../packages/db/migrations/0057_wiki_title_lower_index.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -116,4 +117,5 @@ export const MIGRATIONS = [
 	m0054,
 	m0055,
 	m0056,
+	m0057,
 ];

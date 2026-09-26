@@ -4,7 +4,7 @@
 // No dependency on services/wiki.ts (avoids a circular import — wiki.ts calls into this
 // file's notifyWikiWatchers on every write). Page resolution + visibility checks are
 // duplicated in miniature here rather than imported, mirroring services/wiki-links.ts's
-// resolveSlugTarget precedent.
+// resolveSlugTargets precedent.
 import { drizzle, schema } from "@projektor/db";
 import { and, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { wikiPagePath } from "../lib/urls";
