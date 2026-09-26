@@ -613,6 +613,32 @@ describe("the issued token is bound to the workspace it was granted for", () => 
 	});
 });
 
+describe("an OAuth grant cannot mint a personal access token (PROJ-903)", () => {
+	it("POST /auth/tokens with an OAuth access token is refused and mints nothing", async () => {
+		const workspace = await seedWorkspace();
+		const email = `pat-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "owner");
+		const { tokens } = await connect({ email, workspaceId: workspace.id });
+
+		const res = await SELF.fetch(`${HOST}/auth/tokens`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${tokens.access_token}`,
+				"Content-Type": "application/json",
+				"CF-Connecting-IP": clientIp,
+			},
+			body: JSON.stringify({ name: "oauth-escape", scopes: ["*"] }),
+		});
+		expect(res.status).not.toBe(201);
+		expect([401, 403]).toContain(res.status);
+		const row = await env.DB.prepare("SELECT id FROM api_tokens WHERE name = ?")
+			.bind("oauth-escape")
+			.first();
+		expect(row).toBeNull();
+	});
+});
+
 describe("the token endpoint's failure modes", () => {
 	let workspaceId: string;
 	let email: string;

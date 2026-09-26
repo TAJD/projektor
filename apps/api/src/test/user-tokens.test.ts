@@ -127,22 +127,39 @@ describe("PROJ-91: workspace-scoped token regression", () => {
 // §4: Minting user-scoped tokens via POST /auth/tokens
 // ---------------------------------------------------------------------------
 
+// PROJ-903: minting happens from an interactive human session. In tests that's the
+// dev bypass: ENVIRONMENT=development + DEV_USER_EMAIL, no Authorization header.
+async function asHuman<T>(email: string, fn: () => Promise<T>): Promise<T> {
+	const prev = env.DEV_USER_EMAIL;
+	env.DEV_USER_EMAIL = email;
+	try {
+		return await fn();
+	} finally {
+		env.DEV_USER_EMAIL = prev;
+	}
+}
+
+function mintAsHuman(email: string, body: unknown) {
+	return asHuman(email, () =>
+		SELF.fetch("http://localhost/auth/tokens", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+		})
+	);
+}
+
 describe("PROJ-91: POST /auth/tokens — user-scoped minting", () => {
 	it("omitting workspaceId creates a token with null workspace_id", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch("http://localhost/auth/tokens", {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${fixture.token}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({ name: "my-user-token", scopes: ["read", "write"] }),
+		const res = await mintAsHuman(fixture.user.email, {
+			name: "my-user-token",
+			scopes: ["read", "write"],
 		});
 		expect(res.status).toBe(201);
 		const body = (await res.json()) as { token: string };
 		expect(typeof body.token).toBe("string");
 
-		// Verify the DB row has null workspace_id
 		const row = await env.DB.prepare(
 			"SELECT workspace_id FROM api_tokens WHERE name = ? AND user_id = ?"
 		)
@@ -154,39 +171,28 @@ describe("PROJ-91: POST /auth/tokens — user-scoped minting", () => {
 
 	it("minted user-scoped token can authenticate against the user's workspace", async () => {
 		const fixture = await seedFixture();
-
-		// Mint via API
-		const mintRes = await SELF.fetch("http://localhost/auth/tokens", {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${fixture.token}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({ name: "cross-ws-token", scopes: ["*"] }),
+		const mintRes = await mintAsHuman(fixture.user.email, {
+			name: "cross-ws-token",
+			scopes: ["*"],
 		});
 		expect(mintRes.status).toBe(201);
 		const { token: newToken } = (await mintRes.json()) as { token: string };
 
-		// Use it against the user's workspace
 		const res = await getIssues(newToken, fixture.workspace.slug);
 		expect(res.status).toBe(200);
 	});
 
-	it("providing workspaceId still creates a workspace-scoped token (existing behaviour)", async () => {
+	it("providing workspaceId creates a token confined to that workspace", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch("http://localhost/auth/tokens", {
-			method: "POST",
-			headers: {
-				Authorization: `Bearer ${fixture.token}`,
-				"Content-Type": "application/json",
-			},
-			body: JSON.stringify({
-				name: "ws-scoped",
-				workspaceId: fixture.workspace.id,
-				scopes: ["read"],
-			}),
+		const other = await seedWorkspace();
+		await seedMember(other.id, fixture.user.id, "member");
+		const res = await mintAsHuman(fixture.user.email, {
+			name: "ws-scoped",
+			workspaceId: fixture.workspace.id,
+			scopes: ["read"],
 		});
 		expect(res.status).toBe(201);
+		const { token: minted } = (await res.json()) as { token: string };
 
 		const row = await env.DB.prepare(
 			"SELECT workspace_id FROM api_tokens WHERE name = ? AND user_id = ?"
@@ -194,5 +200,57 @@ describe("PROJ-91: POST /auth/tokens — user-scoped minting", () => {
 			.bind("ws-scoped", fixture.user.id)
 			.first<{ workspace_id: string | null }>();
 		expect(row?.workspace_id).toBe(fixture.workspace.id);
+
+		expect((await getIssues(minted, fixture.workspace.slug)).status).toBe(200);
+		expect((await getIssues(minted, other.slug)).status).toBe(403);
+	});
+});
+
+describe("PROJ-903: only a human session can mint or revoke a PAT", () => {
+	it("a workspace-confined pk_ token cannot mint a PAT (no confinement escape)", async () => {
+		const fixture = await seedFixture();
+		const res = await SELF.fetch("http://localhost/auth/tokens", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${fixture.token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ name: "escape", scopes: ["*"] }),
+		});
+		expect(res.status).toBe(403);
+		expect(((await res.json()) as { error: string }).error).toMatch(/signed-in browser session/);
+		const row = await env.DB.prepare("SELECT id FROM api_tokens WHERE name = ?")
+			.bind("escape")
+			.first();
+		expect(row).toBeNull();
+	});
+
+	it("a user-scoped PAT cannot mint another PAT either", async () => {
+		const fixture = await seedFixture();
+		const pat = await seedUserToken(fixture.user.id);
+		const res = await SELF.fetch("http://localhost/auth/tokens", {
+			method: "POST",
+			headers: { Authorization: `Bearer ${pat}`, "Content-Type": "application/json" },
+			body: JSON.stringify({ name: "chain", scopes: ["*"] }),
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("a bearer token cannot revoke a PAT; a human session can", async () => {
+		const fixture = await seedFixture();
+		const mint = await mintAsHuman(fixture.user.email, { name: "to-revoke", scopes: ["read"] });
+		expect(mint.status).toBe(201);
+		const row = await env.DB.prepare("SELECT id FROM api_tokens WHERE name = ? AND user_id = ?")
+			.bind("to-revoke", fixture.user.id)
+			.first<{ id: string }>();
+		const id = row?.id as string;
+
+		const byToken = await SELF.fetch(`http://localhost/auth/tokens/${id}`, {
+			method: "DELETE",
+			headers: { Authorization: `Bearer ${fixture.token}` },
+		});
+		expect(byToken.status).toBe(403);
+
+		const byHuman = await asHuman(fixture.user.email, () =>
+			SELF.fetch(`http://localhost/auth/tokens/${id}`, { method: "DELETE" })
+		);
+		expect(byHuman.status).toBe(200);
 	});
 });

@@ -906,13 +906,24 @@ describe("PROJ-79: GET /auth/me", () => {
 	});
 });
 
+// PROJ-903: PATs are minted/revoked from a human session only. The dev bypass
+// (ENVIRONMENT=development + DEV_USER_EMAIL, no Authorization header) is that session here.
+async function humanFetch(email: string, url: string, init: RequestInit): Promise<Response> {
+	const prev = env.DEV_USER_EMAIL;
+	env.DEV_USER_EMAIL = email;
+	try {
+		return await SELF.fetch(url, init);
+	} finally {
+		env.DEV_USER_EMAIL = prev;
+	}
+}
+
 describe("PROJ-79: POST /auth/tokens", () => {
 	it("creates a personal token and returns it", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch("http://localhost/auth/tokens", {
+		const res = await humanFetch(fixture.user.email, "http://localhost/auth/tokens", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${fixture.token}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
@@ -929,10 +940,9 @@ describe("PROJ-79: POST /auth/tokens", () => {
 
 	it("returns 400 when workspaceId is not a UUID", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch("http://localhost/auth/tokens", {
+		const res = await humanFetch(fixture.user.email, "http://localhost/auth/tokens", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${fixture.token}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({ name: "t", workspaceId: "not-a-uuid", scopes: ["read"] }),
@@ -942,10 +952,9 @@ describe("PROJ-79: POST /auth/tokens", () => {
 
 	it("returns 400 when scopes array is empty", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch("http://localhost/auth/tokens", {
+		const res = await humanFetch(fixture.user.email, "http://localhost/auth/tokens", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${fixture.token}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({ name: "t", workspaceId: fixture.workspace.id, scopes: [] }),
@@ -969,10 +978,9 @@ describe("PROJ-79: DELETE /auth/tokens/:id", () => {
 		const fixture = await seedFixture();
 
 		// Create a second token to delete (cannot delete the fixture token we're using for auth)
-		const createRes = await SELF.fetch("http://localhost/auth/tokens", {
+		const createRes = await humanFetch(fixture.user.email, "http://localhost/auth/tokens", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${fixture.token}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
@@ -991,10 +999,13 @@ describe("PROJ-79: DELETE /auth/tokens/:id", () => {
 			.first<{ id: string }>();
 		expect(tokenRow).not.toBeNull();
 
-		const deleteRes = await SELF.fetch(`http://localhost/auth/tokens/${tokenRow!.id}`, {
-			method: "DELETE",
-			headers: { Authorization: `Bearer ${fixture.token}` },
-		});
+		const deleteRes = await humanFetch(
+			fixture.user.email,
+			`http://localhost/auth/tokens/${tokenRow!.id}`,
+			{
+				method: "DELETE",
+			}
+		);
 		expect(deleteRes.status).toBe(200);
 		const body = (await deleteRes.json()) as { ok: boolean };
 		expect(body.ok).toBe(true);
@@ -1014,10 +1025,13 @@ describe("PROJ-79: DELETE /auth/tokens/:id", () => {
 			.first<{ id: string }>();
 
 		// Alice tries to delete Bob's token — the WHERE user_id = alice.user.id clause filters it out
-		const res = await SELF.fetch(`http://localhost/auth/tokens/${bobTokenRow!.id}`, {
-			method: "DELETE",
-			headers: { Authorization: `Bearer ${alice.token}` },
-		});
+		const res = await humanFetch(
+			alice.user.email,
+			`http://localhost/auth/tokens/${bobTokenRow!.id}`,
+			{
+				method: "DELETE",
+			}
+		);
 		// The endpoint returns 200 ok (no error — just no rows deleted)
 		expect(res.status).toBe(200);
 
