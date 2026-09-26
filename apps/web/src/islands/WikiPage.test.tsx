@@ -2094,3 +2094,118 @@ describe("WikiPage — PROJ-803 post-render effects survive remounts", () => {
 		await expectPostRenderWorkApplied(before);
 	});
 });
+
+describe("WikiPage — PROJ-802 hash link scroll on load/nav/back-forward", () => {
+	// Three headings so the ToC's IntersectionObserver effect also runs — jsdom has no
+	// real IntersectionObserver, so it needs a stub.
+	const HEADINGS_PAGE: WikiPageData = {
+		...PAGE,
+		content:
+			"# Title\n\n## Setup\n\nSetup text.\n\n## Usage\n\nUsage text.\n\n## Notes\n\nMore text.",
+	};
+
+	let scrollIntoView: ReturnType<typeof vi.fn>;
+	// biome-ignore lint/suspicious/noExplicitAny: jsdom doesn't implement scrollIntoView at all.
+	const originalScrollIntoView = (Element.prototype as any).scrollIntoView;
+
+	beforeEach(() => {
+		scrollIntoView = vi.fn();
+		// biome-ignore lint/suspicious/noExplicitAny: jsdom doesn't implement scrollIntoView at all.
+		(Element.prototype as any).scrollIntoView = scrollIntoView;
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				observe() {}
+				unobserve() {}
+				disconnect() {}
+			}
+		);
+	});
+
+	afterEach(() => {
+		// biome-ignore lint/suspicious/noExplicitAny: matches the cast above.
+		(Element.prototype as any).scrollIntoView = originalScrollIntoView;
+		vi.unstubAllGlobals();
+	});
+
+	it("scrolls to and focuses the heading matching location.hash once it renders", async () => {
+		history.replaceState(null, "", "/wiki/my-page#setup");
+		mockFetchWiki(HEADINGS_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		await waitFor(() => {
+			expect(scrollIntoView).toHaveBeenCalled();
+		});
+		const heading = document.getElementById("setup");
+		expect(heading).toBeTruthy();
+		expect(heading?.getAttribute("tabindex")).toBe("-1");
+		expect(document.activeElement).toBe(heading);
+	});
+
+	it("scrolls again on hashchange (in-app navigation) and on popstate (Back/Forward)", async () => {
+		mockFetchWiki(HEADINGS_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => expect(document.getElementById("usage")).toBeTruthy());
+
+		history.replaceState(null, "", "/wiki/my-page#usage");
+		window.dispatchEvent(new Event("hashchange"));
+		await waitFor(() => {
+			expect(document.activeElement).toBe(document.getElementById("usage"));
+		});
+
+		history.replaceState(null, "", "/wiki/my-page#notes");
+		window.dispatchEvent(new PopStateEvent("popstate"));
+		await waitFor(() => {
+			expect(document.activeElement).toBe(document.getElementById("notes"));
+		});
+	});
+
+	it("does not re-scroll or steal focus when the TOC rebuilds on the same page and hash", async () => {
+		history.replaceState(null, "", "/wiki/my-page#usage");
+		mockFetchWiki(HEADINGS_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => {
+			expect(document.activeElement).toBe(document.getElementById("usage"));
+		});
+		const scrollsAfterLoad = scrollIntoView.mock.calls.length;
+
+		// Edit → Cancel remounts the content and rebuilds the TOC (PROJ-803) without any
+		// navigation having happened. The user is working with the Edit/Cancel buttons;
+		// yanking them back to #usage (and moving focus there) is the bug.
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		const editButton = screen.getByRole("button", { name: "Edit" });
+		editButton.focus();
+		// Wait until the rebuilt content has its ids again, i.e. the TOC rebuild happened.
+		await waitFor(() => expect(document.getElementById("usage")?.tagName).toBe("H2"));
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(scrollIntoView.mock.calls.length).toBe(scrollsAfterLoad);
+		expect(document.activeElement).toBe(editButton);
+
+		// A real navigation back to the same hash still scrolls again.
+		window.dispatchEvent(new Event("hashchange"));
+		await waitFor(() => {
+			expect(scrollIntoView.mock.calls.length).toBe(scrollsAfterLoad + 1);
+			expect(document.activeElement).toBe(document.getElementById("usage"));
+		});
+	});
+
+	it("only scrolls to targets inside the page content, not ids elsewhere on the page", async () => {
+		// The sidebar drawer carries id="wiki-page-tree" — a hash naming it must not scroll
+		// the sidebar into view or focus it.
+		history.replaceState(null, "", "/wiki/my-page#wiki-page-tree");
+		mockFetchWiki(HEADINGS_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => expect(document.getElementById("usage")).toBeTruthy());
+		expect(document.getElementById("wiki-page-tree")).toBeTruthy();
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(scrollIntoView).not.toHaveBeenCalled();
+		expect(document.activeElement).not.toBe(document.getElementById("wiki-page-tree"));
+	});
+});

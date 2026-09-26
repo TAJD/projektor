@@ -2499,6 +2499,77 @@ function useTableOfContents(
 	return { toc, setToc, activeHeadingId };
 }
 
+// PROJ-802: heading ids are only assigned once the content has rendered (the effects
+// above), so a link like /wiki/foo#setup used to always open at the top of the page —
+// nothing ever re-checked location.hash once the target id actually existed. `toc`
+// changing covers first load and in-app navigation (navigateTo/showSlug rebuild the
+// page and its TOC); hashchange covers clicking a same-page #anchor (including a TOC
+// link) without a full navigation; popstate covers Back/Forward.
+//
+// A TOC rebuild is *not* a navigation, though: Cancel edit, Verify, Move and a late tree
+// load all rebuild it on the same page and hash. Re-scrolling on each of those yanked the
+// reader back to the anchor and stole focus from whatever they were doing, so each
+// page-slug + hash pair is handled once; only hashchange/popstate (a real navigation,
+// even back to the same hash) clear that and allow another scroll.
+function findInContent(container: HTMLElement, id: string): HTMLElement | null {
+	// Only the rendered page body counts — an id elsewhere (the sidebar's
+	// `wiki-page-tree`, the TOC nav, …) must not hijack the anchor. Matched by property
+	// rather than a `#id` selector so ids needing CSS escaping still work.
+	for (const el of container.querySelectorAll<HTMLElement>("[id]")) {
+		if (el.id === id) return el;
+	}
+	return null;
+}
+
+function useHashScroll(
+	toc: readonly TocItem[],
+	contentRef: RefObject<HTMLDivElement>,
+	pageSlug: string | undefined
+) {
+	const handledRef = useRef<string | null>(null);
+	const slugRef = useRef(pageSlug);
+	slugRef.current = pageSlug;
+
+	const scrollToHash = useCallback(() => {
+		// PROJ-802: some call sites (and this file's own tests, see PROJ-487) swap
+		// `window.location` for a partial stand-in that may not define `hash` at all.
+		const raw = (window.location.hash ?? "").slice(1);
+		if (!raw) return;
+		const key = `${slugRef.current ?? ""}#${raw}`;
+		if (handledRef.current === key) return;
+		const container = contentRef.current;
+		if (!container) return;
+		const heading = findInContent(container, safeDecodeURIComponent(raw) ?? raw);
+		// Not rendered yet (or not on this page) — leave it unhandled so the next TOC
+		// build, once the target exists, can still scroll to it.
+		if (!heading) return;
+		handledRef.current = key;
+		heading.scrollIntoView();
+		// Headings aren't focusable by default — tabindex=-1 lets focus() target them
+		// programmatically (screen reader users land there too) without adding them to
+		// the normal Tab order.
+		heading.setAttribute("tabindex", "-1");
+		heading.focus({ preventScroll: true });
+	}, [contentRef]);
+
+	useEffect(() => {
+		scrollToHash();
+	}, [toc, scrollToHash]);
+
+	useEffect(() => {
+		function onNavigate() {
+			handledRef.current = null;
+			scrollToHash();
+		}
+		window.addEventListener("hashchange", onNavigate);
+		window.addEventListener("popstate", onNavigate);
+		return () => {
+			window.removeEventListener("hashchange", onNavigate);
+			window.removeEventListener("popstate", onNavigate);
+		};
+	}, [scrollToHash]);
+}
+
 function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageData | null) {
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [uploadFormOpen, setUploadFormOpen] = useState(false);
@@ -3850,6 +3921,7 @@ function useWikiPageState(
 		renderedHtml,
 		pageData.contentMountToken
 	);
+	useHashScroll(toc, pageData.contentRef, pageData.page?.slug);
 	const attach = useWikiAttachments(workspaceSlug, pageData.page);
 	const editState = useWikiEditing(
 		workspaceSlug,
