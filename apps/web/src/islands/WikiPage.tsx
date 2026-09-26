@@ -1653,7 +1653,10 @@ interface PageArticleProps {
 	showToc: boolean;
 	toc: TocItem[];
 	activeHeadingId: string;
-	contentRef: RefObject<HTMLDivElement>;
+	// PROJ-803: a callback ref (not a plain RefObject) so remounting the content div
+	// (Cancel edit / Verify / Move) is observable as a mount-token bump, not just a
+	// silent `.current` update — see useWikiPageData's contentMountToken.
+	setContentRef: (node: HTMLDivElement | null) => void;
 	editing: boolean;
 	editTitle: string;
 	onEditTitleChange: (value: string) => void;
@@ -1859,12 +1862,12 @@ function PageArticle(props: PageArticleProps) {
 	const articleContent = useMemo(
 		() => (
 			<div
-				ref={props.contentRef}
+				ref={props.setContentRef}
 				class="prose prose-sm max-w-none"
 				dangerouslySetInnerHTML={{ __html: props.renderedHtml }}
 			/>
 		),
-		[props.renderedHtml, props.contentRef]
+		[props.renderedHtml, props.setContentRef]
 	);
 	return (
 		<div class="flex gap-8 items-start">
@@ -2250,6 +2253,27 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 	const [revisionsLoaded, setRevisionsLoaded] = useState(false);
 	const [showHistory, setShowHistory] = useState(false);
 	const contentRef = useRef<HTMLDivElement>(null);
+	// PROJ-803: the content div only mounts when `!editing` (PageArticle), so Cancel
+	// edit / Verify / Move — anything that flips `editing` or otherwise remounts that
+	// div without page.content changing — used to leave the TOC pointing at detached
+	// nodes and mermaid blocks unrendered, because the post-render effects keyed only
+	// on content. A callback ref bumps this token on every mount so those effects can
+	// key on "the DOM actually changed" instead, composing with PROJ-860's HTML memo
+	// (effects now depend on [renderedHtml, contentMountToken] — either changing means
+	// there's new DOM to process).
+	//
+	// Why a counter and not the node itself in state: Preact recycles the same <div>
+	// across Edit → Cancel (it morphs the article div into MarkdownEditor's root and
+	// back, resetting innerHTML on the way), so the ref is called again with the
+	// *identical* node and a [node] dependency would never change — the original bug. It
+	// can also deliver the old mount's `null` after the new node. A bump on every non-null
+	// call survives both. The cost is one extra run of these effects on first mount (the
+	// bump lands in the commit after the HTML does).
+	const [contentMountToken, setContentMountToken] = useState(0);
+	const setContentRef = useCallback((node: HTMLDivElement | null) => {
+		contentRef.current = node;
+		if (node) setContentMountToken((t) => t + 1);
+	}, []);
 
 	// PROJ-801: every fetch takes a ticket, and only the latest ticket's response is
 	// applied. Clicking A then B used to let A's slower response land last — showing A
@@ -2324,6 +2348,8 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 		showHistory,
 		setShowHistory,
 		contentRef,
+		setContentRef,
+		contentMountToken,
 		fetchPage,
 	};
 }
@@ -2404,7 +2430,11 @@ function useRenderedPageHtml(
 function useTableOfContents(
 	page: WikiPageData | null,
 	contentRef: RefObject<HTMLDivElement>,
-	renderedHtml: string
+	renderedHtml: string,
+	// PROJ-803: bumped by the content div's callback ref every time it mounts, so
+	// Cancel/Verify/Move (which remount the div without page.content changing) still
+	// re-run these effects against the new DOM node.
+	contentMountToken: number
 ) {
 	const [toc, setToc] = useState<TocItem[]>([]);
 	const [activeHeadingId, setActiveHeadingId] = useState("");
@@ -2432,7 +2462,7 @@ function useTableOfContents(
 				id: h.id,
 			}))
 		);
-	}, [renderedHtml]);
+	}, [renderedHtml, contentMountToken]);
 
 	// Hydrate ```mermaid code blocks into rendered diagrams
 	useEffect(() => {
@@ -2441,7 +2471,7 @@ function useTableOfContents(
 		renderMermaidDiagrams(container).catch(() => {
 			// non-fatal — leave the raw code block visible
 		});
-	}, [renderedHtml]);
+	}, [renderedHtml, contentMountToken]);
 
 	// PROJ-113: IntersectionObserver for active heading
 	useEffect(() => {
@@ -3691,7 +3721,7 @@ function buildArticleProps(
 		showToc: boolean;
 		toc: TocItem[];
 		activeHeadingId: string;
-		contentRef: RefObject<HTMLDivElement>;
+		setContentRef: (node: HTMLDivElement | null) => void;
 		editing: boolean;
 		editTitle: string;
 		setEditTitle: (v: string) => void;
@@ -3731,7 +3761,7 @@ function buildArticleProps(
 		showToc: article.showToc,
 		toc: article.toc,
 		activeHeadingId: article.activeHeadingId,
-		contentRef: article.contentRef,
+		setContentRef: article.setContentRef,
 		editing: article.editing,
 		editTitle: article.editTitle,
 		onEditTitleChange: article.setEditTitle,
@@ -3817,7 +3847,8 @@ function useWikiPageState(
 	const { toc, setToc, activeHeadingId } = useTableOfContents(
 		pageData.page,
 		pageData.contentRef,
-		renderedHtml
+		renderedHtml,
+		pageData.contentMountToken
 	);
 	const attach = useWikiAttachments(workspaceSlug, pageData.page);
 	const editState = useWikiEditing(
@@ -3939,7 +3970,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		showToc,
 		toc,
 		activeHeadingId,
-		contentRef: pageData.contentRef,
+		setContentRef: pageData.setContentRef,
 		editing: editState.editing,
 		editTitle: editState.editTitle,
 		setEditTitle: editState.setEditTitle,

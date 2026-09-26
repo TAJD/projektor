@@ -6,7 +6,7 @@
 // revisions via apiFetch (which calls global fetch). The pattern: set the URL with
 // history.replaceState, override the default stub from setup.ts with
 // vi.stubGlobal, then await findBy* for the async state update.
-import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetProjectStoreForTests } from "../lib/project-context";
 import * as markdownUtils from "../utils/markdown";
@@ -1969,5 +1969,128 @@ describe("WikiPage — PROJ-860 memoised markdown rendering", () => {
 			expect(mermaid.mock.calls.length).toBeGreaterThan(mermaidBeforeTree);
 		});
 		expect(renderMd.mock.calls.length).toBe(parsesBeforeTree + 1);
+	});
+});
+
+describe("WikiPage — PROJ-803 post-render effects survive remounts", () => {
+	// Three headings so the TOC renders (it needs >= 3), a mermaid block, and a verify
+	// signal so the Verify button is offered.
+	const REMOUNT_PAGE: WikiPageData = {
+		...PAGE,
+		content:
+			"# Title\n\n## Setup\n\nText.\n\n## Usage\n\nText.\n\n```mermaid\ngraph TD\nA --> B\n```\n",
+		verify_interval: 30,
+		verified_at: 1_000_000,
+		freshness: { state: "stale", staleSince: 1_000_000 + 30 * 86400 },
+	};
+	const mermaid = vi.mocked(markdownUtils.renderMermaidDiagrams);
+
+	beforeEach(() => {
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				observe() {}
+				unobserve() {}
+				disconnect() {}
+			}
+		);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+				const u = String(url);
+				if (u.includes("/revisions"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				if (u.includes("/tree")) {
+					const other = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([other]) });
+				}
+				if (u.includes("/verify") && init?.method === "POST") {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve({ ok: true, verifiedAt: 2_000_000 }),
+					});
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(REMOUNT_PAGE) });
+			})
+		);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	// The bug: after a remount the TOC still held ids that only existed on the old,
+	// detached heading nodes, so every TOC link pointed nowhere; and mermaid never ran
+	// on the new node, leaving the raw code block.
+	async function expectPostRenderWorkApplied(mermaidCallsBefore: number) {
+		await waitFor(() => {
+			expect(mermaid.mock.calls.length).toBeGreaterThan(mermaidCallsBefore);
+			const content = document.querySelector(".prose");
+			expect(content).toBeTruthy();
+			// The latest mermaid call was handed the live content div, not a detached one.
+			expect(mermaid.mock.calls.at(-1)?.[0]).toBe(content);
+			const toc = screen.getByRole("navigation", { name: "Table of contents" });
+			const hrefs = within(toc)
+				.getAllByRole("link")
+				.map((a) => a.getAttribute("href") ?? "");
+			expect(hrefs).toEqual(["#title", "#setup", "#usage"]);
+			for (const href of hrefs) {
+				const target = document.getElementById(href.slice(1));
+				expect(target && content?.contains(target)).toBe(true);
+			}
+		});
+	}
+
+	async function renderAndSettle() {
+		render(<WikiPage slug="my-page" />);
+		await screen.findByRole("heading", { name: "My Page" });
+		await expectPostRenderWorkApplied(0);
+		return mermaid.mock.calls.length;
+	}
+
+	// Verify/Move refetch asynchronously; until the refetch lands the old (correct) DOM is
+	// still there, so assert only once the content div has actually been replaced —
+	// otherwise the TOC checks would pass against the pre-action DOM.
+	async function waitForContentRemount(oldNode: Element | null) {
+		await waitFor(() => {
+			const current = document.querySelector(".prose");
+			expect(current).toBeTruthy();
+			expect(current).not.toBe(oldNode);
+		});
+	}
+
+	it("re-applies heading ids and mermaid after Cancel edit remounts the content div", async () => {
+		const before = await renderAndSettle();
+
+		// Editing swaps the rendered-content div for MarkdownEditor; Cancel brings back a
+		// fresh node even though page.content never changed.
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		await expectPostRenderWorkApplied(before);
+	});
+
+	it("re-applies heading ids and mermaid after Verify refetches the page", async () => {
+		const before = await renderAndSettle();
+		const oldNode = document.querySelector(".prose");
+
+		fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+		await waitForContentRemount(oldNode);
+		await expectPostRenderWorkApplied(before);
+	});
+
+	it("re-applies heading ids and mermaid after Move refetches the page", async () => {
+		const before = await renderAndSettle();
+		const oldNode = document.querySelector(".prose");
+
+		fireEvent.click(screen.getByRole("button", { name: "Move" }));
+		fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
+		fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
+		const moveButtons = screen.getAllByRole("button", { name: "Move" });
+		fireEvent.click(moveButtons[moveButtons.length - 1]);
+
+		await waitForContentRemount(oldNode);
+		await expectPostRenderWorkApplied(before);
 	});
 });
