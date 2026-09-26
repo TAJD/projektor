@@ -1686,7 +1686,9 @@ interface PageArticleProps {
 	onDiscardDraft: () => void;
 	editContent: string;
 	onEditContentChange: (value: string) => void;
-	wikiPages: FlatEntry[];
+	// PROJ-860: pre-rendered (marked + wikilinks + DOMPurify), memoised on [content,
+	// wikiPages] one level up — PageArticle never calls renderMdWithWikilinks itself.
+	renderedHtml: string;
 	revisions: WikiRevision[];
 	showHistory: boolean;
 	onToggleHistory: () => void;
@@ -1847,6 +1849,23 @@ function PageArticleMeta(
 
 function PageArticle(props: PageArticleProps) {
 	const { page } = props;
+	// PROJ-860: memoise the rendered-content vnode itself, keyed on the already-memoised
+	// HTML (and the stable contentRef object) — not `preact/compat`'s `memo()`, which
+	// would switch this whole island to React event semantics (see LazyMarkdownEditor).
+	// Preact bails out of diffing a subtree when it receives the same vnode object it
+	// rendered last time, so as long as `renderedHtml` doesn't change, unrelated
+	// re-renders of PageArticle (sidebar search, filters, activeHeadingId, …) never touch
+	// this DOM at all — no re-parse, no re-diff of the (potentially large) article body.
+	const articleContent = useMemo(
+		() => (
+			<div
+				ref={props.contentRef}
+				class="prose prose-sm max-w-none"
+				dangerouslySetInnerHTML={{ __html: props.renderedHtml }}
+			/>
+		),
+		[props.renderedHtml, props.contentRef]
+	);
 	return (
 		<div class="flex gap-8 items-start">
 			<article class="flex-1 min-w-0">
@@ -1862,13 +1881,7 @@ function PageArticle(props: PageArticleProps) {
 						/>
 					</div>
 				) : (
-					<div
-						ref={props.contentRef}
-						class="prose prose-sm max-w-none"
-						dangerouslySetInnerHTML={{
-							__html: renderMdWithWikilinks(stripFrontmatter(page.content), props.wikiPages),
-						}}
-					/>
+					articleContent
 				)}
 
 				<RevisionsHistory
@@ -2352,7 +2365,47 @@ function useWikiPageMeta(page: WikiPageData | null) {
 	}, [page]);
 }
 
-function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTMLDivElement>) {
+// PROJ-860: takes the already-memoised rendered HTML string, not `page`, so these
+// post-render effects re-run exactly when the DOM they inspect actually changed —
+// not on every WikiPage re-render.
+// PROJ-860: marked + wikilink resolution + DOMPurify is the single most expensive
+// thing WikiPage does (561 ms self time on a 187 KB page) — it used to run inline in
+// JSX on *every* render, including unrelated ones (a sidebar search keystroke, a
+// filter change, activeHeadingId ticking from the scroll observer). `wikiPages` must
+// itself be a stable array identity (see the `useMemo` around `Object.values(pageMap)`
+// in useWikiPageState) or this memo would recompute just as often as before.
+//
+// Keyed on the title map's *contents*, not the array's identity: every fetchTree()
+// (after a save, a move, a create, or an empty tree landing after the page) builds a
+// new array, and re-parsing an unchanged body for an unchanged title map is exactly the
+// waste this exists to avoid. A real change to any title or slug still re-renders.
+function useRenderedPageHtml(
+	content: string | undefined,
+	wikiPages: ReadonlyArray<{ title: string; slug: string }>
+): string {
+	const titleMapKey = useMemo(
+		() =>
+			wikiPages
+				.map((p) => `${p.title.toLowerCase()}\u0000${p.slug}`)
+				.sort()
+				.join("\u0001"),
+		[wikiPages]
+	);
+	const pagesRef = useRef(wikiPages);
+	pagesRef.current = wikiPages;
+	// titleMapKey stands in for wikiPages as the dependency (see above); the ref only
+	// carries the matching array into the parse.
+	return useMemo(() => {
+		if (content === undefined) return "";
+		return renderMdWithWikilinks(stripFrontmatter(content), pagesRef.current);
+	}, [content, titleMapKey]);
+}
+
+function useTableOfContents(
+	page: WikiPageData | null,
+	contentRef: RefObject<HTMLDivElement>,
+	renderedHtml: string
+) {
 	const [toc, setToc] = useState<TocItem[]>([]);
 	const [activeHeadingId, setActiveHeadingId] = useState("");
 
@@ -2379,7 +2432,7 @@ function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTM
 				id: h.id,
 			}))
 		);
-	}, [page?.content]);
+	}, [renderedHtml]);
 
 	// Hydrate ```mermaid code blocks into rendered diagrams
 	useEffect(() => {
@@ -2388,7 +2441,7 @@ function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTM
 		renderMermaidDiagrams(container).catch(() => {
 			// non-fatal — leave the raw code block visible
 		});
-	}, [page?.content]);
+	}, [renderedHtml]);
 
 	// PROJ-113: IntersectionObserver for active heading
 	useEffect(() => {
@@ -3571,6 +3624,9 @@ function WikiPageShell(
 function deriveWikiPageState(
 	pageData: ReturnType<typeof useWikiPageData>,
 	pageMap: Record<string, FlatEntry>,
+	// PROJ-860: passed in (memoised on [pageMap]) rather than recomputed here, so its
+	// identity stays stable across renders this function runs on but pageMap doesn't change.
+	wikiPages: readonly FlatEntry[],
 	editState: ReturnType<typeof useWikiEditing>,
 	createForm: ReturnType<typeof useCreatePageForm>,
 	toc: readonly TocItem[]
@@ -3583,14 +3639,13 @@ function deriveWikiPageState(
 	const createParentTitle = createForm.createParentId
 		? (pageMap[createForm.createParentId]?.title ?? null)
 		: null;
-	const wikiPages = Object.values(pageMap);
 	const moveOptions: SelectOption[] = [
 		{ value: "", label: "No parent (root)" },
 		...wikiPages
 			.filter((p) => p.id !== pageData.page?.id)
 			.map((p) => ({ value: p.id, label: p.title })),
 	];
-	return { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions };
+	return { latestRevision, breadcrumbs, showToc, createParentTitle, moveOptions };
 }
 
 function buildCreateFormProps(
@@ -3658,7 +3713,7 @@ function buildArticleProps(
 		discardDraft: () => void;
 		editContent: string;
 		setEditContent: (v: string) => void;
-		wikiPages: FlatEntry[];
+		renderedHtml: string;
 		revisions: WikiRevision[];
 		showHistory: boolean;
 		setShowHistory: (updater: (h: boolean) => boolean) => void;
@@ -3698,7 +3753,7 @@ function buildArticleProps(
 		onDiscardDraft: article.discardDraft,
 		editContent: article.editContent,
 		onEditContentChange: article.setEditContent,
-		wikiPages: article.wikiPages,
+		renderedHtml: article.renderedHtml,
 		revisions: article.revisions,
 		showHistory: article.showHistory,
 		onToggleHistory: () => article.setShowHistory((h) => !h),
@@ -3750,10 +3805,20 @@ function useWikiPageState(
 		}
 	);
 
+	// PROJ-860: stable array identity across renders that don't touch the tree, so this
+	// can be a `useRenderedPageHtml`/`useMemo` dependency instead of invalidating on
+	// every keystroke elsewhere in the page.
+	const wikiPages = useMemo(() => Object.values(pageMap), [pageMap]);
+
 	const pageData = useWikiPageData(workspaceSlug, slug);
 	useLegacyQuerySlugRedirect(pageData.page?.slug, slug);
 	useWikiPageMeta(pageData.page);
-	const { toc, setToc, activeHeadingId } = useTableOfContents(pageData.page, pageData.contentRef);
+	const renderedHtml = useRenderedPageHtml(pageData.page?.content, wikiPages);
+	const { toc, setToc, activeHeadingId } = useTableOfContents(
+		pageData.page,
+		pageData.contentRef,
+		renderedHtml
+	);
 	const attach = useWikiAttachments(workspaceSlug, pageData.page);
 	const editState = useWikiEditing(
 		workspaceSlug,
@@ -3790,6 +3855,8 @@ function useWikiPageState(
 		searchResults,
 		searchLoading,
 		pageData,
+		wikiPages,
+		renderedHtml,
 		toc,
 		setToc,
 		activeHeadingId,
@@ -3809,6 +3876,8 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		pageMap,
 		fetchTree,
 		pageData,
+		wikiPages,
+		renderedHtml,
 		toc,
 		setToc,
 		activeHeadingId,
@@ -3839,8 +3908,8 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 
 	usePopstateNavigation(showSlug);
 
-	const { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions } =
-		deriveWikiPageState(pageData, pageMap, editState, createForm, toc);
+	const { latestRevision, breadcrumbs, showToc, createParentTitle, moveOptions } =
+		deriveWikiPageState(pageData, pageMap, wikiPages, editState, createForm, toc);
 
 	function startEdit() {
 		move.cancelMove();
@@ -3892,7 +3961,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		discardDraft: editState.discardDraft,
 		editContent: editState.editContent,
 		setEditContent: editState.setEditContent,
-		wikiPages,
+		renderedHtml,
 		revisions: pageData.revisions,
 		showHistory: pageData.showHistory,
 		setShowHistory: pageData.setShowHistory,

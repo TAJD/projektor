@@ -9,7 +9,22 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetProjectStoreForTests } from "../lib/project-context";
+import * as markdownUtils from "../utils/markdown";
 import WikiPage, { type ServerDraft, type WikiPageData } from "./WikiPage";
+
+// PROJ-860/PROJ-803: real marked/DOMPurify rendering (so headings, mermaid placeholders
+// etc. still show up in the DOM) wrapped in spies — `renderMdWithWikilinks`'s call count
+// is how PROJ-860's "typing in sidebar search causes 0 markdown parses" is asserted, and
+// `renderMermaidDiagrams` is mocked outright (PROJ-803's brief) since it dynamically
+// imports the real `mermaid` package, which isn't worth exercising here.
+vi.mock("../utils/markdown", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../utils/markdown")>();
+	return {
+		...actual,
+		renderMdWithWikilinks: vi.fn(actual.renderMdWithWikilinks),
+		renderMermaidDiagrams: vi.fn().mockResolvedValue(undefined),
+	};
+});
 
 const PAGE: WikiPageData = {
 	id: "w1",
@@ -89,6 +104,8 @@ async function movePageToOther(fetchMock: ReturnType<typeof mockFetchMovePage>) 
 
 beforeEach(() => {
 	history.replaceState(null, "", "/");
+	vi.mocked(markdownUtils.renderMdWithWikilinks).mockClear();
+	vi.mocked(markdownUtils.renderMermaidDiagrams).mockClear();
 });
 
 afterEach(() => {
@@ -1872,5 +1889,85 @@ describe("out-of-order page/revision responses (PROJ-801)", () => {
 			expect(String(putCall?.[0])).toContain("/api/wiki/page-b");
 			expect(JSON.parse(putCall?.[1].body)).toMatchObject({ baseRevisionId: "rev-b" });
 		});
+	});
+});
+
+describe("WikiPage — PROJ-860 memoised markdown rendering", () => {
+	it("does not re-parse the article body when typing in the sidebar search", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const callsAfterMount = vi.mocked(markdownUtils.renderMdWithWikilinks).mock.calls.length;
+		expect(callsAfterMount).toBeGreaterThan(0);
+
+		const searchInput = screen.getByLabelText(/Search wiki pages/i);
+		fireEvent.input(searchInput, { target: { value: "a" } });
+		fireEvent.input(searchInput, { target: { value: "ab" } });
+		fireEvent.input(searchInput, { target: { value: "abc" } });
+		// Let the debounced search fire and its response land, so any re-render it
+		// triggers has already happened by the time we assert.
+		await new Promise((r) => setTimeout(r, 350));
+
+		expect(vi.mocked(markdownUtils.renderMdWithWikilinks).mock.calls.length).toBe(callsAfterMount);
+	});
+
+	// The page usually lands before the tree (the tree is a bigger response), and the
+	// wikilink title map comes from the tree — so the tree's arrival is the one legitimate
+	// reason to re-render an unchanged page body. It must re-render exactly once, and the
+	// post-render work (heading ids, mermaid) must follow the new HTML.
+	it("re-renders exactly once when the tree arrives after the page, then reapplies ids and mermaid", async () => {
+		const LINKED_PAGE: WikiPageData = {
+			...PAGE,
+			content: "## Setup\n\nSee [[Other Page]].\n\n```mermaid\ngraph TD\nA --> B\n```\n",
+		};
+		let resolveTree: (v: unknown) => void = () => {};
+		const treeResponse = new Promise((r) => {
+			resolveTree = r;
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/tree")) return treeResponse;
+				if (u.includes("/revisions"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(LINKED_PAGE) });
+			})
+		);
+		const renderMd = vi.mocked(markdownUtils.renderMdWithWikilinks);
+		const mermaid = vi.mocked(markdownUtils.renderMermaidDiagrams);
+
+		render(<WikiPage slug="my-page" />);
+		await screen.findByRole("heading", { name: "My Page" });
+		await waitFor(() => expect(document.getElementById("setup")).toBeTruthy());
+		// No tree yet, so [[Other Page]] can't resolve and renders as a broken link.
+		expect(document.querySelector(".wiki-link-broken")).toBeTruthy();
+		await waitFor(() => expect(mermaid).toHaveBeenCalled());
+		const parsesBeforeTree = renderMd.mock.calls.length;
+		const mermaidBeforeTree = mermaid.mock.calls.length;
+
+		resolveTree({
+			ok: true,
+			json: () =>
+				Promise.resolve([
+					{ id: "w1", slug: "my-page", title: "My Page", type: null, children: [] },
+					{ id: "w2", slug: "other-page", title: "Other Page", type: null, children: [] },
+				]),
+		});
+
+		const link = await waitFor(() => {
+			const a = document.querySelector('.prose a[href="/wiki/other-page"]');
+			expect(a).toBeTruthy();
+			return a;
+		});
+		expect(link?.textContent).toBe("Other Page");
+		// Replacing innerHTML dropped the old heading ids; the TOC effect must put them back
+		// on the new nodes, and mermaid must hydrate the new placeholder.
+		await waitFor(() => {
+			expect(document.getElementById("setup")?.tagName).toBe("H2");
+			expect(mermaid.mock.calls.length).toBeGreaterThan(mermaidBeforeTree);
+		});
+		expect(renderMd.mock.calls.length).toBe(parsesBeforeTree + 1);
 	});
 });
