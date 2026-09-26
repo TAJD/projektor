@@ -3,7 +3,7 @@ import { useEffect } from "preact/hooks";
 import { buildFilterUrlQueryString } from "../IssueList-helpers";
 import type { DateField } from "./FiltersPopover";
 
-function parseListParam(v: string | null): string[] {
+export function parseListParam(v: string | null): string[] {
 	return v ? v.split(",").filter(Boolean) : [];
 }
 
@@ -31,41 +31,22 @@ interface UrlSyncState {
 	setFilterDateTo: Dispatch<StateUpdater<string>>;
 }
 
-/** Reads filters from the URL on mount, then keeps the URL in sync with filter state (PROJ-60/211/212). */
+/** Keeps the URL in sync with filter state (PROJ-60/211/212). */
 export function useFilterUrlSync(state: UrlSyncState) {
 	const {
 		filterStatuses,
-		setFilterStatuses,
 		filterPriorities,
-		setFilterPriorities,
-		setFilterProject,
 		filterEpicId,
-		setFilterEpicId,
 		filterSprintId,
-		setFilterSprintId,
 		hideEpics,
-		setHideEpics,
 		filterDateField,
-		setFilterDateField,
 		filterDateFrom,
-		setFilterDateFrom,
 		filterDateTo,
-		setFilterDateTo,
 	} = state;
 
-	// Read initial filter state from URL params on mount.
-	useEffect(() => {
-		const params = new URLSearchParams(window.location.search);
-		setFilterStatuses(parseListParam(params.get("status")));
-		setFilterPriorities(parseListParam(params.get("priority")));
-		setFilterProject(params.get("project") ?? "");
-		setFilterEpicId(params.get("epic") ?? "");
-		setFilterSprintId(params.get("sprintId") ?? "");
-		setHideEpics(params.get("hideEpics") === "1");
-		setFilterDateField(parseDateField(params.get("dateField")));
-		setFilterDateFrom(params.get("dateFrom") ?? "");
-		setFilterDateTo(params.get("dateTo") ?? "");
-	}, []);
+	// PROJ-862: initial state is read from the URL synchronously (useIssueFilters'
+	// lazy initialisers), not in a mount effect — the effect ran after the first
+	// render, so the first issues request went out with no filters at all.
 
 	// Sync filter state back to URL without page reload.
 	useEffect(() => {

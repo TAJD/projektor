@@ -7,13 +7,17 @@ import type { ViewMode } from "./types-view";
 
 type FilterInputs = FilterQueryFilters;
 
+// PROJ-862: board/backlog page through at most this many 100-issue pages (5,000 issues).
+const BOARD_MAX_PAGES = 50;
+
 /** Owns the paginated issue set: fetching, "Load more", and loading/error state (PROJ-201/211). */
 export function useIssueFetching(
 	workspaceSlug: string | undefined,
 	view: ViewMode,
 	filters: FilterInputs,
 	projects: ProjectMeta[],
-	taskTypes: Array<{ id: string; key: string; name: string }>
+	taskTypes: Array<{ id: string; key: string; name: string }>,
+	lookupsReady = true
 ) {
 	const [issues, setIssues] = useState<Issue[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -62,13 +66,40 @@ export function useIssueFetching(
 			setNextCursor(data.nextCursor ?? null);
 			setTotal(data.total ?? data.items.length);
 			hasLoadedOnce.current = true;
+			// PROJ-862: board and backlog show the whole working set — keep paging
+			// (the API caps a page at 100) instead of silently stopping at 100.
+			if (view !== "list" && data.nextCursor != null) {
+				setLoading(false);
+				await loadRemainingPages(qs, data.nextCursor, seq);
+			}
 		} catch (e) {
 			if (seq !== fetchSeq.current) return;
 			setError(String(e));
 		} finally {
 			if (seq === fetchSeq.current) setLoading(false);
 		}
-	}, [workspaceSlug, buildFilterParams, pageSize]);
+	}, [workspaceSlug, buildFilterParams, pageSize, view]);
+
+	async function loadRemainingPages(base: URLSearchParams, first: string | number, seq: number) {
+		setLoadingMore(true);
+		let cursor: string | number | null = first;
+		try {
+			for (let page = 0; cursor != null && page < BOARD_MAX_PAGES; page++) {
+				const qs = new URLSearchParams(base);
+				qs.set("cursor", String(cursor));
+				const data: { items: Issue[]; nextCursor: string | number | null } = await apiFetch(
+					`/api/issues?${qs.toString()}`,
+					{ workspaceSlug }
+				);
+				if (seq !== fetchSeq.current) return;
+				setIssues((prev) => [...prev, ...data.items]);
+				cursor = data.nextCursor ?? null;
+				setNextCursor(cursor);
+			}
+		} finally {
+			if (seq === fetchSeq.current) setLoadingMore(false);
+		}
+	}
 
 	const loadMore = useCallback(async () => {
 		if (nextCursor == null || loadingMore) return;
@@ -97,8 +128,9 @@ export function useIssueFetching(
 	}, [workspaceSlug, buildFilterParams, pageSize, nextCursor, loadingMore]);
 
 	useEffect(() => {
+		if (!lookupsReady) return;
 		fetchIssues();
-	}, [fetchIssues]);
+	}, [fetchIssues, lookupsReady]);
 
 	return {
 		issues,

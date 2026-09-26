@@ -17,12 +17,20 @@ export function useIssueListData(
 	filters: FilterInputs
 ) {
 	const lookups = useIssueLookups(workspaceSlug, filters.filterProject, filters.filterSprintId);
+	// PROJ-862: the list request waits for the lookups its filters depend on, so a
+	// `?project=KEY` load sends one filtered request instead of an unfiltered one first.
+	const needsTaskTypes =
+		filters.hideEpics || filters.filterEpicId === "none" || !!filters.filterType;
+	const lookupsReady =
+		(!filters.filterProject || lookups.projectsLoaded) &&
+		(!needsTaskTypes || lookups.taskTypesLoaded);
 	const fetching = useIssueFetching(
 		workspaceSlug,
 		view,
 		filters,
 		lookups.projects,
-		lookups.taskTypes
+		lookups.taskTypes,
+		lookupsReady
 	);
 	const mutations = useIssueMutations(
 		workspaceSlug,
