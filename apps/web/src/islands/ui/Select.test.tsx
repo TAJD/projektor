@@ -363,3 +363,72 @@ describe("computeMenuPosition (CD-294)", () => {
 		}
 	});
 });
+
+// PROJ-848: on phones the option list is a bottom sheet that must scroll by touch.
+describe("mobile sheet (PROJ-848)", () => {
+	const MANY: SelectOption[] = Array.from({ length: 30 }, (_, i) => ({
+		value: `v${i}`,
+		label: `Option ${i}`,
+	}));
+
+	function mockMobile() {
+		vi.stubGlobal(
+			"matchMedia",
+			vi.fn().mockImplementation((q: string) => ({
+				matches: true,
+				media: q,
+				addEventListener: () => {},
+				removeEventListener: () => {},
+			}))
+		);
+	}
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		document.body.style.overflow = "";
+	});
+
+	function open(onChange = vi.fn()) {
+		mockMobile();
+		const { container } = render(
+			<Select value="v0" options={MANY} onChange={onChange} ariaLabel="Pick" />
+		);
+		fireEvent.click(screen.getByRole("combobox"));
+		return { container, onChange, list: screen.getByRole("listbox") };
+	}
+
+	it("renders the sheet on <body>, outside any clipping/transformed ancestor", () => {
+		const { container, list } = open();
+		expect(container.contains(list)).toBe(false);
+		expect(list.parentElement).toBe(document.body);
+	});
+
+	it("locks page scroll while open and restores it on close", () => {
+		open();
+		expect(document.body.style.overflow).toBe("hidden");
+		fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+		expect(document.body.style.overflow).toBe("");
+	});
+
+	it("a drag across options scrolls — it never selects", () => {
+		const { list, onChange } = open();
+		const last = screen.getByRole("option", { name: "Option 29" });
+		fireEvent.pointerDown(list, { clientX: 10, clientY: 300 });
+		fireEvent.pointerMove(list, { clientX: 10, clientY: 200 });
+		fireEvent.click(last);
+		expect(onChange).not.toHaveBeenCalled();
+		expect(screen.getByRole("listbox")).toBeTruthy();
+	});
+
+	it("a tap without movement selects, including the last option", () => {
+		const { list, onChange } = open();
+		fireEvent.pointerDown(list, { clientX: 10, clientY: 300 });
+		fireEvent.click(screen.getByRole("option", { name: "Option 29" }));
+		expect(onChange).toHaveBeenCalledWith("v29");
+	});
+
+	it("tapping inside the portaled sheet doesn't count as an outside tap", () => {
+		const { list } = open();
+		fireEvent.pointerDown(list);
+		expect(screen.queryByRole("listbox")).toBeTruthy();
+	});
+});

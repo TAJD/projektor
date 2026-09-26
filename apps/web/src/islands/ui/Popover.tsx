@@ -12,7 +12,7 @@ import { useLayoutEffect, useRef } from "preact/hooks";
  * only the resulting DOM node (`container.firstChild`) is moved into `into`,
  * keeping that node a direct child of `into` as callers rely on.
  */
-function Portal({ into, vnode }: { into: Element; vnode: VNode }) {
+export function Portal({ into, vnode }: { into: Element; vnode: VNode }) {
 	const containerRef = useRef<HTMLDivElement | null>(null);
 	if (!containerRef.current) containerRef.current = document.createElement("div");
 	const container = containerRef.current;

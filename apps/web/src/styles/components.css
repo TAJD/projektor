@@ -165,6 +165,10 @@
 		width: 100%;
 		min-width: 0;
 		max-height: 50dvh;
+		/* PROJ-848: explicit — the sheet must always be touch-scrollable. */
+		overflow-y: auto;
+		-webkit-overflow-scrolling: touch;
+		touch-action: pan-y;
 		overscroll-behavior: contain;
 		border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
 		padding-bottom: max(0.25rem, env(safe-area-inset-bottom));
