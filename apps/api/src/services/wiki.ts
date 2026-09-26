@@ -728,6 +728,10 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 	await assertWikiPageVisible(ctx, page.project_id);
 	return {
 		...page,
+		// PROJ-809: the revision pointer for exactly this content — the value to send back
+		// as baseRevisionId. Read with the page, so a save that lands between a caller's
+		// read and a separate list_wiki_revisions call can't hand them a newer base.
+		revisionId: await getLatestRevisionId(ctx.db, page.id),
 		url: wikiPagePath(page.slug),
 		// PROJ-489 (R7): computed/derived, not a stored column — surfaced for the page header.
 		freshness: computeFreshness({
@@ -959,6 +963,52 @@ async function getLatestRevisionId(db: D1Database, pageId: string): Promise<stri
 		.bind(pageId)
 		.first<{ id: string }>();
 	return row?.id ?? null;
+}
+
+// PROJ-810: the write guard. A batch's UPDATE used to filter only on `id`, so two
+// writers that both read content C could both pass the revision check and the second
+// silently reverted the first. This statement goes first in every content-write batch:
+// if the page's content is no longer what the caller read, it raises (json() on a
+// non-JSON literal errors, and CASE only evaluates that branch when stale), which rolls
+// back the whole batch; writeGuarded turns that into a 409.
+const STALE_WRITE_MARKER = "__projektor_stale_wiki_write__";
+
+function staleWriteGuard(
+	ctx: ServiceCtx,
+	page: Readonly<{ id: string; content: string }>
+): D1PreparedStatement {
+	return ctx.db
+		.prepare(
+			`SELECT CASE WHEN EXISTS (
+			   SELECT 1 FROM wiki_pages WHERE id = ? AND workspace_id = ? AND content = ?
+			 ) THEN 1 ELSE json('${STALE_WRITE_MARKER}') END`
+		)
+		.bind(page.id, ctx.workspaceId, page.content);
+}
+
+class StaleWikiWriteError extends Error {}
+
+function isStaleWriteError(e: unknown): boolean {
+	return e instanceof Error && /malformed JSON|__projektor_stale_wiki_write__/i.test(e.message);
+}
+
+async function batchGuarded(
+	ctx: ServiceCtx,
+	page: Readonly<{ id: string; content: string }>,
+	statements: readonly D1PreparedStatement[]
+): Promise<void> {
+	try {
+		await ctx.db.batch([staleWriteGuard(ctx, page), ...statements]);
+	} catch (e) {
+		if (isStaleWriteError(e)) throw new StaleWikiWriteError();
+		throw e;
+	}
+}
+
+async function staleConflict(ctx: ServiceCtx, pageId: string): Promise<ConflictError> {
+	return new ConflictError("Wiki page was modified by another write; re-read and retry", {
+		currentRevisionId: await getLatestRevisionId(ctx.db, pageId),
+	});
 }
 
 // PROJ-484: content to diff a conflicting write's base against. Revisions snapshot
@@ -1386,13 +1436,15 @@ async function buildUpdateWikiPageReindexStatements(
 // violation as a structured conflict, not a raw 500.
 async function writeUpdateWikiPageBatch(
 	ctx: ServiceCtx,
+	page: Readonly<{ id: string; content: string }>,
 	statements: readonly D1PreparedStatement[],
 	isRename: boolean,
 	slug: string | undefined
 ): Promise<void> {
 	try {
-		await ctx.db.batch(statements as D1PreparedStatement[]);
+		await batchGuarded(ctx, page, statements);
 	} catch (e) {
+		if (e instanceof StaleWikiWriteError) throw await staleConflict(ctx, page.id);
 		if (isRename && e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
 			throw new ConflictError(`Slug '${slug}' is already in use`);
 		}
@@ -1493,7 +1545,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		...(await buildUpdateWikiPageReindexStatements(ctx, orm, page, { title, content, meta }))
 	);
 
-	await writeUpdateWikiPageBatch(ctx, statements, isRename, slug);
+	await writeUpdateWikiPageBatch(ctx, page, statements, isRename, slug);
 	await finalizeWikiPageUpdate(ctx, page, { title, content, parentId, slug, meta });
 
 	return { ok: true, url: wikiPagePath(slug ?? page.slug) };
@@ -1851,12 +1903,33 @@ async function resolveSectionPatchContent(
 	return applySectionOp(currentContent, currentSection, data);
 }
 
+// PROJ-810: append and set_frontmatter are recomputed from whatever the page holds
+// now, so when a concurrent write wins the guard they simply re-read and re-apply
+// (bounded). Section edits carry a caller-visible base, so they return the 409.
+const PATCH_RETRIES = 3;
+
 export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
 	const parsed = PatchWikiPageInputSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const data = parsed.data;
+	const retryable = data.op === "append_to_page" || data.op === "set_frontmatter";
 
-	const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
+	for (let attempt = 0; ; attempt++) {
+		const page = await resolvePageByIdOrSlug(ctx.db, idOrSlug, ctx.workspaceId);
+		try {
+			return await patchWikiPageOnce(ctx, page, data);
+		} catch (e) {
+			if (!(e instanceof StaleWikiWriteError)) throw e;
+			if (!retryable || attempt + 1 >= PATCH_RETRIES) throw await staleConflict(ctx, page.id);
+		}
+	}
+}
+
+async function patchWikiPageOnce(
+	ctx: ServiceCtx,
+	page: Awaited<ReturnType<typeof resolvePageByIdOrSlug>>,
+	data: PatchWikiPageInput
+) {
 	await requireWikiWrite(ctx, page.projectId);
 	const currentContent = page.content;
 
@@ -1911,7 +1984,12 @@ export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: un
 	const ftsStatements = buildFtsReindexStatements(ctx, page.id, page.title, newContent, meta.tags);
 	const linkStatements = await buildWikiLinksReindexStatements(ctx, orm, page.id, newContent);
 
-	await ctx.db.batch([revisionStatement, updateStatement, ...ftsStatements, ...linkStatements]);
+	await batchGuarded(ctx, page, [
+		revisionStatement,
+		updateStatement,
+		...ftsStatements,
+		...linkStatements,
+	]);
 
 	await recordActivity(ctx, {
 		entityType: "wiki_page",

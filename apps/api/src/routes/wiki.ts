@@ -284,7 +284,10 @@ router.get("/:slug/revisions", async (c) => {
 router.get("/:slug", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await wikiService.getWikiPage(ctx, c.req.param("slug")));
+		const page = await wikiService.getWikiPage(ctx, c.req.param("slug"));
+		// PROJ-809: the ETag is the revision pointer for the returned content.
+		c.header("ETag", `"${page.revisionId ?? "none"}"`);
+		return c.json(page);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

@@ -68,6 +68,8 @@ export interface WikiPageData {
 	slug: string;
 	title: string;
 	content: string;
+	// PROJ-809: revision pointer for exactly this content (undefined from older servers).
+	revisionId?: string | null;
 	parent_id: string | null;
 	updated_at: number;
 	// PROJ-488 (R6): optional YAML frontmatter, denormalized on the API side.
@@ -2617,7 +2619,9 @@ function useWikiEditing(
 		if (!page) return;
 		setSaveError(null);
 		setDraftBanner(null);
-		setBaseRevisionId(latestRevisionId);
+		// PROJ-809: prefer the revision read together with this content; the separately
+		// fetched revisions list can already include a save that the content predates.
+		setBaseRevisionId(page.revisionId !== undefined ? page.revisionId : latestRevisionId);
 		setEditTitle(page.title);
 		setEditContent(page.content);
 		setEditing(true);
