@@ -212,5 +212,9 @@ async function apiFetchUncached<T>(path: string, opts: ApiFetchOpts, method: str
 	// A working request proves the session is good again — re-arm the guard so a
 	// later expiry gets its own reload attempt.
 	if (reauthAttemptedAt !== null) clearReauthMarker();
+	// PROJ-876: 204/205 and empty bodies have nothing to parse — res.json() would throw
+	// and make a successful DELETE look like a failure to the caller.
+	if (res.status === 204 || res.status === 205) return undefined as T;
+	if (res.headers?.get?.("content-length") === "0") return undefined as T;
 	return res.json() as Promise<T>;
 }

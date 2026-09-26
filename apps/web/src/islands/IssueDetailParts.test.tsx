@@ -18,7 +18,7 @@
 // measured overflow.
 import { render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BodySection } from "./IssueDetailParts";
+import { AttachmentsSection, BodySection } from "./IssueDetailParts";
 import type { Comment, IssueData } from "./issue-detail-helpers";
 
 const WIDE_TABLE_BODY = `
@@ -190,5 +190,54 @@ describe("CommentsSection — mermaid hydration", () => {
 		await waitFor(() => {
 			expect(run).toHaveBeenCalled();
 		});
+	});
+});
+
+// PROJ-876: DELETE /api/files/:id answers 204; apiFetch used to throw on the empty body,
+// the catch swallowed it, and the deleted attachment stayed listed until a reload.
+describe("AttachmentsSection delete (PROJ-876)", () => {
+	afterEach(() => vi.unstubAllGlobals());
+
+	const attachment = {
+		id: "att-1",
+		kind: "file" as const,
+		filename: "notes.txt",
+		contentType: "text/plain",
+		size: 10,
+		url: null,
+		createdAt: 0,
+		wikiPage: null,
+	};
+
+	it("refreshes the list after a 204 delete", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
+		const fetchAttachments = vi.fn().mockResolvedValue(undefined);
+		render(
+			<AttachmentsSection
+				issueId="i1"
+				workspaceSlug="ws"
+				attachments={[attachment]}
+				fetchAttachments={fetchAttachments}
+			/>
+		);
+		screen.getByLabelText(/Remove notes\.txt/).click();
+		await waitFor(() => expect(fetchAttachments).toHaveBeenCalled());
+		expect(screen.queryByRole("alert")).toBeNull();
+	});
+
+	it("shows an error when the delete fails", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+		const fetchAttachments = vi.fn().mockResolvedValue(undefined);
+		render(
+			<AttachmentsSection
+				issueId="i1"
+				workspaceSlug="ws"
+				attachments={[attachment]}
+				fetchAttachments={fetchAttachments}
+			/>
+		);
+		screen.getByLabelText(/Remove notes\.txt/).click();
+		await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Couldn't delete/));
+		expect(fetchAttachments).not.toHaveBeenCalled();
 	});
 });

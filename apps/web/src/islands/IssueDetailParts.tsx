@@ -1373,16 +1373,20 @@ function useAttachmentForms(
 	const upload = useAttachmentUpload(issueId, workspaceSlug, resetForms, fetchAttachments);
 	const links = useAttachmentLinks(issueId, workspaceSlug, resetForms, fetchAttachments);
 
+	// PROJ-876: a failed delete is shown, not swallowed.
+	const [deleteError, setDeleteError] = useState<string | null>(null);
 	async function deleteAttachment(attachmentId: string) {
+		setDeleteError(null);
 		try {
 			await apiFetch(`/api/files/${attachmentId}`, { workspaceSlug, method: "DELETE" });
-			await fetchAttachments();
-		} catch {
-			// non-fatal
+		} catch (e) {
+			setDeleteError(`Couldn't delete attachment: ${String(e)}`);
+			return;
 		}
+		await fetchAttachments();
 	}
 
-	return { mode, setMode, upload, links, resetForms, deleteAttachment };
+	return { mode, setMode, upload, links, resetForms, deleteAttachment, deleteError };
 }
 
 export function AttachmentsSection({
@@ -1396,11 +1400,8 @@ export function AttachmentsSection({
 	attachments: Attachment[];
 	fetchAttachments: () => Promise<void>;
 }) {
-	const { mode, setMode, upload, links, resetForms, deleteAttachment } = useAttachmentForms(
-		issueId,
-		workspaceSlug,
-		fetchAttachments
-	);
+	const { mode, setMode, upload, links, resetForms, deleteAttachment, deleteError } =
+		useAttachmentForms(issueId, workspaceSlug, fetchAttachments);
 
 	return (
 		<section class="mb-8">
@@ -1408,6 +1409,11 @@ export function AttachmentsSection({
 				title={`Attachments${attachments.length > 0 ? ` (${attachments.length})` : ""}`}
 			/>
 
+			{deleteError && (
+				<p role="alert" class="mb-2 text-[0.8rem] text-danger-text">
+					{deleteError}
+				</p>
+			)}
 			{attachments.length > 0 && (
 				<div class="mb-4 flex flex-col gap-2">
 					{attachments.map((a) => (

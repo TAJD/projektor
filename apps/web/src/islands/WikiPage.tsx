@@ -2402,14 +2402,19 @@ function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageDat
 		setUploadError(null);
 	}
 
+	// PROJ-876: a failed delete is shown (via the attachments panel's alert line), not
+	// swallowed; a successful one refreshes the list.
 	async function deleteAttachment(attachmentId: string) {
 		if (!page) return;
+		setUploadError(null);
 		try {
 			await apiFetch(`/api/files/${attachmentId}`, { workspaceSlug, method: "DELETE" });
-			await fetchAttachments(page.id);
-		} catch {
-			// non-fatal
+		} catch (e) {
+			setUploadFormOpen(true);
+			setUploadError(`Couldn't delete attachment: ${String(e)}`);
+			return;
 		}
+		await fetchAttachments(page.id);
 	}
 
 	// PROJ-494: paste/drag-drop image upload, passed to MarkdownEditor as onImageFile.
