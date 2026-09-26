@@ -14,10 +14,11 @@ import {
 	MarkWikiNotificationsReadInputSchema,
 	WatchWikiPageInputSchema,
 } from "../schemas/wiki";
-import { assertProjectAccess, hasProjectAccess } from "./access";
+import { assertProjectAccess, hasProjectAccess, usersWithProjectReadAccess } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
+import { idFirst, idOrSlugMatch } from "./wiki-lookup";
 
 type Orm = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -45,13 +46,14 @@ async function resolveWatchTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 		.from(schema.wikiPages)
 		.where(
 			and(
-				or(eq(schema.wikiPages.id, idOrSlug), eq(schema.wikiPages.slug, idOrSlug)),
+				idOrSlugMatch(idOrSlug),
 				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
 				// PROJ-496: a trashed page can't be (un)watched — same "trashed = gone" rule
 				// as every other page reference entry point (services/wiki.ts).
 				isNull(schema.wikiPages.deletedAt)
 			)
 		)
+		.orderBy(idFirst(idOrSlug))
 		.get();
 
 	let page = direct;
@@ -253,6 +255,46 @@ export async function notifyWikiWatchers(
 	);
 }
 
+// PROJ-821: a watch row outlives the watcher's access — a removed member, or one whose
+// group lost its grant on the page's project, must not keep receiving notifications
+// (which carry the page title). Access is checked per recipient at send time; watch
+// rows themselves are left alone, so restoring access restores notifications.
+async function filterRecipientsWithAccess<E extends { userId: string; pageId: string }>(
+	ctx: ServiceCtx,
+	orm: Orm,
+	entries: readonly E[]
+): Promise<E[]> {
+	const pageIds = [...new Set(entries.map((e) => e.pageId))];
+	// Trashed pages are included on purpose: "deleted" notifications are sent for them.
+	const pages = await inChunks(pageIds, (chunk) =>
+		orm
+			.select({ id: schema.wikiPages.id, projectId: schema.wikiPages.projectId })
+			.from(schema.wikiPages)
+			.where(
+				and(eq(schema.wikiPages.workspaceId, ctx.workspaceId), inArray(schema.wikiPages.id, chunk))
+			)
+	);
+	const projectOf = new Map(pages.map((p) => [p.id, p.projectId ?? null]));
+
+	const usersByProject = new Map<string | null, Set<string>>();
+	for (const e of entries) {
+		if (!projectOf.has(e.pageId)) continue; // page not in this workspace — never deliver
+		const projectId = projectOf.get(e.pageId) ?? null;
+		const users = usersByProject.get(projectId) ?? new Set<string>();
+		users.add(e.userId);
+		usersByProject.set(projectId, users);
+	}
+	const allowedByProject = new Map<string | null, Set<string>>();
+	for (const [projectId, users] of usersByProject) {
+		allowedByProject.set(projectId, await usersWithProjectReadAccess(ctx, projectId, [...users]));
+	}
+
+	return entries.filter((e) => {
+		if (!projectOf.has(e.pageId)) return false;
+		return allowedByProject.get(projectOf.get(e.pageId) ?? null)?.has(e.userId) ?? false;
+	});
+}
+
 async function insertNotifications(
 	ctx: ServiceCtx,
 	orm: Orm,
@@ -265,8 +307,10 @@ async function insertNotifications(
 	}[]
 ): Promise<void> {
 	if (entries.length === 0) return;
+	const deliverable = await filterRecipientsWithAccess(ctx, orm, entries);
+	if (deliverable.length === 0) return;
 	const now = Math.floor(Date.now() / 1000);
-	const values = entries.map((e) => ({
+	const values = deliverable.map((e) => ({
 		id: crypto.randomUUID(),
 		workspaceId: ctx.workspaceId,
 		userId: e.userId,

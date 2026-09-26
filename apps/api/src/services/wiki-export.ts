@@ -70,7 +70,11 @@ async function resolveExportRoot(
 		})
 		.from(schema.wikiPages)
 		.where(
-			and(eq(schema.wikiPages.workspaceId, ctx.workspaceId), eq(schema.wikiPages.id, idOrSlug))
+			and(
+				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+				eq(schema.wikiPages.id, idOrSlug),
+				isNull(schema.wikiPages.deletedAt)
+			)
 		)
 		.get();
 	if (row) return row;
@@ -84,7 +88,11 @@ async function resolveExportRoot(
 		})
 		.from(schema.wikiPages)
 		.where(
-			and(eq(schema.wikiPages.workspaceId, ctx.workspaceId), eq(schema.wikiPages.slug, idOrSlug))
+			and(
+				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+				eq(schema.wikiPages.slug, idOrSlug),
+				isNull(schema.wikiPages.deletedAt)
+			)
 		)
 		.get();
 	if (!bySlug) throw new NotFoundError("Wiki page not found");
@@ -116,7 +124,8 @@ async function collectDescendantIds(
 				.where(
 					and(
 						inArray(schema.wikiPages.parentId, chunk),
-						eq(schema.wikiPages.workspaceId, ctx.workspaceId)
+						eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+						isNull(schema.wikiPages.deletedAt)
 					)
 				)
 		);
@@ -143,7 +152,11 @@ async function pagesByIds(ctx: ServiceCtx, ids: string[]): Promise<ExportedPage[
 			})
 			.from(schema.wikiPages)
 			.where(
-				and(inArray(schema.wikiPages.id, chunk), eq(schema.wikiPages.workspaceId, ctx.workspaceId))
+				and(
+					inArray(schema.wikiPages.id, chunk),
+					eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+					isNull(schema.wikiPages.deletedAt)
+				)
 			)
 	);
 }
@@ -321,6 +334,8 @@ export async function exportWiki(
 			.where(
 				and(
 					eq(schema.wikiPages.workspaceId, ctx.workspaceId),
+					// PROJ-813: trashed pages never leave the workspace via export.
+					isNull(schema.wikiPages.deletedAt),
 					data.projectId
 						? eq(schema.wikiPages.projectId, data.projectId)
 						: isNull(schema.wikiPages.projectId)

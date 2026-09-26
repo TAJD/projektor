@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
@@ -388,6 +388,91 @@ describe("Share tokens", () => {
 				headers: authHeaders(f.token, f.slug),
 			});
 			expect(res.status).toBe(201);
+		});
+	});
+
+	// PROJ-794: a share link dies with its issue, its project's archival, or its
+	// creator's access — checked every time the link is read.
+	describe("PROJ-794: share links stop resolving when the issue or the creator's access goes", () => {
+		async function sharedIssue(workspaceRole: string, grant: "none" | "member") {
+			const { workspace, user, token } = await seedFixture({ role: workspaceRole });
+			const project = await seedProject(workspace.id);
+			const g =
+				grant === "member"
+					? await seedGroupGrant(workspace.id, user.id, project.id, "member")
+					: null;
+			const issue = await seedIssue(workspace.id, project.id, user.id, { title: "Shared" });
+			const res = await SELF.fetch(`http://localhost/api/issues/${issue.id}/share`, {
+				method: "POST",
+				headers: authHeaders(token, workspace.slug),
+			});
+			expect(res.status).toBe(201);
+			const { token: shareToken } = (await res.json()) as { token: string };
+			return {
+				shareToken,
+				workspaceId: workspace.id,
+				userId: user.id,
+				projectId: project.id,
+				issueId: issue.id,
+				groupId: g?.groupId ?? null,
+			};
+		}
+
+		async function shareStatus(shareToken: string): Promise<number> {
+			// The public share route is rate-limited too; these tests hit it several times.
+			await env.DB.prepare("DELETE FROM rate_limit").run();
+			return (await SELF.fetch(`http://localhost/api/share/${shareToken}`)).status;
+		}
+
+		it("404s once the issue is deleted", async () => {
+			const f = await sharedIssue("admin", "none");
+			expect(await shareStatus(f.shareToken)).toBe(200);
+			await env.DB.prepare("DELETE FROM issues WHERE id = ?").bind(f.issueId).run();
+			expect(await shareStatus(f.shareToken)).toBe(404);
+		});
+
+		it("404s once the issue's project is archived", async () => {
+			const f = await sharedIssue("admin", "none");
+			expect(await shareStatus(f.shareToken)).toBe(200);
+			await env.DB.prepare("UPDATE projects SET archived_at = ? WHERE id = ?")
+				.bind(Math.floor(Date.now() / 1000), f.projectId)
+				.run();
+			expect(await shareStatus(f.shareToken)).toBe(404);
+		});
+
+		it("404s once the creator's project grant is revoked, and resolves again if restored", async () => {
+			const f = await sharedIssue("member", "member");
+			expect(await shareStatus(f.shareToken)).toBe(200);
+
+			const grant = await env.DB.prepare(
+				"SELECT role FROM group_project_grants WHERE group_id = ? AND project_id = ?"
+			)
+				.bind(f.groupId, f.projectId)
+				.first<{ role: string }>();
+			await env.DB.prepare("DELETE FROM group_project_grants WHERE group_id = ? AND project_id = ?")
+				.bind(f.groupId, f.projectId)
+				.run();
+			expect(await shareStatus(f.shareToken)).toBe(404);
+			await env.DB.prepare("DELETE FROM rate_limit").run();
+			expect((await SELF.fetch(`http://localhost/api/share/${f.shareToken}/logo`)).status).toBe(
+				404
+			);
+
+			await env.DB.prepare(
+				"INSERT INTO group_project_grants (group_id, project_id, role) VALUES (?, ?, ?)"
+			)
+				.bind(f.groupId, f.projectId, grant?.role ?? "member")
+				.run();
+			expect(await shareStatus(f.shareToken)).toBe(200);
+		});
+
+		it("404s once the creator is removed from the workspace", async () => {
+			const f = await sharedIssue("admin", "none");
+			expect(await shareStatus(f.shareToken)).toBe(200);
+			await env.DB.prepare("DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?")
+				.bind(f.workspaceId, f.userId)
+				.run();
+			expect(await shareStatus(f.shareToken)).toBe(404);
 		});
 	});
 });

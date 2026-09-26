@@ -2238,19 +2238,29 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 	const [showHistory, setShowHistory] = useState(false);
 	const contentRef = useRef<HTMLDivElement>(null);
 
+	// PROJ-801: every fetch takes a ticket, and only the latest ticket's response is
+	// applied. Clicking A then B used to let A's slower response land last — showing A
+	// under B's URL (and tripping the canonical-slug redirect to /wiki/A), or pairing
+	// B's page with A's revisions so the next save sent the wrong baseRevisionId (409).
+	const pageRequestRef = useRef(0);
+	const revisionsRequestRef = useRef(0);
+
 	const fetchPage = useCallback(
 		async (s: string) => {
 			if (!s) return;
+			const ticket = ++pageRequestRef.current;
+			const isCurrent = () => ticket === pageRequestRef.current;
 			setLoading(true);
 			setError(null);
 			try {
-				setPage(
-					await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, { workspaceSlug })
-				);
+				const data = await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(s)}`, {
+					workspaceSlug,
+				});
+				if (isCurrent()) setPage(data);
 			} catch (e) {
-				setError(String(e));
+				if (isCurrent()) setError(String(e));
 			} finally {
-				setLoading(false);
+				if (isCurrent()) setLoading(false);
 			}
 		},
 		[workspaceSlug]
@@ -2258,6 +2268,7 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 
 	const fetchRevisions = useCallback(
 		async (s: string) => {
+			const ticket = ++revisionsRequestRef.current;
 			try {
 				const data = await apiFetch<WikiRevision[]>(
 					`/api/wiki/${encodeURIComponent(s)}/revisions`,
@@ -2265,6 +2276,7 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 						workspaceSlug,
 					}
 				);
+				if (ticket !== revisionsRequestRef.current) return;
 				setRevisions(Array.isArray(data) ? data : []);
 				setRevisionsLoaded(true);
 			} catch {

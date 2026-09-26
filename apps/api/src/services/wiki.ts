@@ -46,6 +46,7 @@ import {
 	deleteWikiLinksForPages,
 	type WikiBacklink,
 } from "./wiki-links";
+import { idFirst, idOrSlugMatch, isIdShapedSlug } from "./wiki-lookup";
 import {
 	deleteWikiWatchersForPages,
 	notifyCascadeDescendantWatchers,
@@ -101,7 +102,27 @@ function slugify(title: string): string {
 // catch-all, so a page slugged "templates" would be shadowed by it and never load. The
 // seeded Templates parent page therefore uses "page-templates" (seedDefaultWikiTemplates
 // / migration 0047).
-const RESERVED_WIKI_SLUGS = new Set(["view", "index", "templates"]);
+//
+// PROJ-811: every other fixed first segment under /api/wiki (search, tree, trash, …) is
+// registered before the /:slug catch-all too, so a page slugged with any of them can
+// never load. test/wiki-reserved-slugs.test.ts walks the wiki router and fails if a new
+// fixed route isn't listed here; migration 0060 renamed any pages that already had one.
+export const RESERVED_WIKI_SLUGS: ReadonlySet<string> = new Set([
+	"view",
+	"index",
+	"templates",
+	"tree",
+	"search",
+	"broken-links",
+	"stale-pages",
+	"backfill-links",
+	"watches",
+	"notifications",
+	"trash",
+	"purge-trash",
+	"changes",
+	"export",
+]);
 
 // PROJ-496 (R14): 30-day trash retention — purgeExpiredWikiPages permanently removes a
 // page (and its R2 attachments) once it's been soft-deleted for at least this long.
@@ -112,6 +133,18 @@ const WIKI_TRASH_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 // write an arbitrarily large JSON blob into a single activity row and every list_wiki_changes
 // response covering it. deletedCount always reports the true total regardless of truncation.
 const MAX_DELETED_PAGE_IDS = 500;
+
+// PROJ-812: a slug shaped like a page id would make id-or-slug lookups ambiguous.
+// Checked only when a slug is newly chosen (create, rename), never when an existing
+// slug is re-validated (undelete), so a page created before this rule still restores.
+function assertSlugNotIdShaped(slug: string): void {
+	if (isIdShapedSlug(slug)) {
+		throw new ValidationError({
+			formErrors: [`Slug '${slug}' looks like a page id and cannot be used`],
+			fieldErrors: { slug: ["Slug cannot look like a page id"] },
+		});
+	}
+}
 
 // PROJ-483: wiki_pages(workspace_id, slug) is unique among LIVE pages — surface a
 // structured ConflictError instead of letting the constraint throw a raw D1 error.
@@ -175,13 +208,14 @@ async function resolvePageByIdOrSlug(
 		.from(schema.wikiPages)
 		.where(
 			and(
-				or(eq(schema.wikiPages.id, idOrSlug), eq(schema.wikiPages.slug, idOrSlug)),
+				idOrSlugMatch(idOrSlug),
 				eq(schema.wikiPages.workspaceId, workspaceId),
 				// PROJ-496: a trashed page is treated as gone for every normal read/write
 				// entry point — only undeleteWikiPage/listWikiTrash bypass this filter.
 				isNull(schema.wikiPages.deletedAt)
 			)
 		)
+		.orderBy(idFirst(idOrSlug))
 		.get();
 	if (direct) return direct;
 	// PROJ-483: fall back to a redirect (old slug -> page id) so operations other
@@ -723,11 +757,12 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 		.from(schema.wikiPages)
 		.where(
 			and(
-				or(eq(schema.wikiPages.id, slugOrId), eq(schema.wikiPages.slug, slugOrId)),
+				idOrSlugMatch(slugOrId),
 				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
 				isNull(schema.wikiPages.deletedAt)
 			)
 		)
+		.orderBy(idFirst(slugOrId))
 		.get();
 	// PROJ-483: live page always wins over a redirect, so reusing an old slug for a
 	// new/renamed page never leaves getWikiPage returning an ambiguous result.
@@ -760,11 +795,12 @@ export async function getWikiBacklinks(ctx: ServiceCtx, slugOrId: string): Promi
 		.from(schema.wikiPages)
 		.where(
 			and(
-				or(eq(schema.wikiPages.id, slugOrId), eq(schema.wikiPages.slug, slugOrId)),
+				idOrSlugMatch(slugOrId),
 				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
 				isNull(schema.wikiPages.deletedAt)
 			)
 		)
+		.orderBy(idFirst(slugOrId))
 		.get();
 	const page = direct ?? (await resolveWikiPageByRedirect(orm, ctx.workspaceId, slugOrId));
 	if (!page) throw new NotFoundError("Wiki page not found");
@@ -812,7 +848,11 @@ async function resolveTemplateContent(ctx: ServiceCtx, templateSlug: string): Pr
 // by SlugSchema) remains the actual display name.
 function deriveSlugFromTitle(title: string): string {
 	const derivedSlug = SlugSchema.safeParse(slugify(title));
-	return derivedSlug.success ? derivedSlug.data : `page-${crypto.randomUUID().slice(0, 8)}`;
+	if (!derivedSlug.success) return `page-${crypto.randomUUID().slice(0, 8)}`;
+	// PROJ-811/812: a title that derives a reserved or id-shaped slug gets a suffix
+	// instead (a page titled "Search" becomes search-page), so it stays loadable.
+	const needsSuffix = RESERVED_WIKI_SLUGS.has(derivedSlug.data) || isIdShapedSlug(derivedSlug.data);
+	return needsSuffix ? `${derivedSlug.data}-page` : derivedSlug.data;
 }
 
 function buildCreateWikiPageInsertStatement(
@@ -912,6 +952,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		: (parsed.data.content ?? "");
 
 	const orm = drizzle(ctx.db, { schema });
+	if (customSlug !== undefined) assertSlugNotIdShaped(customSlug);
 	const slug = customSlug ?? deriveSlugFromTitle(title);
 	await assertSlugAvailable(orm, ctx.workspaceId, slug);
 	const id = crypto.randomUUID();
@@ -1524,6 +1565,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// redirect from the old slug to this page so existing links keep resolving.
 	const isRename = slug !== undefined && slug !== page.slug;
 	if (isRename) {
+		assertSlugNotIdShaped(slug);
 		await assertSlugAvailable(orm, ctx.workspaceId, slug, page.id);
 	}
 
