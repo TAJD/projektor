@@ -1,4 +1,4 @@
-import type { RefObject } from "preact";
+import { Fragment, type RefObject } from "preact";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { currentProject, ensureProjectResolved, projectReady } from "../lib/project-context";
 import { slugify } from "../lib/slugify";
@@ -472,6 +472,7 @@ function TreeNodeItem({
 				class={`${TREE_ITEM_BASE_CLASS} ${isActive ? "!bg-accent !text-white font-semibold" : ""}`}
 				style={{ paddingLeft: `${0.5 + depth * 1}rem` }}
 				onClick={() => onNavigate(node.slug)}
+				aria-current={isActive ? "page" : undefined}
 			>
 				{depth > 0 && <span class="text-text-muted mr-1">{"›"}</span>}
 				{node.title}
@@ -796,6 +797,7 @@ function WikiSidebar({
 	stalePages,
 	staleLoading,
 	drawerOpen,
+	isMobile,
 	sidebarRef,
 }: {
 	workspaceSlug: string | undefined;
@@ -826,6 +828,10 @@ function WikiSidebar({
 	// PROJ-664: below 640px this aside becomes an off-canvas drawer (see
 	// WikiPageShell) instead of stacking full-width in flow above the article.
 	drawerOpen: boolean;
+	// PROJ-806: whether the drawer is acting as a drawer at all (mobile viewport) — on
+	// desktop the sidebar is always in normal flow and must never be inert, even though
+	// `drawerOpen` itself stays false there (it's only ever opened via the mobile trigger).
+	isMobile: boolean;
 	sidebarRef: RefObject<HTMLElement>;
 }) {
 	const asideClass = [
@@ -835,7 +841,13 @@ function WikiSidebar({
 	].join(" ");
 	const isPublicViewer = usePublicViewer(workspaceSlug);
 	return (
-		<aside id="wiki-page-tree" class={asideClass} aria-label="Wiki pages" ref={sidebarRef}>
+		<aside
+			id="wiki-page-tree"
+			class={asideClass}
+			aria-label="Wiki pages"
+			ref={sidebarRef}
+			inert={isMobile && !drawerOpen}
+		>
 			<ScopeControl workspaceSlug={workspaceSlug} projectId={projectId} />
 			{!isPublicViewer && (
 				<Button variant="primary" onClick={onCreate} class="w-full mb-4 max-sm:min-h-[44px]">
@@ -1029,17 +1041,21 @@ function PageBreadcrumbs({
 				Home
 			</button>
 			{breadcrumbs.slice(1, -1).map((crumb) => (
-				<>
+				// PROJ-806: the key belongs on the list item itself (this fragment), not a
+				// DOM node nested inside it — Preact reconciles the fragment's children by
+				// their position, not the key on a descendant, so a key here (rather than on
+				// the button) is what actually makes each breadcrumb crumb identifiable
+				// across re-renders when the list changes.
+				<Fragment key={crumb.id}>
 					<span>›</span>
 					<button
-						key={crumb.id}
 						type="button"
 						class={BREADCRUMB_BUTTON_CLASS}
 						onClick={() => onNavigate(crumb.slug)}
 					>
 						{crumb.title}
 					</button>
-				</>
+				</Fragment>
 			))}
 			<span>›</span>
 			<span class="text-text-base">{breadcrumbs[breadcrumbs.length - 1].title}</span>
@@ -1156,16 +1172,43 @@ function PageActionOverflowMenu({
 		setOpen(true);
 	}
 
+	function menuItems(): HTMLElement[] {
+		return Array.from(popoverRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+	}
+
+	function closeToTrigger() {
+		setOpen(false);
+		triggerRef.current?.focus();
+	}
+
+	// PROJ-806: a menu that opens without moving focus into itself, or that doesn't
+	// support arrow keys, forces a screen reader or keyboard user to tab through the
+	// rest of the page to reach it. Focus moves to the first item on open; ArrowUp/
+	// ArrowDown cycle between items (wrapping), matching the standard menu pattern. The
+	// items are tabindex=-1 (arrows move between them, not Tab), and Tab or Escape close
+	// the menu back to its trigger — the menu is portalled to <body>, so letting Tab run
+	// on would jump to wherever the portal sits in the document, not the next control
+	// after ⋯.
 	useEffect(() => {
 		if (!open) return;
+		menuItems()[0]?.focus();
 		function onPointerDown(e: MouseEvent) {
 			if (!(e.target instanceof Node) || !isInside(e.target)) setOpen(false);
 		}
 		function onKeyDown(e: KeyboardEvent) {
-			if (e.key === "Escape") {
-				setOpen(false);
-				triggerRef.current?.focus();
+			if (e.key === "Escape" || e.key === "Tab") {
+				e.preventDefault();
+				closeToTrigger();
+				return;
 			}
+			if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+			const items = menuItems();
+			if (items.length === 0) return;
+			e.preventDefault();
+			const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+			const delta = e.key === "ArrowDown" ? 1 : -1;
+			const nextIndex = (currentIndex + delta + items.length) % items.length;
+			items[nextIndex]?.focus();
 		}
 		document.addEventListener("mousedown", onPointerDown);
 		document.addEventListener("keydown", onKeyDown);
@@ -1175,8 +1218,11 @@ function PageActionOverflowMenu({
 		};
 	}, [open]);
 
+	// Refocus the trigger *before* running the action: the menu (and the focused item)
+	// is about to unmount, which would otherwise drop focus to <body>. An action that
+	// moves focus somewhere deliberately still gets the last word.
 	function runAndClose(fn: () => void) {
-		setOpen(false);
+		closeToTrigger();
 		fn();
 	}
 
@@ -1206,6 +1252,7 @@ function PageActionOverflowMenu({
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="page-action-menu-item"
 						onClick={() => runAndClose(() => onStartCreateChild(pageId))}
 					>
@@ -1214,6 +1261,7 @@ function PageActionOverflowMenu({
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="page-action-menu-item"
 						onClick={() => runAndClose(onStartMove)}
 					>
@@ -1222,6 +1270,7 @@ function PageActionOverflowMenu({
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="page-action-menu-item page-action-menu-item-danger"
 						onClick={() => runAndClose(onDelete)}
 					>
@@ -3554,12 +3603,21 @@ const WIKI_PAGE_STYLES = `
 			width: min(82vw, 280px);
 			max-width: 280px;
 			transform: translateX(-100%);
-			transition: transform 0.22s ease;
+			/* PROJ-806: translateX alone leaves the closed drawer keyboard/screen-reader
+			   reachable (it's still in the layout, just off-screen) — visibility:hidden
+			   (paired with the inert attribute set in JS below) takes it out of both. */
+			visibility: hidden;
+			/* Delay the switch to hidden until the slide-out has finished, or the drawer
+			   vanishes instantly on close instead of sliding away. */
+			transition: transform 0.22s ease, visibility 0s linear 0.22s;
 			z-index: 105;
 			box-shadow: none;
 		}
 		.wiki-sidebar.wiki-sidebar-open {
 			transform: translateX(0);
+			visibility: visible;
+			/* …but become visible immediately on open, so the slide-in is seen. */
+			transition: transform 0.22s ease, visibility 0s linear 0s;
 			box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
 		}
 		.wiki-drawer-overlay {
@@ -3632,7 +3690,16 @@ function useWikiSidebarDrawer() {
 		};
 	}, [open, close]);
 
+	// PROJ-806: this effect also fires on mount (effects always run after the first
+	// render, `open` "changing" from nothing to its initial value), which used to move
+	// focus to the "Pages" trigger button on every mobile page load even though the
+	// user never opened or closed anything. Only actual open/close transitions —
+	// something the person did — should move focus.
+	const isFirstRenderRef = useRef(true);
 	useEffect(() => {
+		const isFirstRender = isFirstRenderRef.current;
+		isFirstRenderRef.current = false;
+		if (isFirstRender) return;
 		if (!window.matchMedia(WIKI_MOBILE_QUERY).matches) return;
 		if (open) {
 			sidebarRef.current
@@ -3779,6 +3846,7 @@ function WikiPageShell(
 				stalePages={props.stale.stalePages}
 				staleLoading={props.stale.staleLoading}
 				drawerOpen={drawer.open}
+				isMobile={isMobile}
 				sidebarRef={drawer.sidebarRef}
 			/>
 

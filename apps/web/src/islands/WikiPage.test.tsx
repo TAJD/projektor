@@ -2556,3 +2556,160 @@ describe("WikiPage — PROJ-805 stale sidebar search responses", () => {
 		expect(screen.queryByText("First Filtered")).toBeNull();
 	});
 });
+
+describe("WikiPage — PROJ-806 a11y: closed drawer, menu, tree, breadcrumb", () => {
+	it("keeps the closed mobile drawer inert and does not move focus to it on initial mount", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			const drawer = document.getElementById("wiki-page-tree");
+			expect(drawer).toBeTruthy();
+			expect(drawer?.hasAttribute("inert")).toBe(true);
+			// The "Pages" trigger must not have received focus just because the page loaded.
+			expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Pages" }));
+		} finally {
+			restore();
+		}
+	});
+
+	it("is not inert once opened, and is inert again after closing", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			const trigger = screen.getByRole("button", { name: "Pages" });
+			const drawer = document.getElementById("wiki-page-tree");
+
+			fireEvent.click(trigger);
+			expect(drawer?.hasAttribute("inert")).toBe(false);
+
+			fireEvent.click(trigger);
+			expect(drawer?.hasAttribute("inert")).toBe(true);
+		} finally {
+			restore();
+		}
+	});
+
+	it("marks the current page's tree item with aria-current=page", async () => {
+		const treeNode = {
+			id: "w1",
+			slug: "my-page",
+			title: "My Page",
+			type: null,
+			children: [{ id: "w2", slug: "other-page", title: "Other Page", type: null, children: [] }],
+		};
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/tree"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([treeNode]) });
+				if (u.includes("/revisions"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+			})
+		);
+		render(<WikiPage slug="my-page" />);
+		// The tree also has a "My Page" node, so this waits on the heading specifically
+		// rather than plain text (which would match both and fail as ambiguous).
+		await screen.findByRole("heading", { name: "My Page" });
+
+		await waitFor(() => {
+			expect(screen.getByRole("button", { name: "My Page" }).getAttribute("aria-current")).toBe(
+				"page"
+			);
+		});
+		expect(
+			screen.getByRole("button", { name: /Other Page/ }).getAttribute("aria-current")
+		).toBeNull();
+	});
+
+	it("moves focus into the ⋯ menu on open and supports ArrowDown/ArrowUp navigation", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+			const childItem = await screen.findByRole("menuitem", { name: "+ Child page" });
+			const moveItem = screen.getByRole("menuitem", { name: "Move" });
+			const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
+
+			expect(document.activeElement).toBe(childItem);
+
+			fireEvent.keyDown(childItem, { key: "ArrowDown" });
+			expect(document.activeElement).toBe(moveItem);
+
+			fireEvent.keyDown(moveItem, { key: "ArrowDown" });
+			expect(document.activeElement).toBe(deleteItem);
+
+			// Wraps back to the first item.
+			fireEvent.keyDown(deleteItem, { key: "ArrowDown" });
+			expect(document.activeElement).toBe(childItem);
+
+			fireEvent.keyDown(childItem, { key: "ArrowUp" });
+			expect(document.activeElement).toBe(deleteItem);
+		} finally {
+			restore();
+		}
+	});
+
+	it("keeps menu items out of the Tab order and closes the menu back to its trigger on Tab, Escape, or an action", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+			const trigger = screen.getByRole("button", { name: "More page actions" });
+
+			fireEvent.click(trigger);
+			const items = await screen.findAllByRole("menuitem");
+			expect(items.map((i) => i.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1"]);
+
+			// Tab closes the menu and lands back on ⋯ (not wherever the portal sits).
+			fireEvent.keyDown(document.activeElement ?? document.body, { key: "Tab" });
+			expect(screen.queryByRole("menu")).toBeNull();
+			expect(document.activeElement).toBe(trigger);
+
+			fireEvent.click(trigger);
+			await screen.findByRole("menu");
+			fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+			expect(screen.queryByRole("menu")).toBeNull();
+			expect(document.activeElement).toBe(trigger);
+
+			// Choosing an action unmounts the focused item; focus returns to ⋯ rather than
+			// falling to <body>.
+			fireEvent.click(trigger);
+			fireEvent.click(await screen.findByRole("menuitem", { name: "Move" }));
+			expect(screen.queryByRole("menu")).toBeNull();
+			expect(await screen.findByRole("combobox", { name: /new parent page/i })).toBeTruthy();
+			expect(document.activeElement).toBe(trigger);
+		} finally {
+			restore();
+		}
+	});
+
+	it("delays the closed drawer's visibility:hidden until its slide-out transition finishes", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const css = Array.from(document.querySelectorAll("style"))
+			.map((el) => el.textContent ?? "")
+			.find((text) => text.includes(".wiki-sidebar.wiki-sidebar-open"));
+		expect(css).toBeTruthy();
+		const rule = (selector: string) =>
+			css?.match(new RegExp(`${selector.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+		const closed = rule(".wiki-sidebar");
+		const opened = rule(".wiki-sidebar.wiki-sidebar-open");
+		expect(closed).toMatch(/visibility:\s*hidden/);
+		expect(closed).toMatch(/transition:[^;]*visibility 0s linear 0\.22s/);
+		expect(opened).toMatch(/transition:[^;]*visibility 0s linear 0s/);
+	});
+});
