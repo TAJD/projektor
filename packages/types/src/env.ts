@@ -1,3 +1,5 @@
+import type { AuthInfo } from "./plugin";
+
 export interface Env {
 	DB: D1Database;
 	KV: KVNamespace;
@@ -94,6 +96,8 @@ export interface Variables {
 	// (Cloudflare Access / dev bypass => "human", Bearer API token => "agent") — not a
 	// caller-declared field like the deprecated agent_sessions.kind (PROJ-336).
 	authKind: "human" | "agent";
+	// PROJ-889: method + credential behind authKind. Set by every auth strategy.
+	auth: AuthInfo;
 	// PROJ-494: opt-in, set by index.ts ahead of workspaceMiddleware for GET requests
 	// that a browser subresource load (e.g. an <img> tag rendering an inline attachment)
 	// can't attach a custom X-Workspace-Slug header to. See middleware/workspace.ts.

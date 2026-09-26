@@ -1,4 +1,4 @@
-import type { HonoEnv, MCPTool, PluginContext, Role } from "@projektor/types";
+import type { HonoEnv, MCPTool } from "@projektor/types";
 import { type Context, Hono } from "hono";
 import { insufficientScopeChallenge } from "../auth/challenge";
 import { type Capability, capabilityForMcpTool, tokenAllows } from "../auth/scopes";
@@ -28,6 +28,7 @@ import { wikiTools } from "../mcp/wiki";
 import { workflowTools } from "../mcp/workflow";
 import { workspacesTools } from "../mcp/workspaces";
 import { pluginRegistry } from "../plugins/registry";
+import { ctxFromHono } from "../services/types";
 
 // __PROJEKTOR_VERSION__ is injected by esbuild --define at release-build time
 // (scripts/build-release.sh); it's absent in local `wrangler dev` and tests.
@@ -80,9 +81,6 @@ const router = new Hono<HonoEnv>();
 // docs/superpowers/specs/2026-07-29-mcp-2026-07-28-update-plan.md.
 router.post("/:workspaceId", async (c) => {
 	const workspace = c.get("workspace") as { id: string };
-	const user = c.get("user") as { id: string };
-	const role = c.get("role") as Role | undefined;
-	const authKind = c.get("authKind") as "human" | "agent" | undefined;
 	const body = await c.req.json<{
 		jsonrpc: "2.0";
 		id: unknown;
@@ -94,15 +92,9 @@ router.post("/:workspaceId", async (c) => {
 		return c.json(jsonRpcError(body.id, -32600, "Invalid Request"), 400);
 	}
 
-	const ctx: PluginContext = {
-		db: c.env.DB,
-		kv: c.env.KV,
-		r2: c.env.R2,
-		workspaceId: workspace.id,
-		userId: user.id,
-		role,
-		authKind,
-	};
+	// PROJ-889: the same full ServiceCtx as REST (waitUntil, realtime hub, auth method +
+	// credential), so MCP mutations broadcast and nothing needs an `as ServiceCtx` cast.
+	const ctx = ctxFromHono(c);
 
 	switch (body.method) {
 		case "initialize":

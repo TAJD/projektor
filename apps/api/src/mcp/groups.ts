@@ -11,7 +11,6 @@ import {
 	setGroupGrant,
 	updateGroup,
 } from "../services/groups";
-import type { ServiceCtx } from "../services/types";
 
 export const groupsTools: MCPTool[] = [
 	{
@@ -20,7 +19,7 @@ export const groupsTools: MCPTool[] = [
 			"List access groups. Owner/admin see all groups in the workspace; other members see only groups they belong to.",
 		inputSchema: { type: "object", properties: {} },
 		async handler(_input, ctx) {
-			return listGroups(ctx as ServiceCtx);
+			return listGroups(ctx);
 		},
 	},
 	{
@@ -33,7 +32,7 @@ export const groupsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
-			return getGroup(ctx as ServiceCtx, id);
+			return getGroup(ctx, id);
 		},
 	},
 	{
@@ -43,7 +42,7 @@ export const groupsTools: MCPTool[] = [
 			"Members with no groups appear with an empty list — the pending/default-deny state.",
 		inputSchema: { type: "object", properties: {} },
 		async handler(_input, ctx) {
-			return listMemberGroups(ctx as ServiceCtx);
+			return listMemberGroups(ctx);
 		},
 	},
 	{
@@ -58,7 +57,7 @@ export const groupsTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return createGroup(ctx as ServiceCtx, input);
+			return createGroup(ctx, input);
 		},
 	},
 	{
@@ -75,7 +74,7 @@ export const groupsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { id, ...fields } = input as { id: string; [k: string]: unknown };
-			return updateGroup(ctx as ServiceCtx, id, fields);
+			return updateGroup(ctx, id, fields);
 		},
 	},
 	{
@@ -89,7 +88,7 @@ export const groupsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
-			return deleteGroup(ctx as ServiceCtx, id);
+			return deleteGroup(ctx, id);
 		},
 	},
 	{
@@ -105,7 +104,7 @@ export const groupsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { groupId, ...fields } = input as { groupId: string; [k: string]: unknown };
-			return addGroupMember(ctx as ServiceCtx, groupId, fields);
+			return addGroupMember(ctx, groupId, fields);
 		},
 	},
 	{
@@ -121,7 +120,7 @@ export const groupsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { groupId, userId } = input as { groupId: string; userId: string };
-			return removeGroupMember(ctx as ServiceCtx, groupId, userId);
+			return removeGroupMember(ctx, groupId, userId);
 		},
 	},
 	{
@@ -143,7 +142,7 @@ export const groupsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { groupId, ...fields } = input as { groupId: string; [k: string]: unknown };
-			return setGroupGrant(ctx as ServiceCtx, groupId, fields);
+			return setGroupGrant(ctx, groupId, fields);
 		},
 	},
 	{
@@ -159,7 +158,7 @@ export const groupsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { groupId, projectId } = input as { groupId: string; projectId: string };
-			return removeGroupGrant(ctx as ServiceCtx, groupId, projectId);
+			return removeGroupGrant(ctx, groupId, projectId);
 		},
 	},
 ];

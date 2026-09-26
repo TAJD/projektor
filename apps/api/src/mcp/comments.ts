@@ -1,6 +1,5 @@
 import type { MCPTool } from "@projektor/types";
 import { addComment, deleteComment, listComments, updateComment } from "../services/comments";
-import type { ServiceCtx } from "../services/types";
 
 export const commentsTools: MCPTool[] = [
 	{
@@ -12,7 +11,7 @@ export const commentsTools: MCPTool[] = [
 			properties: { issueId: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			return listComments(ctx as unknown as ServiceCtx, input);
+			return listComments(ctx, input);
 		},
 	},
 	{
@@ -27,7 +26,7 @@ export const commentsTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return addComment(ctx as unknown as ServiceCtx, input);
+			return addComment(ctx, input);
 		},
 	},
 	{
@@ -43,7 +42,7 @@ export const commentsTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return updateComment(ctx as unknown as ServiceCtx, input);
+			return updateComment(ctx, input);
 		},
 	},
 	{
@@ -58,7 +57,7 @@ export const commentsTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return deleteComment(ctx as unknown as ServiceCtx, input);
+			return deleteComment(ctx, input);
 		},
 	},
 ];

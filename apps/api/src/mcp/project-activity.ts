@@ -1,6 +1,5 @@
 import type { MCPTool } from "@projektor/types";
 import { listProjectActivity } from "../services/project-activity";
-import type { ServiceCtx } from "../services/types";
 
 export const projectActivityTools: MCPTool[] = [
 	{
@@ -25,7 +24,7 @@ export const projectActivityTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return listProjectActivity(ctx as unknown as ServiceCtx, input);
+			return listProjectActivity(ctx, input);
 		},
 	},
 ];
