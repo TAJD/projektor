@@ -1456,18 +1456,27 @@ function RevisionDiffView({ diff }: { diff: string }) {
 	);
 }
 
+// PROJ-808: restoring while the page is being edited raced the edit's own save against
+// the restore's PUT — both build their request off the revision the user started from,
+// so whichever lands second gets a 409 against a revision it created itself. Simplest
+// correct fix: disable Restore during editing rather than trying to reconcile the two.
+const RESTORE_DISABLED_WHILE_EDITING_REASON =
+	"Finish or cancel editing before restoring a previous revision";
+
 function RevisionRow({
 	revision,
 	workspaceSlug,
 	pageSlug,
 	onRestore,
 	restoring,
+	editing,
 }: {
 	revision: WikiRevision;
 	workspaceSlug: string | undefined;
 	pageSlug: string;
 	onRestore: (revision: WikiRevision) => void;
 	restoring: boolean;
+	editing: boolean;
 }) {
 	const [diffOpen, setDiffOpen] = useState(false);
 	const [diff, setDiff] = useState<string | null>(null);
@@ -1511,7 +1520,8 @@ function RevisionRow({
 					variant="outline"
 					size="sm"
 					onClick={() => onRestore(revision)}
-					disabled={restoring}
+					disabled={restoring || editing}
+					title={editing ? RESTORE_DISABLED_WHILE_EDITING_REASON : undefined}
 					class="text-text-muted py-0 px-2"
 				>
 					{restoring ? "Restoring…" : "Restore"}
@@ -1540,6 +1550,7 @@ function RevisionsHistory({
 	pageSlug,
 	onRestore,
 	restoringId,
+	editing,
 }: {
 	revisions: WikiRevision[];
 	showHistory: boolean;
@@ -1548,6 +1559,7 @@ function RevisionsHistory({
 	pageSlug: string;
 	onRestore: (revision: WikiRevision) => void;
 	restoringId: string | null;
+	editing: boolean;
 }) {
 	if (revisions.length === 0) return null;
 	return (
@@ -1565,6 +1577,7 @@ function RevisionsHistory({
 							pageSlug={pageSlug}
 							onRestore={onRestore}
 							restoring={restoringId === r.id}
+							editing={editing}
 						/>
 					))}
 				</ul>
@@ -1998,6 +2011,7 @@ function PageArticle(props: PageArticleProps) {
 					pageSlug={page.slug}
 					onRestore={props.onRestoreRevision}
 					restoringId={props.restoringRevisionId}
+					editing={props.editing}
 				/>
 
 				<AttachmentsPanel
@@ -3211,12 +3225,17 @@ function useWikiRestore(
 	page: WikiPageData | null,
 	latestRevisionId: string | null | undefined,
 	fetchPage: (s: string) => Promise<void>,
-	fetchRevisions: (s: string) => Promise<void>
+	fetchRevisions: (s: string) => Promise<void>,
+	editing: boolean
 ) {
 	const [restoringId, setRestoringId] = useState<string | null>(null);
 
 	async function restore(revision: WikiRevision) {
 		if (!page) return;
+		// PROJ-808: the Restore button is disabled while editing, but guard the action
+		// itself too — restoring mid-edit races the edit's own save against this PUT,
+		// and whichever lands second 409s against a revision it created itself.
+		if (editing) return;
 		const when = new Date(revision.created_at * 1000).toLocaleString();
 		if (
 			!window.confirm(
@@ -4115,7 +4134,8 @@ function useWikiPageState(
 		pageData.page,
 		pageData.revisionsLoaded ? (pageData.revisions[0]?.id ?? null) : undefined,
 		pageData.fetchPage,
-		pageData.fetchRevisions
+		pageData.fetchRevisions,
+		editState.editing
 	);
 
 	return {

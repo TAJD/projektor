@@ -1479,6 +1479,101 @@ describe("revision history: diff view + restore (PROJ-492)", () => {
 	});
 });
 
+// PROJ-808: restoring a revision while editing raced the edit's own save against the
+// restore's PUT, both built off the same base revision — whichever landed second 409'd
+// against a revision it created itself. Restore should be disabled (not merely racy)
+// while the page is being edited.
+describe("WikiPage — PROJ-808 Restore disabled while editing", () => {
+	const REVISION = {
+		id: "rev-old",
+		author_id: "u1",
+		author_name: "Ann",
+		created_at: 500,
+		summary: "Fixed a typo",
+	};
+
+	function mockFetchWithRevisionForEditing() {
+		return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (/\/revisions\/rev-old$/.test(u)) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ ...REVISION, content: "old content" }),
+				});
+			}
+			if (u.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve({ user: { id: "u1", email: "real-user@example.com", name: "User" } }),
+				});
+			}
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([REVISION]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (init?.method === "PUT") {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+	}
+
+	it("disables Restore with an explanatory tooltip once the page enters edit mode", async () => {
+		const fetchMock = mockFetchWithRevisionForEditing();
+		vi.stubGlobal("fetch", fetchMock);
+		// Accept any confirm() — otherwise jsdom's default (false) would stop restore()
+		// before its PUT, and "no PUT went out" below would hold whether or not Restore is
+		// actually blocked while editing. Cleared because earlier tests leave the spy on.
+		const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+		confirmSpy.mockClear();
+		try {
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			fireEvent.click(screen.getByRole("button", { name: /History/i }));
+			const restoreButton = await screen.findByRole("button", { name: "Restore" });
+			expect(restoreButton.hasAttribute("disabled")).toBe(false);
+
+			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+			expect(restoreButton.hasAttribute("disabled")).toBe(true);
+			expect(restoreButton.getAttribute("title")).toMatch(/before restoring/i);
+
+			fireEvent.click(restoreButton);
+			// Give a (wrongly) started restore time to fetch the old revision and PUT it.
+			await new Promise((r) => setTimeout(r, 50));
+			expect(confirmSpy).not.toHaveBeenCalled();
+			expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith("/revisions/rev-old"))).toBe(
+				false
+			);
+			expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+		} finally {
+			confirmSpy.mockRestore();
+		}
+	});
+
+	it("re-enables Restore once editing is cancelled", async () => {
+		const fetchMock = mockFetchWithRevisionForEditing();
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: /History/i }));
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+		const restoreButtonWhileEditing = await screen.findByRole("button", { name: "Restore" });
+		expect(restoreButtonWhileEditing.hasAttribute("disabled")).toBe(true);
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		const restoreButtonAfterCancel = await screen.findByRole("button", { name: "Restore" });
+		expect(restoreButtonAfterCancel.hasAttribute("disabled")).toBe(false);
+	});
+});
+
 // PROJ-494: inline image paste/drag upload + attachment referenced/orphaned badge.
 describe("WikiPage — inline images & attachment badges (PROJ-494)", () => {
 	const REFERENCED_ID = "att-referenced";
