@@ -2339,3 +2339,220 @@ describe("WikiPage — PROJ-804 duplicate/empty heading ids in the rendered TOC"
 		expect(new Set(headingIds).size).toBe(headingIds.length);
 	});
 });
+
+describe("WikiPage — PROJ-805 stale sidebar search responses", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function searchResult(id: string, title: string) {
+		return {
+			id,
+			slug: id,
+			title,
+			project_id: null,
+			excerpt: null,
+			type: null,
+			status: null,
+			tags: [] as string[],
+			freshness: null,
+		};
+	}
+
+	it("discards a slower response for an earlier query once a newer query's response has landed", async () => {
+		let resolveFirst: (v: unknown) => void = () => {};
+		const firstResponse = new Promise((r) => {
+			resolveFirst = r;
+		});
+
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = new URL(String(url), "http://localhost");
+			if (u.pathname.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ user: { id: "u1", email: "a@example.com", name: "A" } }),
+				});
+			}
+			if (u.pathname.includes("/revisions"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.pathname.includes("/tree"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.pathname === "/api/wiki/search") {
+				const q = u.searchParams.get("q");
+				if (q === "ab") return firstResponse; // slow — resolves later, below
+				if (q === "abc") {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([searchResult("r2", "Second Result")]),
+					});
+				}
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const searchInput = screen.getByLabelText(/Search wiki pages/i);
+		fireEvent.input(searchInput, { target: { value: "ab" } });
+		await vi.advanceTimersByTimeAsync(300); // "ab"'s debounce fires; its fetch is left in flight.
+
+		fireEvent.input(searchInput, { target: { value: "abc" } });
+		await vi.advanceTimersByTimeAsync(300); // "abc"'s debounce fires and its fetch resolves.
+
+		expect(await screen.findByText("Second Result")).toBeTruthy();
+
+		// The slow "ab" response finally arrives after "abc"'s has already landed — it
+		// must not overwrite the newer, already-displayed results.
+		resolveFirst({
+			ok: true,
+			json: () => Promise.resolve([searchResult("r1", "First Result")]),
+		});
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(screen.queryByText("First Result")).toBeNull();
+		expect(screen.getByText("Second Result")).toBeTruthy();
+	});
+
+	function listItem(id: string, title: string) {
+		return { id, slug: id, title, type: null, status: null, tags: [] as string[] };
+	}
+
+	it("discards a slower filter response for an earlier tag filter once a newer one has landed", async () => {
+		let resolveFirst: (v: unknown) => void = () => {};
+		const firstResponse = new Promise((r) => {
+			resolveFirst = r;
+		});
+
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = new URL(String(url), "http://localhost");
+			if (u.pathname.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ user: { id: "u1", email: "a@example.com", name: "A" } }),
+				});
+			}
+			if (u.pathname.includes("/revisions"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.pathname.includes("/tree"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.pathname === "/api/wiki" && u.searchParams.has("tags")) {
+				const tags = u.searchParams.get("tags");
+				if (tags === "ab") return firstResponse; // slow — resolves later, below
+				if (tags === "abc") {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([listItem("f2", "Second Filtered")]),
+					});
+				}
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const tagsInput = screen.getByLabelText(/Filter wiki pages by tags/i);
+		fireEvent.input(tagsInput, { target: { value: "ab" } });
+		await vi.advanceTimersByTimeAsync(300);
+
+		fireEvent.input(tagsInput, { target: { value: "abc" } });
+		await vi.advanceTimersByTimeAsync(300);
+
+		expect(await screen.findByText("Second Filtered")).toBeTruthy();
+
+		resolveFirst({
+			ok: true,
+			json: () => Promise.resolve([listItem("f1", "First Filtered")]),
+		});
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(screen.queryByText("First Filtered")).toBeNull();
+		expect(screen.getByText("Second Filtered")).toBeTruthy();
+	});
+
+	// The first two tests only cover a stale response landing *after* the newer one. It
+	// can also land while the newer input's debounce is still pending — before any newer
+	// request exists to out-rank it — and used to be applied then (clearing the loading
+	// state and showing results for input the user has already changed).
+	function mockFetchWithSlowFirst(
+		match: (u: URL) => string | null,
+		slowKey: string,
+		fastKey: string,
+		fastBody: unknown
+	) {
+		let resolveSlow: (v: unknown) => void = () => {};
+		const slow = new Promise((r) => {
+			resolveSlow = r;
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = new URL(String(url), "http://localhost");
+				if (u.pathname.includes("/revisions") || u.pathname.includes("/tree"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				const key = match(u);
+				if (key === slowKey) return slow;
+				if (key === fastKey)
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(fastBody) });
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+			})
+		);
+		return (body: unknown) => resolveSlow({ ok: true, json: () => Promise.resolve(body) });
+	}
+
+	it("drops an in-flight search response once the query changes, even before the new debounce fires", async () => {
+		const resolveSlow = mockFetchWithSlowFirst(
+			(u) => (u.pathname === "/api/wiki/search" ? u.searchParams.get("q") : null),
+			"ab",
+			"abc",
+			[searchResult("r2", "Second Result")]
+		);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const searchInput = screen.getByLabelText(/Search wiki pages/i);
+		fireEvent.input(searchInput, { target: { value: "ab" } });
+		await vi.advanceTimersByTimeAsync(300); // "ab" is now in flight.
+		fireEvent.input(searchInput, { target: { value: "abc" } }); // debounce pending.
+
+		resolveSlow([searchResult("r1", "First Result")]);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByText("First Result")).toBeNull();
+		expect(screen.getByText("Searching…")).toBeTruthy();
+
+		await vi.advanceTimersByTimeAsync(300);
+		expect(await screen.findByText("Second Result")).toBeTruthy();
+		expect(screen.queryByText("First Result")).toBeNull();
+	});
+
+	it("drops an in-flight filter response once the filter changes, even before the new debounce fires", async () => {
+		const resolveSlow = mockFetchWithSlowFirst(
+			(u) => (u.pathname === "/api/wiki" ? u.searchParams.get("tags") : null),
+			"ab",
+			"abc",
+			[listItem("f2", "Second Filtered")]
+		);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const tagsInput = screen.getByLabelText(/Filter wiki pages by tags/i);
+		fireEvent.input(tagsInput, { target: { value: "ab" } });
+		await vi.advanceTimersByTimeAsync(300);
+		fireEvent.input(tagsInput, { target: { value: "abc" } });
+
+		resolveSlow([listItem("f1", "First Filtered")]);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByText("First Filtered")).toBeNull();
+
+		await vi.advanceTimersByTimeAsync(300);
+		expect(await screen.findByText("Second Filtered")).toBeTruthy();
+		expect(screen.queryByText("First Filtered")).toBeNull();
+	});
+});

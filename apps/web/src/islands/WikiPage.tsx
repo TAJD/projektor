@@ -2204,6 +2204,14 @@ function useWikiFilters(
 	const [filterTags, setFilterTags] = useState("");
 	const [filteredResults, setFilteredResults] = useState<WikiListItem[]>([]);
 	const [filteredLoading, setFilteredLoading] = useState(false);
+	// PROJ-805: clearing the debounce timer stops a request that hasn't fired yet, but
+	// not one already in flight — a slow response for an earlier filter combination
+	// could still land after (and overwrite the results of) a faster, newer one. Each
+	// debounced fire takes a ticket; only the response whose ticket is still the latest
+	// gets applied. The effect cleanup also advances the ticket, so an in-flight
+	// response is dropped as soon as *any* input changes — including while the next
+	// debounce is still pending, or after the filters are cleared entirely.
+	const filterRequestRef = useRef(0);
 
 	const hasActiveFilters = Boolean(filterType || filterStatus || filterTags.trim());
 
@@ -2215,22 +2223,29 @@ function useWikiFilters(
 	useEffect(() => {
 		if (!hasActiveFilters || projectId === undefined) {
 			setFilteredResults([]);
+			// A request dropped by the previous run's cleanup never clears this itself.
+			setFilteredLoading(false);
 			return;
 		}
 		setFilteredLoading(true);
 		const timer = setTimeout(async () => {
+			const ticket = ++filterRequestRef.current;
 			try {
 				const qs = new URLSearchParams();
 				appendWikiFilterParams(qs, { projectId, filterType, filterStatus, filterTags });
 				const data = await apiFetch<WikiListItem[]>(`/api/wiki?${qs}`, { workspaceSlug });
+				if (ticket !== filterRequestRef.current) return;
 				setFilteredResults(Array.isArray(data) ? data : []);
 			} catch {
 				// non-fatal
 			} finally {
-				setFilteredLoading(false);
+				if (ticket === filterRequestRef.current) setFilteredLoading(false);
 			}
 		}, 300);
-		return () => clearTimeout(timer);
+		return () => {
+			clearTimeout(timer);
+			filterRequestRef.current++;
+		};
 	}, [filterType, filterStatus, filterTags, workspaceSlug, projectId, hasActiveFilters]);
 
 	return {
@@ -2256,26 +2271,37 @@ function useWikiSearch(
 	const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
 	const [searchLoading, setSearchLoading] = useState(false);
 	const { filterType, filterStatus, filterTags } = filters;
+	// PROJ-805: same stale-response guard as useWikiFilters above — a slow response for
+	// an earlier query could otherwise overwrite a faster, newer one's results, or
+	// repopulate the list after the query was cleared. Cleanup advances the ticket too.
+	const searchRequestRef = useRef(0);
 
 	useEffect(() => {
 		if (!searchQuery.trim() || projectId === undefined) {
 			setSearchResults([]);
+			// A request dropped by the previous run's cleanup never clears this itself.
+			setSearchLoading(false);
 			return;
 		}
 		setSearchLoading(true);
 		const timer = setTimeout(async () => {
+			const ticket = ++searchRequestRef.current;
 			try {
 				const qs = new URLSearchParams({ q: searchQuery });
 				appendWikiFilterParams(qs, { projectId, filterType, filterStatus, filterTags });
 				const data = await apiFetch<SearchResult[]>(`/api/wiki/search?${qs}`, { workspaceSlug });
+				if (ticket !== searchRequestRef.current) return;
 				setSearchResults(Array.isArray(data) ? data : []);
 			} catch {
 				// non-fatal
 			} finally {
-				setSearchLoading(false);
+				if (ticket === searchRequestRef.current) setSearchLoading(false);
 			}
 		}, 300);
-		return () => clearTimeout(timer);
+		return () => {
+			clearTimeout(timer);
+			searchRequestRef.current++;
+		};
 	}, [searchQuery, workspaceSlug, projectId, filterType, filterStatus, filterTags]);
 
 	return { searchQuery, setSearchQuery, searchResults, searchLoading };
