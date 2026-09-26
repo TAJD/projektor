@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { unzipSync } from "fflate";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedFixture, seedProject, seedProjectFixture } from "./helpers";
 
 // MAX_EXPORT_PAGES in services/wiki-export.ts — kept in sync manually since the
@@ -321,5 +321,77 @@ describe("Wiki export (PROJ-497)", () => {
 
 		const { status } = await exportZip(token, slug, `scope=subtree&pageId=${root.slug}`);
 		expect(status).toBe(400);
+	});
+	// PROJ-813: trashed pages must never leave the workspace via export.
+	describe("trashed pages (PROJ-813)", () => {
+		// Each test here makes more than RATE_LIMIT_API_MAX (5) calls on one token.
+		let originalMax: unknown;
+		beforeAll(() => {
+			originalMax = (env as unknown as Record<string, unknown>).RATE_LIMIT_API_MAX;
+			(env as unknown as Record<string, unknown>).RATE_LIMIT_API_MAX = "1000";
+		});
+		afterAll(() => {
+			(env as unknown as Record<string, unknown>).RATE_LIMIT_API_MAX = originalMax;
+		});
+
+		async function trash(pageId: string): Promise<void> {
+			const res = await SELF.fetch(`http://localhost/api/wiki/${pageId}`, {
+				method: "DELETE",
+				headers: authHeaders(token, slug),
+			});
+			expect(res.status).toBeLessThan(300);
+		}
+
+		it("omits a trashed page from a space export", async () => {
+			await createPage(token, slug, { title: "Kept", content: "kept body" });
+			const leaked = await createPage(token, slug, { title: "Leaked Secret", content: "hunter2" });
+			await trash(leaked.id);
+
+			const { entries } = await exportZip(token, slug, "scope=space");
+			expect(Object.keys(entries ?? {})).toEqual(["pages/kept.md"]);
+		});
+
+		it("with a reused slug, exports only the live page and resolves the subtree root to it", async () => {
+			const old = await createPage(token, slug, { title: "Notes", content: "old secret" });
+			await trash(old.id);
+			const live = await createPage(token, slug, { title: "Notes", content: "live body" });
+			expect(live.slug).toBe(old.slug);
+			await createPage(token, slug, { title: "Live Child", content: "c", parentId: live.id });
+
+			const space = await exportZip(token, slug, "scope=space");
+			const spaceNames = Object.keys(space.entries ?? {}).sort();
+			expect(spaceNames).toEqual(["pages/live-child.md", `pages/${live.slug}.md`]);
+			expect(entryText(space.entries!, `pages/${live.slug}.md`)).toContain("live body");
+			expect(entryText(space.entries!, `pages/${live.slug}.md`)).not.toContain("old secret");
+
+			const sub = await exportZip(token, slug, `scope=subtree&pageId=${live.slug}`);
+			expect(sub.status).toBe(200);
+			expect(Object.keys(sub.entries ?? {}).sort()).toEqual([
+				"pages/live-child.md",
+				`pages/${live.slug}.md`,
+			]);
+			expect(entryText(sub.entries!, `pages/${live.slug}.md`)).toContain("live body");
+		});
+
+		it("excludes a trashed descendant from a subtree export and 404s a trashed root", async () => {
+			const root = await createPage(token, slug, { title: "Tree Root", content: "r" });
+			const gone = await createPage(token, slug, {
+				title: "Gone Child",
+				content: "g",
+				parentId: root.id,
+			});
+			await createPage(token, slug, { title: "Kept Child", content: "k", parentId: root.id });
+			await trash(gone.id);
+
+			const { entries } = await exportZip(token, slug, `scope=subtree&pageId=${root.id}`);
+			expect(Object.keys(entries ?? {}).sort()).toEqual([
+				"pages/kept-child.md",
+				"pages/tree-root.md",
+			]);
+
+			await trash(root.id);
+			const after = await exportZip(token, slug, `scope=subtree&pageId=${root.id}`);
+			expect(after.status).toBe(404);
+		});
 	});
 });
