@@ -1792,3 +1792,85 @@ describe("PROJ-795: Back/Forward switch the displayed page", () => {
 		expect(await screen.findByText("Page A")).toBeTruthy();
 	});
 });
+
+describe("out-of-order page/revision responses (PROJ-801)", () => {
+	const realLocation = window.location;
+
+	afterEach(() => {
+		Object.defineProperty(window, "location", { configurable: true, value: realLocation });
+	});
+
+	function deferred<T>() {
+		let resolve!: (v: T) => void;
+		const promise = new Promise<T>((r) => {
+			resolve = r;
+		});
+		return { promise, resolve };
+	}
+
+	const jsonResponse = (body: unknown) => ({ ok: true, json: () => Promise.resolve(body) });
+
+	it("keeps the last-navigated page and its revisions when the first page's responses arrive last", async () => {
+		const PAGE_A: WikiPageData = { ...PAGE, id: "wa", slug: "page-a", title: "Page A" };
+		const PAGE_B: WikiPageData = { ...PAGE, id: "wb", slug: "page-b", title: "Page B" };
+		const REV_A = { id: "rev-a", author_id: "u1", author_name: "Ann", created_at: 1 };
+		const REV_B = { id: "rev-b", author_id: "u1", author_name: "Ann", created_at: 2 };
+		const slowPageA = deferred<ReturnType<typeof jsonResponse>>();
+		const slowRevsA = deferred<ReturnType<typeof jsonResponse>>();
+
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/auth/me")) {
+				return Promise.resolve(
+					jsonResponse({ user: { id: "u1", email: "a@example.com", name: "A" } })
+				);
+			}
+			if (u.includes("/tree")) return Promise.resolve(jsonResponse([]));
+			if (init?.method === "PUT") return Promise.resolve(jsonResponse(PAGE_B));
+			if (u.includes("/api/wiki/page-a/revisions")) return slowRevsA.promise;
+			if (u.includes("/api/wiki/page-b/revisions")) return Promise.resolve(jsonResponse([REV_B]));
+			if (u.includes("/api/wiki/page-a")) return slowPageA.promise;
+			if (u.includes("/api/wiki/page-b")) return Promise.resolve(jsonResponse(PAGE_B));
+			return Promise.resolve({ ok: false, status: 404 });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		// A plain location object so the canonical-slug redirect can be observed (see the
+		// PROJ-487 block above for why jsdom's own Location can't be spied on).
+		const replace = vi.fn();
+		const loc = {
+			pathname: "/wiki/page-a",
+			search: "",
+			origin: realLocation.origin,
+			hostname: realLocation.hostname,
+			host: realLocation.host,
+			replace,
+		};
+		Object.defineProperty(window, "location", { configurable: true, value: loc });
+
+		render(<WikiPage slug="page-a" />);
+		// Navigate to B (Back/Forward path) before A has answered.
+		loc.pathname = "/wiki/page-b";
+		window.dispatchEvent(new PopStateEvent("popstate"));
+		expect(await screen.findByText("Page B")).toBeTruthy();
+
+		// A's responses finally arrive.
+		slowPageA.resolve(jsonResponse(PAGE_A));
+		slowRevsA.resolve(jsonResponse([REV_A]));
+		await new Promise((r) => setTimeout(r, 20));
+
+		expect(screen.getByText("Page B")).toBeTruthy();
+		expect(screen.queryByText("Page A")).toBeNull();
+		expect(replace).not.toHaveBeenCalled();
+
+		// And B's save carries B's revision, not A's — no false 409.
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		await waitFor(() => {
+			const putCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
+			expect(putCall).toBeTruthy();
+			expect(String(putCall?.[0])).toContain("/api/wiki/page-b");
+			expect(JSON.parse(putCall?.[1].body)).toMatchObject({ baseRevisionId: "rev-b" });
+		});
+	});
+});
