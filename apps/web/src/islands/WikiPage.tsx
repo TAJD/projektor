@@ -361,6 +361,8 @@ export interface ServerDraft {
 	content: string;
 	baseRevisionId: string | null;
 	updatedAt: number;
+	// PROJ-797 (client-only): the page was saved by someone since this draft started.
+	pageChangedSince?: boolean;
 }
 
 function formatBytes(bytes: number): string {
@@ -1285,10 +1287,12 @@ function PageHeader({
 // not just after a crash on the same browser.
 function DraftRestoreBanner({
 	updatedAt,
+	pageChangedSince,
 	onRestore,
 	onDiscard,
 }: {
 	updatedAt: number;
+	pageChangedSince?: boolean;
 	onRestore: () => void;
 	onDiscard: () => void;
 }) {
@@ -1298,7 +1302,15 @@ function DraftRestoreBanner({
 	].join(" ");
 	return (
 		<div class={bannerClass}>
-			<span>Restore unsaved draft from {new Date(updatedAt * 1000).toLocaleString()}?</span>
+			<span>
+				Restore unsaved draft from {new Date(updatedAt * 1000).toLocaleString()}?
+				{pageChangedSince && (
+					<span class="block text-text-muted text-[0.8rem]">
+						The page has been saved since this draft was started — saving it will ask before
+						overwriting.
+					</span>
+				)}
+			</span>
 			<div class="flex gap-2 shrink-0">
 				<Button variant="primary" size="sm" onClick={onRestore}>
 					Restore
@@ -1666,6 +1678,8 @@ interface PageArticleProps {
 	onCancelMove: () => void;
 	latestRevision: WikiRevision | null;
 	saveError: string | null;
+	// PROJ-797: set only after a 409 — rebases the user's text onto the current revision.
+	onOverwriteWithMine: (() => void) | null;
 	draftBanner: ServerDraft | null;
 	onRestoreDraft: () => void;
 	onDiscardDraft: () => void;
@@ -1723,6 +1737,7 @@ function PageArticleMeta(
 		| "onCancelMove"
 		| "latestRevision"
 		| "saveError"
+		| "onOverwriteWithMine"
 		| "draftBanner"
 		| "onRestoreDraft"
 		| "onDiscardDraft"
@@ -1792,14 +1807,25 @@ function PageArticleMeta(
 			)}
 
 			{props.saveError && (
-				<p role="alert" class="text-danger-text mb-3">
-					{props.saveError}
-				</p>
+				<div role="alert" class="text-danger-text mb-3">
+					<p class="m-0">{props.saveError}</p>
+					{props.onOverwriteWithMine && (
+						<div class="mt-2 flex gap-2 flex-wrap items-center">
+							<Button variant="primary" size="sm" onClick={props.onOverwriteWithMine}>
+								Overwrite with mine
+							</Button>
+							<span class="text-text-muted text-[0.8rem]">
+								or copy your text from the editor before reloading.
+							</span>
+						</div>
+					)}
+				</div>
 			)}
 
 			{props.editing && props.draftBanner && (
 				<DraftRestoreBanner
 					updatedAt={props.draftBanner.updatedAt}
+					pageChangedSince={props.draftBanner.pageChangedSince}
 					onRestore={props.onRestoreDraft}
 					onDiscard={props.onDiscardDraft}
 				/>
@@ -1961,6 +1987,21 @@ function useWikiUrlState(slugProp: string | undefined) {
 	}, [slugProp]);
 
 	return { slug, setSlug };
+}
+
+// PROJ-795: navigateTo pushes history entries, so Back/Forward must switch the page too
+// (the slug used to be read only on mount — the URL changed but the old page stayed).
+function usePopstateNavigation(showSlug: (s: string) => void) {
+	const showSlugRef = useRef(showSlug);
+	showSlugRef.current = showSlug;
+	useEffect(() => {
+		const onPopState = () => {
+			const params = new URLSearchParams(window.location.search);
+			showSlugRef.current(params.get("slug") || slugFromPathname(window.location.pathname));
+		};
+		window.addEventListener("popstate", onPopState);
+		return () => window.removeEventListener("popstate", onPopState);
+	}, []);
 }
 
 const WORKSPACE_SCOPE = "workspace";
@@ -2567,11 +2608,15 @@ async function saveWikiPageEdit(
 // than the generic failure message, so the user knows to reload instead of retrying the
 // same save. Match the tail of apiFetch's message, not a bare "409" — the request path is
 // part of it, and slugs like "proj-409-notes" would otherwise read as conflicts.
+function isWikiSaveConflict(e: unknown): boolean {
+	return String(e).endsWith("failed: 409");
+}
+
 function wikiSaveErrorMessage(e: unknown): string {
-	if (String(e).endsWith("failed: 409")) {
+	if (isWikiSaveConflict(e)) {
 		return (
-			"This page was changed by someone else since you loaded it. Reload the page before " +
-			"saving to avoid overwriting their changes."
+			"This page was changed by someone else since you started editing. Overwrite it with " +
+			"your version, or copy your text and reload to merge by hand."
 		);
 	}
 	return `Save failed: ${String(e)}`;
@@ -2589,6 +2634,8 @@ function useWikiEditing(
 	const [editContent, setEditContent] = useState("");
 	const [saving, setSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
+	// PROJ-797: the last save hit a 409 (someone else saved first).
+	const [conflict, setConflict] = useState(false);
 	const [draftBanner, setDraftBanner] = useState<ServerDraft | null>(null);
 	// PROJ-507: the revision id of the content the user actually started editing,
 	// frozen at startEdit() time — sent back as baseRevisionId so the server can
@@ -2635,11 +2682,16 @@ function useWikiEditing(
 				`/api/wiki/${encodeURIComponent(page.slug)}/draft`,
 				{ workspaceSlug }
 			);
-			// A draft older than the page's current published content was superseded
-			// by a publish (this user's or someone else's) since it was saved — not
-			// worth offering to restore.
-			if (draft && draft.updatedAt > page.updated_at) {
-				setDraftBanner(draft);
+			// PROJ-797: offer any draft that differs from what's published, regardless
+			// of timestamp order — a publish by someone else after the last autosave
+			// used to hide the user's draft silently. The banner notes when the page
+			// has changed since the draft was started.
+			if (draft && (draft.content !== page.content || draft.title !== page.title)) {
+				const pageChangedSince =
+					page.revisionId !== undefined
+						? draft.baseRevisionId !== page.revisionId
+						: draft.updatedAt <= page.updated_at;
+				setDraftBanner({ ...draft, pageChangedSince });
 			}
 		} catch {
 			// non-fatal — treat as no draft
@@ -2670,22 +2722,33 @@ function useWikiEditing(
 	}
 
 	function cancelEdit() {
+		// PROJ-796: while the restore banner is unresolved, the server draft is the
+		// user's unsaved work from elsewhere — leaving must not overwrite it with the
+		// published text the editor was opened with.
+		if (draftBanner) skipLeaveFlushRef.current = true;
 		setEditing(false);
 		setSaveError(null);
+		setConflict(false);
 		setDraftBanner(null);
 	}
 
-	async function save() {
+	// Wired straight to onClick, so it must not take the event as an argument.
+	function save() {
+		return saveWithBase(undefined);
+	}
+
+	async function saveWithBase(baseOverride: string | null | undefined) {
 		if (!page) return;
 		setSaving(true);
 		setSaveError(null);
+		setConflict(false);
 		try {
 			await saveWikiPageEdit({
 				workspaceSlug,
 				page,
 				editTitle,
 				editContent,
-				baseRevisionId,
+				baseRevisionId: baseOverride !== undefined ? baseOverride : baseRevisionId,
 				fetchPage,
 				fetchRevisions,
 			});
@@ -2693,8 +2756,28 @@ function useWikiEditing(
 			setEditing(false);
 		} catch (e) {
 			setSaveError(wikiSaveErrorMessage(e));
+			setConflict(isWikiSaveConflict(e));
 		} finally {
 			setSaving(false);
+		}
+	}
+
+	// PROJ-797: after a 409 the user is never stuck — this re-reads the page's current
+	// revision and saves their text on top of it (a deliberate overwrite). Their text
+	// stays in the editor either way, so they can also copy it out instead.
+	async function overwriteWithMine() {
+		if (!page) return;
+		try {
+			const current = await apiFetch<WikiPageData>(`/api/wiki/${encodeURIComponent(page.slug)}`, {
+				workspaceSlug,
+			});
+			const base = current.revisionId !== undefined ? current.revisionId : undefined;
+			setBaseRevisionId(base);
+			// null is a real base ("page has no revisions"); undefined means "server
+			// predates revisionId", which falls back to last-write-wins.
+			await saveWithBase(base === undefined ? null : base);
+		} catch (e) {
+			setSaveError(wikiSaveErrorMessage(e));
 		}
 	}
 
@@ -2707,6 +2790,7 @@ function useWikiEditing(
 		setEditContent,
 		saving,
 		saveError,
+		overwriteWithMine: conflict ? overwriteWithMine : null,
 		draftBanner,
 		startEdit,
 		restoreDraft,
@@ -3004,7 +3088,9 @@ function createWikiActions(
 		cancelMove,
 	} = args;
 
-	function navigateTo(s: string) {
+	// Leaving edit mode here (setEditing(false)) runs the autosave hook's leave-flush,
+	// so in-progress edits are saved as a draft before the page switches.
+	function showSlug(s: string) {
 		setCreating(false);
 		setEditing(false);
 		setPage(null);
@@ -3012,6 +3098,10 @@ function createWikiActions(
 		setToc([]);
 		setSlug(s);
 		cancelMove();
+	}
+
+	function navigateTo(s: string) {
+		showSlug(s);
 		history.pushState(null, "", s ? `/wiki/${encodeURIComponent(s)}` : "/wiki");
 	}
 
@@ -3043,7 +3133,7 @@ function createWikiActions(
 		}
 	}
 
-	return { navigateTo, startCreate, submitCreate, deletePage };
+	return { navigateTo, showSlug, startCreate, submitCreate, deletePage };
 }
 
 const WIKI_PAGE_STYLES = `
@@ -3441,6 +3531,7 @@ function buildArticleProps(
 		verifyError: string | null;
 		latestRevision: WikiRevision | null;
 		saveError: string | null;
+		overwriteWithMine: (() => void) | null;
 		draftBanner: ServerDraft | null;
 		restoreDraft: () => void;
 		discardDraft: () => void;
@@ -3479,6 +3570,7 @@ function buildArticleProps(
 		verifyError: article.verifyError,
 		latestRevision: article.latestRevision,
 		saveError: article.saveError,
+		onOverwriteWithMine: article.overwriteWithMine,
 		draftBanner: article.draftBanner,
 		onRestoreDraft: article.restoreDraft,
 		onDiscardDraft: article.discardDraft,
@@ -3607,7 +3699,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		restoreState,
 	} = state;
 
-	const { navigateTo, startCreate, submitCreate, deletePage } = createWikiActions({
+	const { navigateTo, showSlug, startCreate, submitCreate, deletePage } = createWikiActions({
 		workspaceSlug,
 		page: pageData.page,
 		fetchTree,
@@ -3621,6 +3713,8 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		rawSubmitCreate: createForm.submitCreate,
 		cancelMove: move.cancelMove,
 	});
+
+	usePopstateNavigation(showSlug);
 
 	const { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions } =
 		deriveWikiPageState(pageData, pageMap, editState, createForm, toc);
@@ -3668,6 +3762,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		verifyError: verify.verifyError,
 		latestRevision,
 		saveError: editState.saveError,
+		overwriteWithMine: editState.overwriteWithMine,
 		draftBanner: editState.draftBanner,
 		restoreDraft: editState.restoreDraft,
 		discardDraft: editState.discardDraft,

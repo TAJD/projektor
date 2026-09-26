@@ -577,10 +577,12 @@ describe("server-side draft autosave (PROJ-495) — restore banner", () => {
 		expect(deleteCall).toBeTruthy();
 	});
 
-	it("does not offer a draft older than the page's current published content", async () => {
+	// PROJ-797: timestamp order no longer decides (an older-but-different draft IS
+	// offered — see the PROJ-797 tests); a draft identical to the published page isn't.
+	it("does not offer a draft that matches the published page", async () => {
 		await renderWithDraftAndOpenEdit({
-			title: "Stale Draft Title",
-			content: "Stale draft content",
+			title: PAGE.title,
+			content: PAGE.content,
 			baseRevisionId: null,
 			updatedAt: PAGE.updated_at - 1,
 		});
@@ -668,7 +670,7 @@ describe("optimistic locking (PROJ-507)", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 		fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-		expect(await screen.findByText(/changed by someone else since you loaded it/i)).toBeTruthy();
+		expect(await screen.findByText(/changed by someone else/i)).toBeTruthy();
 		// Still in edit mode — the save was rejected, not applied.
 		expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
 	});
@@ -1507,5 +1509,115 @@ describe("WikiPage — mobile drawer + action overflow (PROJ-664)", () => {
 		} finally {
 			restore();
 		}
+	});
+});
+
+describe("PROJ-796: Cancel with an unresolved restore banner keeps the draft", () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	it("Edit → banner → Cancel writes no draft", async () => {
+		const { draftPutCalls } = mockFetchWikiWithDraft({
+			title: "From my laptop",
+			content: "Unsaved work",
+			baseRevisionId: null,
+			updatedAt: 2_000_000,
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		await vi.advanceTimersByTimeAsync(0);
+		await screen.findByText(/Restore unsaved draft from/i);
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		await vi.advanceTimersByTimeAsync(2000);
+
+		expect(draftPutCalls).toEqual([]);
+	});
+});
+
+describe("PROJ-797: drafts and 409s are always recoverable", () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	it("offers a draft even when the page was saved after it, and says so", async () => {
+		mockFetchWikiWithDraft({
+			title: "My Page",
+			content: "my unsaved edit",
+			baseRevisionId: "rev-old",
+			// older than PAGE.updated_at (1000): someone else saved after my last autosave
+			updatedAt: 500,
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(await screen.findByText(/Restore unsaved draft from/i)).toBeTruthy();
+		expect(screen.getByText(/has been saved since this draft was started/i)).toBeTruthy();
+	});
+
+	it("after a 409, Overwrite with mine re-saves on top of the current revision", async () => {
+		vi.useRealTimers();
+		let puts = 0;
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/revisions"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("/tree"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.includes("/draft"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(null) });
+			if (init?.method === "PUT") {
+				puts++;
+				return puts === 1
+					? Promise.resolve({ ok: false, status: 409 })
+					: Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) });
+			}
+			// The first GET is what the editor opened with; later GETs see someone else's save.
+			const revisionId = puts > 0 ? "rev-theirs" : "rev-mine";
+			return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE, revisionId }) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+		fireEvent.click(await screen.findByRole("button", { name: "Overwrite with mine" }));
+
+		await waitFor(() => {
+			const bodies = fetchMock.mock.calls
+				.filter(([u, i]) => i?.method === "PUT" && !String(u).includes("/draft"))
+				.map(([, i]) => JSON.parse(i.body).baseRevisionId);
+			expect(bodies).toEqual(["rev-mine", "rev-theirs"]);
+		});
+	});
+});
+
+describe("PROJ-795: Back/Forward switch the displayed page", () => {
+	it("popstate loads the page named by the URL", async () => {
+		const pages: Record<string, WikiPageData> = {
+			a: { ...PAGE, id: "wa", slug: "a", title: "Page A" },
+			b: { ...PAGE, id: "wb", slug: "b", title: "Page B" },
+		};
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/revisions") || u.includes("/tree"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				if (u.includes("/draft"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(null) });
+				const slug = decodeURIComponent(u.split("/api/wiki/")[1] ?? "").split(/[/?]/)[0];
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(pages[slug] ?? pages.a) });
+			})
+		);
+		window.history.replaceState(null, "", "/wiki/b");
+		render(<WikiPage slug="b" />);
+		await screen.findByText("Page B");
+
+		window.history.replaceState(null, "", "/wiki/a");
+		window.dispatchEvent(new PopStateEvent("popstate"));
+		expect(await screen.findByText("Page A")).toBeTruthy();
 	});
 });
