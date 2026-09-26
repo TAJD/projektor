@@ -39,8 +39,8 @@ Logging in and minting long-lived tokens are browser flows, not agent tool calls
 | Method | Path | Notes |
 |--------|------|-------|
 | `GET` | `/auth/login` | Login redirect (browser only) |
-| `POST` | `/auth/tokens` | Mint an API token for the current user |
-| `DELETE` | `/auth/tokens/:id` | Revoke a token |
+| `POST` | `/auth/tokens` | Mint a personal access token for the current user (signed-in browser session only — API tokens and OAuth grants get 403) |
+| `DELETE` | `/auth/tokens/:id` | Revoke one of your personal tokens (signed-in browser session only) |
 
 ## Workspace-scoped API tokens
 

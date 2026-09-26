@@ -222,6 +222,60 @@ describe("PROJ-79: CF Access JWT verification (verifyJwtPayload unit tests)", ()
 		const result = await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER);
 		expect(result).toBeNull();
 	});
+
+	// PROJ-879: the payload is schema-validated, not cast.
+	describe("PROJ-879: payload validation", () => {
+		const now = () => Math.floor(Date.now() / 1000);
+
+		it("missing exp is rejected (previously never expired)", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				aud: TEST_AUDIENCE,
+				iss: TEST_ISSUER,
+				email: TEST_EMAIL,
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+
+		it("missing email (Access service-token JWT) is rejected, not a crash", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				exp: now() + 3600,
+				aud: TEST_AUDIENCE,
+				iss: TEST_ISSUER,
+				common_name: "svc-token.access",
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+
+		it("expired is rejected", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				exp: now() - 5,
+				aud: TEST_AUDIENCE,
+				iss: TEST_ISSUER,
+				email: TEST_EMAIL,
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+
+		it("wrong aud is rejected", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				exp: now() + 3600,
+				aud: ["someone-else"],
+				iss: TEST_ISSUER,
+				email: TEST_EMAIL,
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+
+		it("exp of the wrong type is rejected", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				exp: "9999999999",
+				aud: TEST_AUDIENCE,
+				iss: TEST_ISSUER,
+				email: TEST_EMAIL,
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -289,6 +343,32 @@ describe("PROJ-79: CF Access JWT HTTP rejection paths", () => {
 			},
 		});
 		expect(res.status).toBe(401);
+	});
+
+	it("PROJ-879: a JWT without email returns 401, not 500", async () => {
+		const aud = "http-879-aud";
+		const domain = "http-879.cloudflareaccess.com";
+		const prev = { a: env.CF_ACCESS_AUDIENCE, d: env.CF_ACCESS_TEAM_DOMAIN };
+		env.CF_ACCESS_AUDIENCE = aud;
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		try {
+			const header = encodeJwtPart({ alg: "RS256", typ: "JWT" });
+			const payload = encodeJwtPart({
+				exp: Math.floor(Date.now() / 1000) + 3600,
+				aud,
+				iss: `https://${domain}`,
+			});
+			const res = await SELF.fetch("http://localhost/api/issues", {
+				headers: {
+					"Cf-Access-Jwt-Assertion": `${header}.${payload}.fakesig`,
+					"X-Workspace-Slug": "x",
+				},
+			});
+			expect(res.status).toBe(401);
+		} finally {
+			env.CF_ACCESS_AUDIENCE = prev.a;
+			env.CF_ACCESS_TEAM_DOMAIN = prev.d;
+		}
 	});
 });
 
@@ -906,13 +986,24 @@ describe("PROJ-79: GET /auth/me", () => {
 	});
 });
 
+// PROJ-903: PATs are minted/revoked from a human session only. The dev bypass
+// (ENVIRONMENT=development + DEV_USER_EMAIL, no Authorization header) is that session here.
+async function humanFetch(email: string, url: string, init: RequestInit): Promise<Response> {
+	const prev = env.DEV_USER_EMAIL;
+	env.DEV_USER_EMAIL = email;
+	try {
+		return await SELF.fetch(url, init);
+	} finally {
+		env.DEV_USER_EMAIL = prev;
+	}
+}
+
 describe("PROJ-79: POST /auth/tokens", () => {
 	it("creates a personal token and returns it", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch("http://localhost/auth/tokens", {
+		const res = await humanFetch(fixture.user.email, "http://localhost/auth/tokens", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${fixture.token}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
@@ -929,10 +1020,9 @@ describe("PROJ-79: POST /auth/tokens", () => {
 
 	it("returns 400 when workspaceId is not a UUID", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch("http://localhost/auth/tokens", {
+		const res = await humanFetch(fixture.user.email, "http://localhost/auth/tokens", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${fixture.token}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({ name: "t", workspaceId: "not-a-uuid", scopes: ["read"] }),
@@ -942,10 +1032,9 @@ describe("PROJ-79: POST /auth/tokens", () => {
 
 	it("returns 400 when scopes array is empty", async () => {
 		const fixture = await seedFixture();
-		const res = await SELF.fetch("http://localhost/auth/tokens", {
+		const res = await humanFetch(fixture.user.email, "http://localhost/auth/tokens", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${fixture.token}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({ name: "t", workspaceId: fixture.workspace.id, scopes: [] }),
@@ -969,10 +1058,9 @@ describe("PROJ-79: DELETE /auth/tokens/:id", () => {
 		const fixture = await seedFixture();
 
 		// Create a second token to delete (cannot delete the fixture token we're using for auth)
-		const createRes = await SELF.fetch("http://localhost/auth/tokens", {
+		const createRes = await humanFetch(fixture.user.email, "http://localhost/auth/tokens", {
 			method: "POST",
 			headers: {
-				Authorization: `Bearer ${fixture.token}`,
 				"Content-Type": "application/json",
 			},
 			body: JSON.stringify({
@@ -991,10 +1079,13 @@ describe("PROJ-79: DELETE /auth/tokens/:id", () => {
 			.first<{ id: string }>();
 		expect(tokenRow).not.toBeNull();
 
-		const deleteRes = await SELF.fetch(`http://localhost/auth/tokens/${tokenRow!.id}`, {
-			method: "DELETE",
-			headers: { Authorization: `Bearer ${fixture.token}` },
-		});
+		const deleteRes = await humanFetch(
+			fixture.user.email,
+			`http://localhost/auth/tokens/${tokenRow!.id}`,
+			{
+				method: "DELETE",
+			}
+		);
 		expect(deleteRes.status).toBe(200);
 		const body = (await deleteRes.json()) as { ok: boolean };
 		expect(body.ok).toBe(true);
@@ -1014,10 +1105,13 @@ describe("PROJ-79: DELETE /auth/tokens/:id", () => {
 			.first<{ id: string }>();
 
 		// Alice tries to delete Bob's token — the WHERE user_id = alice.user.id clause filters it out
-		const res = await SELF.fetch(`http://localhost/auth/tokens/${bobTokenRow!.id}`, {
-			method: "DELETE",
-			headers: { Authorization: `Bearer ${alice.token}` },
-		});
+		const res = await humanFetch(
+			alice.user.email,
+			`http://localhost/auth/tokens/${bobTokenRow!.id}`,
+			{
+				method: "DELETE",
+			}
+		);
 		// The endpoint returns 200 ok (no error — just no rows deleted)
 		expect(res.status).toBe(200);
 

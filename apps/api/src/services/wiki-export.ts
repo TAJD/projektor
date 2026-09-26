@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Zip, ZipDeflate } from "fflate";
 import { stringify as stringifyYaml } from "yaml";
 import { ExportWikiInputSchema } from "../schemas/wiki";
-import { effectiveProjectRole, isWorkspaceAdmin, requireProjectInWorkspace } from "./access";
+import { assertProjectAccess } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -50,11 +50,7 @@ function assertExportSizeAllowed(pageCount: number, totalAttachmentBytes: number
 // admin bypass or a group grant on that project.
 async function requireSpaceVisible(ctx: ServiceCtx, projectId: string | null): Promise<void> {
 	if (projectId === null) return;
-	await requireProjectInWorkspace(ctx, projectId);
-	if (isWorkspaceAdmin(ctx.role)) return;
-	if ((await effectiveProjectRole(ctx, projectId)) === null) {
-		throw new NotFoundError("Project not found");
-	}
+	await assertProjectAccess(ctx, projectId, "read", { notFoundMessage: "Project not found" });
 }
 
 // Mirrors wiki.ts's resolvePageByIdOrSlug direct-match branch (no redirect chasing —

@@ -75,15 +75,11 @@ export const workspacesTools: MCPTool[] = [
 			if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 			const { workspaceSlug } = parsed.data;
 
-			const orm = drizzle(ctx.db, { schema });
-			const ws = await orm
-				.select({ id: schema.workspaces.id })
-				.from(schema.workspaces)
-				.where(eq(schema.workspaces.slug, workspaceSlug))
-				.get();
-			if (!ws) throw new NotFoundError("Workspace not found");
-
-			return deleteWorkspace({ ...ctx, workspaceId: ws.id }, workspaceSlug, "projektor");
+			// PROJ-884: only the workspace named in the MCP URL (ctx.workspaceId, set by
+			// middleware) can be deleted. Never retarget ctx at a slug-resolved workspace —
+			// ctx.role and token confinement belong to the URL's workspace, not the target.
+			// deleteWorkspace 404s when workspaceSlug isn't ctx's workspace.
+			return deleteWorkspace(ctx, workspaceSlug, "projektor");
 		},
 	},
 	{

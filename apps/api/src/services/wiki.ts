@@ -18,10 +18,10 @@ import {
 	WikiTreeInputSchema,
 } from "../schemas/wiki";
 import {
-	canWriteProject,
+	assertProjectAccess,
 	effectiveProjectRole,
+	hasProjectAccess,
 	isWorkspaceAdmin,
-	requireProjectInWorkspace,
 	visibleProjectPredicate,
 	visibleProjectSqlFragment,
 } from "./access";
@@ -65,10 +65,12 @@ type TreeNode = {
 // sees it) or project-scoped (visible only when the project is granted). Writes to
 // a project-scoped page need a member/admin grant; deletes need admin.
 async function assertWikiPageVisible(ctx: ServiceCtx, projectId: string | null): Promise<void> {
-	if (projectId === null || isWorkspaceAdmin(ctx.role)) return;
-	if ((await effectiveProjectRole(ctx, projectId)) === null) {
-		throw new NotFoundError("Wiki page not found");
-	}
+	if (projectId === null) return;
+	// projectId comes from a wiki_pages row already loaded under ctx.workspaceId.
+	await assertProjectAccess(ctx, projectId, "read", {
+		notFoundMessage: "Wiki page not found",
+		projectLoadedFromWorkspaceRow: true,
+	});
 }
 
 async function requireWikiWrite(ctx: ServiceCtx, projectId: string | null): Promise<void> {
@@ -76,13 +78,9 @@ async function requireWikiWrite(ctx: ServiceCtx, projectId: string | null): Prom
 		if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
 		return;
 	}
-	// PROJ-389: confirm projectId belongs to this workspace BEFORE the admin-bypass
-	// check below, so an owner/admin can't write into another workspace's project.
-	await requireProjectInWorkspace(ctx, projectId);
-	if (isWorkspaceAdmin(ctx.role)) return;
-	const role = await effectiveProjectRole(ctx, projectId);
-	if (role === null) throw new NotFoundError("Wiki page not found");
-	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+	// PROJ-389/837: the guard confirms projectId belongs to this workspace BEFORE the
+	// admin bypass, so an owner/admin can't write into another workspace's project.
+	await assertProjectAccess(ctx, projectId, "edit", { notFoundMessage: "Wiki page not found" });
 }
 
 function slugify(title: string): string {
@@ -495,7 +493,7 @@ export async function searchWiki(ctx: ServiceCtx, input: unknown) {
 
 	if (projectId && !includeWorkspacePages) {
 		// PROJ-311: searching a specific project the user can't see returns nothing.
-		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+		if (!(await hasProjectAccess(ctx, projectId))) {
 			return [];
 		}
 	}
@@ -1564,7 +1562,7 @@ export async function listStaleWikiPages(ctx: ServiceCtx, input: unknown) {
 
 	if (projectId && !includeWorkspacePages) {
 		// PROJ-311: same as searchWiki — querying a project the caller can't see returns nothing.
-		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+		if (!(await hasProjectAccess(ctx, projectId))) {
 			return [];
 		}
 	}
@@ -1949,7 +1947,7 @@ export async function listWikiTemplates(ctx: ServiceCtx, input: unknown) {
 	if (projectId) {
 		// PROJ-311: same as searchWiki/listStaleWikiPages — a project the caller can't
 		// see returns nothing.
-		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+		if (!(await hasProjectAccess(ctx, projectId))) {
 			return [];
 		}
 	}
@@ -2526,7 +2524,7 @@ export async function listWikiTrash(ctx: ServiceCtx, input: unknown) {
 	const { projectId, limit, offset } = parsed.data;
 
 	if (projectId) {
-		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+		if (!(await hasProjectAccess(ctx, projectId))) {
 			return [];
 		}
 	}

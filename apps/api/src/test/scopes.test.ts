@@ -9,7 +9,7 @@
  */
 
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	capabilityForMcpTool,
 	capabilityForMethod,
@@ -242,26 +242,32 @@ describe("PROJ-17: MCP scope enforcement", () => {
 describe("PROJ-17: POST /auth/tokens", () => {
 	let workspaceId: string;
 	let userId: string;
-	let callerToken: string;
+	let prevDevEmail: string | undefined;
+
+	// PROJ-903: minting requires a human session — the dev bypass here.
+	afterEach(() => {
+		env.DEV_USER_EMAIL = prevDevEmail as string;
+	});
 
 	beforeEach(async () => {
 		const ws = await seedWorkspace(`ws-${crypto.randomUUID().slice(0, 8)}`);
 		workspaceId = ws.id;
-		const user = await seedUser(`u-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		const email = `u-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
 		userId = user.id;
 		await env.DB.prepare(
 			"INSERT INTO workspace_members (workspace_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)"
 		)
 			.bind(workspaceId, userId, Math.floor(Date.now() / 1000))
 			.run();
-		// The caller authenticates with a full-access token (creating a token is a write).
-		callerToken = await seedToken(workspaceId, userId, { scopes: ["*"] });
+		prevDevEmail = env.DEV_USER_EMAIL;
+		env.DEV_USER_EMAIL = email;
 	});
 
 	it("a member can mint a token for their workspace", async () => {
 		const res = await SELF.fetch("http://localhost/auth/tokens", {
 			method: "POST",
-			headers: { Authorization: `Bearer ${callerToken}`, "Content-Type": "application/json" },
+			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ name: "mine", workspaceId, scopes: ["read"] }),
 		});
 		expect(res.status).toBe(201);
@@ -272,7 +278,7 @@ describe("PROJ-17: POST /auth/tokens", () => {
 		const other = await seedWorkspace(`ws-${crypto.randomUUID().slice(0, 8)}`);
 		const res = await SELF.fetch("http://localhost/auth/tokens", {
 			method: "POST",
-			headers: { Authorization: `Bearer ${callerToken}`, "Content-Type": "application/json" },
+			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ name: "sneaky", workspaceId: other.id, scopes: ["*"] }),
 		});
 		expect(res.status).toBe(403);
@@ -281,7 +287,7 @@ describe("PROJ-17: POST /auth/tokens", () => {
 	it("rejects invalid scope values", async () => {
 		const res = await SELF.fetch("http://localhost/auth/tokens", {
 			method: "POST",
-			headers: { Authorization: `Bearer ${callerToken}`, "Content-Type": "application/json" },
+			headers: { "Content-Type": "application/json" },
 			body: JSON.stringify({ name: "bad", workspaceId, scopes: ["admin"] }),
 		});
 		expect(res.status).toBe(400);

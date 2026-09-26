@@ -61,11 +61,15 @@ claude mcp add \
 
 **Finding the workspace ID:** it is returned by `GET /api/workspaces` or shown in the bootstrap response. The slug is the short identifier you chose when creating the workspace (e.g. `projektor`).
 
-**Minting a token via REST** (requires a valid Cloudflare Access JWT):
+**Minting a personal access token via REST** — from a signed-in browser session only
+(a Cloudflare Access JWT, sent as the `Cf-Access-Jwt-Assertion` header or the
+`CF_Authorization` cookie). API tokens and connected apps get `403`: a credential can't
+mint another credential, so a token confined to one workspace can't create a broader one
+(PROJ-903).
 
 ```bash
 curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
-  -H "Authorization: Bearer <cf-access-jwt>" \
+  -H "Cf-Access-Jwt-Assertion: <cf-access-jwt>" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "my-agent",
@@ -73,8 +77,12 @@ curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
     "scopes": ["read", "write"],
     "expiresAt": 1893456000
   }'
-# Response: { "token": "pk_..." }
+# Response: { "token": "<64 hex chars>" }
 ```
+
+Omit `workspaceId` for a user-scoped token that works in every workspace you belong to;
+include it to confine the token to one workspace. Personal tokens have no `pk_` prefix
+(that's the workspace-token format from `POST /api/workspaces/:slug/tokens`).
 
 `scopes` is a list of `"read"`, `"write"`, or `"*"` (full access) — e.g. `["read"]`, `["read", "write"]`, or `["*"]`. `expiresAt` is optional (unix seconds).
 

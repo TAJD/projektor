@@ -14,7 +14,7 @@ import {
 	MarkWikiNotificationsReadInputSchema,
 	WatchWikiPageInputSchema,
 } from "../schemas/wiki";
-import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
+import { assertProjectAccess, hasProjectAccess } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -88,10 +88,11 @@ async function resolveWatchTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 	}
 	if (!page) throw new NotFoundError("Wiki page not found");
 
-	if (page.projectId !== null && !isWorkspaceAdmin(ctx.role)) {
-		if ((await effectiveProjectRole(ctx, page.projectId)) === null) {
-			throw new NotFoundError("Wiki page not found");
-		}
+	if (page.projectId !== null) {
+		await assertProjectAccess(ctx, page.projectId, "read", {
+			notFoundMessage: "Wiki page not found",
+			projectLoadedFromWorkspaceRow: true,
+		});
 	}
 	return page;
 }
@@ -673,7 +674,7 @@ export async function listWikiChanges(
 	const { since, limit, projectId, watchedOnly } = parsed.data;
 
 	if (projectId) {
-		if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, projectId)) === null) {
+		if (!(await hasProjectAccess(ctx, projectId))) {
 			return { changes: [], nextSince: since };
 		}
 	}
@@ -709,10 +710,9 @@ export async function listWikiChanges(
 	// One role lookup per distinct project in the batch, not per event.
 	const roleCache = new Map<string, boolean>();
 	const canSeeProject = async (id: string): Promise<boolean> => {
-		if (isWorkspaceAdmin(ctx.role)) return true;
 		const cached = roleCache.get(id);
 		if (cached !== undefined) return cached;
-		const visible = (await effectiveProjectRole(ctx, id)) !== null;
+		const visible = await hasProjectAccess(ctx, id);
 		roleCache.set(id, visible);
 		return visible;
 	};

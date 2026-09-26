@@ -1,5 +1,6 @@
 import type { Env, HonoEnv } from "@projektor/types";
 import type { Context, Next } from "hono";
+import { z } from "zod";
 import { unauthorizedChallenge } from "../auth/challenge";
 import type { Capability } from "../auth/scopes";
 import {
@@ -295,27 +296,43 @@ export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
  * the validation logic without hitting CF's JWKS endpoint or KV.
  * The live path (validateCfAccessJwt) calls this after fetching/caching keys.
  */
-type JwtHeader = { alg: string; kid?: string };
-type JwtPayload = { exp: number; aud?: string | string[]; iss?: string; email: string };
+// PROJ-879: the decoded JSON is untrusted until parsed. Previously it was cast, so a
+// JWT without `exp` compared `undefined < now` → false → never expired, and one without
+// `email` (a Cloudflare Access *service-token* JWT) crashed provisioning with a 500.
+// Now: `exp`, `aud` and `iss` are required; `email` is required too, because every
+// Access identity projektor serves is a person. Service-token JWTs are rejected (401) —
+// machine callers use pk_ API tokens or OAuth instead, which carry confinement and scopes.
+const JwtHeaderSchema = z.object({ alg: z.string(), kid: z.string().optional() });
+const JwtPayloadSchema = z.object({
+	exp: z.number(),
+	iat: z.number().optional(),
+	aud: z.union([z.string(), z.array(z.string())]),
+	iss: z.string(),
+	email: z.string().min(1).optional(),
+});
+type JwtHeader = z.infer<typeof JwtHeaderSchema>;
+type JwtPayload = z.infer<typeof JwtPayloadSchema>;
 
 function decodeJwtFields(
 	parts: readonly string[]
 ): { header: JwtHeader; payload: JwtPayload } | null {
 	try {
-		const header = JSON.parse(base64urlDecode(parts[0]));
-		const payload = JSON.parse(base64urlDecode(parts[1]));
-		return { header, payload };
+		const header = JwtHeaderSchema.safeParse(JSON.parse(base64urlDecode(parts[0])));
+		const payload = JwtPayloadSchema.safeParse(JSON.parse(base64urlDecode(parts[1])));
+		if (!header.success || !payload.success) return null;
+		return { header: header.data, payload: payload.data };
 	} catch {
 		return null;
 	}
 }
 
+/** The single claim check, used by both the key-less pre-screen and the verifier. */
 function jwtClaimsValid(
 	header: JwtHeader,
 	payload: JwtPayload,
 	audience: string,
 	issuer: string
-): boolean {
+): payload is JwtPayload & { email: string } {
 	if (header.alg !== "RS256") return false;
 
 	const now = Math.floor(Date.now() / 1000);
@@ -324,7 +341,8 @@ function jwtClaimsValid(
 	const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
 	if (!aud.includes(audience)) return false;
 
-	return payload.iss === issuer;
+	if (payload.iss !== issuer) return false;
+	return typeof payload.email === "string";
 }
 
 async function verifySignatureAgainstKeys(
@@ -362,27 +380,24 @@ export async function verifyJwtPayload(
 	const decoded = decodeJwtFields(parts);
 	if (!decoded) return null;
 
-	if (!jwtClaimsValid(decoded.header, decoded.payload, audience, issuer)) return null;
+	const { header, payload } = decoded;
+	if (!jwtClaimsValid(header, payload, audience, issuer)) return null;
 
 	const valid = await verifySignatureAgainstKeys(parts, keys);
-	return valid ? { email: decoded.payload.email } : null;
+	return valid ? { email: payload.email } : null;
 }
 
 // Pre-screen without keys: avoids a JWKS fetch for obviously-invalid tokens.
 // Mirrors the order of checks in verifyJwtPayload so early exits fire first.
 function preScreenCfAccessJwt(parts: readonly string[], env: Env): boolean {
-	try {
-		const hdr = JSON.parse(base64urlDecode(parts[0]));
-		if (hdr.alg !== "RS256") return false;
-		const pld = JSON.parse(base64urlDecode(parts[1]));
-		if (pld.exp < Math.floor(Date.now() / 1000)) return false;
-		const aud = Array.isArray(pld.aud) ? pld.aud : [pld.aud];
-		if (!aud.includes(env.CF_ACCESS_AUDIENCE)) return false;
-		if (pld.iss !== `https://${env.CF_ACCESS_TEAM_DOMAIN}`) return false;
-		return true;
-	} catch {
-		return false;
-	}
+	const decoded = decodeJwtFields(parts);
+	if (!decoded) return false;
+	return jwtClaimsValid(
+		decoded.header,
+		decoded.payload,
+		env.CF_ACCESS_AUDIENCE,
+		`https://${env.CF_ACCESS_TEAM_DOMAIN}`
+	);
 }
 
 async function validateCfAccessJwt(jwt: string, env: Env): Promise<AuthUser | null> {

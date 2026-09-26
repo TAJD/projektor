@@ -230,6 +230,46 @@ describe("Workspaces MCP", () => {
 		expect(isMcpError(res)).toBe(true);
 	});
 
+	describe("PROJ-884: delete_workspace cannot cross tenants", () => {
+		async function workspaceExists(id: string) {
+			const row = await env.DB.prepare("SELECT id FROM workspaces WHERE id = ?").bind(id).first();
+			return row !== null;
+		}
+
+		it("owner of A cannot delete B (not a member of B) via A's MCP URL", async () => {
+			const a = await seedFixture({ role: "owner" });
+			const victim = await seedWorkspace(`victim-${crypto.randomUUID().slice(0, 8)}`);
+
+			const res = (await mcpCall(
+				a.workspace.id,
+				"delete_workspace",
+				{ workspaceSlug: victim.slug },
+				authHeaders(a.token, a.workspace.slug)
+			)) as JsonRpcError;
+
+			expect(isMcpError(res)).toBe(true);
+			expect(res.error.message).toMatch(/not found/i);
+			expect(await workspaceExists(victim.id)).toBe(true);
+			expect(await workspaceExists(a.workspace.id)).toBe(true);
+		});
+
+		it("owner of A and B, using a token confined to A, cannot delete B via A's MCP URL", async () => {
+			const a = await seedFixture({ role: "owner" });
+			const b = await seedWorkspace(`both-${crypto.randomUUID().slice(0, 8)}`);
+			await seedMember(b.id, a.user.id, "owner");
+
+			const res = (await mcpCall(
+				a.workspace.id,
+				"delete_workspace",
+				{ workspaceSlug: b.slug },
+				authHeaders(a.token, a.workspace.slug)
+			)) as JsonRpcError;
+
+			expect(isMcpError(res)).toBe(true);
+			expect(await workspaceExists(b.id)).toBe(true);
+		});
+	});
+
 	it("delete_workspace returns error for non-owner", async () => {
 		const ws = await seedWorkspace(`mcp-del-${crypto.randomUUID().slice(0, 8)}`);
 		const memberUser = await import("./helpers").then((h) =>

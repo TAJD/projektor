@@ -1,7 +1,7 @@
 import { drizzle, schema } from "@projektor/db";
 import type { Role } from "@projektor/types";
 import { and, type Column, eq, type SQL, sql } from "drizzle-orm";
-import { NotFoundError } from "./errors";
+import { ForbiddenError, NotFoundError } from "./errors";
 import type { ServiceCtx } from "./types";
 
 // PROJ-311: group-based project access.
@@ -103,6 +103,90 @@ export async function requireProjectInWorkspace(ctx: ServiceCtx, projectId: stri
 		.where(and(eq(schema.projects.id, projectId), eq(schema.projects.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!project) throw new NotFoundError("Project not found");
+}
+
+// ─── PROJ-837: the central access guard ─────────────────────────────────────
+//
+// One policy for every project-scoped resource (issue, wiki page, sprint,
+// project, share link, …):
+//
+//   • no access at all  → 404 (NotFoundError). The resource's existence must not
+//     leak to someone who was never granted its project.
+//   • can see, can't write (mode "edit" with a viewer-level role) → 403
+//     (ForbiddenError). They can already see it, so 404 would only confuse.
+//   • project not in ctx.workspaceId → 404, for everyone including owner/admin
+//     (PROJ-389 — the admin bypass must never cross a tenant boundary).
+//
+// New service code should call `assertProjectAccess` (single resource) or
+// `hasProjectAccess` (a soft check that returns false instead of throwing, for
+// "unknown project → empty list" read paths), and `visibleProjectFilter` for
+// list queries. `test/architecture/access-guard.test.ts` enforces this.
+
+export type AccessMode = "read" | "edit";
+
+export interface AssertProjectAccessOptions {
+	/** Message for the 404. Default "Not found" — name the resource the caller asked for. */
+	notFoundMessage?: string;
+	/**
+	 * Skip the project-in-workspace query because the caller loaded `projectId`
+	 * from a row it already fetched with `workspace_id = ctx.workspaceId`
+	 * (projects.workspace_id is immutable, so the child row's project is in the
+	 * same workspace). Never set this for a caller-supplied projectId.
+	 */
+	projectLoadedFromWorkspaceRow?: boolean;
+}
+
+/**
+ * Throw unless the caller may `mode` the project. Returns the effective role.
+ * See the policy block above for 404-vs-403.
+ */
+export async function assertProjectAccess(
+	ctx: ServiceCtx,
+	projectId: string,
+	mode: AccessMode,
+	opts: AssertProjectAccessOptions = {}
+): Promise<Role> {
+	const notFound = opts.notFoundMessage ?? "Not found";
+	if (!opts.projectLoadedFromWorkspaceRow) {
+		try {
+			await requireProjectInWorkspace(ctx, projectId);
+		} catch {
+			throw new NotFoundError(notFound);
+		}
+	}
+	const role = await effectiveProjectRole(ctx, projectId);
+	if (role === null) throw new NotFoundError(notFound);
+	if (mode === "edit" && !canWriteProject(role)) {
+		throw new ForbiddenError("Insufficient permissions");
+	}
+	return role;
+}
+
+/**
+ * Soft variant of `assertProjectAccess` for read paths where "no access" means
+ * "return nothing" rather than an error (search/list scoped to a project).
+ */
+export async function hasProjectAccess(
+	ctx: ServiceCtx,
+	projectId: string,
+	mode: AccessMode = "read"
+): Promise<boolean> {
+	if (isWorkspaceAdmin(ctx.role)) return true;
+	const role = await effectiveProjectRole(ctx, projectId);
+	if (role === null) return false;
+	return mode === "read" || canWriteProject(role);
+}
+
+/**
+ * List-query filter: keep only rows whose project the caller can see. Returns
+ * `undefined` for owner/admin (no filter). Alias of `visibleProjectPredicate`
+ * under the PROJ-837 name; defaults to filtering `projects.id`.
+ */
+export function visibleProjectFilter(
+	ctx: ServiceCtx,
+	projectColumn: Column | SQL = schema.projects.id
+): SQL | undefined {
+	return visibleProjectPredicate(ctx, projectColumn);
 }
 
 /**
