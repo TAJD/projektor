@@ -235,8 +235,10 @@ app.post("/api/workspaces", authMiddleware, async (c) => {
 	}
 });
 
-// All remaining /api/* and /mcp/* routes need auth + workspace context
-app.use("/api/workspaces/:slug", authMiddleware, workspaceMiddleware);
+// All remaining /api/* and /mcp/* routes need auth + workspace context.
+// PROJ-856: register each prefix ONCE, as `/x/*`. Hono's `/x/*` also matches the bare
+// `/x`, so adding a separate `app.use("/x", …)` ran auth + workspace twice (two wasted
+// sequential D1 round trips per request). test/middleware-once.test.ts guards this.
 app.use("/api/workspaces/:slug/*", authMiddleware, workspaceMiddleware);
 // Cross-workspace project list — auth only, no workspace context needed
 app.get("/api/projects", authMiddleware, etagMiddleware, async (c) => {
@@ -249,13 +251,9 @@ app.get("/api/projects", authMiddleware, etagMiddleware, async (c) => {
 	}
 });
 // Project mutations and /:id routes need workspace context
-app.use("/api/projects", authMiddleware, workspaceMiddleware);
 app.use("/api/projects/*", authMiddleware, workspaceMiddleware);
-app.use("/api/issues", authMiddleware, workspaceMiddleware);
 app.use("/api/issues/*", authMiddleware, workspaceMiddleware);
-app.use("/api/issue-links", authMiddleware, workspaceMiddleware);
 app.use("/api/issue-links/*", authMiddleware, workspaceMiddleware);
-app.use("/api/wiki", authMiddleware, workspaceMiddleware);
 app.use("/api/wiki/*", authMiddleware, workspaceMiddleware);
 app.use("/mcp/*", authMiddleware, workspaceMiddleware);
 // PROJ-494: an inline image embedded in rendered wiki content (`<img src="/api/files/:id?workspace=...">`)
@@ -267,29 +265,18 @@ const allowFilesQueryWorkspaceFallback = async (c: Context<HonoEnv>, next: Next)
 	if (c.req.method === "GET") c.set("allowQueryWorkspaceFallback", true);
 	await next();
 };
-app.use("/api/files", allowFilesQueryWorkspaceFallback);
 app.use("/api/files/*", allowFilesQueryWorkspaceFallback);
-app.use("/api/files", authMiddleware, workspaceMiddleware);
 app.use("/api/files/*", authMiddleware, workspaceMiddleware);
-app.use("/api/task-types", authMiddleware, workspaceMiddleware);
 app.use("/api/task-types/*", authMiddleware, workspaceMiddleware);
-app.use("/api/task-statuses", authMiddleware, workspaceMiddleware);
 app.use("/api/task-statuses/*", authMiddleware, workspaceMiddleware);
-app.use("/api/custom-fields", authMiddleware, workspaceMiddleware);
 app.use("/api/custom-fields/*", authMiddleware, workspaceMiddleware);
-app.use("/api/sprints", authMiddleware, workspaceMiddleware);
 app.use("/api/sprints/*", authMiddleware, workspaceMiddleware);
-app.use("/api/agents", authMiddleware, workspaceMiddleware);
 app.use("/api/agents/*", authMiddleware, workspaceMiddleware);
-app.use("/api/file-claims", authMiddleware, workspaceMiddleware);
 app.use("/api/file-claims/*", authMiddleware, workspaceMiddleware);
-app.use("/api/agent-messages", authMiddleware, workspaceMiddleware);
 app.use("/api/agent-messages/*", authMiddleware, workspaceMiddleware);
 app.use("/api/feedback-sources/*", authMiddleware, workspaceMiddleware);
 // No workspaceMiddleware: the workflow spec is global, not workspace-scoped.
-app.use("/api/workflow", authMiddleware);
 app.use("/api/workflow/*", authMiddleware);
-app.use("/api/playbooks", authMiddleware);
 app.use("/api/playbooks/*", authMiddleware);
 // PROJ-633: compose is the one exception to the line above. Reading a playbook is a pure
 // function of static templates, but composing one resolves a live epic, so it needs
@@ -306,7 +293,6 @@ app.use("/api/playbooks/:name/compose", workspaceMiddleware);
 // it to hash would trade a bandwidth saving for a memory and latency cost.
 // The cross-workspace project list is registered further up, ahead of these .use()
 // calls, so a .use() here would never wrap it — it takes the middleware inline instead.
-app.use("/api/issues", etagMiddleware);
 app.use("/api/issues/*", etagMiddleware);
 app.use("/api/task-statuses", etagMiddleware);
 
