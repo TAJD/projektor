@@ -1,8 +1,8 @@
 import type { HonoEnv } from "@projektor/types";
-import { type Context, Hono } from "hono";
+import { Hono } from "hono";
 import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
-import { authMiddleware, isPublicViewer } from "../middleware/auth";
+import { authMiddleware, requireInteractiveHuman } from "../middleware/auth";
 import { createUserToken, deleteUserToken, getUserWorkspaces } from "../services/user-tokens";
 
 const router = new Hono<HonoEnv>();
@@ -34,16 +34,8 @@ router.get("/me", authMiddleware, async (c) => {
 const HUMAN_SESSION_REQUIRED =
 	"Personal access tokens can only be created or revoked from a signed-in browser session, not with an API token or connected app.";
 
-function requireInteractiveHuman(c: Context<HonoEnv>): Response | null {
-	const user = c.get("user") as { email: string } | undefined;
-	if (c.get("authKind") !== "human" || !user || isPublicViewer(user)) {
-		return c.json({ error: HUMAN_SESSION_REQUIRED }, 403);
-	}
-	return null;
-}
-
 router.post("/tokens", authMiddleware, async (c) => {
-	const denied = requireInteractiveHuman(c);
+	const denied = requireInteractiveHuman(c, HUMAN_SESSION_REQUIRED);
 	if (denied) return denied;
 	const user = c.get("user") as { id: string };
 	try {
@@ -55,7 +47,7 @@ router.post("/tokens", authMiddleware, async (c) => {
 });
 
 router.delete("/tokens/:id", authMiddleware, async (c) => {
-	const denied = requireInteractiveHuman(c);
+	const denied = requireInteractiveHuman(c, HUMAN_SESSION_REQUIRED);
 	if (denied) return denied;
 	const user = c.get("user") as { id: string };
 	const id = c.req.param("id") ?? "";

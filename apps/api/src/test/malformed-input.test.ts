@@ -33,7 +33,8 @@ describe("REST: invalid JSON bodies → 400", () => {
 		["POST", "/api/agents"],
 		["POST", "/api/file-claims"],
 		["POST", "/api/agent-messages"],
-		["POST", "/api/workspaces/:slug/tokens"],
+		// POST /api/workspaces/:slug/tokens needs a human session (PROJ-917); its
+		// malformed-body case lives in workspace-tokens.test.ts.
 	])("%s %s", async (method, path) => {
 		const url = path.replace(":issueId", f.issueId).replace(":slug", f.slug);
 		const res = await SELF.fetch(`http://localhost${url}`, {

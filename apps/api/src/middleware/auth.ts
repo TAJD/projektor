@@ -25,6 +25,21 @@ export function isPublicViewer(user: Readonly<{ email: string }>): boolean {
 	return user.email === PUBLIC_VIEWER_EMAIL;
 }
 
+/**
+ * PROJ-903 / PROJ-917: credential minting and revocation happen only from an
+ * interactive human session (Cloudflare Access JWT or the dev bypass). A bearer
+ * token or OAuth grant is `authKind === "agent"` and is refused, as is the shared
+ * PUBLIC_READ_ONLY viewer (human but anonymous). Returns a 403 response to send, or
+ * null when the caller may proceed.
+ */
+export function requireInteractiveHuman(c: Context<HonoEnv>, message: string): Response | null {
+	const user = c.get("user") as { email: string } | undefined;
+	if (c.get("authKind") !== "human" || !user || isPublicViewer(user)) {
+		return c.json({ error: message }, 403);
+	}
+	return null;
+}
+
 // Matches the truthy-string convention used by WORKSPACE_SUBDOMAIN_ROUTING (PROJ-296).
 function isTruthy(v: string | undefined): boolean {
 	return ["true", "1", "yes"].includes(v?.trim().toLowerCase() ?? "");

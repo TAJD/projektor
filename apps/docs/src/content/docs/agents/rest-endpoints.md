@@ -46,9 +46,9 @@ Logging in and minting long-lived tokens are browser flows, not agent tool calls
 
 | Method | Path | Notes |
 |--------|------|-------|
-| `POST` | `/api/workspaces/:slug/tokens` | Create a token scoped to a workspace |
-| `GET` | `/api/workspaces/:slug/tokens` | List a workspace's tokens |
-| `DELETE` | `/api/workspaces/:slug/tokens/:tokenId` | Revoke a workspace token |
+| `POST` | `/api/workspaces/:slug/tokens` | Create a token scoped to a workspace (admin/owner, signed-in browser session only — API tokens and OAuth grants get 403) |
+| `GET` | `/api/workspaces/:slug/tokens` | List a workspace's tokens (admin/owner; any credential — no secrets returned) |
+| `DELETE` | `/api/workspaces/:slug/tokens/:tokenId` | Revoke a workspace token (admin/owner, signed-in browser session only) |
 | `GET` | `/api/workspaces/:slug/mcp-info` | Ready-to-use MCP connection details for a workspace |
 
 ## Public issue sharing
