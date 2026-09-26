@@ -71,6 +71,8 @@ type OAuthGrantProps = {
 	name: string;
 	workspaceId: string;
 	scopes: string[];
+	// PROJ-889: recorded at consent for grants created after this change.
+	clientId?: string;
 };
 
 function oauthGrantProps(c: Context<HonoEnv>): OAuthGrantProps | null {
@@ -106,7 +108,22 @@ async function tryOAuthGrantAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	// authKind === "human": calling this human would let an OAuth token approve further
 	// grants, so a connector could quietly widen its own access.
 	c.set("authKind", "agent");
+	c.set("auth", {
+		kind: "agent",
+		method: "oauth",
+		credentialId: oauthGrantIdFromRequest(c),
+		clientId: props.clientId,
+		scopes,
+	});
 	return { kind: "allow" };
+}
+
+// The provider's access token is `<userId>:<grantId>:<secret>` (see rate-limit.ts);
+// the grant id is the stable credential identity across hourly token rotation.
+function oauthGrantIdFromRequest(c: Context<HonoEnv>): string | undefined {
+	const header = c.req.header("Authorization") ?? "";
+	const parts = header.startsWith("Bearer ") ? header.slice(7).split(":") : [];
+	return parts.length === 3 && parts[1] ? parts[1] : undefined;
 }
 
 // 1. Cloudflare Access JWT (header or cookie)
@@ -131,6 +148,7 @@ async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	await ensureUserProvisioned(c.env, user);
 	c.set("user", user);
 	c.set("authKind", "human");
+	c.set("auth", { kind: "human", method: "access" });
 	return { kind: "allow" };
 }
 
@@ -168,7 +186,7 @@ const LAST_USED_AT_THROTTLE_SECS = 60;
 async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise<AuthOutcome> {
 	const hash = await hashToken(token);
 	const row = await c.env.DB.prepare(
-		`SELECT at.workspace_id, at.expires_at, at.scopes, at.last_used_at,
+		`SELECT at.id, at.workspace_id, at.expires_at, at.scopes, at.last_used_at,
               u.id as user_id, u.email, u.name
        FROM api_tokens at
        LEFT JOIN users u ON u.id = at.user_id
@@ -176,6 +194,7 @@ async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise
 	)
 		.bind(hash)
 		.first<{
+			id: string;
 			user_id: string;
 			email: string;
 			name: string;
@@ -200,6 +219,12 @@ async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise
 	c.set("tokenWorkspaceId", row.workspace_id);
 	c.set("tokenScopes", scopes);
 	c.set("authKind", "agent");
+	c.set("auth", {
+		kind: "agent",
+		method: token.startsWith("pk_") ? "pk" : "pat",
+		credentialId: row.id,
+		scopes,
+	});
 
 	const now = Math.floor(Date.now() / 1000);
 	if (!row.last_used_at || now - row.last_used_at >= LAST_USED_AT_THROTTLE_SECS) {
@@ -240,6 +265,7 @@ async function tryDevBypassAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	await ensureUserProvisioned(c.env, user);
 	c.set("user", user);
 	c.set("authKind", "human");
+	c.set("auth", { kind: "human", method: "dev" });
 	return { kind: "allow" };
 }
 
@@ -251,6 +277,7 @@ async function tryPublicViewerAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 	await provisionPublicViewer(c.env, user);
 	c.set("user", user);
 	c.set("authKind", "human");
+	c.set("auth", { kind: "human", method: "public" });
 	return { kind: "allow" };
 }
 

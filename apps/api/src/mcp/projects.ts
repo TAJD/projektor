@@ -6,7 +6,6 @@ import {
 	listProjects,
 	updateProject,
 } from "../services/projects";
-import type { ServiceCtx } from "../services/types";
 
 export const projectsTools: MCPTool[] = [
 	{
@@ -23,7 +22,7 @@ export const projectsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { includeArchived } = (input ?? {}) as { includeArchived?: boolean };
-			return listProjects(ctx as ServiceCtx, { includeArchived });
+			return listProjects(ctx, { includeArchived });
 		},
 	},
 	{
@@ -42,7 +41,7 @@ export const projectsTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return createProject(ctx as ServiceCtx, input);
+			return createProject(ctx, input);
 		},
 	},
 	{
@@ -55,7 +54,7 @@ export const projectsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
-			return getProject(ctx as ServiceCtx, id);
+			return getProject(ctx, id);
 		},
 	},
 	{
@@ -74,7 +73,7 @@ export const projectsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { id, ...fields } = input as { id: string; [k: string]: unknown };
-			return updateProject(ctx as ServiceCtx, id, fields);
+			return updateProject(ctx, id, fields);
 		},
 	},
 	{
@@ -87,7 +86,7 @@ export const projectsTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
-			return deleteProject(ctx as ServiceCtx, id);
+			return deleteProject(ctx, id);
 		},
 	},
 ];

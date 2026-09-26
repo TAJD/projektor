@@ -361,6 +361,7 @@ oauthRouter.post("/authorize", async (c) => {
 			name: user.name,
 			workspaceId: payload.workspaceId,
 			scopes: payload.scopes,
+			clientId: payload.authRequest.clientId,
 		},
 		// The library defaults this to true, which would revoke the user's other grants
 		// for the same client. Grants here are per-workspace by design, so the default

@@ -1,19 +1,9 @@
-import type { HonoEnv, Role } from "@projektor/types";
+import type { AuthInfo, HonoEnv, PluginContext, Role } from "@projektor/types";
 import type { Context } from "hono";
 
-export interface ServiceCtx {
-	db: D1Database;
-	kv: KVNamespace;
-	r2: R2Bucket;
-	workspaceId: string;
-	userId: string;
-	role?: Role;
-	// PROJ-328: which auth path authenticated this request ("human" = Cloudflare Access
-	// JWT / dev bypass, "agent" = Bearer API token). See middleware/auth.ts.
-	authKind?: "human" | "agent";
-	workspaceHub?: DurableObjectNamespace;
-	waitUntil?: (promise: Promise<unknown>) => void;
-}
+// PROJ-889: one context type for REST and MCP — defined in @projektor/types as
+// PluginContext (so MCPTool handlers receive it without casts) and aliased here.
+export type ServiceCtx = PluginContext;
 
 export function ctxFromHono(c: Context<HonoEnv>): ServiceCtx {
 	const workspace = c.get("workspace") as { id: string };
@@ -28,6 +18,7 @@ export function ctxFromHono(c: Context<HonoEnv>): ServiceCtx {
 		userId: user.id,
 		role,
 		authKind,
+		auth: c.get("auth") as AuthInfo | undefined,
 		workspaceHub: c.env.WORKSPACE_HUB,
 		waitUntil: c.executionCtx?.waitUntil ? (p) => c.executionCtx.waitUntil(p) : undefined,
 	};

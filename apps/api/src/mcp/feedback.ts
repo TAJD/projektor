@@ -8,7 +8,6 @@ import {
 	rotateFeedbackSourceToken,
 	updateFeedbackSource,
 } from "../services/feedback-sources";
-import type { ServiceCtx } from "../services/types";
 
 export const feedbackTools: MCPTool[] = [
 	{
@@ -37,7 +36,7 @@ export const feedbackTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return createFeedbackSource(ctx as unknown as ServiceCtx, input);
+			return createFeedbackSource(ctx, input);
 		},
 	},
 	{
@@ -52,7 +51,7 @@ export const feedbackTools: MCPTool[] = [
 			properties: { projectId: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			return listFeedbackSources(ctx as unknown as ServiceCtx, input);
+			return listFeedbackSources(ctx, input);
 		},
 	},
 	{
@@ -66,7 +65,7 @@ export const feedbackTools: MCPTool[] = [
 			properties: { sourceId: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			return getFeedbackSource(ctx as unknown as ServiceCtx, input);
+			return getFeedbackSource(ctx, input);
 		},
 	},
 	{
@@ -87,7 +86,7 @@ export const feedbackTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return updateFeedbackSource(ctx as unknown as ServiceCtx, input);
+			return updateFeedbackSource(ctx, input);
 		},
 	},
 	{
@@ -103,7 +102,7 @@ export const feedbackTools: MCPTool[] = [
 			properties: { sourceId: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			return rotateFeedbackSourceToken(ctx as unknown as ServiceCtx, input);
+			return rotateFeedbackSourceToken(ctx, input);
 		},
 	},
 	{
@@ -118,7 +117,7 @@ export const feedbackTools: MCPTool[] = [
 			properties: { sourceId: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			return revokeFeedbackSource(ctx as unknown as ServiceCtx, input);
+			return revokeFeedbackSource(ctx, input);
 		},
 	},
 	{
@@ -139,7 +138,7 @@ export const feedbackTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return listFeedback(ctx as unknown as ServiceCtx, input);
+			return listFeedback(ctx, input);
 		},
 	},
 	{
@@ -155,7 +154,7 @@ export const feedbackTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return updateFeedbackStatus(ctx as unknown as ServiceCtx, input);
+			return updateFeedbackStatus(ctx, input);
 		},
 	},
 	{
@@ -171,7 +170,7 @@ export const feedbackTools: MCPTool[] = [
 			properties: { feedbackId: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			return convertFeedbackToIssue(ctx as unknown as ServiceCtx, input);
+			return convertFeedbackToIssue(ctx, input);
 		},
 	},
 ];

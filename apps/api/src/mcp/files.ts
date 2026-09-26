@@ -5,7 +5,6 @@ import {
 	getAttachment,
 	listAttachments,
 } from "../services/files";
-import type { ServiceCtx } from "../services/types";
 
 // Binary upload and streamed download can't cross JSON-RPC, so those two operations
 // stay REST-only (POST /api/files, GET /api/files/:id) — a deliberate parity exception
@@ -24,7 +23,7 @@ export const filesTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return listAttachments(ctx as unknown as ServiceCtx, input);
+			return listAttachments(ctx, input);
 		},
 	},
 	{
@@ -38,7 +37,7 @@ export const filesTools: MCPTool[] = [
 			properties: { id: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			return getAttachment(ctx as unknown as ServiceCtx, input);
+			return getAttachment(ctx, input);
 		},
 	},
 	{
@@ -57,7 +56,7 @@ export const filesTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return createLinkAttachment(ctx as unknown as ServiceCtx, input);
+			return createLinkAttachment(ctx, input);
 		},
 	},
 	{
@@ -69,11 +68,10 @@ export const filesTools: MCPTool[] = [
 			properties: { id: { type: "string" } },
 		},
 		async handler(input, ctx) {
-			const serviceCtx = ctx as unknown as ServiceCtx;
-			const { r2Key } = await deleteAttachment(serviceCtx, input);
+			const { r2Key } = await deleteAttachment(ctx, input);
 			// R2 object I/O is streaming-specific in the REST route; do the equivalent
 			// cleanup here so the MCP path doesn't leave the blob orphaned in storage.
-			if (r2Key) await serviceCtx.r2.delete(r2Key);
+			if (r2Key) await ctx.r2.delete(r2Key);
 			return { ok: true };
 		},
 	},

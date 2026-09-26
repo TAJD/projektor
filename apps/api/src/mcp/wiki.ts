@@ -1,7 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { WIKI_WELL_KNOWN_TYPES } from "../schemas/wiki";
 import { ValidationError } from "../services/errors";
-import type { ServiceCtx } from "../services/types";
 import * as wikiService from "../services/wiki";
 import * as wikiDraftsService from "../services/wiki-drafts";
 import * as wikiWatchersService from "../services/wiki-watchers";
@@ -304,7 +303,7 @@ export const wikiTools: MCPTool[] = [
 					fieldErrors: {},
 				});
 			}
-			return wikiService.patchWikiPage(ctx as ServiceCtx, idOrSlug, rest);
+			return wikiService.patchWikiPage(ctx, idOrSlug, rest);
 		},
 	},
 	{
@@ -326,7 +325,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug, cascade } = input as { slug: string; cascade?: boolean };
-			return wikiService.deleteWikiPage(ctx as ServiceCtx, slug, { cascade });
+			return wikiService.deleteWikiPage(ctx, slug, { cascade });
 		},
 	},
 	{
@@ -340,7 +339,7 @@ export const wikiTools: MCPTool[] = [
 			},
 		},
 		async handler(input, ctx) {
-			return wikiService.getWikiTree(ctx as ServiceCtx, input);
+			return wikiService.getWikiTree(ctx, input);
 		},
 	},
 	{
@@ -358,7 +357,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
-			return wikiService.getWikiBacklinks(ctx as ServiceCtx, slug);
+			return wikiService.getWikiBacklinks(ctx, slug);
 		},
 	},
 	{
@@ -385,7 +384,7 @@ export const wikiTools: MCPTool[] = [
 			"existing page in the workspace. Owner/admin only.",
 		inputSchema: { type: "object", properties: {} },
 		async handler(_input, ctx) {
-			return wikiService.backfillWikiLinks(ctx as ServiceCtx);
+			return wikiService.backfillWikiLinks(ctx);
 		},
 	},
 	{
@@ -398,7 +397,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
-			return wikiService.listWikiRevisions(ctx as ServiceCtx, slug);
+			return wikiService.listWikiRevisions(ctx, slug);
 		},
 	},
 	{
@@ -414,7 +413,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug, revisionId } = input as { slug: string; revisionId: string };
-			return wikiService.getWikiRevision(ctx as ServiceCtx, slug, revisionId);
+			return wikiService.getWikiRevision(ctx, slug, revisionId);
 		},
 	},
 	{
@@ -443,7 +442,7 @@ export const wikiTools: MCPTool[] = [
 				revisionId: string;
 				against?: string;
 			};
-			return wikiService.getWikiRevisionDiff(ctx as ServiceCtx, slug, revisionId, { against });
+			return wikiService.getWikiRevisionDiff(ctx, slug, revisionId, { against });
 		},
 	},
 	{
@@ -463,7 +462,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
-			return wikiService.verifyWikiPage(ctx as ServiceCtx, slug);
+			return wikiService.verifyWikiPage(ctx, slug);
 		},
 	},
 	{
@@ -535,7 +534,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug, ...rest } = input as { slug: string; subtree?: boolean };
-			return wikiWatchersService.watchWikiPage(ctx as ServiceCtx, slug, rest);
+			return wikiWatchersService.watchWikiPage(ctx, slug, rest);
 		},
 	},
 	{
@@ -548,7 +547,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
-			return wikiWatchersService.unwatchWikiPage(ctx as ServiceCtx, slug);
+			return wikiWatchersService.unwatchWikiPage(ctx, slug);
 		},
 	},
 	{
@@ -556,7 +555,7 @@ export const wikiTools: MCPTool[] = [
 		description: "List the pages the calling user is currently watching.",
 		inputSchema: { type: "object", properties: {} },
 		async handler(_input, ctx) {
-			return wikiWatchersService.listWikiWatches(ctx as ServiceCtx);
+			return wikiWatchersService.listWikiWatches(ctx);
 		},
 	},
 	{
@@ -650,7 +649,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
-			return wikiDraftsService.getWikiDraft(ctx as ServiceCtx, slug);
+			return wikiDraftsService.getWikiDraft(ctx, slug);
 		},
 	},
 	{
@@ -678,7 +677,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug, ...rest } = input as { slug: string; title: string; content: string };
-			return wikiDraftsService.saveWikiDraft(ctx as ServiceCtx, slug, rest);
+			return wikiDraftsService.saveWikiDraft(ctx, slug, rest);
 		},
 	},
 	{
@@ -694,7 +693,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
-			return wikiDraftsService.discardWikiDraft(ctx as ServiceCtx, slug);
+			return wikiDraftsService.discardWikiDraft(ctx, slug);
 		},
 	},
 	{
@@ -740,7 +739,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
-			return wikiService.undeleteWikiPage(ctx as ServiceCtx, id);
+			return wikiService.undeleteWikiPage(ctx, id);
 		},
 	},
 	{
@@ -754,7 +753,7 @@ export const wikiTools: MCPTool[] = [
 			"to force an off-cycle purge.",
 		inputSchema: { type: "object", properties: {} },
 		async handler(_input, ctx) {
-			return wikiService.purgeExpiredWikiPages(ctx as ServiceCtx);
+			return wikiService.purgeExpiredWikiPages(ctx);
 		},
 	},
 ];
