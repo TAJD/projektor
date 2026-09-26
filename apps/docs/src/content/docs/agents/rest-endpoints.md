@@ -62,6 +62,16 @@ whole point is that it works without auth, so it can't be an MCP tool.
 | `DELETE` | `/api/issues/:id/share` | Revoke the share link |
 | `GET` | `/api/share/:token` | **Public.** View the shared issue, no auth |
 
+A link expires after 3 days. It also returns 404 as soon as any of these is no longer
+true, checked each time it's opened:
+
+- the issue still exists and its project isn't archived;
+- the person who created the link can still see the issue's project (they're still a
+  workspace member, and a workspace owner/admin or in a group with a grant on it).
+
+Access is checked when the link is read, not by deleting links when access changes. So
+revoking a grant hides the link right away, and restoring the grant brings it back.
+
 ## Public feedback submission
 
 Feedback comes from end users of *your* product, not from an agent with a

@@ -288,7 +288,9 @@ export async function visibleProjectIds(ctx: ServiceCtx): Promise<string[]> {
  * - Anyone else, project-scoped → included only with a group grant on that project.
  */
 export async function usersWithProjectReadAccess(
-	ctx: ServiceCtx,
+	// Only db + workspaceId are read, so unauthenticated paths (public share links,
+	// PROJ-794) can call this without a caller identity.
+	ctx: Pick<ServiceCtx, "db" | "workspaceId">,
 	projectId: string | null,
 	userIds: readonly string[]
 ): Promise<Set<string>> {
