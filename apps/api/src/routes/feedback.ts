@@ -2,6 +2,7 @@ import type { HonoEnv } from "@projektor/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { logger } from "hono/logger";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { bumpRateCounter } from "../middleware/rate-limit";
 import { ForbiddenError, NotFoundError, ValidationError } from "../services/errors";
@@ -61,7 +62,7 @@ async function checkFeedbackRateLimit(
 
 async function parseFeedbackBody(c: Context<HonoEnv>): Promise<unknown> {
 	try {
-		return await c.req.json();
+		return await jsonBody(c);
 	} catch {
 		return {};
 	}
@@ -127,7 +128,7 @@ authedRouter.patch("/:id/feedback/:feedbackId", async (c) => {
 	const ctx = ctxFromHono(c);
 	const projectId = c.req.param("id");
 	const feedbackId = c.req.param("feedbackId");
-	const raw = await c.req.json();
+	const raw = await jsonBody(c);
 	try {
 		return c.json(await updateFeedbackStatus(ctx, { ...raw, projectId, feedbackId }));
 	} catch (e) {
@@ -138,7 +139,7 @@ authedRouter.patch("/:id/feedback/:feedbackId", async (c) => {
 authedRouter.post("/:id/feedback/bulk-mark-reviewed", async (c) => {
 	const ctx = ctxFromHono(c);
 	const projectId = c.req.param("id");
-	const raw = await c.req.json();
+	const raw = await jsonBody(c);
 	try {
 		return c.json(await bulkMarkReviewed(ctx, { ...raw, projectId }));
 	} catch (e) {
@@ -149,7 +150,7 @@ authedRouter.post("/:id/feedback/bulk-mark-reviewed", async (c) => {
 authedRouter.post("/:id/feedback/bulk-convert-to-issue", async (c) => {
 	const ctx = ctxFromHono(c);
 	const projectId = c.req.param("id");
-	const raw = await c.req.json();
+	const raw = await jsonBody(c);
 	try {
 		return c.json(await bulkConvertToIssue(ctx, { ...raw, projectId }), 201);
 	} catch (e) {

@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { type Context, Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { authMiddleware, isPublicViewer } from "../middleware/auth";
 import { createUserToken, deleteUserToken, getUserWorkspaces } from "../services/user-tokens";
@@ -46,7 +47,7 @@ router.post("/tokens", authMiddleware, async (c) => {
 	if (denied) return denied;
 	const user = c.get("user") as { id: string };
 	try {
-		const result = await createUserToken({ db: c.env.DB, userId: user.id }, await c.req.json());
+		const result = await createUserToken({ db: c.env.DB, userId: user.id }, await jsonBody(c));
 		return c.json(result, 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);

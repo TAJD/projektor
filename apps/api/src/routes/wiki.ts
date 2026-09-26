@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { ctxFromHono } from "../services/types";
 import * as wikiService from "../services/wiki";
@@ -162,7 +163,7 @@ router.get("/notifications", async (c) => {
 router.post("/notifications/read", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		const body = await c.req.json().catch(() => ({}));
+		const body = await jsonBody(c).catch(() => ({}));
 		return c.json(await wikiWatchersService.markWikiNotificationsRead(ctx, body));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
@@ -296,7 +297,7 @@ router.get("/:slug", async (c) => {
 router.post("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		const body = await c.req.json();
+		const body = await jsonBody(c);
 		return c.json(await wikiService.createWikiPage(ctx, body), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
@@ -306,7 +307,7 @@ router.post("/", async (c) => {
 router.put("/:slug", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		const body = await c.req.json();
+		const body = await jsonBody(c);
 		return c.json(await wikiService.updateWikiPage(ctx, c.req.param("slug"), body));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
@@ -325,7 +326,7 @@ router.post("/:slug/verify", async (c) => {
 router.post("/:slug/watch", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		const body = await c.req.json().catch(() => ({}));
+		const body = await jsonBody(c).catch(() => ({}));
 		return c.json(await wikiWatchersService.watchWikiPage(ctx, c.req.param("slug"), body));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
@@ -353,7 +354,7 @@ router.get("/:slug/draft", async (c) => {
 router.put("/:slug/draft", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		const body = await c.req.json();
+		const body = await jsonBody(c);
 		return c.json(await wikiDraftsService.saveWikiDraft(ctx, c.req.param("slug"), body));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
@@ -372,7 +373,7 @@ router.delete("/:slug/draft", async (c) => {
 router.patch("/:slug", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		const body = await c.req.json();
+		const body = await jsonBody(c);
 		return c.json(await wikiService.patchWikiPage(ctx, c.req.param("slug"), body));
 	} catch (e) {
 		return serviceErrToResponse(c, e);

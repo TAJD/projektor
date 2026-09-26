@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { claimFiles, listFileClaims, releaseFiles } from "../services/file-claims";
 import { ctxFromHono } from "../services/types";
@@ -19,7 +20,7 @@ router.get("/", async (c) => {
 router.post("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await claimFiles(ctx, await c.req.json()), 201);
+		return c.json(await claimFiles(ctx, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -28,7 +29,7 @@ router.post("/", async (c) => {
 router.post("/release", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await releaseFiles(ctx, await c.req.json()));
+		return c.json(await releaseFiles(ctx, await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

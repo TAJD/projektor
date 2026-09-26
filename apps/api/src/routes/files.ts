@@ -2,6 +2,7 @@ import type { HonoEnv } from "@projektor/types";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { z } from "zod";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import * as filesService from "../services/files";
 import { ctxFromHono } from "../services/types";
@@ -25,7 +26,7 @@ router.get("/", async (c) => {
 
 router.post("/links", async (c) => {
 	const ctx = ctxFromHono(c);
-	const body = await c.req.json().catch(() => null);
+	const body = await jsonBody(c).catch(() => null);
 	try {
 		const result = await filesService.createLinkAttachment(ctx, body);
 		return c.json(result, 201);

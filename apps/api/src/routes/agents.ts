@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { endAgent, heartbeatAgent, listActiveAgents, registerAgent } from "../services/agents";
 import { ctxFromHono } from "../services/types";
@@ -19,7 +20,7 @@ router.get("/", async (c) => {
 router.post("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await registerAgent(ctx, await c.req.json()), 201);
+		return c.json(await registerAgent(ctx, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

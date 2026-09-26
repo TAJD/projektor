@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import {
 	createTaskType,
@@ -23,7 +24,7 @@ router.get("/", async (c) => {
 router.post("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await createTaskType(ctx, await c.req.json()), 201);
+		return c.json(await createTaskType(ctx, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -32,7 +33,7 @@ router.post("/", async (c) => {
 router.patch("/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await updateTaskType(ctx, c.req.param("id"), await c.req.json()));
+		return c.json(await updateTaskType(ctx, c.req.param("id"), await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

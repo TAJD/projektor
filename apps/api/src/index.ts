@@ -4,6 +4,7 @@ import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import { jsonBody } from "./http/body";
 import { serviceErrToResponse } from "./http/error-adapter";
 import { safeDecodeURIComponent } from "./lib/urls";
 import { injectWikiMetadata, resolveWikiPageForSsr } from "./lib/wiki-ssr";
@@ -47,6 +48,7 @@ import { wikiRouter } from "./routes/wiki";
 import { workflowRouter } from "./routes/workflow";
 import { workspacesRouter } from "./routes/workspaces";
 import { seedDefaultCustomFields } from "./services/custom-fields";
+import { ServiceError } from "./services/errors";
 import { listProjectsAcrossWorkspaces } from "./services/projects";
 import { seedDefaultTaskStatuses } from "./services/task-statuses";
 import { seedDefaultTaskTypes } from "./services/task-types";
@@ -61,6 +63,9 @@ const app = new Hono<HonoEnv>();
 // temporary instrumentation (PROJ-427/#131). Log the failure with its request
 // context and return the same JSON error shape every other endpoint uses.
 app.onError((err, c) => {
+	// PROJ-877: a typed service error that escaped a route's try (e.g. a body parse
+	// outside it) still maps to its 4xx rather than a 500.
+	if (err instanceof ServiceError) return serviceErrToResponse(c, err);
 	console.error("unhandled error", {
 		method: c.req.method,
 		path: c.req.path,
@@ -229,7 +234,7 @@ app.get("/api/workspaces", authMiddleware, async (c) => {
 app.post("/api/workspaces", authMiddleware, async (c) => {
 	const user = c.get("user") as { id: string };
 	try {
-		return c.json(await createWorkspace(c.env.DB, user.id, await c.req.json()), 201);
+		return c.json(await createWorkspace(c.env.DB, user.id, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

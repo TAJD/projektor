@@ -66,6 +66,16 @@ const SERVER_INSTRUCTIONS =
 
 const router = new Hono<HonoEnv>();
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+	return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function missingRequiredArgs(tool: MCPTool, args: Record<string, unknown>): string[] {
+	const required = (tool.inputSchema as { required?: unknown }).required;
+	if (!Array.isArray(required)) return [];
+	return required.filter((k): k is string => typeof k === "string" && args[k] === undefined);
+}
+
 // MCP endpoint: POST /mcp/{workspaceId}
 // Implements JSON-RPC 2.0 over HTTP (MCP Streamable HTTP transport)
 //
@@ -81,12 +91,19 @@ const router = new Hono<HonoEnv>();
 // docs/superpowers/specs/2026-07-29-mcp-2026-07-28-update-plan.md.
 router.post("/:workspaceId", async (c) => {
 	const workspace = c.get("workspace") as { id: string };
-	const body = await c.req.json<{
-		jsonrpc: "2.0";
-		id: unknown;
-		method: string;
-		params?: unknown;
-	}>();
+	// PROJ-877: malformed JSON is a JSON-RPC parse error (-32700), and a body that
+	// isn't a request object is an invalid request (-32600) — neither is a 500.
+	let raw: unknown;
+	try {
+		raw = await c.req.json();
+	} catch {
+		return c.json(jsonRpcError(null, -32700, "Parse error"), 400);
+	}
+	if (!isPlainObject(raw) || typeof raw.method !== "string") {
+		const id = isPlainObject(raw) ? (raw.id ?? null) : null;
+		return c.json(jsonRpcError(id, -32600, "Invalid Request"), 400);
+	}
+	const body = raw as { jsonrpc: "2.0"; id: unknown; method: string; params?: unknown };
 
 	if (body.jsonrpc !== "2.0") {
 		return c.json(jsonRpcError(body.id, -32600, "Invalid Request"), 400);
@@ -154,9 +171,27 @@ router.post("/:workspaceId", async (c) => {
 		}
 
 		case "tools/call": {
-			const { name, arguments: args } = body.params as { name: string; arguments: unknown };
+			// PROJ-877: params must name a tool; missing `arguments` is treated as {} and
+			// checked against the tool's declared required fields, so a handler never
+			// destructures undefined into a 500.
+			if (!isPlainObject(body.params) || typeof body.params.name !== "string") {
+				return c.json(jsonRpcError(body.id, -32602, "Invalid params: `name` is required"));
+			}
+			const name = body.params.name;
+			const args = body.params.arguments ?? {};
+			if (!isPlainObject(args)) {
+				return c.json(
+					jsonRpcError(body.id, -32602, "Invalid params: `arguments` must be an object")
+				);
+			}
 			const tool = getAllTools(workspace.id).find((t) => t.name === name);
 			if (!tool) return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
+			const missing = missingRequiredArgs(tool, args);
+			if (missing.length > 0) {
+				return c.json(
+					jsonRpcError(body.id, -32602, `Missing required argument(s): ${missing.join(", ")}`)
+				);
+			}
 
 			// PROJ-17: enforce token scope per-tool. tokenScopes is undefined when
 			// auth came from Cloudflare Access / dev bypass — those are role-governed,
