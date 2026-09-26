@@ -333,6 +333,46 @@ interface TocItem {
 	id: string;
 }
 
+// PROJ-804: pure and exported so it's unit-testable without mounting WikiPage. Turns
+// heading text into a URL-safe id and de-duplicates within one pass over the page's
+// headings — repeated text (two "Overview" headings) gets `-1`, `-2`, … suffixes
+// instead of two headings sharing an id (which broke the second TOC entry's link and
+// its React/Preact list key). A heading whose text produces an empty slug (e.g. all
+// punctuation, or a script `[^a-z0-9]` strips entirely) falls back to `section-N`
+// (1-based, N = that heading's position) rather than `id=""`.
+//
+// Uniqueness is checked against every id handed out so far, not a per-base counter:
+// ["Overview", "Overview", "Overview 1"] must not give `overview-1` twice, so a suffix
+// is only taken once it's actually free. An id the author wrote (`<h2 id="install">`,
+// which DOMPurify keeps) is reserved up front and left as-is — links elsewhere point
+// at it — and generated ids steer around it. Only a *repeated* authored id is
+// re-suffixed, since two elements can't share it either. Because kept ids are left
+// alone, running this again over headings it already labelled is a no-op.
+export function assignHeadingIds(
+	headings: ReadonlyArray<{ text: string; id?: string | null }>
+): string[] {
+	const used = new Set<string>();
+	const result: (string | null)[] = headings.map((h) => {
+		const authored = h.id?.trim();
+		if (!authored || used.has(authored)) return null;
+		used.add(authored);
+		return authored;
+	});
+	return headings.map((h, index) => {
+		const kept = result[index];
+		if (kept !== null) return kept;
+		const slug = h.text
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-|-$/g, "");
+		const base = h.id?.trim() || slug || `section-${index + 1}`;
+		let candidate = base;
+		for (let n = 1; used.has(candidate); n++) candidate = `${base}-${n}`;
+		used.add(candidate);
+		return candidate;
+	});
+}
+
 interface WikiRevision {
 	id: string;
 	author_id: string | null;
@@ -2447,19 +2487,20 @@ function useTableOfContents(
 			return;
 		}
 		const headings = Array.from(container.querySelectorAll("h1, h2, h3")) as HTMLElement[];
-		headings.forEach((h) => {
-			if (!h.id) {
-				h.id = (h.textContent ?? "")
-					.toLowerCase()
-					.replace(/[^a-z0-9]+/g, "-")
-					.replace(/^-|-$/g, "");
-			}
+		// PROJ-804: one pass over every heading on the page, so de-duplication sees them
+		// all. Existing ids are passed in: authored ones (raw `<h2 id>` in the markdown)
+		// are kept, and ids this already assigned to the same DOM are left unchanged.
+		const ids = assignHeadingIds(
+			headings.map((h) => ({ text: h.textContent ?? "", id: h.getAttribute("id") }))
+		);
+		headings.forEach((h, i) => {
+			h.id = ids[i];
 		});
 		setToc(
-			headings.map((h) => ({
+			headings.map((h, i) => ({
 				level: parseInt(h.tagName[1], 10),
 				text: h.textContent ?? "",
-				id: h.id,
+				id: ids[i],
 			}))
 		);
 	}, [renderedHtml, contentMountToken]);

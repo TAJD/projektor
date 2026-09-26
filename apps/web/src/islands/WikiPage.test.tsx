@@ -10,7 +10,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/pre
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetProjectStoreForTests } from "../lib/project-context";
 import * as markdownUtils from "../utils/markdown";
-import WikiPage, { type ServerDraft, type WikiPageData } from "./WikiPage";
+import WikiPage, { assignHeadingIds, type ServerDraft, type WikiPageData } from "./WikiPage";
 
 // PROJ-860/PROJ-803: real marked/DOMPurify rendering (so headings, mermaid placeholders
 // etc. still show up in the DOM) wrapped in spies — `renderMdWithWikilinks`'s call count
@@ -2207,5 +2207,135 @@ describe("WikiPage — PROJ-802 hash link scroll on load/nav/back-forward", () =
 
 		expect(scrollIntoView).not.toHaveBeenCalled();
 		expect(document.activeElement).not.toBe(document.getElementById("wiki-page-tree"));
+	});
+});
+
+describe("assignHeadingIds (PROJ-804)", () => {
+	it("gives repeated heading text de-duplicated suffixes", () => {
+		expect(
+			assignHeadingIds([{ text: "Overview" }, { text: "Setup" }, { text: "Overview" }])
+		).toEqual(["overview", "setup", "overview-1"]);
+	});
+
+	it("falls back to section-N (never an empty id) when text produces an empty slug", () => {
+		expect(assignHeadingIds([{ text: "Setup" }, { text: "---" }, { text: "" }])).toEqual([
+			"setup",
+			"section-2",
+			"section-3",
+		]);
+	});
+
+	it("still de-dupes a section-N fallback against a heading literally titled that", () => {
+		expect(assignHeadingIds([{ text: "Section 2" }, { text: "" }])).toEqual([
+			"section-2",
+			"section-2-1",
+		]);
+	});
+
+	it("never hands out a suffixed id that a later heading's own text already produces", () => {
+		const ids = assignHeadingIds([
+			{ text: "Overview" },
+			{ text: "Overview" },
+			{ text: "Overview 1" },
+		]);
+		expect(ids).toEqual(["overview", "overview-1", "overview-1-1"]);
+		expect(new Set(ids).size).toBe(ids.length);
+
+		// Same collision with the order reversed: the suffix skips the taken id.
+		expect(
+			assignHeadingIds([{ text: "Overview 1" }, { text: "Overview" }, { text: "Overview" }])
+		).toEqual(["overview-1", "overview", "overview-2"]);
+	});
+
+	it("keeps authored ids and steers generated ones around them", () => {
+		expect(
+			assignHeadingIds([
+				{ text: "Setup" }, // would be `setup`, but an author claimed that below
+				{ text: "Install", id: "setup" },
+				{ text: "Custom anchor", id: "my-anchor" },
+				{ text: "My anchor" }, // slugs to `my-anchor`, which is taken
+			])
+		).toEqual(["setup-1", "setup", "my-anchor", "my-anchor-1"]);
+	});
+
+	it("re-suffixes only a repeated authored id, and is a no-op on ids it already assigned", () => {
+		expect(
+			assignHeadingIds([
+				{ text: "A", id: "dup" },
+				{ text: "B", id: "dup" },
+			])
+		).toEqual(["dup", "dup-1"]);
+
+		const first = assignHeadingIds([{ text: "Overview" }, { text: "Overview" }, { text: "" }]);
+		const again = assignHeadingIds(
+			[{ text: "Overview" }, { text: "Overview" }, { text: "" }].map((h, i) => ({
+				...h,
+				id: first[i],
+			}))
+		);
+		expect(again).toEqual(first);
+	});
+});
+
+describe("WikiPage — PROJ-804 duplicate/empty heading ids in the rendered TOC", () => {
+	beforeEach(() => {
+		// Three headings mean the ToC's IntersectionObserver effect also runs — jsdom has
+		// no real IntersectionObserver, so it needs a stub (see PROJ-802's describe block).
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				observe() {}
+				unobserve() {}
+				disconnect() {}
+			}
+		);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("renders unique anchors and TOC entries for duplicate and blank headings", async () => {
+		mockFetchWiki({
+			...PAGE,
+			content: "# Overview\n\nIntro.\n\n## Setup\n\nSetup text.\n\n## Overview\n\nMore text.",
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		await waitFor(() => {
+			expect(document.querySelectorAll('[id="overview"]')).toHaveLength(1);
+			expect(document.querySelectorAll('[id="overview-1"]')).toHaveLength(1);
+		});
+		const toc = within(screen.getByRole("navigation", { name: "Table of contents" }));
+		expect(toc.getByRole("link", { name: "Setup" }).getAttribute("href")).toBe("#setup");
+		const overviewLinks = toc.getAllByRole("link", { name: "Overview" });
+		expect(overviewLinks.map((a) => a.getAttribute("href")).sort()).toEqual([
+			"#overview",
+			"#overview-1",
+		]);
+	});
+
+	it("keeps an authored heading id from the markdown instead of overwriting it", async () => {
+		mockFetchWiki({
+			...PAGE,
+			content:
+				'# Guide\n\n<h2 id="install-guide">Install</h2>\n\nText.\n\n## Overview\n\nText.\n\n## Overview 1\n\nText.\n\n## Overview\n\nText.',
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		await waitFor(() => {
+			expect(document.getElementById("install-guide")?.textContent).toBe("Install");
+		});
+		const toc = within(screen.getByRole("navigation", { name: "Table of contents" }));
+		expect(toc.getByRole("link", { name: "Install" }).getAttribute("href")).toBe("#install-guide");
+		const hrefs = toc.getAllByRole("link").map((a) => a.getAttribute("href"));
+		expect(hrefs).toEqual(["#guide", "#install-guide", "#overview", "#overview-1", "#overview-2"]);
+		// Every heading id in the article is unique.
+		const headingIds = Array.from(document.querySelectorAll(".prose :is(h1, h2, h3)")).map(
+			(h) => h.id
+		);
+		expect(new Set(headingIds).size).toBe(headingIds.length);
 	});
 });
