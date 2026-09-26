@@ -6,12 +6,13 @@
 // are duplicated in miniature here rather than imported, mirroring
 // services/wiki-watchers.ts's resolveWatchTarget precedent.
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { SaveWikiDraftInputSchema } from "../schemas/wiki";
 import { assertProjectAccess } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
+import { idFirst, idOrSlugMatch } from "./wiki-lookup";
 
 type ResolvedDraftTarget = {
 	id: string;
@@ -32,13 +33,14 @@ async function resolveDraftTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 		.from(schema.wikiPages)
 		.where(
 			and(
-				or(eq(schema.wikiPages.id, idOrSlug), eq(schema.wikiPages.slug, idOrSlug)),
+				idOrSlugMatch(idOrSlug),
 				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
 				// PROJ-496: no drafts on a trashed page — same "trashed = gone" rule as every
 				// other page reference entry point (services/wiki.ts).
 				isNull(schema.wikiPages.deletedAt)
 			)
 		)
+		.orderBy(idFirst(idOrSlug))
 		.get();
 
 	let page = direct;

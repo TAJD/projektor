@@ -18,6 +18,7 @@ import { assertProjectAccess, hasProjectAccess } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
+import { idFirst, idOrSlugMatch } from "./wiki-lookup";
 
 type Orm = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -45,13 +46,14 @@ async function resolveWatchTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 		.from(schema.wikiPages)
 		.where(
 			and(
-				or(eq(schema.wikiPages.id, idOrSlug), eq(schema.wikiPages.slug, idOrSlug)),
+				idOrSlugMatch(idOrSlug),
 				eq(schema.wikiPages.workspaceId, ctx.workspaceId),
 				// PROJ-496: a trashed page can't be (un)watched — same "trashed = gone" rule
 				// as every other page reference entry point (services/wiki.ts).
 				isNull(schema.wikiPages.deletedAt)
 			)
 		)
+		.orderBy(idFirst(idOrSlug))
 		.get();
 
 	let page = direct;

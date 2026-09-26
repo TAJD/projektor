@@ -6155,3 +6155,101 @@ describe("Wiki trash (PROJ-496)", () => {
 		expect(revisionsAfter.results.length).toBe(0);
 	});
 });
+
+// PROJ-812: a slug equal to another page's id must never make an id-or-slug lookup
+// hit the wrong page, and new id-shaped slugs are rejected outright.
+describe("wiki slug/id collisions (PROJ-812)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let userId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture({ role: "admin" });
+		token = fixture.token;
+		slug = fixture.workspace.slug;
+		workspaceId = fixture.workspace.id;
+		userId = fixture.user.id;
+	});
+
+	async function create(body: Record<string, unknown>) {
+		return resetRateLimitAndFetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify(body),
+		});
+	}
+
+	it("rejects an explicit slug shaped like a dashed or undashed page id", async () => {
+		const dashed = await create({ title: "A", slug: crypto.randomUUID() });
+		expect(dashed.status).toBe(400);
+		const hex = await create({ title: "B", slug: crypto.randomUUID().replace(/-/g, "") });
+		expect(hex.status).toBe(400);
+	});
+
+	it("rejects renaming a page to an id-shaped slug", async () => {
+		const res = await create({ title: "Rename Me" });
+		const page = (await res.json()) as { id: string };
+		const put = await resetRateLimitAndFetch(`http://localhost/api/wiki/${page.id}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ slug: crypto.randomUUID() }),
+		});
+		expect(put.status).toBe(400);
+	});
+
+	it("suffixes an auto-derived slug when the title is itself an id", async () => {
+		const id = crypto.randomUUID();
+		const res = await create({ title: id });
+		expect(res.status).toBe(201);
+		expect(((await res.json()) as { slug: string }).slug).toBe(`${id}-page`);
+	});
+
+	it("resolves GET, PUT and DELETE by id to the id's page when a legacy slug equals that id", async () => {
+		// Legacy (pre-PROJ-812) data, inserted directly since the API now refuses it: the
+		// impostor row is written FIRST, so a lookup without an id preference returns it.
+		const target = { id: crypto.randomUUID() };
+		const impostorId = crypto.randomUUID();
+		const now = Math.floor(Date.now() / 1000);
+		const insert = (id: string, pageSlug: string, title: string) =>
+			env.DB.prepare(
+				`INSERT INTO wiki_pages (id, workspace_id, project_id, slug, title, content,
+				 parent_id, created_by_id, updated_by_id, created_at, updated_at)
+				 VALUES (?, ?, NULL, ?, ?, 'body', NULL, ?, ?, ?, ?)`
+			).bind(id, workspaceId, pageSlug, title, userId, userId, now, now);
+		await env.DB.batch([
+			insert(impostorId, target.id, "Impostor"),
+			insert(target.id, "target", "Target"),
+		]);
+
+		const get = await resetRateLimitAndFetch(`http://localhost/api/wiki/${target.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(get.status).toBe(200);
+		expect(((await get.json()) as { id: string }).id).toBe(target.id);
+
+		const put = await resetRateLimitAndFetch(`http://localhost/api/wiki/${target.id}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Target Renamed" }),
+		});
+		expect(put.status).toBe(200);
+
+		const del = await resetRateLimitAndFetch(`http://localhost/api/wiki/${target.id}`, {
+			method: "DELETE",
+			headers: authHeaders(token, slug),
+		});
+		expect(del.status).toBeLessThan(300);
+
+		const rows = await env.DB.prepare(
+			"SELECT id, title, deleted_at FROM wiki_pages WHERE id IN (?, ?)"
+		)
+			.bind(target.id, impostorId)
+			.all<{ id: string; title: string; deleted_at: number | null }>();
+		const byId = Object.fromEntries(rows.results.map((r) => [r.id, r]));
+		expect(byId[target.id].title).toBe("Target Renamed");
+		expect(byId[target.id].deleted_at).not.toBeNull();
+		expect(byId[impostorId].title).toBe("Impostor");
+		expect(byId[impostorId].deleted_at).toBeNull();
+	});
+});
