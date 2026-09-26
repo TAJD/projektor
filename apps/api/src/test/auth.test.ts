@@ -222,6 +222,60 @@ describe("PROJ-79: CF Access JWT verification (verifyJwtPayload unit tests)", ()
 		const result = await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER);
 		expect(result).toBeNull();
 	});
+
+	// PROJ-879: the payload is schema-validated, not cast.
+	describe("PROJ-879: payload validation", () => {
+		const now = () => Math.floor(Date.now() / 1000);
+
+		it("missing exp is rejected (previously never expired)", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				aud: TEST_AUDIENCE,
+				iss: TEST_ISSUER,
+				email: TEST_EMAIL,
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+
+		it("missing email (Access service-token JWT) is rejected, not a crash", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				exp: now() + 3600,
+				aud: TEST_AUDIENCE,
+				iss: TEST_ISSUER,
+				common_name: "svc-token.access",
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+
+		it("expired is rejected", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				exp: now() - 5,
+				aud: TEST_AUDIENCE,
+				iss: TEST_ISSUER,
+				email: TEST_EMAIL,
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+
+		it("wrong aud is rejected", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				exp: now() + 3600,
+				aud: ["someone-else"],
+				iss: TEST_ISSUER,
+				email: TEST_EMAIL,
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+
+		it("exp of the wrong type is rejected", async () => {
+			const jwt = await signTestJwt(privateKey, {
+				exp: "9999999999",
+				aud: TEST_AUDIENCE,
+				iss: TEST_ISSUER,
+				email: TEST_EMAIL,
+			});
+			expect(await verifyJwtPayload(jwt, [publicJwk], TEST_AUDIENCE, TEST_ISSUER)).toBeNull();
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -289,6 +343,32 @@ describe("PROJ-79: CF Access JWT HTTP rejection paths", () => {
 			},
 		});
 		expect(res.status).toBe(401);
+	});
+
+	it("PROJ-879: a JWT without email returns 401, not 500", async () => {
+		const aud = "http-879-aud";
+		const domain = "http-879.cloudflareaccess.com";
+		const prev = { a: env.CF_ACCESS_AUDIENCE, d: env.CF_ACCESS_TEAM_DOMAIN };
+		env.CF_ACCESS_AUDIENCE = aud;
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		try {
+			const header = encodeJwtPart({ alg: "RS256", typ: "JWT" });
+			const payload = encodeJwtPart({
+				exp: Math.floor(Date.now() / 1000) + 3600,
+				aud,
+				iss: `https://${domain}`,
+			});
+			const res = await SELF.fetch("http://localhost/api/issues", {
+				headers: {
+					"Cf-Access-Jwt-Assertion": `${header}.${payload}.fakesig`,
+					"X-Workspace-Slug": "x",
+				},
+			});
+			expect(res.status).toBe(401);
+		} finally {
+			env.CF_ACCESS_AUDIENCE = prev.a;
+			env.CF_ACCESS_TEAM_DOMAIN = prev.d;
+		}
 	});
 });
 
