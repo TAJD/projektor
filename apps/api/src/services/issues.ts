@@ -1,18 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import {
-	and,
-	desc,
-	eq,
-	gte,
-	inArray,
-	isNotNull,
-	isNull,
-	like,
-	lte,
-	notInArray,
-	or,
-	sql,
-} from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { issuePath } from "../lib/urls";
 import { IdSchema } from "../schemas/common";
@@ -39,14 +26,14 @@ import {
 	validateCustomFields,
 	writeCustomFieldValues,
 } from "./custom-fields";
-import { checkDefinitionOfReady } from "./definition-of-ready";
+import { dorColumns } from "./definition-of-ready";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { isExternallyVerifiableEvidence } from "./evidence-classification";
 import {
 	isLiveAgentSessionId,
 	issueEverHadAgentLease,
 	issueHasLiveAgentLease,
-	liveLeasedIssueIds,
+	SESSION_TTL_SECONDS,
 } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
@@ -709,10 +696,10 @@ async function insertIssueRow(
 			`INSERT INTO issues
 			   (id, workspace_id, project_id, number, title, body, status, status_id,
 			    status_category, priority, assignee_id, labels, parent_id, type_id,
-			    created_by_id, author_kind, created_at, updated_at)
+			    created_by_id, author_kind, created_at, updated_at, dor_ready, dor_missing)
 			 VALUES
 			   (?, ?, ?, (SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE project_id = ?),
-			    ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			    ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		)
 		.bind(
 			params.id,
@@ -733,7 +720,8 @@ async function insertIssueRow(
 			// field — see ServiceCtx.authKind and the issueComments.authorKind precedent (PROJ-328).
 			ctx.authKind ?? null,
 			params.now,
-			params.now
+			params.now,
+			...dorColumns(params.resolvedBody)
 		)
 		.run();
 
@@ -871,7 +859,13 @@ type SetValues = Record<string, any>;
 function buildSimpleFields(data: UpdateIssueData): SetValues {
 	const setValues: SetValues = {};
 	if (data.title !== undefined) setValues.title = data.title;
-	if (data.body !== undefined) setValues.body = data.body;
+	if (data.body !== undefined) {
+		setValues.body = data.body;
+		// PROJ-859: keep the stored definition-of-ready result in step with the body.
+		const [dorReady, dorMissing] = dorColumns(data.body);
+		setValues.dorReady = dorReady;
+		setValues.dorMissing = dorMissing;
+	}
 	if (data.priority !== undefined) setValues.priority = data.priority;
 	if ("assigneeId" in data) setValues.assigneeId = data.assigneeId ?? null;
 	if (data.labels !== undefined) setValues.labels = data.labels;
@@ -1416,7 +1410,7 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 	return { ok: true };
 }
 
-const PRIORITY_SCORE: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1, none: 0 };
+const _PRIORITY_SCORE: Record<string, number> = { urgent: 4, high: 3, medium: 2, low: 1, none: 0 };
 
 type PrioritizedFilters = {
 	limit: number;
@@ -1446,133 +1440,160 @@ function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
 	return { limit, includeBacklog, excludeClaimed, includeNotReady, projectId };
 }
 
-async function fetchOpenIssuesForPrioritization(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	includeBacklog: boolean,
-	projectId: string | undefined
-) {
-	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
-	return orm
-		.select({
-			id: schema.issues.id,
-			title: schema.issues.title,
-			status: schema.issues.status,
-			priority: schema.issues.priority,
-			project_id: schema.issues.projectId,
-			number: schema.issues.number,
-			status_id: schema.issues.statusId,
-			status_category: schema.taskStatuses.category,
-			body: schema.issues.body,
-		})
-		.from(schema.issues)
-		.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
-		.where(
-			and(
-				eq(schema.issues.workspaceId, ctx.workspaceId),
-				// PROJ-311: only prioritize issues in projects the user can see.
-				...(visible ? [visible as Condition] : []),
-				...(projectId ? [eq(schema.issues.projectId, projectId)] : []),
-				or(
-					and(
-						isNull(schema.issues.statusId),
-						sql`${schema.issues.status} NOT IN ('done', 'cancelled')`
-					),
-					and(
-						isNotNull(schema.issues.statusId),
-						sql`${schema.taskStatuses.category} NOT IN ('done', 'cancelled')`
+// PROJ-859: fill in dor_ready/dor_missing for rows written before migration 0058.
+// One-time per row (writes keep the columns current afterwards), in bounded batches so
+// a large workspace heals over a few calls instead of one huge request. Steady state
+// is a single indexed SELECT that returns nothing.
+const DOR_HEAL_BATCH = 200;
+const DOR_HEAL_MAX_BATCHES = 5;
+
+async function healDefinitionOfReady(ctx: ServiceCtx): Promise<void> {
+	for (let i = 0; i < DOR_HEAL_MAX_BATCHES; i++) {
+		const { results } = await ctx.db
+			.prepare("SELECT id, body FROM issues WHERE workspace_id = ? AND dor_ready IS NULL LIMIT ?")
+			.bind(ctx.workspaceId, DOR_HEAL_BATCH)
+			.all<{ id: string; body: string | null }>();
+		const rows = results ?? [];
+		if (rows.length === 0) return;
+		await ctx.db.batch(
+			rows.map((r) =>
+				ctx.db
+					.prepare(
+						"UPDATE issues SET dor_ready = ?, dor_missing = ? WHERE id = ? AND workspace_id = ?"
 					)
-				),
-				...(!includeBacklog ? [sql`${schema.issues.status} != 'backlog'`] : [])
+					.bind(...dorColumns(r.body), r.id, ctx.workspaceId)
 			)
 		);
+		if (rows.length < DOR_HEAL_BATCH) return;
+	}
 }
 
-type OpenIssue = Awaited<ReturnType<typeof fetchOpenIssuesForPrioritization>>[number];
+interface PrioritizedRow {
+	id: string;
+	title: string;
+	status: string;
+	priority: string;
+	project_id: string;
+	number: number;
+	status_id: string | null;
+	status_category: string | null;
+	dor_ready: number | null;
+	dor_missing: string | null;
+	centrality: number;
+	priority_score: number;
+	story_points: number;
+	score: number;
+	not_ready_count: number;
+}
 
-async function computeInDegree(
-	orm: ReturnType<typeof drizzle>,
+/**
+ * PROJ-859: candidate selection AND ranking in one SQL statement.
+ *
+ * Same composite as before — 0.4·centrality + 0.4·priority/4 + 0.2·(1/story points),
+ * centrality = in-degree / max in-degree over the open set — but computed by SQLite
+ * with window functions, so the Worker only ever receives `limit` rows and no bodies.
+ * The window aggregates (max in-degree, not-ready count) run over the full open set
+ * BEFORE the ready filter, exactly as the old in-memory version scored everything and
+ * filtered afterwards. Ties break on insertion order (rowid).
+ */
+async function queryPrioritized(
 	ctx: ServiceCtx,
-	issueIds: string[]
-): Promise<Record<string, number>> {
-	// inChunks: issueIds is every open issue, so this would otherwise blow past D1's
-	// 100-bound-parameter cap on any reasonably busy workspace. See services/sql.ts.
-	const links = await inChunks(issueIds, (chunk) =>
-		orm
-			.select({ target_issue_id: schema.issueLinks.targetIssueId })
-			.from(schema.issueLinks)
-			.where(
-				and(
-					eq(schema.issueLinks.workspaceId, ctx.workspaceId),
-					inArray(schema.issueLinks.targetIssueId, chunk)
-				)
-			)
-	);
-
-	const inDegree: Record<string, number> = {};
-	for (const link of links) {
-		inDegree[link.target_issue_id] = (inDegree[link.target_issue_id] ?? 0) + 1;
+	opts: {
+		limit: number;
+		includeBacklog: boolean;
+		excludeClaimed: boolean;
+		projectId: string | undefined;
+		readyOnly: boolean;
 	}
-	return inDegree;
+): Promise<PrioritizedRow[]> {
+	const where: string[] = [
+		"i.workspace_id = ?",
+		`((i.status_id IS NULL AND i.status NOT IN ('done', 'cancelled'))
+		  OR (i.status_id IS NOT NULL AND ts.category NOT IN ('done', 'cancelled')))`,
+	];
+	const params: unknown[] = [ctx.workspaceId];
+	if (opts.projectId) {
+		where.push("i.project_id = ?");
+		params.push(opts.projectId);
+	}
+	// PROJ-311: only prioritize issues in projects the user can see.
+	const visible = visibleProjectSqlFragment(ctx, "i.project_id");
+	if (visible) {
+		where.push(visible.sql);
+		params.push(...visible.params);
+	}
+	if (!opts.includeBacklog) where.push("i.status != 'backlog'");
+	// PROJ-184: skip issues held by a live lease.
+	if (opts.excludeClaimed) {
+		where.push(`NOT EXISTS (
+			SELECT 1 FROM issue_leases l JOIN agent_sessions s ON s.id = l.agent_session_id
+			WHERE l.workspace_id = i.workspace_id AND l.issue_id = i.id AND l.released_at IS NULL
+			  AND s.status = 'active' AND s.last_heartbeat_at > ?)`);
+		params.push(Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS);
+	}
+
+	const sqlText = `
+		WITH open AS (
+			SELECT i.id, i.title, i.status, i.priority, i.project_id, i.number, i.status_id,
+			       ts.category AS status_category, i.dor_ready, i.dor_missing, i.rowid AS rid,
+			       (SELECT COUNT(*) FROM issue_links l
+			         WHERE l.workspace_id = i.workspace_id AND l.target_issue_id = i.id) AS indeg,
+			       (SELECT CAST(v.value AS REAL) FROM custom_field_values v
+			          JOIN custom_field_definitions d ON d.id = v.field_id
+			         WHERE v.issue_id = i.id AND CAST(v.value AS REAL) > 0
+			           AND (d.key LIKE '%story%' OR d.key LIKE '%point%'
+			                OR d.label LIKE '%story%' OR d.label LIKE '%point%')
+			         ORDER BY v.rowid DESC LIMIT 1) AS sp
+			  FROM issues i
+			  LEFT JOIN task_statuses ts ON ts.id = i.status_id
+			 WHERE ${where.join(" AND ")}
+		),
+		scored AS (
+			SELECT *,
+			       CAST(indeg AS REAL) / MAX(MAX(indeg) OVER (), 1) AS centrality,
+			       (CASE priority WHEN 'urgent' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2
+			                      WHEN 'low' THEN 1 ELSE 0 END) / 4.0 AS priority_score,
+			       COALESCE(sp, 1) AS story_points,
+			       SUM(CASE WHEN dor_ready = 0 THEN 1 ELSE 0 END) OVER () AS not_ready_count
+			  FROM open
+		)
+		SELECT *, 0.4 * centrality + 0.4 * priority_score + 0.2 * (1.0 / story_points) AS score
+		  FROM scored
+		 ${opts.readyOnly ? "WHERE dor_ready = 1" : ""}
+		 ORDER BY score DESC, rid ASC
+		 LIMIT ?`;
+	params.push(opts.limit);
+
+	const { results } = await ctx.db
+		.prepare(sqlText)
+		.bind(...params)
+		.all<PrioritizedRow>();
+	return results ?? [];
 }
 
-async function computeStoryPoints(
-	orm: ReturnType<typeof drizzle>,
-	issueIds: string[]
-): Promise<Record<string, number>> {
-	const cfValues = await inChunks(issueIds, (chunk) =>
-		orm
-			.select({
-				issue_id: schema.customFieldValues.issueId,
-				sp: sql<number>`CAST(${schema.customFieldValues.value} AS REAL)`,
-			})
-			.from(schema.customFieldValues)
-			.innerJoin(
-				schema.customFieldDefinitions,
-				eq(schema.customFieldValues.fieldId, schema.customFieldDefinitions.id)
-			)
-			.where(
-				and(
-					inArray(schema.customFieldValues.issueId, chunk),
-					or(
-						like(schema.customFieldDefinitions.key, "%story%"),
-						like(schema.customFieldDefinitions.key, "%point%"),
-						like(schema.customFieldDefinitions.label, "%story%"),
-						like(schema.customFieldDefinitions.label, "%point%")
-					)
-				)
-			)
-	);
-
-	const storyPoints: Record<string, number> = {};
-	for (const cf of cfValues) {
-		if (cf.sp > 0) storyPoints[cf.issue_id] = cf.sp;
-	}
-	return storyPoints;
-}
-
-function scoreOpenIssues(
-	openIssues: readonly OpenIssue[],
-	inDegree: Record<string, number>,
-	storyPoints: Record<string, number>
-) {
-	const issueIds = openIssues.map((i) => i.id);
-	const maxInDegree = Math.max(...issueIds.map((id) => inDegree[id] ?? 0), 1);
-
-	const scored = openIssues.map((issue) => {
-		const centrality = (inDegree[issue.id] ?? 0) / maxInDegree;
-		const priority = (PRIORITY_SCORE[issue.priority] ?? 0) / 4;
-		const sp = storyPoints[issue.id] ?? 1;
-		const composite = 0.4 * centrality + 0.4 * priority + 0.2 * (1 / sp);
-		return {
-			...issue,
-			_score: composite,
-			_score_breakdown: { centrality, priority, story_points: sp },
-		};
-	});
-
-	scored.sort((a, b) => b._score - a._score);
-	return scored;
+function toPrioritizedIssue(r: PrioritizedRow) {
+	const issue = {
+		id: r.id,
+		title: r.title,
+		status: r.status,
+		priority: r.priority,
+		project_id: r.project_id,
+		number: r.number,
+		status_id: r.status_id,
+		status_category: r.status_category,
+		_score: r.score,
+		_score_breakdown: {
+			centrality: r.centrality,
+			priority: r.priority_score,
+			story_points: r.story_points,
+		},
+	};
+	if (r.dor_ready === 1) return issue;
+	return {
+		...issue,
+		needsGrooming: true as const,
+		missingCriteria: JSON.parse(r.dor_missing ?? "[]") as string[],
+	};
 }
 
 export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
@@ -1582,46 +1603,35 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 		? await resolveVisibleProjectIdParam(ctx, parsed.projectId)
 		: parsed.projectId;
 
-	const orm = drizzle(ctx.db, { schema });
-
-	const issues = await fetchOpenIssuesForPrioritization(orm, ctx, includeBacklog, projectId);
-	if (issues.length === 0) return { issues: [] };
-
-	// excludeClaimed (PROJ-184): drop issues held by a live lease so "what should
-	// I work on next?" skips tickets another agent is already on.
-	const openIssues = excludeClaimed
-		? await (async () => {
-				const leased = await liveLeasedIssueIds(ctx);
-				return issues.filter((i) => !leased.has(i.id));
-			})()
-		: issues;
-
-	if (openIssues.length === 0) return { issues: [] };
-
-	const issueIds = openIssues.map((i) => i.id);
-	const inDegree = await computeInDegree(orm, ctx, issueIds);
-	const storyPoints = await computeStoryPoints(orm, issueIds);
-
-	const scored = scoreOpenIssues(openIssues, inDegree, storyPoints);
+	await healDefinitionOfReady(ctx);
+	const base = { limit, includeBacklog, excludeClaimed, projectId };
 
 	// PROJ-253: definition-of-ready gate. By default, issues missing acceptance
-	// criteria/scope/verification are dropped from "what should I work on next?" — an
-	// agent that claims one is set up to guess. includeNotReady surfaces them anyway,
-	// annotated with what's missing, for grooming.
-	const annotated = scored.map(({ body, ...issue }) => {
-		const { ready, missing } = checkDefinitionOfReady(body ?? "");
-		return ready ? issue : { ...issue, needsGrooming: true, missingCriteria: missing };
-	});
-	// PROJ-291: don't SILENTLY drop not-ready issues — a caller seeing an empty list
-	// otherwise concludes "no work" when a differently-worded backlog exists. Surface
-	// the count so the caller knows to groom (or re-query with includeNotReady).
-	const droppedNotReady = annotated.filter((i) => "needsGrooming" in i).length;
-	if (includeNotReady) return { issues: annotated.slice(0, limit), droppedNotReady: 0 };
+	// criteria/scope are dropped from "what should I work on next?" — an agent that
+	// claims one is set up to guess. includeNotReady surfaces them anyway, annotated
+	// with what's missing, for grooming.
+	if (includeNotReady) {
+		const rows = await queryPrioritized(ctx, { ...base, readyOnly: false });
+		if (rows.length === 0) return { issues: [] };
+		return { issues: rows.map(toPrioritizedIssue), droppedNotReady: 0 };
+	}
 
-	const readyOnly = annotated.filter((i) => !("needsGrooming" in i));
-	if (readyOnly.length > 0) return { issues: readyOnly.slice(0, limit), droppedNotReady };
+	const ready = await queryPrioritized(ctx, { ...base, readyOnly: true });
+	// PROJ-291: don't SILENTLY drop not-ready issues — surface the count so a caller
+	// seeing few results knows to groom (or re-query with includeNotReady).
+	if (ready.length > 0) {
+		return { issues: ready.map(toPrioritizedIssue), droppedNotReady: ready[0].not_ready_count };
+	}
 
-	return { issues: annotated.slice(0, limit), droppedNotReady, degraded: true };
+	// Nothing ready: return the ranked not-ready list, flagged, rather than an empty
+	// array that reads as "no open work".
+	const all = await queryPrioritized(ctx, { ...base, readyOnly: false });
+	if (all.length === 0) return { issues: [] };
+	return {
+		issues: all.map(toPrioritizedIssue),
+		droppedNotReady: all[0].not_ready_count,
+		degraded: true,
+	};
 }
 
 export async function searchIssues(ctx: ServiceCtx, raw: unknown) {

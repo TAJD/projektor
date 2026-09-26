@@ -11,7 +11,7 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 // PROJ-496 (R14): a trashed page is treated as gone for link resolution purposes — see
-// resolveTitleTargets/resolveSlugTarget/backlinksForResolvedPage/listBrokenWikiLinks
+// resolveTitleTargets/resolveSlugTargets/backlinksForResolvedPage/listBrokenWikiLinks
 // below for the `isNull(schema.wikiPages.deletedAt)` filters this adds.
 import { safeDecodeURIComponent, wikiPagePath } from "../lib/urls";
 import { ListBrokenWikiLinksInputSchema } from "../schemas/wiki";
@@ -100,47 +100,74 @@ async function resolveTitleTargets(
 	return byLower;
 }
 
-async function resolveSlugTarget(
+// PROJ-858: all slug targets resolve in a fixed number of queries — one slug IN (…),
+// one wiki_redirects IN (…) for the misses, one page load for redirect targets (each
+// chunked under D1's bind limit) — instead of 1–3 sequential queries per link.
+async function resolveSlugTargets(
 	orm: Orm,
 	workspaceId: string,
-	slug: string
-): Promise<{ id: string; title: string } | null> {
-	const direct = await orm
-		.select({ id: schema.wikiPages.id, title: schema.wikiPages.title })
-		.from(schema.wikiPages)
-		.where(
-			and(
-				eq(schema.wikiPages.workspaceId, workspaceId),
-				eq(schema.wikiPages.slug, slug),
-				isNull(schema.wikiPages.deletedAt)
+	slugs: readonly string[]
+): Promise<Map<string, { id: string; title: string }>> {
+	const bySlug = new Map<string, { id: string; title: string }>();
+	const unique = [...new Set(slugs)];
+	if (unique.length === 0) return bySlug;
+
+	const direct = await inChunks(unique, (chunk) =>
+		orm
+			.select({
+				id: schema.wikiPages.id,
+				title: schema.wikiPages.title,
+				slug: schema.wikiPages.slug,
+			})
+			.from(schema.wikiPages)
+			.where(
+				and(
+					eq(schema.wikiPages.workspaceId, workspaceId),
+					inArray(schema.wikiPages.slug, chunk),
+					isNull(schema.wikiPages.deletedAt)
+				)
 			)
-		)
-		.get();
-	if (direct) return direct;
+	);
+	for (const row of direct) bySlug.set(row.slug, { id: row.id, title: row.title });
+
 	// PROJ-483 redirects: an old slug still resolves to its page.
-	const redirect = await orm
-		.select({ pageId: schema.wikiRedirects.pageId })
-		.from(schema.wikiRedirects)
-		.where(
-			and(eq(schema.wikiRedirects.workspaceId, workspaceId), eq(schema.wikiRedirects.oldSlug, slug))
-		)
-		.get();
-	if (!redirect) return null;
-	const page = await orm
-		.select({ id: schema.wikiPages.id, title: schema.wikiPages.title })
-		.from(schema.wikiPages)
-		.where(
-			and(
-				eq(schema.wikiPages.id, redirect.pageId),
-				eq(schema.wikiPages.workspaceId, workspaceId),
-				// PROJ-496: same "trashed = gone" rule as resolveWikiPageByRedirect in
-				// services/wiki.ts — a link to a page's old slug doesn't resolve while the
-				// page is in the trash.
-				isNull(schema.wikiPages.deletedAt)
+	const missing = unique.filter((slug) => !bySlug.has(slug));
+	if (missing.length === 0) return bySlug;
+	const redirects = await inChunks(missing, (chunk) =>
+		orm
+			.select({ oldSlug: schema.wikiRedirects.oldSlug, pageId: schema.wikiRedirects.pageId })
+			.from(schema.wikiRedirects)
+			.where(
+				and(
+					eq(schema.wikiRedirects.workspaceId, workspaceId),
+					inArray(schema.wikiRedirects.oldSlug, chunk)
+				)
 			)
-		)
-		.get();
-	return page ?? null;
+	);
+	if (redirects.length === 0) return bySlug;
+
+	const targetIds = [...new Set(redirects.map((r) => r.pageId))];
+	const targets = await inChunks(targetIds, (chunk) =>
+		orm
+			.select({ id: schema.wikiPages.id, title: schema.wikiPages.title })
+			.from(schema.wikiPages)
+			.where(
+				and(
+					inArray(schema.wikiPages.id, chunk),
+					eq(schema.wikiPages.workspaceId, workspaceId),
+					// PROJ-496: same "trashed = gone" rule as resolveWikiPageByRedirect in
+					// services/wiki.ts — a link to a page's old slug doesn't resolve while the
+					// page is in the trash.
+					isNull(schema.wikiPages.deletedAt)
+				)
+			)
+	);
+	const pageById = new Map(targets.map((t) => [t.id, t]));
+	for (const r of redirects) {
+		const page = pageById.get(r.pageId);
+		if (page && !bySlug.has(r.oldSlug)) bySlug.set(r.oldSlug, page);
+	}
+	return bySlug;
 }
 
 type ResolvedLink = { targetPageId: string | null; targetTitle: string };
@@ -168,20 +195,26 @@ async function resolveTitleLinks(
 	}
 }
 
-// Slug-kind targets (from same-workspace wiki URLs) each need a redirect-fallback lookup,
-// so they stay sequential rather than batched.
+// Slug-kind targets (from same-workspace wiki URLs), batched — see resolveSlugTargets.
 async function resolveSlugLinks(
 	orm: Orm,
 	workspaceId: string,
 	targets: readonly ParsedLinkTarget[],
 	resolved: Map<string, ResolvedLink>
 ): Promise<void> {
-	for (const t of targets) {
-		if (t.kind !== "slug") continue;
-		const found = await resolveSlugTarget(orm, workspaceId, t.slug);
-		const key = found?.id ?? `slug:${t.slug.toLowerCase()}`;
+	const slugTargets = targets.filter(
+		(t): t is Extract<ParsedLinkTarget, { kind: "slug" }> => t.kind === "slug"
+	);
+	const found = await resolveSlugTargets(
+		orm,
+		workspaceId,
+		slugTargets.map((t) => t.slug)
+	);
+	for (const t of slugTargets) {
+		const page = found.get(t.slug);
+		const key = page?.id ?? `slug:${t.slug.toLowerCase()}`;
 		if (!resolved.has(key)) {
-			resolved.set(key, { targetPageId: found?.id ?? null, targetTitle: found?.title ?? t.slug });
+			resolved.set(key, { targetPageId: page?.id ?? null, targetTitle: page?.title ?? t.slug });
 		}
 	}
 }

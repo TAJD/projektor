@@ -128,6 +128,10 @@ export const issues = sqliteTable(
 		// flags agent-initiated closures whose completion-report verification wasn't
 		// externally checkable (no CI run/PR/commit link) for after-the-fact human review.
 		needsAudit: integer("needs_audit", { mode: "boolean" }).notNull().default(false),
+		// PROJ-859: stored definition-of-ready result (1/0, JSON array of missing
+		// criteria). NULL until first computed — see migration 0058.
+		dorReady: integer("dor_ready"),
+		dorMissing: text("dor_missing"),
 	},
 	(t) => ({
 		projectIdx: index("issues_project_idx").on(t.projectId),

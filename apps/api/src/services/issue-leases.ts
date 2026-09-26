@@ -13,7 +13,7 @@ import type { ServiceCtx } from "./types";
 // Mirrors ACTIVE_TTL in services/agents.ts: a session (and therefore its leases)
 // is live only while it has heartbeat within this window. Kept local to avoid a
 // circular import (agents.ts already imports releaseLeasesForAgent from here).
-const SESSION_TTL_SECONDS = 120;
+export const SESSION_TTL_SECONDS = 120;
 
 const liveCutoff = () => Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 

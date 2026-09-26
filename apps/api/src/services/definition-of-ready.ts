@@ -17,28 +17,48 @@ function ci(source: string, flags: string): RegExp {
 	return new RegExp(source, flags.includes("i") ? "i" : "");
 }
 
+// PROJ-859: the per-label regexes are compiled once per label (and cached), not once
+// per line — this used to rebuild two RegExps for every line of every open issue.
+interface LabelMatchers {
+	word: RegExp;
+	prefix: RegExp;
+}
+const matcherCache = new Map<string, LabelMatchers>();
+function labelMatchers(label: RegExp): LabelMatchers {
+	const key = `${label.source}/${label.flags}`;
+	let m = matcherCache.get(key);
+	if (!m) {
+		m = {
+			word: ci(`\\b(?:${label.source})\\b`, label.flags),
+			prefix: ci(`^\\s*(?:${label.source})\\b[^:—–]*[:—–]`, label.flags),
+		};
+		matcherCache.set(key, m);
+	}
+	return m;
+}
+
 // Is `line` a STRUCTURAL label line for `label` — a heading, a bold label, or a
 // "Label:"-prefixed line — rather than prose that merely mentions the phrase
 // (PROJ-291)? "## Scope / files", "**Acceptance criteria**", "Verification:" pass;
 // "acceptance criteria are unclear" does not.
-function isLabelLine(line: string, label: RegExp): boolean {
+function isLabelLine(line: string, m: LabelMatchers): boolean {
 	const t = line.trim();
-	const word = ci(`\\b(?:${label.source})\\b`, label.flags);
 
 	const isHeading = /^#{1,6}\s+/.test(t);
 	const isBold = /^\*\*[^*]+\*\*:?\s*$/.test(t) || /^[-*]\s+\*\*[^*]+\*\*/.test(t);
-	if (isHeading || isBold) return word.test(t);
+	if (isHeading || isBold) return m.word.test(t);
 
 	// A plain line only counts when the label is a "Label:" prefix, not mid-sentence.
 	const stripped = t.replace(/^[-*]\s+/, "").replace(/\*\*/g, "");
-	return ci(`^\\s*(?:${label.source})\\b[^:—–]*[:—–]`, label.flags).test(stripped);
+	return m.prefix.test(stripped);
 }
 
 // Non-empty content for `label`'s section: inline after a "Label:" or on a following
 // non-blank line before the next section boundary.
 function sectionHasContent(body: string, label: RegExp): boolean {
 	const lines = body.split(/\r?\n/);
-	const idx = lines.findIndex((l) => isLabelLine(l, label));
+	const m = labelMatchers(label);
+	const idx = lines.findIndex((l) => isLabelLine(l, m));
 	if (idx === -1) return false;
 
 	const inline = lines[idx]
@@ -82,4 +102,10 @@ export function checkDefinitionOfReady(body: string): ReadinessCheck {
 	}
 
 	return { ready: missing.length === 0, missing };
+}
+
+/** PROJ-859: the stored-column form of checkDefinitionOfReady — [dor_ready, dor_missing]. */
+export function dorColumns(body: string | null | undefined): [number, string] {
+	const { ready, missing } = checkDefinitionOfReady(body ?? "");
+	return [ready ? 1 : 0, JSON.stringify(missing)];
 }
