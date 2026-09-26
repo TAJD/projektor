@@ -1681,6 +1681,7 @@ interface PageArticleProps {
 	// PROJ-797: set only after a 409 — rebases the user's text onto the current revision.
 	onOverwriteWithMine: (() => void) | null;
 	draftBanner: ServerDraft | null;
+	draftWarning: string | null;
 	onRestoreDraft: () => void;
 	onDiscardDraft: () => void;
 	editContent: string;
@@ -1739,6 +1740,7 @@ function PageArticleMeta(
 		| "saveError"
 		| "onOverwriteWithMine"
 		| "draftBanner"
+		| "draftWarning"
 		| "onRestoreDraft"
 		| "onDiscardDraft"
 		| "workspaceSlug"
@@ -1820,6 +1822,15 @@ function PageArticleMeta(
 						</div>
 					)}
 				</div>
+			)}
+
+			{props.editing && props.draftWarning && (
+				<p
+					role="status"
+					class="bg-warning-bg border border-warning-border rounded px-3 py-2 text-[0.85rem] mb-3"
+				>
+					{props.draftWarning}
+				</p>
 			)}
 
 			{props.editing && props.draftBanner && (
@@ -2502,6 +2513,15 @@ function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageDat
 // localStorage version so an in-progress edit survives a device switch, not just a
 // same-browser crash. Same ~1s debounce cadence as before; debouncing stays entirely
 // client-side (no server-side throttling) so this is just a plain PUT on a timer.
+//
+// PROJ-799: a draft is only written when the edit actually differs from the
+// published page (so opening and cancelling never leaves a spurious "Restore unsaved
+// draft?" behind), and reverting to the published text deletes the draft this
+// session wrote. Autosave is paused while a save is in flight, and stays off until
+// the existing server draft has been checked — if that check fails, autosave is
+// disabled for the session rather than risk overwriting a draft from another device.
+export type DraftStatus = "loading" | "ready" | "failed";
+
 interface UseServerDraftAutosaveOptions {
 	workspaceSlug: string | undefined;
 	editing: boolean;
@@ -2510,42 +2530,79 @@ interface UseServerDraftAutosaveOptions {
 	page: WikiPageData | null;
 	draftBanner: ServerDraft | null;
 	baseRevisionId: string | null | undefined;
+	saving: boolean;
+	draftStatus: DraftStatus;
+}
+
+export function differsFromPublished(
+	page: Readonly<{ title: string; content: string }>,
+	title: string,
+	content: string
+): boolean {
+	return title !== page.title || content !== page.content;
 }
 
 function useServerDraftAutosave(options: UseServerDraftAutosaveOptions) {
-	const { workspaceSlug, editing, editTitle, editContent, page, draftBanner, baseRevisionId } =
-		options;
+	const {
+		workspaceSlug,
+		editing,
+		editTitle,
+		editContent,
+		page,
+		draftBanner,
+		baseRevisionId,
+		saving,
+		draftStatus,
+	} = options;
 	// Latest edit state for the flush-on-leave effect below, since its cleanup
 	// closure would otherwise only see the values from when `editing` last changed.
-	const latestDraftStateRef = useRef({ editTitle, editContent, page, draftBanner, baseRevisionId });
-	latestDraftStateRef.current = { editTitle, editContent, page, draftBanner, baseRevisionId };
+	const latestDraftStateRef = useRef(options);
+	latestDraftStateRef.current = options;
 
 	// save() clears the draft itself right before leaving edit mode; set this to
 	// suppress the flush below so it doesn't resurrect the just-cleared draft.
 	const skipLeaveFlushRef = useRef(false);
+	// PROJ-799: whether a server draft for this page is known to exist (this session
+	// wrote one, or the user restored the one found on open). Only then does reverting
+	// to the published text issue a DELETE — never for a draft this session hasn't seen.
+	const serverHasDraftRef = useRef(false);
 
-	function saveDraft(
-		slug: string,
+	function persistDraft(
+		p: WikiPageData,
 		title: string,
 		content: string,
 		base: string | null | undefined
 	) {
+		const path = `/api/wiki/${encodeURIComponent(p.slug)}/draft`;
 		// Best-effort: a failed autosave shouldn't interrupt editing or surface an
 		// error — the explicit Save button remains the source of truth.
-		apiFetch(`/api/wiki/${encodeURIComponent(slug)}/draft`, {
-			method: "PUT",
-			workspaceSlug,
-			body: { title, content, baseRevisionId: base ?? null },
-		}).catch(() => {});
+		if (differsFromPublished(p, title, content)) {
+			serverHasDraftRef.current = true;
+			apiFetch(path, {
+				method: "PUT",
+				workspaceSlug,
+				body: { title, content, baseRevisionId: base ?? null },
+			}).catch(() => {});
+		} else if (serverHasDraftRef.current) {
+			serverHasDraftRef.current = false;
+			apiFetch(path, { method: "DELETE", workspaceSlug }).catch(() => {});
+		}
+	}
+
+	function mayWrite(s: UseServerDraftAutosaveOptions): s is UseServerDraftAutosaveOptions & {
+		page: WikiPageData;
+	} {
+		return !!s.page && !s.draftBanner && !s.saving && s.draftStatus === "ready";
 	}
 
 	useEffect(() => {
-		if (!editing || !page || draftBanner) return;
+		const s = latestDraftStateRef.current;
+		if (!editing || !mayWrite(s)) return;
 		const timer = setTimeout(() => {
-			saveDraft(page.slug, editTitle, editContent, baseRevisionId);
+			persistDraft(s.page, editTitle, editContent, baseRevisionId);
 		}, 1000);
 		return () => clearTimeout(timer);
-	}, [editing, editTitle, editContent, page, draftBanner, baseRevisionId]);
+	}, [editing, editTitle, editContent, page, draftBanner, baseRevisionId, saving, draftStatus]);
 
 	// Flush any not-yet-debounced edits when leaving edit mode via navigation (not
 	// just Save/Cancel), so a quick click-away doesn't drop the last <1s of
@@ -2558,19 +2615,13 @@ function useServerDraftAutosave(options: UseServerDraftAutosaveOptions) {
 				skipLeaveFlushRef.current = false;
 				return;
 			}
-			const {
-				editTitle: t,
-				editContent: c,
-				page: p,
-				draftBanner: db,
-				baseRevisionId: b,
-			} = latestDraftStateRef.current;
-			if (!p || db) return;
-			saveDraft(p.slug, t, c, b);
+			const s = latestDraftStateRef.current;
+			if (!mayWrite(s)) return;
+			persistDraft(s.page, s.editTitle, s.editContent, s.baseRevisionId);
 		};
 	}, [editing]);
 
-	return skipLeaveFlushRef;
+	return { skipLeaveFlushRef, serverHasDraftRef };
 }
 
 async function saveWikiPageEdit(
@@ -2652,7 +2703,9 @@ function useWikiEditing(
 	// be now.
 	const [baseRevisionId, setBaseRevisionId] = useState<string | null | undefined>(undefined);
 
-	const skipLeaveFlushRef = useServerDraftAutosave({
+	const [draftStatus, setDraftStatus] = useState<DraftStatus>("loading");
+
+	const { skipLeaveFlushRef, serverHasDraftRef } = useServerDraftAutosave({
 		workspaceSlug,
 		editing,
 		editTitle,
@@ -2660,6 +2713,8 @@ function useWikiEditing(
 		page,
 		draftBanner,
 		baseRevisionId,
+		saving,
+		draftStatus,
 	});
 
 	// PROJ-495: draft is fetched from the server (not just a local check) so it
@@ -2671,6 +2726,8 @@ function useWikiEditing(
 		if (!page) return;
 		setSaveError(null);
 		setDraftBanner(null);
+		setDraftStatus("loading");
+		serverHasDraftRef.current = false;
 		// PROJ-809: prefer the revision read together with this content; the separately
 		// fetched revisions list can already include a save that the content predates.
 		setBaseRevisionId(page.revisionId !== undefined ? page.revisionId : latestRevisionId);
@@ -2693,8 +2750,14 @@ function useWikiEditing(
 						: draft.updatedAt <= page.updated_at;
 				setDraftBanner({ ...draft, pageChangedSince });
 			}
+			// A draft identical to the published page is still a row we may delete if
+			// the user types and then reverts.
+			serverHasDraftRef.current = !!draft;
+			setDraftStatus("ready");
 		} catch {
-			// non-fatal — treat as no draft
+			// PROJ-799: we can't tell whether a draft from another device exists, so
+			// autosaving now could silently overwrite it. Keep editing, but don't autosave.
+			setDraftStatus("failed");
 		}
 	}
 
@@ -2704,6 +2767,7 @@ function useWikiEditing(
 		setEditContent(draftBanner.content);
 		setBaseRevisionId(draftBanner.baseRevisionId);
 		setDraftBanner(null);
+		serverHasDraftRef.current = true;
 	}
 
 	async function discardDraft() {
@@ -2711,6 +2775,7 @@ function useWikiEditing(
 		setEditTitle(page.title);
 		setEditContent(page.content);
 		setDraftBanner(null);
+		serverHasDraftRef.current = false;
 		try {
 			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}/draft`, {
 				method: "DELETE",
@@ -2752,6 +2817,7 @@ function useWikiEditing(
 				fetchPage,
 				fetchRevisions,
 			});
+			serverHasDraftRef.current = false;
 			skipLeaveFlushRef.current = true;
 			setEditing(false);
 		} catch (e) {
@@ -2792,6 +2858,10 @@ function useWikiEditing(
 		saveError,
 		overwriteWithMine: conflict ? overwriteWithMine : null,
 		draftBanner,
+		draftWarning:
+			editing && draftStatus === "failed"
+				? "Couldn't check for an unsaved draft from another device, so autosave is off for this edit. Save when you're done."
+				: null,
 		startEdit,
 		restoreDraft,
 		discardDraft,
@@ -3533,6 +3603,7 @@ function buildArticleProps(
 		saveError: string | null;
 		overwriteWithMine: (() => void) | null;
 		draftBanner: ServerDraft | null;
+		draftWarning: string | null;
 		restoreDraft: () => void;
 		discardDraft: () => void;
 		editContent: string;
@@ -3572,6 +3643,7 @@ function buildArticleProps(
 		saveError: article.saveError,
 		onOverwriteWithMine: article.overwriteWithMine,
 		draftBanner: article.draftBanner,
+		draftWarning: article.draftWarning,
 		onRestoreDraft: article.restoreDraft,
 		onDiscardDraft: article.discardDraft,
 		editContent: article.editContent,
@@ -3764,6 +3836,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		saveError: editState.saveError,
 		overwriteWithMine: editState.overwriteWithMine,
 		draftBanner: editState.draftBanner,
+		draftWarning: editState.draftWarning,
 		restoreDraft: editState.restoreDraft,
 		discardDraft: editState.discardDraft,
 		editContent: editState.editContent,

@@ -523,6 +523,129 @@ describe("server-side draft autosave (PROJ-495)", () => {
 	});
 });
 
+const isDraftCall = (method: string) => (call: unknown[]) =>
+	String(call[0]).includes("/draft") && (call[1] as RequestInit | undefined)?.method === method;
+
+describe("draft autosave only writes real changes (PROJ-799)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("opening edit and waiting writes no draft", async () => {
+		await startEditingWithTitleInput();
+		await vi.advanceTimersByTimeAsync(3000);
+		const fetchMock = vi.mocked(fetch);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toEqual([]);
+	});
+
+	it("opening edit and cancelling without changes writes no draft", async () => {
+		await startEditingWithTitleInput();
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		await vi.advanceTimersByTimeAsync(2000);
+		const fetchMock = vi.mocked(fetch);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toEqual([]);
+		expect(fetchMock.mock.calls.filter(isDraftCall("DELETE"))).toEqual([]);
+	});
+
+	it("reverting to the published text deletes the draft this session wrote", async () => {
+		const titleInput = await startEditingWithTitleInput();
+		fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
+		await vi.advanceTimersByTimeAsync(1000);
+		const fetchMock = vi.mocked(fetch);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toHaveLength(1);
+
+		fireEvent.input(titleInput, { target: { value: PAGE.title } });
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toHaveLength(1);
+		expect(fetchMock.mock.calls.filter(isDraftCall("DELETE"))).toHaveLength(1);
+	});
+
+	it("a failed draft check disables autosave and warns", async () => {
+		const { fetchMock } = mockFetchWikiWithDraft();
+		const base = fetchMock.getMockImplementation() as (u: string, i?: RequestInit) => unknown;
+		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+			if (String(url).includes("/draft") && (init?.method ?? "GET") === "GET") {
+				return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+			}
+			return base(url, init);
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(await screen.findByText(/autosave is off for this edit/i)).toBeTruthy();
+		const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
+		fireEvent.input(titleInput, { target: { value: "Would clobber another device" } });
+		await vi.advanceTimersByTimeAsync(3000);
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toEqual([]);
+	});
+
+	it("does not autosave while the draft check is still loading", async () => {
+		const { fetchMock } = mockFetchWikiWithDraft();
+		const base = fetchMock.getMockImplementation() as (u: string, i?: RequestInit) => unknown;
+		let resolveDraft: (v: unknown) => void = () => {};
+		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+			if (String(url).includes("/draft") && (init?.method ?? "GET") === "GET") {
+				return new Promise((r) => {
+					resolveDraft = r;
+				});
+			}
+			return base(url, init);
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		await vi.advanceTimersByTimeAsync(0);
+		const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
+		fireEvent.input(titleInput, { target: { value: "Typed before the draft loaded" } });
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toEqual([]);
+
+		resolveDraft({ ok: true, json: () => Promise.resolve(null) });
+		// Preact runs effects after paint, so give the debounce room past 1s.
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toHaveLength(1);
+	});
+
+	it("never re-creates the draft while a save is in flight or after it succeeds", async () => {
+		const { fetchMock } = mockFetchWikiWithDraft();
+		const base = fetchMock.getMockImplementation() as (u: string, i?: RequestInit) => unknown;
+		let releaseSave: () => void = () => {};
+		fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (init?.method === "PUT" && !u.includes("/draft")) {
+				return new Promise((r) => {
+					releaseSave = () => r({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+				});
+			}
+			return base(url, init);
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		await vi.advanceTimersByTimeAsync(0);
+		const titleInput = screen.getByLabelText("Page title") as HTMLInputElement;
+		fireEvent.input(titleInput, { target: { value: "My Page Edited" } });
+		await vi.advanceTimersByTimeAsync(500);
+
+		fireEvent.click(screen.getByRole("button", { name: "Save" }));
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toEqual([]);
+
+		releaseSave();
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toEqual([]);
+		expect(fetchMock.mock.calls.filter(isDraftCall("DELETE"))).toHaveLength(1);
+	});
+});
+
 describe("server-side draft autosave (PROJ-495) — restore banner", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
