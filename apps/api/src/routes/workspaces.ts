@@ -2,7 +2,7 @@ import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
 import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
-import { isPublicViewer } from "../middleware/auth";
+import { isPublicViewer, requireInteractiveHuman } from "../middleware/auth";
 import { oauthApi } from "../oauth/provider";
 import { listConnectorGrants, revokeConnectorGrant } from "../services/oauth";
 import { ctxFromHono } from "../services/types";
@@ -74,7 +74,19 @@ router.patch("/:slug/members/:userId", async (c) => {
 	}
 });
 
+// PROJ-917: workspace tokens follow the same rule as personal access tokens
+// (PROJ-903, routes/auth.ts) — minted and revoked only from an interactive human
+// session. Otherwise an agent's pk_ token or OAuth grant could mint a sibling token
+// with wider scopes than its own, and the new secret would land in an agent's
+// context. Chosen over "new scopes must be a subset of the caller's": there is no
+// machine use case for minting workspace tokens. Listing stays open to admins on any
+// credential — it returns no secrets.
+const WORKSPACE_TOKEN_HUMAN_ONLY =
+	"Workspace tokens can only be created or revoked from a signed-in browser session, not with an API token or connected app.";
+
 router.post("/:slug/tokens", async (c) => {
+	const denied = requireInteractiveHuman(c, WORKSPACE_TOKEN_HUMAN_ONLY);
+	if (denied) return denied;
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(await createToken(ctx, await jsonBody(c)), 201);
@@ -93,6 +105,8 @@ router.get("/:slug/tokens", async (c) => {
 });
 
 router.delete("/:slug/tokens/:tokenId", async (c) => {
+	const denied = requireInteractiveHuman(c, WORKSPACE_TOKEN_HUMAN_ONLY);
+	if (denied) return denied;
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(await revokeToken(ctx, c.req.param("tokenId")));

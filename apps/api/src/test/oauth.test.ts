@@ -639,6 +639,61 @@ describe("an OAuth grant cannot mint a personal access token (PROJ-903)", () => 
 	});
 });
 
+describe("an OAuth grant cannot mint or revoke a workspace token (PROJ-917)", () => {
+	it("POST /api/workspaces/:slug/tokens with an OAuth access token is refused", async () => {
+		const workspace = await seedWorkspace();
+		const email = `wstok-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "owner");
+		const { tokens } = await connect({ email, workspaceId: workspace.id });
+
+		const res = await SELF.fetch(`${HOST}/api/workspaces/${workspace.slug}/tokens`, {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${tokens.access_token}`,
+				"X-Workspace-Slug": workspace.slug,
+				"Content-Type": "application/json",
+				"CF-Connecting-IP": clientIp,
+			},
+			body: JSON.stringify({ name: "oauth-ws-escape", scopes: ["*"] }),
+		});
+		expect(res.status).not.toBe(201);
+		expect([401, 403]).toContain(res.status);
+		const row = await env.DB.prepare("SELECT id FROM api_tokens WHERE name = ?")
+			.bind("oauth-ws-escape")
+			.first();
+		expect(row).toBeNull();
+	});
+
+	it("DELETE /api/workspaces/:slug/tokens/:id with an OAuth access token is refused", async () => {
+		const workspace = await seedWorkspace();
+		const email = `wsrev-${crypto.randomUUID().slice(0, 8)}@example.com`;
+		const user = await seedUser(email);
+		await seedMember(workspace.id, user.id, "owner");
+		await seedToken(workspace.id, user.id);
+		const target = await env.DB.prepare(
+			"SELECT id FROM api_tokens WHERE workspace_id = ? AND user_id = ?"
+		)
+			.bind(workspace.id, user.id)
+			.first<{ id: string }>();
+		const { tokens } = await connect({ email, workspaceId: workspace.id });
+
+		const res = await SELF.fetch(`${HOST}/api/workspaces/${workspace.slug}/tokens/${target?.id}`, {
+			method: "DELETE",
+			headers: {
+				Authorization: `Bearer ${tokens.access_token}`,
+				"X-Workspace-Slug": workspace.slug,
+				"CF-Connecting-IP": clientIp,
+			},
+		});
+		expect([401, 403]).toContain(res.status);
+		const still = await env.DB.prepare("SELECT id FROM api_tokens WHERE id = ?")
+			.bind(target?.id)
+			.first();
+		expect(still).not.toBeNull();
+	});
+});
+
 describe("the token endpoint's failure modes", () => {
 	let workspaceId: string;
 	let email: string;

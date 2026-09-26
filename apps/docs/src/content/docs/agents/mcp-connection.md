@@ -84,6 +84,12 @@ Omit `workspaceId` for a user-scoped token that works in every workspace you bel
 include it to confine the token to one workspace. Personal tokens have no `pk_` prefix
 (that's the workspace-token format from `POST /api/workspaces/:slug/tokens`).
 
+Workspace tokens follow the same rule: `POST /api/workspaces/:slug/tokens` and
+`DELETE /api/workspaces/:slug/tokens/:tokenId` require a signed-in browser session as a
+workspace admin or owner. A `pk_` token or connected app gets `403`, so an agent's
+credential can't mint a sibling token with wider scopes (PROJ-917). Listing tokens
+(`GET`) still works with any admin credential, since it returns no secrets.
+
 `scopes` is a list of `"read"`, `"write"`, or `"*"` (full access) — e.g. `["read"]`, `["read", "write"]`, or `["*"]`. `expiresAt` is optional (unix seconds).
 
 Token minting is one of a handful of REST-only endpoints — see [REST endpoints](/projektor/agents/rest-endpoints/) for the full list.

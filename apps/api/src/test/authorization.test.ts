@@ -411,11 +411,15 @@ describe("PROJ-78: Workspace routes – non-owner blocked, owner allowed", () =>
 	let ownerHeaders: Record<string, string>;
 	let memberHeaders: Record<string, string>;
 	let viewerHeaders: Record<string, string>;
+	let ownerEmail: string;
+	let memberEmail: string;
 
 	beforeEach(async () => {
 		const roles = await seedWorkspaceRoles();
 		workspaceId = roles.workspace.id;
 		slug = roles.workspace.slug;
+		ownerEmail = roles.owner.user.email;
+		memberEmail = roles.member.user.email;
 		ownerToken = roles.owner.token;
 		memberToken = roles.member.token;
 		viewerToken = roles.viewer.token;
@@ -572,59 +576,62 @@ describe("PROJ-78: Workspace routes – non-owner blocked, owner allowed", () =>
 		expect(res.status).toBe(200);
 	});
 
-	// POST /:slug/tokens — admin/owner only
+	// POST/DELETE /:slug/tokens — admin/owner only, and (PROJ-917) only from a human
+	// session: the dev bypass here. Bearer-token refusal is covered in
+	// workspace-tokens.test.ts.
+
+	async function asHuman<T>(email: string, fn: () => Promise<T>): Promise<T> {
+		const prev = env.DEV_USER_EMAIL;
+		env.DEV_USER_EMAIL = email;
+		try {
+			return await fn();
+		} finally {
+			env.DEV_USER_EMAIL = prev;
+		}
+	}
+	const humanHeaders = () => ({ "X-Workspace-Slug": slug, "Content-Type": "application/json" });
+	const mint = (email: string, name: string, scopes: string[]) =>
+		asHuman(email, () =>
+			SELF.fetch(`http://localhost/api/workspaces/${slug}/tokens`, {
+				method: "POST",
+				headers: humanHeaders(),
+				body: JSON.stringify({ name, scopes }),
+			})
+		);
+	const revoke = (email: string, id: string) =>
+		asHuman(email, () =>
+			SELF.fetch(`http://localhost/api/workspaces/${slug}/tokens/${id}`, {
+				method: "DELETE",
+				headers: humanHeaders(),
+			})
+		);
 
 	it("member cannot POST /api/workspaces/:slug/tokens", async () => {
-		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/tokens`, {
-			method: "POST",
-			headers: memberHeaders,
-			body: JSON.stringify({ name: "my-token", scopes: ["read"] }),
-		});
+		const res = await mint(memberEmail, "my-token", ["read"]);
 		expect(res.status).toBe(403);
 	});
 
 	it("owner CAN POST /api/workspaces/:slug/tokens", async () => {
-		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/tokens`, {
-			method: "POST",
-			headers: ownerHeaders,
-			body: JSON.stringify({ name: "my-token", scopes: ["read", "write"] }),
-		});
+		const res = await mint(ownerEmail, "my-token", ["read", "write"]);
 		expect(res.status).toBe(201);
 		const body = (await res.json()) as { id: string; token: string };
 		expect(body.token).toBeTruthy();
 		expect(body.id).toBeTruthy();
 	});
 
-	// DELETE /:slug/tokens/:id — admin/owner only
-
 	it("member cannot DELETE /api/workspaces/:slug/tokens/:id", async () => {
-		// Owner creates a token, member tries to revoke it
-		const createRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/tokens`, {
-			method: "POST",
-			headers: ownerHeaders,
-			body: JSON.stringify({ name: "to-revoke", scopes: ["read"] }),
-		});
-		const { id } = (await createRes.json()) as { id: string };
-
-		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/tokens/${id}`, {
-			method: "DELETE",
-			headers: memberHeaders,
-		});
+		const { id } = (await (await mint(ownerEmail, "to-revoke", ["read"])).json()) as {
+			id: string;
+		};
+		const res = await revoke(memberEmail, id);
 		expect(res.status).toBe(403);
 	});
 
 	it("owner CAN DELETE /api/workspaces/:slug/tokens/:id", async () => {
-		const createRes = await SELF.fetch(`http://localhost/api/workspaces/${slug}/tokens`, {
-			method: "POST",
-			headers: ownerHeaders,
-			body: JSON.stringify({ name: "revocable", scopes: ["read"] }),
-		});
-		const { id } = (await createRes.json()) as { id: string };
-
-		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/tokens/${id}`, {
-			method: "DELETE",
-			headers: ownerHeaders,
-		});
+		const { id } = (await (await mint(ownerEmail, "revocable", ["read"])).json()) as {
+			id: string;
+		};
+		const res = await revoke(ownerEmail, id);
 		expect(res.status).toBe(200);
 	});
 });
