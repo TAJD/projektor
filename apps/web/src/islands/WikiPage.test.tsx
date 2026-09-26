@@ -2713,3 +2713,212 @@ describe("WikiPage — PROJ-806 a11y: closed drawer, menu, tree, breadcrumb", ()
 		expect(opened).toMatch(/transition:[^;]*visibility 0s linear 0s/);
 	});
 });
+
+// PROJ-807: the delete confirmation used to say "This cannot be undone" even though the
+// backend soft-deletes into a 30-day trash with an undelete endpoint. The dialog copy
+// should say so, and a successful delete should offer an in-page Undo rather than
+// forcing the user straight to the trash view to recover.
+describe("WikiPage — PROJ-807 delete confirmation wording + undo toast", () => {
+	const UNDELETED = { ok: true, id: "w1", slug: "my-page", url: "/wiki/my-page", restoredCount: 2 };
+
+	function mockFetchWikiWithDelete(
+		opts: Readonly<{
+			undelete?: Promise<unknown>;
+			treeFailsAfterUndelete?: boolean;
+		}> = {}
+	) {
+		let undeleted = false;
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve({ user: { id: "u1", email: "real-user@example.com", name: "User" } }),
+				});
+			}
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				if (undeleted && opts.treeFailsAfterUndelete) {
+					return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/undelete")) {
+				undeleted = true;
+				return (
+					opts.undelete ?? Promise.resolve({ ok: true, json: () => Promise.resolve(UNDELETED) })
+				);
+			}
+			if (init?.method === "DELETE") {
+				return Promise.resolve({ ok: true, status: 204 });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		return fetchMock;
+	}
+
+	const callsTo = (fetchMock: ReturnType<typeof vi.fn>, method: string, match: RegExp) =>
+		fetchMock.mock.calls
+			.filter(([u, init]) => (init as RequestInit)?.method === method && match.test(String(u)))
+			.map(([u]) => String(u));
+
+	// Earlier tests in this file spy on window.confirm without restoring it (see the
+	// PROJ-796 restore-banner tests above) — vi.spyOn on an already-spied method reuses the
+	// same mock and its call history, so clear it before asserting call counts.
+	function mockConfirm(answer: boolean) {
+		const spy = vi.spyOn(window, "confirm").mockReturnValue(answer);
+		spy.mockClear();
+		return spy;
+	}
+
+	async function deleteMyPage() {
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		return screen.findByRole("status");
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	it("tells the user the page moves to trash for 30 days, not that deletion is permanent", async () => {
+		const fetchMock = mockFetchWikiWithDelete();
+		const confirmSpy = mockConfirm(false);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+		expect(confirmSpy).toHaveBeenCalledTimes(1);
+		const message = confirmSpy.mock.calls[0][0];
+		expect(message).toMatch(/trash/i);
+		expect(message).toMatch(/30 days/);
+		expect(message).not.toMatch(/cannot be undone/i);
+		// User declined the confirm() above — no DELETE should have been issued.
+		expect(callsTo(fetchMock, "DELETE", /./)).toEqual([]);
+	});
+
+	it("deletes with cascade=true, so the children really go to the trash with the page", async () => {
+		const fetchMock = mockFetchWikiWithDelete();
+		mockConfirm(true);
+		await deleteMyPage();
+
+		// Without cascade the API re-parents the children instead of trashing them — the
+		// dialog's "and any children" would be false and Undo couldn't restore the tree.
+		expect(callsTo(fetchMock, "DELETE", /^\/api\/wiki\//)).toEqual([
+			"/api/wiki/my-page?cascade=true",
+		]);
+	});
+
+	it("Undo POSTs the deleted page's id to the undelete endpoint and returns to the page", async () => {
+		const fetchMock = mockFetchWikiWithDelete();
+		mockConfirm(true);
+		const toast = await deleteMyPage();
+		expect(within(toast).getByText(/moved to trash/i)).toBeTruthy();
+		expect(window.location.pathname).toBe("/wiki");
+
+		fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+		await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+		// By id, not slug: a trashed page's slug may already belong to a live page.
+		expect(callsTo(fetchMock, "POST", /undelete/)).toEqual(["/api/wiki/trash/w1/undelete"]);
+		expect(window.location.pathname).toBe("/wiki/my-page");
+		expect(await screen.findByRole("heading", { name: "My Page" })).toBeTruthy();
+	});
+
+	it("keeps the toast and reports the failure when the undelete itself fails", async () => {
+		mockFetchWikiWithDelete({
+			undelete: Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+		});
+		mockConfirm(true);
+		const toast = await deleteMyPage();
+
+		fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+		expect(await within(toast).findByText(/Undo failed/)).toBeTruthy();
+		expect(screen.getByRole("status")).toBe(toast);
+		expect(window.location.pathname).toBe("/wiki");
+	});
+
+	it("does not report 'Undo failed' when the undelete succeeded but the tree refresh after it fails", async () => {
+		mockFetchWikiWithDelete({ treeFailsAfterUndelete: true });
+		mockConfirm(true);
+		const toast = await deleteMyPage();
+
+		fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+		await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+		expect(screen.queryByText(/Undo failed/)).toBeNull();
+		expect(window.location.pathname).toBe("/wiki/my-page");
+	});
+
+	it("auto-dismisses after 8s, but not while hovered, focused, or while Undo is running", async () => {
+		vi.useFakeTimers();
+		let resolveUndelete: (v: unknown) => void = () => {};
+		mockFetchWikiWithDelete({
+			undelete: new Promise((r) => {
+				resolveUndelete = r;
+			}),
+		});
+		mockConfirm(true);
+		render(<WikiPage slug="my-page" />);
+		await vi.advanceTimersByTimeAsync(0);
+		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		// Let the toast mount and its (after-paint) timer effect run.
+		await vi.advanceTimersByTimeAsync(200);
+		const toast = screen.getByRole("status");
+
+		// Hovered: the countdown is suspended however long they read it…
+		fireEvent.mouseEnter(toast);
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(screen.queryByRole("status")).toBe(toast);
+		// …and restarts in full on leave.
+		fireEvent.mouseLeave(toast);
+		await vi.advanceTimersByTimeAsync(7_000);
+		expect(screen.queryByRole("status")).toBe(toast);
+
+		// Keyboard focus inside the toast pauses it too.
+		// (Real focus(): jsdom then fires genuine bubbling focusin/focusout.)
+		const undoButton = within(toast).getByRole("button", { name: "Undo" });
+		undoButton.focus();
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(screen.queryByRole("status")).toBe(toast);
+
+		// An Undo in flight keeps it up even once focus and pointer have left. (Focus
+		// moves to a real control outside the toast — the Undo button is disabled while
+		// running, and blur() on it is a no-op in jsdom.)
+		fireEvent.click(undoButton);
+		screen.getByLabelText(/Search wiki pages/i).focus();
+		expect(toast.contains(document.activeElement)).toBe(false);
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(screen.queryByRole("status")).toBe(toast);
+		expect(within(toast).getByText("Undoing…")).toBeTruthy();
+
+		resolveUndelete({ ok: true, json: () => Promise.resolve(UNDELETED) });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByRole("status")).toBeNull();
+	});
+
+	it("dismisses itself after 8s when left alone", async () => {
+		vi.useFakeTimers();
+		mockFetchWikiWithDelete();
+		mockConfirm(true);
+		render(<WikiPage slug="my-page" />);
+		await vi.advanceTimersByTimeAsync(0);
+		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		// Let the toast mount and its (after-paint) timer effect run.
+		await vi.advanceTimersByTimeAsync(200);
+		expect(screen.getByRole("status")).toBeTruthy();
+
+		await vi.advanceTimersByTimeAsync(7_500);
+		expect(screen.queryByRole("status")).toBeTruthy();
+		await vi.advanceTimersByTimeAsync(500);
+		expect(screen.queryByRole("status")).toBeNull();
+	});
+});

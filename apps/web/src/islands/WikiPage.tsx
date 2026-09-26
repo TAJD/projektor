@@ -4,7 +4,7 @@ import { currentProject, ensureProjectResolved, projectReady } from "../lib/proj
 import { slugify } from "../lib/slugify";
 import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
-import { apiFetch } from "../utils/api-client";
+import { apiFetch, undeleteWikiPage } from "../utils/api-client";
 import { getBrandName } from "../utils/brand";
 import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
 import { usePublicViewer } from "../utils/public-viewer";
@@ -379,6 +379,20 @@ interface WikiRevision {
 	author_name: string | null;
 	created_at: number;
 	summary: string | null;
+}
+
+// PROJ-807: state for the "page moved to trash" toast shown after a delete, with an
+// Undo action wired to the existing trash-undelete endpoint.
+interface UndoToast {
+	message: string;
+	/** The undo itself. Only a rejection here is reported as "Undo failed". */
+	undo: () => Promise<string>;
+	/**
+	 * Best-effort follow-up once `undo` has succeeded (refresh the tree, go back to the
+	 * page), given what `undo` resolved to. Its failures are swallowed: the page is
+	 * already restored, so "Undo failed" would be false.
+	 */
+	afterUndo?: (result: string) => void | Promise<void>;
 }
 
 interface Attachment {
@@ -3461,6 +3475,9 @@ function createWikiActions(
 		rawStartCreate: (parentId: string | null) => void;
 		rawSubmitCreate: () => Promise<string | undefined>;
 		cancelMove: () => void;
+		// PROJ-807: shown after a successful delete, with an Undo action that calls the
+		// existing trash-undelete endpoint. null dismisses whatever toast is showing.
+		showUndoToast: (toast: UndoToast | null) => void;
 	}>
 ) {
 	const {
@@ -3474,6 +3491,7 @@ function createWikiActions(
 		setError,
 		setToc,
 		cancelMove,
+		showUndoToast,
 	} = args;
 
 	// PROJ-800: flush the pending draft explicitly before clearing page state. Leaving
@@ -3508,9 +3526,22 @@ function createWikiActions(
 
 	async function deletePage() {
 		if (!page) return;
-		if (!window.confirm(`Delete "${page.title}"? This cannot be undone.`)) return;
+		// PROJ-807: the backend soft-deletes into a 30-day trash (undeleteWikiPage) —
+		// this used to claim the opposite.
+		if (
+			!window.confirm(
+				`Delete "${page.title}"? The page (and any children) will move to trash for 30 days. You can undo this right after, or restore it from the trash later.`
+			)
+		) {
+			return;
+		}
+		const deletedPage = page;
 		try {
-			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
+			// cascade=true trashes the children together with the page under one
+			// trash_batch_id — which is what the dialog promises, and what lets Undo bring
+			// the whole subtree back. Without it the API re-parents the children one level
+			// up instead, and undelete could only restore the page on its own.
+			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}?cascade=true`, {
 				method: "DELETE",
 				workspaceSlug,
 			});
@@ -3518,6 +3549,14 @@ function createWikiActions(
 			setSlug("");
 			history.pushState(null, "", "/wiki");
 			await fetchTree();
+			showUndoToast({
+				message: `"${deletedPage.title}" moved to trash.`,
+				undo: async () => (await undeleteWikiPage(deletedPage.id, workspaceSlug)).slug,
+				afterUndo: async (restoredSlug) => {
+					navigateTo(restoredSlug || deletedPage.slug);
+					await fetchTree();
+				},
+			});
 		} catch (e) {
 			alert(`Delete failed: ${String(e)}`);
 		}
@@ -4028,6 +4067,8 @@ function useWikiPageState(
 	const { slug, setSlug } = useWikiUrlState(slugProp);
 	const scope = useWikiScope(workspaceSlug, projectIdProp);
 	const projectId = scope ?? "";
+	// PROJ-807: the "moved to trash" Undo toast shown after a delete.
+	const [undoToast, setUndoToast] = useState<UndoToast | null>(null);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, scope);
 	const filters = useWikiFilters(workspaceSlug, scope, pageTree);
 	const stale = useWikiStalePages(workspaceSlug, scope);
@@ -4105,6 +4146,8 @@ function useWikiPageState(
 		move,
 		verify,
 		restoreState,
+		undoToast,
+		setUndoToast,
 	};
 }
 
@@ -4126,6 +4169,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		move,
 		verify,
 		restoreState,
+		setUndoToast,
 	} = state;
 
 	const { navigateTo, showSlug, startCreate, submitCreate, deletePage } = createWikiActions({
@@ -4142,6 +4186,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		rawStartCreate: createForm.startCreate,
 		rawSubmitCreate: createForm.submitCreate,
 		cancelMove: move.cancelMove,
+		showUndoToast: setUndoToast,
 	});
 
 	usePopstateNavigation(showSlug);
@@ -4214,6 +4259,97 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 	return { navigateTo, startCreate, createProps, articleProps };
 }
 
+// PROJ-807: shown after deleting a page. No existing toast utility in apps/web/src —
+// this is deliberately minimal (a fixed-position bar, not a general-purpose stack)
+// rather than introducing a new shared abstraction for a single call site.
+const UNDO_TOAST_TIMEOUT_MS = 8000;
+
+// Each toast gets its own UndoToastBar instance (keyed per toast object), so undo/hover/
+// focus state always starts fresh — no reset effect that could race a hover or focus
+// arriving before it runs.
+const undoToastKeys = new WeakMap<UndoToast, number>();
+let nextUndoToastKey = 0;
+
+function UndoToastView({ toast, onDismiss }: { toast: UndoToast | null; onDismiss: () => void }) {
+	if (!toast) return null;
+	let key = undoToastKeys.get(toast);
+	if (key === undefined) {
+		key = ++nextUndoToastKey;
+		undoToastKeys.set(toast, key);
+	}
+	return <UndoToastBar key={key} toast={toast} onDismiss={onDismiss} />;
+}
+
+function UndoToastBar({ toast, onDismiss }: { toast: UndoToast; onDismiss: () => void }) {
+	const [undoing, setUndoing] = useState(false);
+	const [undoError, setUndoError] = useState<string | null>(null);
+	const [hovered, setHovered] = useState(false);
+	const [focusWithin, setFocusWithin] = useState(false);
+	// Don't pull the toast out from under someone who is reading it, reaching for Undo
+	// with a keyboard, or waiting on an Undo already in progress. Any of those resets the
+	// countdown; it restarts in full once they're all false again.
+	const paused = undoing || hovered || focusWithin;
+
+	useEffect(() => {
+		if (paused) return;
+		const timer = setTimeout(onDismiss, UNDO_TOAST_TIMEOUT_MS);
+		return () => clearTimeout(timer);
+	}, [paused, onDismiss]);
+
+	const current = toast;
+
+	async function handleUndo() {
+		setUndoing(true);
+		setUndoError(null);
+		let result: string;
+		try {
+			result = await current.undo();
+		} catch (e) {
+			setUndoError(`Undo failed: ${String(e)}`);
+			setUndoing(false);
+			return;
+		}
+		onDismiss();
+		try {
+			await current.afterUndo?.(result);
+		} catch {
+			// The undo itself succeeded — a failed refresh afterwards isn't an undo failure.
+		}
+	}
+
+	return (
+		<div
+			role="status"
+			class={[
+				"fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3",
+				"bg-surface border border-border rounded shadow-lg px-4 py-3 text-sm text-text-base",
+			].join(" ")}
+			onMouseEnter={() => setHovered(true)}
+			onMouseLeave={() => setHovered(false)}
+			onFocusIn={() => setFocusWithin(true)}
+			onFocusOut={(e) => {
+				const next = e.relatedTarget;
+				if (!(next instanceof Node) || !e.currentTarget.contains(next)) setFocusWithin(false);
+			}}
+		>
+			<span>{undoError ?? current.message}</span>
+			{!undoError && (
+				<Button variant="outline" size="sm" onClick={handleUndo} disabled={undoing}>
+					{undoing ? "Undoing…" : "Undo"}
+				</Button>
+			)}
+			<button
+				type="button"
+				aria-label="Dismiss"
+				class="bg-transparent border-none cursor-pointer text-text-muted"
+				onClick={onDismiss}
+			>
+				×
+			</button>
+		</div>
+	);
+}
+
 export default function WikiPage({
 	workspaceSlug,
 	projectId: projectIdProp,
@@ -4234,38 +4370,44 @@ export default function WikiPage({
 		searchLoading,
 		pageData,
 		createForm,
+		undoToast,
+		setUndoToast,
 	} = state;
 	const { navigateTo, startCreate, createProps, articleProps } = assembleWikiPageProps(
 		state,
 		workspaceSlug
 	);
+	const dismissUndoToast = useCallback(() => setUndoToast(null), [setUndoToast]);
 
 	if (gate.pending) return <AccessPending />;
 
 	return (
-		<WikiPageShell
-			workspaceSlug={workspaceSlug}
-			projectId={projectId}
-			searchQuery={searchQuery}
-			onSearchQueryChange={setSearchQuery}
-			searchResults={searchResults}
-			searchLoading={searchLoading}
-			treeLoading={treeLoading}
-			pageTree={pageTree}
-			slug={slug}
-			onNavigate={navigateTo}
-			onCreate={() => startCreate(null)}
-			filters={filters}
-			stale={stale}
-			mainContentProps={{
-				creating: createForm.creating,
-				createProps,
-				slug,
-				loading: pageData.loading,
-				error: pageData.error,
-				page: pageData.page,
-				articleProps,
-			}}
-		/>
+		<>
+			<WikiPageShell
+				workspaceSlug={workspaceSlug}
+				projectId={projectId}
+				searchQuery={searchQuery}
+				onSearchQueryChange={setSearchQuery}
+				searchResults={searchResults}
+				searchLoading={searchLoading}
+				treeLoading={treeLoading}
+				pageTree={pageTree}
+				slug={slug}
+				onNavigate={navigateTo}
+				onCreate={() => startCreate(null)}
+				filters={filters}
+				stale={stale}
+				mainContentProps={{
+					creating: createForm.creating,
+					createProps,
+					slug,
+					loading: pageData.loading,
+					error: pageData.error,
+					page: pageData.page,
+					articleProps,
+				}}
+			/>
+			<UndoToastView toast={undoToast} onDismiss={dismissUndoToast} />
+		</>
 	);
 }
