@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { isPublicViewer } from "../middleware/auth";
 import { oauthApi } from "../oauth/provider";
@@ -40,7 +41,7 @@ router.get("/:slug", async (c) => {
 router.patch("/:slug", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await updateWorkspace(ctx, await c.req.json()));
+		return c.json(await updateWorkspace(ctx, await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -49,7 +50,7 @@ router.patch("/:slug", async (c) => {
 router.post("/:slug/members", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await inviteMember(ctx, await c.req.json()), 201);
+		return c.json(await inviteMember(ctx, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -67,7 +68,7 @@ router.delete("/:slug/members/:userId", async (c) => {
 router.patch("/:slug/members/:userId", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await updateMemberRole(ctx, c.req.param("userId"), await c.req.json()));
+		return c.json(await updateMemberRole(ctx, c.req.param("userId"), await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -76,7 +77,7 @@ router.patch("/:slug/members/:userId", async (c) => {
 router.post("/:slug/tokens", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await createToken(ctx, await c.req.json()), 201);
+		return c.json(await createToken(ctx, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -170,7 +171,7 @@ router.patch("/:slug/brand", async (c) => {
 	const ctx = ctxFromHono(c);
 	const workspace = c.get("workspace") as { slug: string };
 	try {
-		return c.json(await updateWorkspaceBrand(ctx, workspace.slug, await c.req.json()));
+		return c.json(await updateWorkspaceBrand(ctx, workspace.slug, await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

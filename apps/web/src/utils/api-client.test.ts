@@ -22,6 +22,21 @@ describe("apiFetch", () => {
 		await expect(apiFetch("/api/issues/i1")).resolves.toEqual({ id: "i1" });
 	});
 
+	it("PROJ-876: a 204 No Content resolves to undefined instead of throwing", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
+		await expect(apiFetch("/api/files/x", { method: "DELETE" })).resolves.toBeUndefined();
+	});
+
+	it("PROJ-876: an empty 200 body (content-length: 0) resolves to undefined", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi
+				.fn()
+				.mockResolvedValue(new Response("", { status: 200, headers: { "content-length": "0" } }))
+		);
+		await expect(apiFetch("/api/x", { method: "DELETE" })).resolves.toBeUndefined();
+	});
+
 	it("throws a plain Error on an HTTP error response", async () => {
 		vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404 }));
 

@@ -1,5 +1,6 @@
-import type { JSX } from "preact";
+import type { JSX, Ref } from "preact";
 import { useCallback, useEffect, useId, useRef, useState } from "preact/hooks";
+import { Portal } from "./Popover";
 
 export interface SelectOption {
 	value: string;
@@ -72,16 +73,22 @@ function useCloseOnOutside(
 	open: boolean,
 	close: () => void,
 	reposition: () => void,
-	rootRef: Readonly<{ current: HTMLDivElement | null }>
+	rootRef: Readonly<{ current: HTMLDivElement | null }>,
+	menuRef: Readonly<{ current: HTMLUListElement | null }>
 ) {
 	useEffect(() => {
 		if (!open) return;
 		let lastWidth = window.innerWidth;
+		// PROJ-848: on mobile the menu is portaled to <body>, so "inside" means the
+		// trigger's root OR the menu itself.
+		const inside = (t: EventTarget | null) =>
+			!!t && (rootRef.current?.contains(t as Node) || menuRef.current?.contains(t as Node));
 		function onDocPointer(e: Event) {
-			if (!rootRef.current?.contains(e.target as Node)) close();
+			if (!inside(e.target)) close();
 		}
 		function onScroll(e: Event) {
-			if (rootRef.current?.contains(e.target as Node)) return;
+			// Scrolling the list itself must never reposition/re-render the sheet.
+			if (inside(e.target)) return;
 			reposition();
 		}
 		function onResize() {
@@ -105,8 +112,24 @@ function useCloseOnOutside(
 			vv?.removeEventListener("resize", onResize);
 			vv?.removeEventListener("scroll", reposition);
 		};
-	}, [open, close, reposition, rootRef]);
+	}, [open, close, reposition, rootRef, menuRef]);
 }
+
+// PROJ-848: the page behind an open mobile sheet must not scroll.
+function useBodyScrollLock(active: boolean) {
+	useEffect(() => {
+		if (!active) return;
+		const prev = document.body.style.overflow;
+		document.body.style.overflow = "hidden";
+		return () => {
+			document.body.style.overflow = prev;
+		};
+	}, [active]);
+}
+
+// PROJ-848: a touch that moves more than this is a scroll, not a tap — it must never
+// select an option (some browsers still fire `click` after a short drag).
+const TAP_SLOP_PX = 8;
 
 interface SelectKeyDownConfig {
 	disabled: boolean;
@@ -199,6 +222,7 @@ interface SelectMenuProps {
 	capitalize: boolean;
 	onHighlight: (i: number) => void;
 	onChoose: (i: number) => void;
+	menuRef: Ref<HTMLUListElement>;
 }
 
 function SelectMenu({
@@ -211,9 +235,24 @@ function SelectMenu({
 	capitalize,
 	onHighlight,
 	onChoose,
+	menuRef,
 }: SelectMenuProps) {
+	const pointerStart = useRef<{ x: number; y: number } | null>(null);
+	const dragged = useRef(false);
 	return (
 		<ul
+			ref={menuRef}
+			onPointerDown={(e: PointerEvent) => {
+				pointerStart.current = { x: e.clientX, y: e.clientY };
+				dragged.current = false;
+			}}
+			onPointerMove={(e: PointerEvent) => {
+				const s = pointerStart.current;
+				if (s && Math.hypot(e.clientX - s.x, e.clientY - s.y) > TAP_SLOP_PX) dragged.current = true;
+			}}
+			onScroll={() => {
+				if (pointerStart.current) dragged.current = true;
+			}}
 			id={`${baseId}-menu`}
 			class="select-menu"
 			role="listbox"
@@ -246,7 +285,13 @@ function SelectMenu({
 					class={i === highlight ? "select-option highlighted" : "select-option"}
 					style={{ textTransform: capitalize ? "capitalize" : undefined }}
 					onMouseEnter={() => onHighlight(i)}
-					onClick={() => onChoose(i)}
+					onClick={() => {
+						if (dragged.current) {
+							dragged.current = false;
+							return;
+						}
+						onChoose(i);
+					}}
 				>
 					{opt.action ? <span class="grow">{opt.label}</span> : opt.label}
 					{opt.action && (
@@ -353,7 +398,11 @@ export default function Select({
 		if (highlight > options.length - 1) setHighlight(Math.max(0, options.length - 1));
 	}, [options.length, highlight]);
 
-	useCloseOnOutside(open, close, reposition, rootRef);
+	const menuRef = useRef<HTMLUListElement | null>(null);
+	useCloseOnOutside(open, close, reposition, rootRef, menuRef);
+	// menuPos === null ⇔ mobile sheet mode (see reposition above).
+	const sheet = open && menuPos === null;
+	useBodyScrollLock(sheet);
 
 	const onKeyDown = createSelectKeyDownHandler({
 		disabled,
@@ -391,19 +440,27 @@ export default function Select({
 					▾
 				</span>
 			</button>
-			{open && (
-				<SelectMenu
-					baseId={baseId}
-					options={options}
-					value={value}
-					highlight={highlight}
-					menuPos={menuPos}
-					ariaLabel={ariaLabel}
-					capitalize={capitalize}
-					onHighlight={setHighlight}
-					onChoose={choose}
-				/>
-			)}
+			{open &&
+				(() => {
+					const menu = (
+						<SelectMenu
+							baseId={baseId}
+							options={options}
+							value={value}
+							highlight={highlight}
+							menuPos={menuPos}
+							ariaLabel={ariaLabel}
+							capitalize={capitalize}
+							onHighlight={setHighlight}
+							onChoose={choose}
+							menuRef={menuRef}
+						/>
+					);
+					// PROJ-848: the mobile sheet renders on <body>, so a transformed or
+					// overflow-clipping ancestor (e.g. the wiki's mobile drawer) can't
+					// re-anchor it, clip it, or steal its touch scroll.
+					return sheet ? <Portal into={document.body} vnode={menu} /> : menu;
+				})()}
 		</div>
 	);
 }

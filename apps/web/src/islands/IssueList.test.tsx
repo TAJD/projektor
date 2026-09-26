@@ -876,3 +876,68 @@ describe("Filters popover stacking (CD-294)", () => {
 		expect(popover.className).toContain("overflow-y-auto");
 	});
 });
+
+// ─── PROJ-862: no unfiltered pre-fetches; board shows everything; one layout ───
+describe("issues page loading (PROJ-862)", () => {
+	function listRequests(mock: ReturnType<typeof vi.fn>): string[] {
+		return (mock.mock.calls as [string][])
+			.map(([u]) => String(u))
+			.filter((u) => u.includes("/api/issues?") && !u.includes("typeId="));
+	}
+
+	it.each(["list", "board"])(
+		"?project=KEY in %s view sends exactly one issues request, already filtered",
+		async (view) => {
+			localStorage.setItem("issues-view", view);
+			history.replaceState(null, "", "/issues/?project=PROJ");
+			const mock = setupProjectFetch();
+			render(<IssueList />);
+			await waitForLoaded();
+			await waitFor(() => expect(listRequests(mock).length).toBeGreaterThan(0));
+			const reqs = listRequests(mock);
+			expect(reqs).toHaveLength(1);
+			expect(reqs[0]).toContain("project=proj-1");
+			expect(reqs[0]).toContain(view === "list" ? "limit=30" : "limit=100");
+		}
+	);
+
+	it("board view pages past the API's 100-issue cap until every issue is loaded", async () => {
+		localStorage.setItem("issues-view", "board");
+		const all: Issue[] = Array.from({ length: 150 }, (_, i) => ({
+			...ISSUES[0],
+			id: `b${i}`,
+			number: i + 1,
+			title: `Board issue ${i}`,
+		}));
+		const mock = vi.fn().mockImplementation((url: string) => {
+			const s = String(url);
+			if (s.includes("task-statuses"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(STATUSES) });
+			if (s.includes("/api/projects"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(PROJECTS) });
+			const cursor = new URL(s, "http://x").searchParams.get("cursor");
+			const page = cursor ? all.slice(100) : all.slice(0, 100);
+			return Promise.resolve({
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						items: page,
+						nextCursor: cursor ? null : "c1",
+						total: cursor ? null : 150,
+					}),
+			});
+		});
+		vi.stubGlobal("fetch", mock);
+		render(<IssueList />);
+		await waitFor(() => expect(screen.getByText("Board issue 149")).toBeTruthy());
+		expect(screen.getByText("Board issue 0")).toBeTruthy();
+	});
+
+	it("renders only one of the desktop table / mobile cards", async () => {
+		setupFetch();
+		const { container } = render(<IssueList />);
+		await waitForLoaded();
+		await waitFor(() => expect(container.querySelector("table")).toBeTruthy());
+		expect(container.querySelector(".max-sm\\:flex")).toBeNull();
+	});
+});

@@ -11,19 +11,25 @@ import { useIssueListData } from "./issue-list/useIssueListData";
 import { useIssueSearch } from "./issue-list/useIssueSearch";
 import { useSavedViews } from "./issue-list/useSavedViews";
 
+function readStoredView(): ViewMode {
+	try {
+		const stored = localStorage.getItem("issues-view");
+		if (stored === "list" || stored === "board" || stored === "backlog") return stored;
+	} catch {
+		// storage unavailable — default below
+	}
+	return "list";
+}
+
 interface Props {
 	workspaceSlug?: string;
 }
 
 export default function IssueList({ workspaceSlug }: Props) {
-	const [view, setView] = useState<ViewMode>("list");
-
 	// safe-ls: cosmetic view preference (list/board/backlog). No API dependency — a stale
-	// or missing value falls back to the "list" default; it never influences API requests.
-	useEffect(() => {
-		const stored = localStorage.getItem("issues-view") as ViewMode | null;
-		if (stored === "list" || stored === "board" || stored === "backlog") setView(stored);
-	}, []);
+	// or missing value falls back to the "list" default. PROJ-862: read synchronously so
+	// the first request uses the right page size for the stored view.
+	const [view, setView] = useState<ViewMode>(readStoredView);
 
 	// safe-ls: cosmetic view preference — no API dependency (see getItem above).
 	useEffect(() => {

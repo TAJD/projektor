@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { composePlaybook } from "../services/playbook-compose";
 import { getPlaybook, listPlaybooks } from "../services/playbooks";
@@ -13,7 +14,7 @@ router.post("/:name/compose", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
 		return c.json(
-			await composePlaybook(ctx, { name: c.req.param("name"), params: await c.req.json() })
+			await composePlaybook(ctx, { name: c.req.param("name"), params: await jsonBody(c) })
 		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);

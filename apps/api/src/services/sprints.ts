@@ -186,6 +186,13 @@ export async function deleteSprint(ctx: ServiceCtx, id: string) {
 	if (!existing) throw new NotFoundError("Sprint not found");
 	await requireSprintProjectWrite(ctx, existing.projectId);
 
+	// PROJ-863: unassign its issues explicitly — D1 doesn't guarantee FK enforcement
+	// (see PROJ-407), so ON DELETE SET NULL alone can leave issues pointing at a
+	// sprint that no longer exists.
+	await orm
+		.update(schema.issues)
+		.set({ sprintId: null })
+		.where(and(eq(schema.issues.sprintId, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
 	await orm
 		.delete(schema.sprints)
 		.where(and(eq(schema.sprints.id, id), eq(schema.sprints.workspaceId, ctx.workspaceId)));

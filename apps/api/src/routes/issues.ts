@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { claimIssue, listIssueLeases, releaseIssue } from "../services/issue-leases";
 import {
@@ -125,7 +126,7 @@ router.get("/:id", async (c) => {
 router.post("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await createIssue(ctx, await c.req.json()), 201);
+		return c.json(await createIssue(ctx, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -135,7 +136,7 @@ router.post("/", async (c) => {
 router.patch("/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await updateIssue(ctx, c.req.param("id"), await c.req.json()));
+		return c.json(await updateIssue(ctx, c.req.param("id"), await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -153,7 +154,7 @@ router.delete("/:id", async (c) => {
 // Issue leasing for parallel agents (PROJ-184)
 router.post("/:id/claim", async (c) => {
 	const ctx = ctxFromHono(c);
-	const body = (await c.req.json().catch(() => ({}))) as { agentId?: string };
+	const body = (await jsonBody(c).catch(() => ({}))) as { agentId?: string };
 	try {
 		return c.json(
 			await claimIssue(ctx, { issueId: c.req.param("id"), agentId: body.agentId }),
@@ -166,7 +167,7 @@ router.post("/:id/claim", async (c) => {
 
 router.post("/:id/release", async (c) => {
 	const ctx = ctxFromHono(c);
-	const body = (await c.req.json().catch(() => ({}))) as { agentId?: string };
+	const body = (await jsonBody(c).catch(() => ({}))) as { agentId?: string };
 	try {
 		return c.json(await releaseIssue(ctx, { issueId: c.req.param("id"), agentId: body.agentId }));
 	} catch (e) {

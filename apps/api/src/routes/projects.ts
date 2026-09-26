@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import {
 	createProject,
@@ -17,7 +18,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 router.post("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		const body = await c.req.json();
+		const body = await jsonBody(c);
 		return c.json(await createProject(ctx, body), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
@@ -41,7 +42,7 @@ router.get("/:id", async (c) => {
 router.patch("/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		const body = await c.req.json();
+		const body = await jsonBody(c);
 		return c.json(await updateProject(ctx, c.req.param("id"), body));
 	} catch (e) {
 		return serviceErrToResponse(c, e);

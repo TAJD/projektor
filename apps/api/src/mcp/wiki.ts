@@ -103,7 +103,8 @@ export const wikiTools: MCPTool[] = [
 	},
 	{
 		name: "get_wiki_page",
-		description: "Get a wiki page by slug, including full content",
+		description:
+			"Get a wiki page by slug, including full content. Pass the returned `revisionId` as `baseRevisionId` when you update or patch the page.",
 		inputSchema: {
 			type: "object",
 			required: ["slug"],

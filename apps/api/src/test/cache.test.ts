@@ -21,7 +21,9 @@ describe("KV caching", () => {
 	});
 
 	describe("single-issue cache (TTL 300s, write-through invalidation)", () => {
-		it("cache hit skips D1 — second GET returns cached data even after D1 row is gone", async () => {
+		// PROJ-863: the cache holds only issue-owned extras (rollup, custom fields); the
+		// row itself is always read, so a deleted issue is a 404 even with a warm cache.
+		it("a warm cache never resurrects a deleted issue (row is always read)", async () => {
 			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Cached Issue" });
 			const url = `http://localhost/api/issues/${issue.id}`;
 			const hdrs = authHeaders(token, slug);
@@ -35,12 +37,8 @@ describe("KV caching", () => {
 			// Delete D1 row — simulates D1 being unavailable or stale
 			await env.DB.prepare("DELETE FROM issues WHERE id = ?").bind(issue.id).run();
 
-			// Second GET — should return from KV cache, not 404
 			const second = await SELF.fetch(url, { headers: hdrs });
-			expect(second.status).toBe(200);
-			const secondBody = (await second.json()) as { id: string; title: string };
-			expect(secondBody.id).toBe(issue.id);
-			expect(secondBody.title).toBe("Cached Issue");
+			expect(second.status).toBe(404);
 		});
 
 		it("updateIssue invalidates the cache — subsequent GET reflects updated data", async () => {

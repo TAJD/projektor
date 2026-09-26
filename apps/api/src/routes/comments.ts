@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { addComment, deleteComment, listComments, updateComment } from "../services/comments";
 import { resolveIssueIdParam } from "../services/issues";
@@ -23,7 +24,7 @@ router.get("/:issueId/comments", async (c) => {
 router.post("/:issueId/comments", async (c) => {
 	const ctx = ctxFromHono(c);
 	const issueId = c.req.param("issueId");
-	const raw = await c.req.json();
+	const raw = await jsonBody(c);
 	try {
 		return c.json(await addComment(ctx, { issueId, ...raw }), 201);
 	} catch (e) {
@@ -35,7 +36,7 @@ router.patch("/:issueId/comments/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	const issueId = c.req.param("issueId");
 	const commentId = c.req.param("id");
-	const raw = await c.req.json();
+	const raw = await jsonBody(c);
 	try {
 		return c.json(await updateComment(ctx, { issueId, commentId, ...raw }));
 	} catch (e) {

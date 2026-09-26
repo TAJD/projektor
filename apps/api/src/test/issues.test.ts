@@ -1718,7 +1718,7 @@ describe("Issues KV cache", () => {
 		({ token, slug, projectId } = await seedProjectFixture());
 	});
 
-	it("getIssue returns cached value on a second call (KV hit, D1 not re-read)", async () => {
+	it("getIssue: row is always fresh; rollup/custom fields come from the KV cache (PROJ-863)", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
 			headers: {
@@ -1741,8 +1741,17 @@ describe("Issues KV cache", () => {
 		const firstIssue = (await first.json()) as { title: string };
 		expect(firstIssue.title).toBe("Cache me");
 
-		// Corrupt the D1 row directly — if the cache is skipped the title would change
+		// Change the row AND add a child behind the service's back: the row is re-read
+		// (fresh title), the rollup comes from the cache (child not counted yet).
 		await env.DB.prepare("UPDATE issues SET title = 'D1 was read' WHERE id = ?").bind(id).run();
+		await env.DB.prepare(
+			`INSERT INTO issues (id, workspace_id, project_id, number, title, status, priority, labels,
+			   parent_id, created_by_id, created_at, updated_at)
+			 SELECT ?, workspace_id, project_id, number + 1000, 'sneaky child', 'todo', 'none', '[]',
+			   id, created_by_id, created_at, updated_at FROM issues WHERE id = ?`
+		)
+			.bind(crypto.randomUUID(), id)
+			.run();
 
 		// Second GET should return the cached value, not the corrupted D1 row
 		const second = await SELF.fetch(`http://localhost/api/issues/${id}`, {
@@ -1752,8 +1761,9 @@ describe("Issues KV cache", () => {
 				"Content-Type": "application/json",
 			},
 		});
-		const secondIssue = (await second.json()) as { title: string };
-		expect(secondIssue.title).toBe("Cache me");
+		const secondIssue = (await second.json()) as { title: string; rollup: { total: number } };
+		expect(secondIssue.title).toBe("D1 was read");
+		expect(secondIssue.rollup.total).toBe(0);
 	});
 
 	it("updateIssue invalidates the cache so next getIssue re-fetches from D1", async () => {
@@ -1803,7 +1813,7 @@ describe("Issues KV cache", () => {
 	// PROJ-359: ref lookups ("PROJ-42", the primary MCP agent read path) resolve
 	// via fetchIssueByRef rather than the id-keyed cache check at the top of
 	// getIssue, so they never got any cache benefit before this fix.
-	it("getIssue by ref returns cached value on a second call (KV hit, D1 not re-read)", async () => {
+	it("getIssue by ref: row is always fresh; rollup/custom fields come from the KV cache (PROJ-863)", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
 			headers: {
@@ -1827,8 +1837,17 @@ describe("Issues KV cache", () => {
 		const firstIssue = (await first.json()) as { title: string };
 		expect(firstIssue.title).toBe("Cache me by ref");
 
-		// Corrupt the D1 row directly — if the cache is skipped the title would change
+		// Change the row AND add a child behind the service's back: the row is re-read
+		// (fresh title), the rollup comes from the cache (child not counted yet).
 		await env.DB.prepare("UPDATE issues SET title = 'D1 was read' WHERE id = ?").bind(id).run();
+		await env.DB.prepare(
+			`INSERT INTO issues (id, workspace_id, project_id, number, title, status, priority, labels,
+			   parent_id, created_by_id, created_at, updated_at)
+			 SELECT ?, workspace_id, project_id, number + 1000, 'sneaky child', 'todo', 'none', '[]',
+			   id, created_by_id, created_at, updated_at FROM issues WHERE id = ?`
+		)
+			.bind(crypto.randomUUID(), id)
+			.run();
 
 		// Second GET by ref should return the cached value, not the corrupted D1 row
 		const second = await SELF.fetch(`http://localhost/api/issues/${ref}`, {
@@ -1838,8 +1857,9 @@ describe("Issues KV cache", () => {
 				"Content-Type": "application/json",
 			},
 		});
-		const secondIssue = (await second.json()) as { title: string };
-		expect(secondIssue.title).toBe("Cache me by ref");
+		const secondIssue = (await second.json()) as { title: string; rollup: { total: number } };
+		expect(secondIssue.title).toBe("D1 was read");
+		expect(secondIssue.rollup.total).toBe(0);
 	});
 });
 

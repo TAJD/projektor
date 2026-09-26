@@ -82,6 +82,10 @@ export function useIssueLookups(
 	const [statuses, setStatuses] = useState<TaskStatus[]>([]);
 	const [projects, setProjects] = useState<ProjectMeta[]>([]);
 	const [taskTypes, setTaskTypes] = useState<Array<{ id: string; key: string; name: string }>>([]);
+	// PROJ-862: whether each lookup has settled (success or failure), so the issue fetch
+	// can wait for exactly the lookups its filters need instead of firing unfiltered.
+	const [projectsLoaded, setProjectsLoaded] = useState(false);
+	const [taskTypesLoaded, setTaskTypesLoaded] = useState(false);
 	// Epics for the epic filter dropdown — fetched independently of the paginated
 	// list (PROJ-211) so the dropdown is complete and survives "Hide epics", which
 	// now excludes epic-typed issues from the list server-side.
@@ -116,6 +120,8 @@ export function useIssueLookups(
 				if (Array.isArray(data)) setTaskTypes(data);
 			} catch {
 				// non-fatal
+			} finally {
+				setTaskTypesLoaded(true);
 			}
 		})();
 	}, [workspaceSlug]);
@@ -128,6 +134,8 @@ export function useIssueLookups(
 				if (Array.isArray(data)) setProjects(data);
 			} catch {
 				// non-fatal
+			} finally {
+				setProjectsLoaded(true);
 			}
 		})();
 	}, [workspaceSlug]);
@@ -140,11 +148,15 @@ export function useIssueLookups(
 	const epicProjectId = filterProject
 		? projects.find((p) => p.key === filterProject)?.id
 		: undefined;
+	// PROJ-862: with a project in the URL, wait for it to resolve — otherwise this
+	// fetches every epic in the workspace first and then again for the project.
+	const epicsReady = !filterProject || projectsLoaded;
 	useEffect(() => {
 		if (!epicTypeId) {
 			setEpics([]);
 			return;
 		}
+		if (!epicsReady) return;
 		(async () => {
 			try {
 				const qs = new URLSearchParams({ typeId: epicTypeId, limit: "100" });
@@ -157,12 +169,14 @@ export function useIssueLookups(
 				// non-fatal — epic dropdown just won't populate
 			}
 		})();
-	}, [workspaceSlug, epicTypeId, epicProjectId]);
+	}, [workspaceSlug, epicTypeId, epicProjectId, epicsReady]);
 
 	return {
 		statuses,
 		projects,
+		projectsLoaded,
 		taskTypes,
+		taskTypesLoaded,
 		epics,
 		sprints,
 		sprintDetail,

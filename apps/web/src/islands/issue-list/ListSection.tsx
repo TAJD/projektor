@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "preact/hooks";
 import { formatIssueRef } from "../../lib/issue-ref";
 import { issueUrl } from "../../utils/issue-url";
+import { useMediaQuery } from "../../utils/use-media-query";
 import type { Issue, SortKey, TaskStatus } from "../board-utils";
 import {
 	getStoryPoints,
@@ -202,32 +203,39 @@ export default function ListSection({
 		return () => observer.disconnect();
 	}, [nextCursor, loadMore]);
 
+	// PROJ-862: render ONE layout (Tailwind's max-sm breakpoint), not both hidden by CSS.
+	const isMobile = useMediaQuery("(max-width: 639.98px)");
+
 	if (issues.length === 0) {
 		return <p class="text-text-base">No issues match the current filters.</p>;
 	}
 
 	return (
 		<>
-			<DesktopTable
-				issues={issues}
-				statuses={statuses}
-				updatingId={updatingId}
-				updatingPriorityId={updatingPriorityId}
-				changeStatus={changeStatus}
-				changePriority={changePriority}
-				sortBy={sortBy}
-				sortDir={sortDir}
-				onSort={onSort}
-			/>
+			{!isMobile && (
+				<DesktopTable
+					issues={issues}
+					statuses={statuses}
+					updatingId={updatingId}
+					updatingPriorityId={updatingPriorityId}
+					changeStatus={changeStatus}
+					changePriority={changePriority}
+					sortBy={sortBy}
+					sortDir={sortDir}
+					onSort={onSort}
+				/>
+			)}
 
-			<MobileCards
-				issues={issues}
-				statuses={statuses}
-				updatingId={updatingId}
-				updatingPriorityId={updatingPriorityId}
-				changeStatus={changeStatus}
-				changePriority={changePriority}
-			/>
+			{isMobile && (
+				<MobileCards
+					issues={issues}
+					statuses={statuses}
+					updatingId={updatingId}
+					updatingPriorityId={updatingPriorityId}
+					changeStatus={changeStatus}
+					changePriority={changePriority}
+				/>
+			)}
 
 			{/* Auto-load sentinel (PROJ-201/303): fetches the next page once it scrolls
 			    into view; only rendered while the server has another page. */}

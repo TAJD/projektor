@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import {
 	addGroupMember,
@@ -29,7 +30,7 @@ router.get("/:slug/groups", async (c) => {
 router.post("/:slug/groups", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await createGroup(ctx, await c.req.json()), 201);
+		return c.json(await createGroup(ctx, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -58,7 +59,7 @@ router.get("/:slug/groups/:groupId", async (c) => {
 router.patch("/:slug/groups/:groupId", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await updateGroup(ctx, c.req.param("groupId"), await c.req.json()));
+		return c.json(await updateGroup(ctx, c.req.param("groupId"), await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -76,7 +77,7 @@ router.delete("/:slug/groups/:groupId", async (c) => {
 router.post("/:slug/groups/:groupId/members", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await addGroupMember(ctx, c.req.param("groupId"), await c.req.json()), 201);
+		return c.json(await addGroupMember(ctx, c.req.param("groupId"), await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -94,7 +95,7 @@ router.delete("/:slug/groups/:groupId/members/:userId", async (c) => {
 router.put("/:slug/groups/:groupId/grants", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await setGroupGrant(ctx, c.req.param("groupId"), await c.req.json()));
+		return c.json(await setGroupGrant(ctx, c.req.param("groupId"), await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

@@ -1,6 +1,7 @@
 import type { Dispatch, StateUpdater } from "preact/hooks";
 import { useState } from "preact/hooks";
 import { apiFetch } from "../../utils/api-client";
+import { dateInputToUnix, unixToDateInput } from "../../utils/date-input";
 import type { Issue } from "../board-utils";
 import { Button } from "../ui/Button";
 
@@ -14,13 +15,7 @@ export interface SprintDetail {
 	projectId: string;
 }
 
-function tsToDateInput(ts: number): string {
-	const d = new Date(ts * 1000);
-	const y = d.getFullYear();
-	const m = String(d.getMonth() + 1).padStart(2, "0");
-	const day = String(d.getDate()).padStart(2, "0");
-	return `${y}-${m}-${day}`;
-}
+const tsToDateInput = unixToDateInput;
 
 function sprintStatusStyle(status: SprintDetail["status"]): {
 	background: string;
@@ -349,10 +344,9 @@ export default function SprintBannerSection({
 			const body: Record<string, unknown> = { name: sprintEditName.trim() };
 			body.goal = sprintEditGoal.trim() || null;
 			body.status = sprintEditStatus;
-			body.startDate = sprintEditStart
-				? Math.floor(new Date(sprintEditStart).getTime() / 1000)
-				: null;
-			body.endDate = sprintEditEnd ? Math.floor(new Date(sprintEditEnd).getTime() / 1000) : null;
+			// PROJ-875: local midnight, matching tsToDateInput — no day shift west of UTC.
+			body.startDate = dateInputToUnix(sprintEditStart);
+			body.endDate = dateInputToUnix(sprintEditEnd);
 			await apiFetch(`/api/sprints/${sprintDetail.id}`, { method: "PATCH", workspaceSlug, body });
 			const updated: SprintDetail = {
 				...sprintDetail,

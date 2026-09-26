@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { createLink, deleteLink, listLinksForIssue } from "../services/issue-links";
 import { resolveIssueIdParam } from "../services/issues";
@@ -22,7 +23,7 @@ router.get("/:issueId/links", async (c) => {
 // POST /api/issues/:issueId/links
 router.post("/:issueId/links", async (c) => {
 	const ctx = ctxFromHono(c);
-	const body = await c.req.json();
+	const body = await jsonBody(c);
 	try {
 		return c.json(await createLink(ctx, { sourceIssueId: c.req.param("issueId"), ...body }), 201);
 	} catch (e) {

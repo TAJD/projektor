@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import {
 	completeSprint,
@@ -27,7 +28,7 @@ router.get("/", async (c) => {
 router.post("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await createSprint(ctx, await c.req.json()), 201);
+		return c.json(await createSprint(ctx, await jsonBody(c)), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -45,7 +46,7 @@ router.get("/:id", async (c) => {
 router.patch("/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await updateSprint(ctx, c.req.param("id"), await c.req.json()));
+		return c.json(await updateSprint(ctx, c.req.param("id"), await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -71,7 +72,7 @@ router.delete("/:id", async (c) => {
 
 router.post("/:id/move-issues", async (c) => {
 	const ctx = ctxFromHono(c);
-	const body = (await c.req.json()) as Record<string, unknown>;
+	const body = (await jsonBody(c)) as Record<string, unknown>;
 	try {
 		return c.json(await moveIssuesToSprint(ctx, { ...body, sprintId: c.req.param("id") }));
 	} catch (e) {

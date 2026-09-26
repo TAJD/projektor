@@ -6,6 +6,7 @@ import {
 	projectError as storeProjectError,
 } from "../lib/project-context";
 import { apiFetch } from "../utils/api-client";
+import { dateInputToUnix, formatUnixDate } from "../utils/date-input";
 import { issueUrl } from "../utils/issue-url";
 import type { CustomFieldValue, ProjectLookup as Project } from "./board-utils";
 import { Badge } from "./ui/Badge";
@@ -16,8 +17,9 @@ export interface Sprint {
 	name: string;
 	goal: string | null;
 	status: "planned" | "active" | "completed";
-	startDate: string | null;
-	endDate: string | null;
+	// Unix seconds (API contract) — PROJ-875.
+	startDate: number | null;
+	endDate: number | null;
 	projectId: string;
 	createdAt: number;
 }
@@ -70,10 +72,7 @@ function statusBadge(status: Sprint["status"]) {
 	);
 }
 
-function formatDate(d: string | null): string {
-	if (!d) return "—";
-	return new Date(d).toLocaleDateString();
-}
+const formatDate = formatUnixDate;
 
 async function fetchSprintIssues(
 	sprintId: string,
@@ -116,7 +115,7 @@ function shouldShowVelocity(completedCount: number, velocityLoading: boolean): b
 	return completedCount > 0 || velocityLoading;
 }
 
-function buildCreateSprintBody(
+export function buildCreateSprintBody(
 	projectId: string,
 	name: string,
 	goal: string,
@@ -125,8 +124,11 @@ function buildCreateSprintBody(
 ): Record<string, unknown> {
 	const body: Record<string, unknown> = { name: name.trim(), projectId };
 	if (goal.trim()) body.goal = goal.trim();
-	if (start) body.startDate = start;
-	if (end) body.endDate = end;
+	// PROJ-875: the API takes unix seconds, not the date input's "YYYY-MM-DD" string.
+	const startDate = dateInputToUnix(start);
+	const endDate = dateInputToUnix(end);
+	if (startDate !== null) body.startDate = startDate;
+	if (endDate !== null) body.endDate = endDate;
 	return body;
 }
 

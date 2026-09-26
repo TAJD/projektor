@@ -2,20 +2,38 @@ import { useState } from "preact/hooks";
 import type { SortKey } from "../board-utils";
 import type { SavedViewFilters } from "../saved-views";
 import type { DateField } from "./FiltersPopover";
-import { parseDateField, useFilterUrlSync } from "./useFilterUrlSync";
+import { parseDateField, parseListParam, useFilterUrlSync } from "./useFilterUrlSync";
+
+function readInitialFilters() {
+	const params = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+	return {
+		statuses: parseListParam(params.get("status")),
+		priorities: parseListParam(params.get("priority")),
+		project: params.get("project") ?? "",
+		epic: params.get("epic") ?? "",
+		sprintId: params.get("sprintId") ?? "",
+		hideEpics: params.get("hideEpics") === "1",
+		dateField: parseDateField(params.get("dateField")),
+		dateFrom: params.get("dateFrom") ?? "",
+		dateTo: params.get("dateTo") ?? "",
+	};
+}
 
 /** Owns all issue-list filter/sort state, plus URL <-> state sync (PROJ-60/211/212). */
 export function useIssueFilters() {
-	const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
-	const [filterPriorities, setFilterPriorities] = useState<string[]>([]);
-	const [filterProject, setFilterProject] = useState("");
+	// PROJ-862: lazy initialisers read the URL on the first render, so the first
+	// issues request already carries the filters.
+	const [initial] = useState(readInitialFilters);
+	const [filterStatuses, setFilterStatuses] = useState<string[]>(initial.statuses);
+	const [filterPriorities, setFilterPriorities] = useState<string[]>(initial.priorities);
+	const [filterProject, setFilterProject] = useState(initial.project);
 	const [filterType, setFilterType] = useState("");
-	const [filterEpicId, setFilterEpicId] = useState("");
-	const [hideEpics, setHideEpics] = useState(false);
-	const [filterDateField, setFilterDateField] = useState<DateField>("");
-	const [filterDateFrom, setFilterDateFrom] = useState("");
-	const [filterDateTo, setFilterDateTo] = useState("");
-	const [filterSprintId, setFilterSprintId] = useState("");
+	const [filterEpicId, setFilterEpicId] = useState(initial.epic);
+	const [hideEpics, setHideEpics] = useState(initial.hideEpics);
+	const [filterDateField, setFilterDateField] = useState<DateField>(initial.dateField);
+	const [filterDateFrom, setFilterDateFrom] = useState(initial.dateFrom);
+	const [filterDateTo, setFilterDateTo] = useState(initial.dateTo);
+	const [filterSprintId, setFilterSprintId] = useState(initial.sprintId);
 	const [sortBy, setSortBy] = useState<SortKey>("created_at");
 	const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 

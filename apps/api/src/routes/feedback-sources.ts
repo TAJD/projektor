@@ -1,5 +1,6 @@
 import type { HonoEnv } from "@projektor/types";
 import { Hono } from "hono";
+import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import {
 	createFeedbackSource,
@@ -16,7 +17,7 @@ const router = new Hono<HonoEnv>();
 router.post("/:id/feedback-sources", async (c) => {
 	const ctx = ctxFromHono(c);
 	const projectId = c.req.param("id");
-	const raw = await c.req.json();
+	const raw = await jsonBody(c);
 	try {
 		return c.json(await createFeedbackSource(ctx, { ...raw, projectId }), 201);
 	} catch (e) {
@@ -38,7 +39,7 @@ router.patch("/:id/feedback-sources/:sourceId", async (c) => {
 	const ctx = ctxFromHono(c);
 	const projectId = c.req.param("id");
 	const sourceId = c.req.param("sourceId");
-	const raw = await c.req.json();
+	const raw = await jsonBody(c);
 	try {
 		return c.json(await updateFeedbackSource(ctx, { ...raw, projectId, sourceId }));
 	} catch (e) {

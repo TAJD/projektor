@@ -140,3 +140,18 @@ describe("SprintManager", () => {
 		});
 	});
 });
+
+// PROJ-875: the create form's "YYYY-MM-DD" values are sent as unix seconds (the API
+// schema's type), not raw strings — which used to fail with a 400.
+describe("buildCreateSprintBody (PROJ-875)", () => {
+	it("sends start/end dates as unix seconds at local midnight", async () => {
+		const { buildCreateSprintBody } = await import("./SprintManager");
+		const body = buildCreateSprintBody("p1", " Sprint 1 ", "", "2026-09-23", "2026-10-07");
+		expect(body).toEqual({
+			name: "Sprint 1",
+			projectId: "p1",
+			startDate: new Date(2026, 8, 23).getTime() / 1000,
+			endDate: new Date(2026, 9, 7).getTime() / 1000,
+		});
+	});
+});
