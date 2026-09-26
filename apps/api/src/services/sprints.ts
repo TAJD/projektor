@@ -9,7 +9,6 @@ import {
 	UpdateSprintSchema,
 } from "../schemas/sprints";
 import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
-import * as cache from "./cache";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -246,11 +245,12 @@ export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 		return [];
 	});
 
-	// PROJ-356: invalidate the per-issue KV cache so a subsequent getIssue reflects
-	// the new sprint_id instead of serving a stale cached issue for up to ISSUE_TTL.
-	await Promise.all(
-		issueIds.map((id) => cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${id}`))
-	);
-
+	// PROJ-871: no KV invalidation needed here. PROJ-863 narrowed the per-issue KV cache
+	// (services/issues.ts's CachedIssueExtras) to only `rollup` and `customFields` —
+	// sprint_id is read live from the issues row on every getIssue/listIssues call, never
+	// served from that cache, so there is nothing to invalidate. This used to be
+	// `Promise.all(issueIds.map(id => cache.invalidate(...)))`, one KV subrequest per issue
+	// (up to 500, 10x the free-plan subrequest limit) invalidating a field the cache no
+	// longer even stores.
 	return { ok: true, count: issueIds.length };
 }

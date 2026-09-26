@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	authHeaders,
 	seedFixture,
@@ -247,6 +247,72 @@ describe("Sprints API", () => {
 			}
 		);
 		expect(res.status).toBe(404);
+	});
+
+	// PROJ-871: moving up to 500 issues used to fire one KV `invalidate` (a subrequest) per
+	// issue — 500 subrequests, 10x the free-plan cap. PROJ-863 already narrowed the per-issue
+	// KV cache to rollup/customFields only (sprint_id is read live from the row on every
+	// getIssue/listIssues), so that invalidation loop was invalidating a field the cache
+	// doesn't hold — it's deleted outright rather than chunked/deferred.
+	describe("PROJ-871: moving many issues stays within the KV subrequest budget", () => {
+		const prevApiMax = env.RATE_LIMIT_API_MAX;
+		beforeAll(() => {
+			env.RATE_LIMIT_API_MAX = "1000";
+		});
+		afterAll(() => {
+			env.RATE_LIMIT_API_MAX = prevApiMax;
+		});
+
+		it("moving 500 issues succeeds within <=50 KV deletes, and a subsequent GET shows the new sprint", async () => {
+			const sprintRes = await createSprint({ projectId, name: "Bulk Target Sprint" });
+			const { id: sprintId } = (await sprintRes.json()) as { id: string };
+
+			const issueIds: string[] = [];
+			for (let i = 0; i < 500; i++) {
+				const issue = await seedIssue(workspaceId, projectId, userId, { title: `Bulk ${i}` });
+				issueIds.push(issue.id);
+			}
+
+			// Warm the per-issue KV cache first, so the GET after the move proves sprint_id
+			// isn't served stale from it (it's read live from the row; the cache only holds
+			// rollup/customFields).
+			const warmRes = await SELF.fetch(`http://localhost/api/issues/${issueIds[0]}`, {
+				headers: authHeaders(token, slug),
+			});
+			expect(warmRes.status).toBe(200);
+			expect(((await warmRes.json()) as { sprint_id: string | null }).sprint_id).toBeNull();
+			expect(await env.KV.get(`issue:${workspaceId}:${issueIds[0]}`)).not.toBeNull();
+
+			let kvDeletes = 0;
+			const origDelete = env.KV.delete.bind(env.KV);
+			vi.spyOn(env.KV, "delete").mockImplementation((...args: Parameters<typeof origDelete>) => {
+				kvDeletes++;
+				return origDelete(...args);
+			});
+
+			const moveRes = await SELF.fetch(`http://localhost/api/sprints/${sprintId}/move-issues`, {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ issueIds }),
+			});
+			vi.restoreAllMocks();
+
+			expect(moveRes.status).toBe(200);
+			const result = (await moveRes.json()) as { ok: boolean; count: number };
+			expect(result.ok).toBe(true);
+			expect(result.count).toBe(500);
+			expect(kvDeletes).toBeLessThanOrEqual(50);
+
+			// The cache entry is still there (nothing invalidated it), yet the GET shows the
+			// new sprint.
+			expect(await env.KV.get(`issue:${workspaceId}:${issueIds[0]}`)).not.toBeNull();
+			const getRes = await SELF.fetch(`http://localhost/api/issues/${issueIds[0]}`, {
+				headers: authHeaders(token, slug),
+			});
+			expect(getRes.status).toBe(200);
+			const body = (await getRes.json()) as { sprint_id: string | null };
+			expect(body.sprint_id).toBe(sprintId);
+		});
 	});
 
 	it("lists multiple sprints ordered by created_at", async () => {
