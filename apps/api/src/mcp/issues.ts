@@ -103,7 +103,10 @@ export const issuesTools: MCPTool[] = [
 					type: "boolean",
 					description: "Include the `body` field on each item (omitted by default)",
 				},
-				cursor: { type: "number", description: "Pagination cursor (created_at of last item)" },
+				cursor: {
+					type: "string",
+					description: "Pagination cursor: pass the previous page's `nextCursor` unchanged",
+				},
 				limit: { type: "number", default: 50, description: "Max 100" },
 			},
 		},

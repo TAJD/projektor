@@ -21,7 +21,7 @@ interface MainContentProps {
 	sortBy: SortKey;
 	sortDir: "asc" | "desc";
 	onSort: (key: SortKey) => void;
-	nextCursor: number | null;
+	nextCursor: string | number | null;
 	loadingMore: boolean;
 	loadMore: () => void;
 }

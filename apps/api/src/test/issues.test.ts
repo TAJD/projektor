@@ -397,10 +397,12 @@ describe("Issues API", () => {
 		expect(first.items).toHaveLength(30);
 		expect(first.total).toBe(35);
 
+		// PROJ-857: later pages skip the COUNT(*) — the client keeps the first page's total.
 		const { page: second } = await listIssues(
 			`http://localhost/api/issues?cursor=${first.nextCursor}`
 		);
-		expect(second.total).toBe(35);
+		expect(second.total).toBeNull();
+		expect(second.items).toHaveLength(5);
 	});
 
 	it("projectId filter scopes results to that project only", async () => {

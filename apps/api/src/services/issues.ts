@@ -277,11 +277,19 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	// Conditions exclude the pagination cursor, so they represent the full filtered set —
 	// used as-is for the total count, and extended with the cursor below for the page query.
 	const conditions = await buildListIssuesConditions(orm, ctx, filters);
-	const pageConditions = filters.cursor
-		? [...conditions, sql`${schema.issues.createdAt} < ${filters.cursor}`]
-		: conditions;
+	const cursor = filters.cursor;
+	const pageConditions = !cursor
+		? conditions
+		: cursor.id === undefined
+			? [...conditions, sql`${schema.issues.createdAt} < ${cursor.createdAt}`]
+			: [
+					...conditions,
+					sql`(${schema.issues.createdAt} < ${cursor.createdAt} OR (${schema.issues.createdAt} = ${cursor.createdAt} AND ${schema.issues.id} < ${cursor.id}))`,
+				];
 
-	const total = await orm.$count(schema.issues, and(...conditions));
+	// PROJ-857: the filtered total only changes the header count, which the first page
+	// already set — later pages skip the COUNT(*) and return total: null.
+	const total = cursor ? null : await orm.$count(schema.issues, and(...conditions));
 
 	// Select with snake_case aliases to preserve the same response shape as the raw-SQL version.
 	// labels uses a raw SQL expression to return the stored JSON string (bypassing Drizzle's
@@ -323,13 +331,13 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
 		.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
 		.where(and(...pageConditions))
-		.orderBy(desc(schema.issues.createdAt))
+		.orderBy(desc(schema.issues.createdAt), desc(schema.issues.id))
 		.limit(limit + 1);
 
 	const hasMore = rows.length > limit;
 	const items = hasMore ? rows.slice(0, limit) : rows;
-	const lastItem = items[items.length - 1] as { created_at: number } | undefined;
-	const nextCursor = hasMore && lastItem ? lastItem.created_at : null;
+	const lastItem = items[items.length - 1] as { created_at: number; id: string } | undefined;
+	const nextCursor = hasMore && lastItem ? `${lastItem.created_at}:${lastItem.id}` : null;
 
 	const issueIds = (items as Array<{ id: string }>).map((i) => i.id);
 	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);

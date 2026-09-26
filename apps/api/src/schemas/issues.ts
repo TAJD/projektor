@@ -47,6 +47,14 @@ export const UpdateIssueSchema = z
 	.strict()
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 
+export const IssueListCursorSchema = z
+	.union([z.number().int().nonnegative(), z.string().regex(/^\d+(?::[A-Za-z0-9-]+)?$/)])
+	.transform((v) => {
+		if (typeof v === "number") return { createdAt: v } as { createdAt: number; id?: string };
+		const [createdAt, id] = v.split(":");
+		return { createdAt: Number(createdAt), id } as { createdAt: number; id?: string };
+	});
+
 export const ListIssuesSchema = z
 	.object({
 		status: StatusEnum.optional(),
@@ -80,7 +88,10 @@ export const ListIssuesSchema = z
 		// PROJ-442: list items omit `body` by default (it's rarely needed and can be
 		// large); set this to restore it.
 		includeBody: BooleanQueryParam.optional(),
-		cursor: z.coerce.number().optional(),
+		// PROJ-857: `<created_at>:<id>` — created_at alone (1 s precision) skipped rows
+		// created in the same second across a page boundary. A bare number (the old
+		// format) is still accepted from clients holding a pre-upgrade cursor.
+		cursor: IssueListCursorSchema.optional(),
 		limit: z.coerce.number().min(1).max(100).default(30),
 	})
 	.strict();
