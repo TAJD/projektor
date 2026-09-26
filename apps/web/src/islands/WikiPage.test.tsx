@@ -646,6 +646,54 @@ describe("draft autosave only writes real changes (PROJ-799)", () => {
 	});
 });
 
+describe("leaving mid-edit keeps the last keystrokes (PROJ-800)", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("navigating to another page flushes the pending draft before clearing the page", async () => {
+		const titleInput = await startEditingWithTitleInput();
+		fireEvent.input(titleInput, { target: { value: "Typed right before leaving" } });
+
+		// Back/forward (and sidebar links) go through showSlug, which clears page state.
+		history.pushState(null, "", "/wiki/other-page");
+		window.dispatchEvent(new PopStateEvent("popstate"));
+		await vi.advanceTimersByTimeAsync(0);
+
+		const fetchMock = vi.mocked(fetch);
+		const puts = fetchMock.mock.calls.filter(isDraftCall("PUT"));
+		expect(puts).toHaveLength(1);
+		expect(String(puts[0][0])).toContain("/api/wiki/my-page/draft");
+		const body = JSON.parse((puts[0][1] as RequestInit).body as string);
+		expect(body.title).toBe("Typed right before leaving");
+
+		await vi.advanceTimersByTimeAsync(2000);
+		expect(fetchMock.mock.calls.filter(isDraftCall("PUT"))).toHaveLength(1);
+	});
+
+	it("prompts before unload only while there are unsaved changes", async () => {
+		const titleInput = await startEditingWithTitleInput();
+		const fire = () => {
+			const e = new Event("beforeunload", { cancelable: true });
+			window.dispatchEvent(e);
+			return e.defaultPrevented;
+		};
+		expect(fire()).toBe(false);
+
+		fireEvent.input(titleInput, { target: { value: "Unsaved" } });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fire()).toBe(true);
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fire()).toBe(false);
+	});
+});
+
 describe("server-side draft autosave (PROJ-495) — restore banner", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
