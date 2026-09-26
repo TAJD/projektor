@@ -1,4 +1,5 @@
-import { ForbiddenError, NotFoundError } from "./errors";
+import { assertProjectAccess } from "./access";
+import { NotFoundError } from "./errors";
 import type { ServiceCtx } from "./types";
 import {
 	getWorkspaceBrandForShare,
@@ -13,20 +14,30 @@ async function hashToken(token: string): Promise<string> {
 		.join("");
 }
 
+/**
+ * PROJ-792: creating or revoking a public link needs *edit* access to the
+ * issue's project (group grant, or workspace owner/admin) — not merely a
+ * non-viewer workspace role. No access → 404 (hides existence); read-only → 403.
+ */
+async function assertIssueShareable(ctx: ServiceCtx, issueId: string): Promise<void> {
+	const issue = await ctx.db
+		.prepare("SELECT project_id FROM issues WHERE id = ? AND workspace_id = ?")
+		.bind(issueId, ctx.workspaceId)
+		.first<{ project_id: string }>();
+	if (!issue) throw new NotFoundError("Issue not found");
+	await assertProjectAccess(ctx, issue.project_id, "edit", {
+		notFoundMessage: "Issue not found",
+		projectLoadedFromWorkspaceRow: true,
+	});
+}
+
 export async function createShareToken(
 	ctx: ServiceCtx,
 	issueId: string
 ): Promise<{ token: string; url: string }> {
-	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+	await assertIssueShareable(ctx, issueId);
 
 	const now = Math.floor(Date.now() / 1000);
-
-	// Verify the issue belongs to this workspace
-	const issue = await ctx.db
-		.prepare("SELECT id FROM issues WHERE id = ? AND workspace_id = ?")
-		.bind(issueId, ctx.workspaceId)
-		.first<{ id: string }>();
-	if (!issue) throw new NotFoundError("Issue not found");
 
 	const bytes = crypto.getRandomValues(new Uint8Array(16));
 	const token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -139,13 +150,7 @@ export async function getSharedLogo(
 }
 
 export async function revokeShareToken(ctx: ServiceCtx, issueId: string): Promise<void> {
-	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
-
-	const issue = await ctx.db
-		.prepare("SELECT id FROM issues WHERE id = ? AND workspace_id = ?")
-		.bind(issueId, ctx.workspaceId)
-		.first<{ id: string }>();
-	if (!issue) throw new NotFoundError("Issue not found");
+	await assertIssueShareable(ctx, issueId);
 
 	await ctx.db
 		.prepare("DELETE FROM share_tokens WHERE issue_id = ? AND workspace_id = ?")

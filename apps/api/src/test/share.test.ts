@@ -1,6 +1,14 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, hashToken, seedFixture, seedIssueFixture } from "./helpers";
+import {
+	authHeaders,
+	hashToken,
+	seedFixture,
+	seedGroupGrant,
+	seedIssue,
+	seedIssueFixture,
+	seedProject,
+} from "./helpers";
 
 describe("Share tokens", () => {
 	let token: string;
@@ -313,5 +321,67 @@ describe("Share tokens", () => {
 			headers: authHeaders(viewerFixture.token, viewerFixture.slug),
 		});
 		expect(res.status).toBe(403);
+	});
+
+	describe("PROJ-792: share create/revoke honour project-level access", () => {
+		async function restrictedIssue(grant: "none" | "viewer" | "member", workspaceRole = "member") {
+			const { workspace, user, token } = await seedFixture({ role: workspaceRole });
+			const project = await seedProject(workspace.id);
+			if (grant !== "none") await seedGroupGrant(workspace.id, user.id, project.id, grant);
+			const issue = await seedIssue(workspace.id, project.id, user.id, { title: "Restricted" });
+			return { token, slug: workspace.slug, workspaceId: workspace.id, userId: user.id, issueId: issue.id };
+		}
+
+		it("member without a grant cannot create a share link (404, existence hidden)", async () => {
+			const f = await restrictedIssue("none");
+			const res = await SELF.fetch(`http://localhost/api/issues/${f.issueId}/share`, {
+				method: "POST",
+				headers: authHeaders(f.token, f.slug),
+			});
+			expect(res.status).toBe(404);
+			const { env } = await import("cloudflare:test");
+			const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM share_tokens WHERE issue_id = ?")
+				.bind(f.issueId)
+				.first<{ n: number }>();
+			expect(row?.n).toBe(0);
+		});
+
+		it("member without a grant cannot revoke someone else's share link", async () => {
+			const f = await restrictedIssue("none");
+			const { env } = await import("cloudflare:test");
+			const now = Math.floor(Date.now() / 1000);
+			await env.DB.prepare(
+				"INSERT INTO share_tokens (id, issue_id, workspace_id, created_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+			)
+				.bind(await hashToken("victim-link"), f.issueId, f.workspaceId, f.userId, now + 3600, now)
+				.run();
+			const res = await SELF.fetch(`http://localhost/api/issues/${f.issueId}/share`, {
+				method: "DELETE",
+				headers: authHeaders(f.token, f.slug),
+			});
+			expect(res.status).toBe(404);
+			const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM share_tokens WHERE issue_id = ?")
+				.bind(f.issueId)
+				.first<{ n: number }>();
+			expect(row?.n).toBe(1);
+		});
+
+		it("member with only a viewer grant gets 403", async () => {
+			const f = await restrictedIssue("viewer");
+			const res = await SELF.fetch(`http://localhost/api/issues/${f.issueId}/share`, {
+				method: "POST",
+				headers: authHeaders(f.token, f.slug),
+			});
+			expect(res.status).toBe(403);
+		});
+
+		it("workspace viewer with a member grant on the project can share (grant replaces workspace role)", async () => {
+			const f = await restrictedIssue("member", "viewer");
+			const res = await SELF.fetch(`http://localhost/api/issues/${f.issueId}/share`, {
+				method: "POST",
+				headers: authHeaders(f.token, f.slug),
+			});
+			expect(res.status).toBe(201);
+		});
 	});
 });
