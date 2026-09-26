@@ -24,7 +24,7 @@ export function useIssueFetching(
 	const [error, setError] = useState<string | null>(null);
 	// Pagination (PROJ-201/303): list view loads 30 at a time and appends automatically
 	// as the user scrolls near the bottom (see useInfiniteScroll / ListSection).
-	const [nextCursor, setNextCursor] = useState<number | null>(null);
+	const [nextCursor, setNextCursor] = useState<string | number | null>(null);
 	const [loadingMore, setLoadingMore] = useState(false);
 	// Real total matching the current filters (server-computed), not just how many
 	// have been loaded so far — PROJ-303: the header count must never look capped.
@@ -50,12 +50,13 @@ export function useIssueFetching(
 		try {
 			const qs = buildFilterParams();
 			qs.set("limit", String(pageSize));
-			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null; total: number }>(
-				`/api/issues?${qs.toString()}`,
-				{
-					workspaceSlug,
-				}
-			);
+			const data = await apiFetch<{
+				items: Issue[];
+				nextCursor: string | number | null;
+				total: number | null;
+			}>(`/api/issues?${qs.toString()}`, {
+				workspaceSlug,
+			});
 			if (seq !== fetchSeq.current) return; // superseded by a newer request
 			setIssues(data.items);
 			setNextCursor(data.nextCursor ?? null);
@@ -77,15 +78,17 @@ export function useIssueFetching(
 			const qs = buildFilterParams();
 			qs.set("limit", String(pageSize));
 			qs.set("cursor", String(nextCursor));
-			const data = await apiFetch<{ items: Issue[]; nextCursor: number | null; total: number }>(
-				`/api/issues?${qs.toString()}`,
-				{
-					workspaceSlug,
-				}
-			);
+			const data = await apiFetch<{
+				items: Issue[];
+				nextCursor: string | number | null;
+				total: number | null;
+			}>(`/api/issues?${qs.toString()}`, {
+				workspaceSlug,
+			});
 			setIssues((prev) => [...prev, ...data.items]);
 			setNextCursor(data.nextCursor ?? null);
-			setTotal(data.total ?? 0);
+			// PROJ-857: later pages return total: null — keep the first page's count.
+			setTotal((prev) => data.total ?? prev);
 		} catch (e) {
 			setError(String(e));
 		} finally {
