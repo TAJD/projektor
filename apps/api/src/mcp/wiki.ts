@@ -167,7 +167,10 @@ export const wikiTools: MCPTool[] = [
 			"advanced since baseRevisionId, the write is rejected with a structured conflict " +
 			"(currentRevisionId + a unified diff) instead of silently overwriting. Omitting " +
 			"baseRevisionId is DEPRECATED — it keeps today's last-write-wins behavior during the " +
-			"transition and will be rejected in a future version. `content` may include a YAML " +
+			"transition and will be rejected in a future version. The revision pointer only " +
+			"advances on content edits, so baseRevisionId doesn't cover title/slug/parentId-only " +
+			"changes; those are last-write-wins against writes that finished before your call, " +
+			"but any write that lands while your call is in flight returns a 409. `content` may include a YAML " +
 			"frontmatter block (see create_wiki_page); it's re-parsed on every content edit, " +
 			"replacing the page's previously-stored metadata. Omitting `content` leaves the " +
 			"page's existing frontmatter metadata unchanged.",

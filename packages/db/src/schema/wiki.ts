@@ -23,6 +23,9 @@ export const wikiPages = sqliteTable(
 			.references(() => users.id),
 		createdAt: integer("created_at").notNull(),
 		updatedAt: integer("updated_at").notNull(),
+		// PROJ-919: bumped by every write to the row; the wiki write guard compares it so a
+		// concurrent title/slug/parent-only write can't be silently overwritten.
+		version: integer("version").notNull().default(0),
 		// PROJ-488 (R6): denormalized from optional YAML frontmatter parsed on write
 		// (services/wiki-frontmatter.ts). `type`/`status` are freeform TEXT — the
 		// well-known enum values are enforced at the Zod layer, not a DB CHECK

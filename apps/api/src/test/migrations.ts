@@ -59,6 +59,7 @@ import m0055 from "../../../../packages/db/migrations/0055_workspace_brand.sql?r
 import m0056 from "../../../../packages/db/migrations/0056_hot_path_indexes.sql?raw";
 import m0057 from "../../../../packages/db/migrations/0057_wiki_title_lower_index.sql?raw";
 import m0058 from "../../../../packages/db/migrations/0058_issue_definition_of_ready.sql?raw";
+import m0059 from "../../../../packages/db/migrations/0059_wiki_page_version.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -120,4 +121,5 @@ export const MIGRATIONS = [
 	m0056,
 	m0057,
 	m0058,
+	m0059,
 ];
