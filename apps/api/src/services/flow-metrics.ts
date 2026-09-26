@@ -1,9 +1,24 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gte, inArray, lte } from "drizzle-orm";
-import { GetFlowMetricsSchema } from "../schemas/flow-metrics";
+import {
+	and,
+	eq,
+	gte,
+	inArray,
+	isNotNull,
+	isNull,
+	lte,
+	or,
+	type SQL,
+	type SQLWrapper,
+	sql,
+} from "drizzle-orm";
+import {
+	flowMetricsDefaultStarts,
+	GetFlowMetricsSchema,
+	mondayAtOrBefore,
+} from "../schemas/flow-metrics";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
-import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 export interface Distribution {
@@ -48,29 +63,102 @@ type FlowIssueRow = {
 	typeKey: string | null;
 };
 
+const DAY = 86400;
+
+function dateLabel(t: number): string {
+	return new Date(t * 1000).toISOString().slice(0, 10);
+}
+
+function bucketSizeFor(granularity: "day" | "week"): number {
+	return granularity === "day" ? DAY : 7 * DAY;
+}
+
+function firstBucketFor(since: number, granularity: "day" | "week"): number {
+	return granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
+}
+
+// PROJ-866: bucket start times only — bounded by the schema's max-window validation,
+// so this list itself is now always small (<=366 for day, <=~261 for week) regardless
+// of what the caller passes.
+function buildBucketStarts(since: number, until: number, granularity: "day" | "week"): number[] {
+	const bucketSize = bucketSizeFor(granularity);
+	const starts: number[] = [];
+	for (let t = firstBucketFor(since, granularity); t <= until; t += bucketSize) {
+		starts.push(t);
+	}
+	return starts;
+}
+
+// Each bucket's *effective* range, clamped to [since, until] so an aligned edge bucket
+// doesn't pull in events from just outside the requested window (matches leadTime/
+// cycleTime's inWindow semantics exactly).
+function bucketRanges(
+	starts: readonly number[],
+	bucketSize: number,
+	since: number,
+	until: number
+): Array<{ start: number; end: number }> {
+	return starts.map((t) => ({
+		start: Math.max(t, since),
+		end: Math.min(t + bucketSize, until + 1),
+	}));
+}
+
+// PROJ-866: assign each item to its bucket in one pass over the SORTED item list plus
+// one pass over the (already small, bounded) bucket ranges — O(n log n + buckets)
+// instead of the old O(buckets * n) (filtering every issue per bucket). Ranges must be
+// non-decreasing and non-overlapping in `start`/`end` (true for bucketRanges() above,
+// since consecutive buckets are contiguous and since/until only clamp the two edges).
+function groupBySortedRanges<T>(
+	items: readonly T[],
+	time: (item: T) => number,
+	ranges: ReadonlyArray<{ start: number; end: number }>
+): T[][] {
+	const sorted = [...items].sort((a, b) => time(a) - time(b));
+	const groups: T[][] = ranges.map(() => []);
+	let idx = 0;
+	for (let r = 0; r < ranges.length; r++) {
+		const { start, end } = ranges[r];
+		while (idx < sorted.length && time(sorted[idx]) < start) idx++;
+		let j = idx;
+		while (j < sorted.length && time(sorted[j]) < end) {
+			groups[r].push(sorted[j]);
+			j++;
+		}
+		idx = j;
+	}
+	return groups;
+}
+
 function buildWipOverTime(
 	issues: readonly FlowIssueRow[],
 	since: number,
 	until: number
 ): Array<{ date: string; count: number }> {
-	const DAY = 86400;
+	// PROJ-866: WIP-at-time-t is an interval-containment count (active during
+	// [claimedAt, doneAt)). Instead of re-filtering every issue at every sampled day,
+	// turn each issue into at most two delta events (+1 at claimedAt, -1 at doneAt) and
+	// sweep a single running total across the sorted events as `t` advances — the
+	// buckets loop and the event list are each walked once.
+	const events: Array<[number, number]> = [];
+	for (const i of issues) {
+		if (i.claimedAt === null) continue;
+		events.push([i.claimedAt, 1]);
+		if (i.doneAt !== null) events.push([i.doneAt, -1]);
+	}
+	events.sort((a, b) => a[0] - b[0]);
+
 	const buckets: Array<{ date: string; count: number }> = [];
+	let idx = 0;
+	let running = 0;
 	for (let t = since - (since % DAY); t <= until; t += DAY) {
-		const count = issues.filter(
-			(i) => i.claimedAt !== null && i.claimedAt <= t && (i.doneAt === null || i.doneAt > t)
-		).length;
-		buckets.push({ date: new Date(t * 1000).toISOString().slice(0, 10), count });
+		while (idx < events.length && events[idx][0] <= t) {
+			running += events[idx][1];
+			idx++;
+		}
+		buckets.push({ date: dateLabel(t), count: running });
 	}
 	return buckets;
-}
-
-// Unix epoch day 0 (1970-01-01) was a Thursday; align to the preceding Monday so
-// week boundaries read as conventional (ISO) weeks rather than landing on Thursdays.
-function mondayAtOrBefore(t: number): number {
-	const DAY = 86400;
-	const dayIndex = Math.floor(t / DAY);
-	const daysSinceMonday = ((dayIndex % 7) + 7 - 4) % 7; // day 0 (Thu) is 4 days after Monday
-	return (dayIndex - daysSinceMonday) * DAY;
 }
 
 function buildThroughputOverTime(
@@ -79,22 +167,12 @@ function buildThroughputOverTime(
 	until: number,
 	granularity: "day" | "week"
 ): Array<{ bucketStart: string; count: number }> {
-	const DAY = 86400;
-	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
-	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
-	const buckets: Array<{ bucketStart: string; count: number }> = [];
-	for (let t = firstBucket; t <= until; t += bucketSize) {
-		const bucketEnd = t + bucketSize;
-		// Clamp each bucket to the requested window so edge buckets don't pull in
-		// completions from just outside [since, until], matching leadTime/cycleTime.
-		const clampedStart = Math.max(t, since);
-		const clampedEnd = Math.min(bucketEnd, until + 1);
-		const count = issues.filter(
-			(i) => i.doneAt !== null && i.doneAt >= clampedStart && i.doneAt < clampedEnd
-		).length;
-		buckets.push({ bucketStart: new Date(t * 1000).toISOString().slice(0, 10), count });
-	}
-	return buckets;
+	const bucketSize = bucketSizeFor(granularity);
+	const starts = buildBucketStarts(since, until, granularity);
+	const ranges = bucketRanges(starts, bucketSize, since, until);
+	const completed = issues.filter((i): i is FlowIssueRow & { doneAt: number } => i.doneAt !== null);
+	const groups = groupBySortedRanges(completed, (i) => i.doneAt, ranges);
+	return starts.map((t, idx) => ({ bucketStart: dateLabel(t), count: groups[idx].length }));
 }
 
 // PROJ-331: bug share of throughput, bucketed the same way as throughput. Untyped issues
@@ -108,31 +186,21 @@ function buildBugShareOverTime(
 	until: number,
 	granularity: "day" | "week"
 ): Array<{ bucketStart: string; total: number; bugCount: number; bugSharePercent: number | null }> {
-	const DAY = 86400;
-	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
-	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
-	const buckets: Array<{
-		bucketStart: string;
-		total: number;
-		bugCount: number;
-		bugSharePercent: number | null;
-	}> = [];
-	for (let t = firstBucket; t <= until; t += bucketSize) {
-		const bucketEnd = t + bucketSize;
-		const clampedStart = Math.max(t, since);
-		const clampedEnd = Math.min(bucketEnd, until + 1);
-		const completed = issues.filter(
-			(i) => i.doneAt !== null && i.doneAt >= clampedStart && i.doneAt < clampedEnd
-		);
-		const bugCount = completed.filter((i) => i.typeKey === "bug").length;
-		buckets.push({
-			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
-			total: completed.length,
+	const bucketSize = bucketSizeFor(granularity);
+	const starts = buildBucketStarts(since, until, granularity);
+	const ranges = bucketRanges(starts, bucketSize, since, until);
+	const completed = issues.filter((i): i is FlowIssueRow & { doneAt: number } => i.doneAt !== null);
+	const groups = groupBySortedRanges(completed, (i) => i.doneAt, ranges);
+	return starts.map((t, idx) => {
+		const group = groups[idx];
+		const bugCount = group.filter((i) => i.typeKey === "bug").length;
+		return {
+			bucketStart: dateLabel(t),
+			total: group.length,
 			bugCount,
-			bugSharePercent: completed.length > 0 ? bugCount / completed.length : null,
-		});
-	}
-	return buckets;
+			bugSharePercent: group.length > 0 ? bugCount / group.length : null,
+		};
+	});
 }
 
 // PROJ-328: review latency (in_review -> done) bucketed the same way as throughput, but
@@ -143,30 +211,18 @@ function buildReviewLatencyOverTime(
 	until: number,
 	granularity: "day" | "week"
 ): Array<{ bucketStart: string; p50: number | null }> {
-	const DAY = 86400;
-	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
-	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
-	const buckets: Array<{ bucketStart: string; p50: number | null }> = [];
-	for (let t = firstBucket; t <= until; t += bucketSize) {
-		const bucketEnd = t + bucketSize;
-		const clampedStart = Math.max(t, since);
-		const clampedEnd = Math.min(bucketEnd, until + 1);
-		const latencies = issues
-			.filter(
-				(i) =>
-					i.inReviewAt !== null &&
-					i.doneAt !== null &&
-					i.doneAt >= clampedStart &&
-					i.doneAt < clampedEnd
-			)
-			// biome-ignore lint/style/noNonNullAssertion: filtered above
-			.map((i) => i.doneAt! - i.inReviewAt!);
-		buckets.push({
-			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
-			p50: summarize(latencies).p50,
-		});
-	}
-	return buckets;
+	const bucketSize = bucketSizeFor(granularity);
+	const starts = buildBucketStarts(since, until, granularity);
+	const ranges = bucketRanges(starts, bucketSize, since, until);
+	const reviewed = issues.filter(
+		(i): i is FlowIssueRow & { doneAt: number; inReviewAt: number } =>
+			i.doneAt !== null && i.inReviewAt !== null
+	);
+	const groups = groupBySortedRanges(reviewed, (i) => i.doneAt, ranges);
+	return starts.map((t, idx) => ({
+		bucketStart: dateLabel(t),
+		p50: summarize(groups[idx].map((i) => i.doneAt - i.inReviewAt)).p50,
+	}));
 }
 
 // PROJ-330: arrival vs completion — issues created vs issues completed per bucket, plus
@@ -178,29 +234,17 @@ function buildArrivalVsCompletion(
 	until: number,
 	granularity: "day" | "week"
 ): Array<{ bucketStart: string; created: number; completed: number; net: number }> {
-	const DAY = 86400;
-	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
-	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
-	const buckets: Array<{ bucketStart: string; created: number; completed: number; net: number }> =
-		[];
-	for (let t = firstBucket; t <= until; t += bucketSize) {
-		const bucketEnd = t + bucketSize;
-		const clampedStart = Math.max(t, since);
-		const clampedEnd = Math.min(bucketEnd, until + 1);
-		const created = issues.filter(
-			(i) => i.createdAt >= clampedStart && i.createdAt < clampedEnd
-		).length;
-		const completed = issues.filter(
-			(i) => i.doneAt !== null && i.doneAt >= clampedStart && i.doneAt < clampedEnd
-		).length;
-		buckets.push({
-			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
-			created,
-			completed,
-			net: created - completed,
-		});
-	}
-	return buckets;
+	const bucketSize = bucketSizeFor(granularity);
+	const starts = buildBucketStarts(since, until, granularity);
+	const ranges = bucketRanges(starts, bucketSize, since, until);
+	const createdGroups = groupBySortedRanges(issues, (i) => i.createdAt, ranges);
+	const completed = issues.filter((i): i is FlowIssueRow & { doneAt: number } => i.doneAt !== null);
+	const completedGroups = groupBySortedRanges(completed, (i) => i.doneAt, ranges);
+	return starts.map((t, idx) => {
+		const created = createdGroups[idx].length;
+		const done = completedGroups[idx].length;
+		return { bucketStart: dateLabel(t), created, completed: done, net: created - done };
+	});
 }
 
 // An issue's CFD band at a given sample instant is the furthest stage it has reached
@@ -217,22 +261,36 @@ function classifyCfdBand(issue: FlowIssueRow, sampleAt: number): CfdBand {
 	return "backlogTodo";
 }
 
-function countCfdBands(
-	issues: readonly FlowIssueRow[],
-	sampleAt: number
-): { backlogTodo: number; inProgress: number; inReview: number; done: number } {
-	let backlogTodo = 0;
-	let inProgress = 0;
-	let inReview = 0;
-	let done = 0;
-	for (const i of issues) {
-		const band = classifyCfdBand(i, sampleAt);
-		if (band === "done") done++;
-		else if (band === "inReview") inReview++;
-		else if (band === "inProgress") inProgress++;
-		else if (band === "backlogTodo") backlogTodo++;
+// PROJ-866: precompute each issue's band-transition events instead of re-classifying
+// every issue at every sampled instant. classifyCfdBand is evaluated only at each
+// issue's OWN distinct timestamps (at most 4) — reusing the exact same priority logic
+// above, so this is not a re-derivation that could drift from it, just memoizing where
+// the band actually changes for that one issue. The resulting per-issue event list is
+// correct regardless of whether an issue's timestamps happen to be in the "expected"
+// created <= claimed <= in_review <= done order.
+function buildCfdEvents(
+	issues: readonly FlowIssueRow[]
+): Array<{ time: number; band: Exclude<CfdBand, "excluded">; delta: 1 | -1 }> {
+	const events: Array<{ time: number; band: Exclude<CfdBand, "excluded">; delta: 1 | -1 }> = [];
+	for (const issue of issues) {
+		const thresholds = [
+			...new Set(
+				[issue.createdAt, issue.claimedAt, issue.inReviewAt, issue.doneAt].filter(
+					(t): t is number => t !== null
+				)
+			),
+		].sort((a, b) => a - b);
+		let prevBand: CfdBand = "excluded";
+		for (const t of thresholds) {
+			const band = classifyCfdBand(issue, t);
+			if (band === prevBand) continue;
+			if (prevBand !== "excluded") events.push({ time: t, band: prevBand, delta: -1 });
+			if (band !== "excluded") events.push({ time: t, band, delta: 1 });
+			prevBand = band;
+		}
 	}
-	return { backlogTodo, inProgress, inReview, done };
+	events.sort((a, b) => a.time - b.time);
+	return events;
 }
 
 // PROJ-329: cumulative flow diagram bands, sampled at each bucket's end (clamped to
@@ -244,12 +302,19 @@ function countCfdBands(
 // all zeros even though `arrivalVsCompletionOverTime` (which counts events across the
 // whole bucket range) shows them. `now` additionally clamps so we never sample into
 // the future when `until` extends past the present.
+//
+// PROJ-866: one pass over the (small, per-issue) event list instead of reclassifying
+// every issue at every bucket — the sampleAt sequence is non-decreasing across buckets
+// (each is min(bucket-end, until, now)), so a single running-counts object plus a
+// monotonic pointer into the sorted event list reproduces exactly what re-running
+// classifyCfdBand per bucket would have produced.
 function buildCfdOverTime(
-	issues: FlowIssueRow[],
+	issues: readonly FlowIssueRow[],
 	since: number,
 	until: number,
 	granularity: "day" | "week",
-	now: number
+	now: number,
+	doneBeforeWindow: number
 ): Array<{
 	bucketStart: string;
 	backlogTodo: number;
@@ -257,72 +322,70 @@ function buildCfdOverTime(
 	inReview: number;
 	done: number;
 }> {
-	const DAY = 86400;
-	const bucketSize = granularity === "day" ? DAY : 7 * DAY;
-	const firstBucket = granularity === "day" ? since - (since % DAY) : mondayAtOrBefore(since);
-	const buckets: Array<{
-		bucketStart: string;
-		backlogTodo: number;
-		inProgress: number;
-		inReview: number;
-		done: number;
-	}> = [];
-	for (let t = firstBucket; t <= until; t += bucketSize) {
+	const bucketSize = bucketSizeFor(granularity);
+	const starts = buildBucketStarts(since, until, granularity);
+	const events = buildCfdEvents(issues);
+	// PROJ-866: issues done before the SQL window's lower bound aren't loaded, but they
+	// are in the done band at every sample (each sample is >= that bound), so the band
+	// starts from their count instead of zero.
+	const counts = { backlogTodo: 0, inProgress: 0, inReview: 0, done: doneBeforeWindow };
+	let idx = 0;
+	return starts.map((t) => {
 		const sampleAt = Math.min(t + bucketSize - 1, until, now);
-		buckets.push({
-			bucketStart: new Date(t * 1000).toISOString().slice(0, 10),
-			...countCfdBands(issues, sampleAt),
-		});
-	}
-	return buckets;
+		while (idx < events.length && events[idx].time <= sampleAt) {
+			counts[events[idx].band] += events[idx].delta;
+			idx++;
+		}
+		return { bucketStart: dateLabel(t), ...counts };
+	});
 }
+
+// PROJ-866: the per-issue lookups below join back to `issues` on the same project scope
+// plus `doneInWindow` (see getFlowMetrics) instead of binding an issue-id IN-list, so
+// each is one statement however many issues the window holds. doneInWindow is exactly
+// the set their consumers read: humanInterventions, autonomyRatio and flowEfficiency
+// all only look at issues done inside the window.
 
 // PROJ-328: human-authored comments per issue, keyed by the ctx.authKind stamped at
 // write time (comments.ts) — not the deprecated agent_sessions.kind. Rows written before
 // that column existed have author_kind NULL and are excluded rather than guessed.
 async function fetchHumanCommentCounts(
 	orm: ReturnType<typeof drizzle>,
-	issueIds: string[]
+	issueScope: SQL
 ): Promise<Map<string, number>> {
-	const rows = await inChunks(issueIds, (chunk) =>
-		orm
-			.select({ issueId: schema.issueComments.issueId })
-			.from(schema.issueComments)
-			.where(
-				and(
-					inArray(schema.issueComments.issueId, chunk),
-					eq(schema.issueComments.authorKind, "human")
-				)
-			)
-	);
-	const counts = new Map<string, number>();
-	for (const row of rows) counts.set(row.issueId, (counts.get(row.issueId) ?? 0) + 1);
-	return counts;
+	const rows = await orm
+		.select({ issueId: schema.issueComments.issueId, n: sql<number>`count(*)` })
+		.from(schema.issueComments)
+		.innerJoin(schema.issues, eq(schema.issueComments.issueId, schema.issues.id))
+		.where(and(issueScope, eq(schema.issueComments.authorKind, "human")))
+		.groupBy(schema.issueComments.issueId);
+	return new Map(rows.map((r) => [r.issueId, Number(r.n)]));
 }
 
 // PROJ-328: total lease-held seconds per issue, from issue_leases (already the
 // authoritative "an agent worked this issue" record — see issue-leases.ts). A lease
 // still held when the issue finished counts through doneAt, not "now".
+//
+// PROJ-866/F-P2: issue_leases.workspace_id is filtered too, so the lease side of the
+// join is tenant-scoped like every other cross-tenant read and can use its indexes.
 async function fetchLeaseHeldSeconds(
 	orm: ReturnType<typeof drizzle>,
-	issues: readonly FlowIssueRow[]
+	ctx: ServiceCtx,
+	issueScope: SQL
 ): Promise<Map<string, number>> {
-	const doneAtById = new Map(issues.map((i) => [i.id, i.doneAt]));
-	const rows = await inChunks(
-		issues.map((i) => i.id),
-		(chunk) =>
-			orm
-				.select({
-					issueId: schema.issueLeases.issueId,
-					claimedAt: schema.issueLeases.claimedAt,
-					releasedAt: schema.issueLeases.releasedAt,
-				})
-				.from(schema.issueLeases)
-				.where(inArray(schema.issueLeases.issueId, chunk))
-	);
+	const rows = await orm
+		.select({
+			issueId: schema.issueLeases.issueId,
+			claimedAt: schema.issueLeases.claimedAt,
+			releasedAt: schema.issueLeases.releasedAt,
+			doneAt: schema.issues.doneAt,
+		})
+		.from(schema.issueLeases)
+		.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
+		.where(and(eq(schema.issueLeases.workspaceId, ctx.workspaceId), issueScope));
 	const held = new Map<string, number>();
 	for (const row of rows) {
-		const end = row.releasedAt ?? doneAtById.get(row.issueId) ?? null;
+		const end = row.releasedAt ?? row.doneAt ?? null;
 		if (end === null) continue;
 		const seconds = Math.max(0, end - row.claimedAt);
 		held.set(row.issueId, (held.get(row.issueId) ?? 0) + seconds);
@@ -414,7 +477,7 @@ function computeFlowEfficiencies(
 
 // PROJ-330: aging-WIP scatter — every currently open (in_progress/in_review) issue with
 // its age since claim. Not scoped to since/until (it's a present-state snapshot, not a
-// historical series); the p50/p90 reference lines the UI overlays come from the window-
+// historical series — PROJ-866 loads open issues past the window bounds for it alone); the p50/p90 reference lines the UI overlays come from the window-
 // scoped cycleTime distribution already returned alongside this, so the chart still
 // reflects the shared date-range controls. Surfaces items stuck long enough to be worth
 // investigating before they finish and pollute the cycle-time percentiles.
@@ -438,7 +501,7 @@ function buildAgingWip(
 // work. Each count is windowed by when the fault EVENT happened (released_at /
 // occurred_at), not by an issue's doneAt like the distribution tiles above, since a
 // lease expiry or abandoned claim can happen on an issue that never completes in this
-// window (or ever). All three counts are project-scoped the same way the rest of this
+// window (or ever). All counts are project-scoped the same way the rest of this
 // endpoint is.
 interface FactoryHealth {
 	leaseExpiries: number;
@@ -447,72 +510,111 @@ interface FactoryHealth {
 	wipCapPressure: number;
 }
 
-async function fetchFactoryHealth(
+// PROJ-866: the four factory-health counts and the CFD's done-before-window count are
+// independent scalar COUNT(*)s, so they run as subqueries of one statement (anchored on
+// the project row) instead of five round trips that each fetched every matching row.
+async function fetchWindowCounts(
 	orm: ReturnType<typeof drizzle>,
 	ctx: ServiceCtx,
 	projectId: string,
-	since: number,
-	until: number
-): Promise<FactoryHealth> {
-	const [leaseExpiries, abandonedClaims, gateRejections, wipCapPressure] = await Promise.all([
-		orm
-			.select({ id: schema.issueLeases.id })
-			.from(schema.issueLeases)
-			.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
-			.where(
-				and(
-					eq(schema.issueLeases.workspaceId, ctx.workspaceId),
-					eq(schema.issues.projectId, projectId),
-					eq(schema.issueLeases.releaseReason, "expired"),
-					gte(schema.issueLeases.releasedAt, since),
-					lte(schema.issueLeases.releasedAt, until)
-				)
+	opts: Readonly<{
+		since: number;
+		until: number;
+		doneBefore: number | undefined;
+		createdUntil: number;
+	}>
+): Promise<FactoryHealth & { doneBeforeWindow: number }> {
+	const { since, until } = opts;
+	const countOf = (query: SQLWrapper) => sql<number>`(${query})`;
+	const count = sql<number>`count(*)`;
+	const row = await orm
+		.select({
+			leaseExpiries: countOf(
+				orm
+					.select({ n: count })
+					.from(schema.issueLeases)
+					.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
+					.where(
+						and(
+							eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+							eq(schema.issues.projectId, projectId),
+							eq(schema.issueLeases.releaseReason, "expired"),
+							gte(schema.issueLeases.releasedAt, since),
+							lte(schema.issueLeases.releasedAt, until)
+						)
+					)
 			),
-		orm
-			.select({ id: schema.issueFileClaims.id })
-			.from(schema.issueFileClaims)
-			.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
-			.where(
-				and(
-					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-					eq(schema.issues.projectId, projectId),
-					eq(schema.issueFileClaims.releaseReason, "agent_ended"),
-					gte(schema.issueFileClaims.releasedAt, since),
-					lte(schema.issueFileClaims.releasedAt, until)
-				)
+			abandonedClaims: countOf(
+				orm
+					.select({ n: count })
+					.from(schema.issueFileClaims)
+					.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
+					.where(
+						and(
+							eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+							eq(schema.issues.projectId, projectId),
+							eq(schema.issueFileClaims.releaseReason, "agent_ended"),
+							gte(schema.issueFileClaims.releasedAt, since),
+							lte(schema.issueFileClaims.releasedAt, until)
+						)
+					)
 			),
-		orm
-			.select({ id: schema.issueGateRejections.id })
-			.from(schema.issueGateRejections)
-			.innerJoin(schema.issues, eq(schema.issueGateRejections.issueId, schema.issues.id))
-			.where(
-				and(
-					eq(schema.issueGateRejections.workspaceId, ctx.workspaceId),
-					eq(schema.issues.projectId, projectId),
-					gte(schema.issueGateRejections.occurredAt, since),
-					lte(schema.issueGateRejections.occurredAt, until)
-				)
+			gateRejections: countOf(
+				orm
+					.select({ n: count })
+					.from(schema.issueGateRejections)
+					.innerJoin(schema.issues, eq(schema.issueGateRejections.issueId, schema.issues.id))
+					.where(
+						and(
+							eq(schema.issueGateRejections.workspaceId, ctx.workspaceId),
+							eq(schema.issues.projectId, projectId),
+							gte(schema.issueGateRejections.occurredAt, since),
+							lte(schema.issueGateRejections.occurredAt, until)
+						)
+					)
 			),
-		// PROJ-342: WIP-cap denials — claims rejected for hitting the per-project agent
-		// WIP cap. Recorded at the denial site in claimIssue (services/issue-leases.ts).
-		orm
-			.select({ id: schema.wipCapDenials.id })
-			.from(schema.wipCapDenials)
-			.where(
-				and(
-					eq(schema.wipCapDenials.workspaceId, ctx.workspaceId),
-					eq(schema.wipCapDenials.projectId, projectId),
-					gte(schema.wipCapDenials.occurredAt, since),
-					lte(schema.wipCapDenials.occurredAt, until)
-				)
+			// PROJ-342: WIP-cap denials — claims rejected for hitting the per-project agent
+			// WIP cap. Recorded at the denial site in claimIssue (services/issue-leases.ts).
+			wipCapPressure: countOf(
+				orm
+					.select({ n: count })
+					.from(schema.wipCapDenials)
+					.where(
+						and(
+							eq(schema.wipCapDenials.workspaceId, ctx.workspaceId),
+							eq(schema.wipCapDenials.projectId, projectId),
+							gte(schema.wipCapDenials.occurredAt, since),
+							lte(schema.wipCapDenials.occurredAt, until)
+						)
+					)
 			),
-	]);
+			doneBeforeWindow:
+				opts.doneBefore === undefined
+					? sql<number>`0`
+					: countOf(
+							orm
+								.select({ n: count })
+								.from(schema.issues)
+								.where(
+									and(
+										eq(schema.issues.workspaceId, ctx.workspaceId),
+										eq(schema.issues.projectId, projectId),
+										lte(schema.issues.createdAt, opts.createdUntil),
+										sql`${schema.issues.doneAt} < ${opts.doneBefore}`
+									)
+								)
+						),
+		})
+		.from(schema.projects)
+		.where(and(eq(schema.projects.id, projectId), eq(schema.projects.workspaceId, ctx.workspaceId)))
+		.get();
 
 	return {
-		leaseExpiries: leaseExpiries.length,
-		abandonedClaims: abandonedClaims.length,
-		gateRejections: gateRejections.length,
-		wipCapPressure: wipCapPressure.length,
+		leaseExpiries: Number(row?.leaseExpiries ?? 0),
+		abandonedClaims: Number(row?.abandonedClaims ?? 0),
+		gateRejections: Number(row?.gateRejections ?? 0),
+		wipCapPressure: Number(row?.wipCapPressure ?? 0),
+		doneBeforeWindow: Number(row?.doneBeforeWindow ?? 0),
 	};
 }
 
@@ -524,11 +626,42 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	await assertProjectExists(ctx, projectId);
 
 	const orm = drizzle(ctx.db, { schema });
+	const now = Math.floor(Date.now() / 1000);
 
-	// Scope by project only, not created_at: since/until describe an activity window
-	// (claimed/done), and an issue created before the window but active inside it must
-	// still count (e.g. WIP). Row count stays bounded by project size.
-	const issues = await orm
+	const defaults = flowMetricsDefaultStarts(now);
+	const wipSince = since ?? defaults.wipSince;
+	const wipUntil = until ?? now;
+	// Default window = the current ISO week plus the preceding 5 weeks (6 weeks total).
+	const throughputSince = since ?? defaults.bucketSince;
+	const throughputUntil = until ?? now;
+
+	// PROJ-866: scope the issue SELECT to the window instead of loading every issue in
+	// the project.
+	// - created_at <= until (or now): an issue created later can't have entered any
+	//   stage by `until`, so no windowed series wants it.
+	// - done_at >= doneBefore, only when `since` is given (when it's omitted, leadTime/
+	//   cycleTime are deliberately unbounded, see inWindow below). doneBefore is the
+	//   start of wipOverTime's first day bucket, not `since` itself: that bucket samples
+	//   at the day start, so an issue done between it and `since` still counts as WIP
+	//   there. Issues done before doneBefore are in the CFD done band at every sample;
+	//   they're counted (fetchWindowCounts) rather than loaded.
+	const createdUntil = until ?? now;
+	const doneBefore = since === undefined ? undefined : Math.min(since, since - (since % DAY));
+	const windowPredicate = and(
+		lte(schema.issues.createdAt, createdUntil),
+		doneBefore === undefined
+			? undefined
+			: or(isNull(schema.issues.doneAt), gte(schema.issues.doneAt, doneBefore))
+	);
+	const inSqlWindow = (i: FlowIssueRow) =>
+		i.createdAt <= createdUntil &&
+		(doneBefore === undefined || i.doneAt === null || i.doneAt >= doneBefore);
+	const projectScope = and(
+		eq(schema.issues.workspaceId, ctx.workspaceId),
+		eq(schema.issues.projectId, projectId)
+	);
+
+	const loaded = await orm
 		.select({
 			id: schema.issues.id,
 			createdAt: schema.issues.createdAt,
@@ -543,9 +676,21 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		.from(schema.issues)
 		.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
 		.where(
-			and(eq(schema.issues.workspaceId, ctx.workspaceId), eq(schema.issues.projectId, projectId))
+			and(
+				projectScope,
+				// Currently open issues are also loaded whatever their dates, for the
+				// present-state agingWip snapshot only (a reopened issue keeps its old
+				// write-once done_at, and one created after a past `until` is still open
+				// now). They're filtered back out below for every windowed series.
+				or(windowPredicate, inArray(schema.issues.status, ["in_progress", "in_review"]))
+			)
 		);
+	const issues = loaded.filter(inSqlWindow);
 
+	// Scope by project only, not created_at: since/until describe an activity window
+	// (claimed/done), and an issue created before the window but active inside it must
+	// still count (e.g. WIP). Row count stays bounded by the window (via the SQL filter
+	// above) rather than total project size.
 	const inWindow = (t: number) =>
 		(since === undefined || t >= since) && (until === undefined || t <= until);
 
@@ -554,22 +699,22 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		inWindow
 	);
 
-	const issueIds = issues.map((i) => i.id);
+	// The issues the per-issue comment/lease lookups serve: done inside the window.
+	const doneInWindowScope = and(
+		projectScope,
+		isNotNull(schema.issues.doneAt),
+		since === undefined ? undefined : gte(schema.issues.doneAt, since),
+		until === undefined ? undefined : lte(schema.issues.doneAt, until)
+	);
+	// Never let the per-issue lookups run without a tenant scope.
+	if (!doneInWindowScope) throw new Error("flow-metrics: missing issue scope");
 
-	const now = Math.floor(Date.now() / 1000);
-	const wipSince = since ?? now - 30 * 86400;
-	const wipUntil = until ?? now;
-
-	// Default window = the current ISO week plus the preceding 5 weeks (6 weeks total).
-	const throughputSince = since ?? mondayAtOrBefore(now) - 5 * 7 * 86400;
-	const throughputUntil = until ?? now;
-
-	// PROJ-446: everything below depends only on `issues` (already fetched) plus
-	// ctx/projectId — none of these four reads depend on each other, so run them
-	// concurrently instead of one round trip at a time.
-	const [humanCommentCounts, leaseHeldSeconds, bugTypeExists, factoryHealth] = await Promise.all([
-		fetchHumanCommentCounts(orm, issueIds),
-		fetchLeaseHeldSeconds(orm, issues),
+	// PROJ-446: everything below depends only on the window bounds plus ctx/projectId —
+	// none of these reads depend on each other, so run them concurrently instead of one
+	// round trip at a time.
+	const [humanCommentCounts, leaseHeldSeconds, bugTypeExists, windowCounts] = await Promise.all([
+		fetchHumanCommentCounts(orm, doneInWindowScope),
+		fetchLeaseHeldSeconds(orm, ctx, doneInWindowScope),
 		// PROJ-341: buildBugShareOverTime identifies bugs via typeKey === "bug" — if the
 		// workspace has no type keyed "bug" (renamed/deleted default), that always reads 0%
 		// with no indication anything's wrong. Surface whether the type exists at all so the
@@ -583,8 +728,14 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 			.get(),
 		// PROJ-334: same window as the throughput/CFD/etc. buckets below — the "selected
 		// window" the tile row is scoped to.
-		fetchFactoryHealth(orm, ctx, projectId, throughputSince, throughputUntil),
+		fetchWindowCounts(orm, ctx, projectId, {
+			since: throughputSince,
+			until: throughputUntil,
+			doneBefore,
+			createdUntil,
+		}),
 	]);
+	const { doneBeforeWindow, ...factoryHealth } = windowCounts;
 
 	const humanInterventions = computeHumanInterventions(issues, humanCommentCounts, inWindow);
 	const autonomyRatios = computeAutonomyRatios(issues, leaseHeldSeconds, inWindow);
@@ -601,7 +752,14 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		throughputUntil,
 		granularity
 	);
-	const cfdOverTime = buildCfdOverTime(issues, throughputSince, throughputUntil, granularity, now);
+	const cfdOverTime = buildCfdOverTime(
+		issues,
+		throughputSince,
+		throughputUntil,
+		granularity,
+		now,
+		doneBeforeWindow
+	);
 	const bugShareOverTime = buildBugShareOverTime(
 		issues,
 		throughputSince,
@@ -616,7 +774,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 		granularity
 	);
 	const flowEfficiencies = computeFlowEfficiencies(issues, leaseHeldSeconds, inWindow);
-	const agingWip = buildAgingWip(issues, now);
+	const agingWip = buildAgingWip(loaded, now);
 
 	return {
 		leadTime: summarize(leadTimes),
