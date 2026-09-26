@@ -2621,7 +2621,40 @@ function useServerDraftAutosave(options: UseServerDraftAutosaveOptions) {
 		};
 	}, [editing]);
 
-	return { skipLeaveFlushRef, serverHasDraftRef };
+	// PROJ-800: an explicit flush for callers about to clear page state in the same
+	// batch as leaving edit mode (navigation). By the time the leave-flush cleanup
+	// above runs, the ref already holds `page: null`, so it can't write — flush here
+	// first, then suppress that now-redundant cleanup.
+	function flushDraftNow() {
+		const s = latestDraftStateRef.current;
+		if (!s.editing) return;
+		skipLeaveFlushRef.current = true;
+		if (!mayWrite(s)) return;
+		persistDraft(s.page, s.editTitle, s.editContent, s.baseRevisionId);
+	}
+
+	return { skipLeaveFlushRef, serverHasDraftRef, flushDraftNow };
+}
+
+// PROJ-800: closing or reloading the tab mid-edit asks first when there are unsaved
+// changes — a debounced draft can't be flushed from an unloading page reliably.
+function useUnsavedChangesGuard(
+	editing: boolean,
+	page: WikiPageData | null,
+	editTitle: string,
+	editContent: string
+) {
+	const dirty = editing && !!page && differsFromPublished(page, editTitle, editContent);
+	useEffect(() => {
+		if (!dirty) return;
+		const onBeforeUnload = (e: BeforeUnloadEvent) => {
+			e.preventDefault();
+			// Legacy browsers only show the prompt when returnValue is set.
+			e.returnValue = "";
+		};
+		window.addEventListener("beforeunload", onBeforeUnload);
+		return () => window.removeEventListener("beforeunload", onBeforeUnload);
+	}, [dirty]);
 }
 
 async function saveWikiPageEdit(
@@ -2705,7 +2738,7 @@ function useWikiEditing(
 
 	const [draftStatus, setDraftStatus] = useState<DraftStatus>("loading");
 
-	const { skipLeaveFlushRef, serverHasDraftRef } = useServerDraftAutosave({
+	const { skipLeaveFlushRef, serverHasDraftRef, flushDraftNow } = useServerDraftAutosave({
 		workspaceSlug,
 		editing,
 		editTitle,
@@ -2716,6 +2749,7 @@ function useWikiEditing(
 		saving,
 		draftStatus,
 	});
+	useUnsavedChangesGuard(editing, page, editTitle, editContent);
 
 	// PROJ-495: draft is fetched from the server (not just a local check) so it
 	// restores across devices, not only after a same-browser crash. Editing opens
@@ -2862,6 +2896,7 @@ function useWikiEditing(
 			editing && draftStatus === "failed"
 				? "Couldn't check for an unsaved draft from another device, so autosave is off for this edit. Save when you're done."
 				: null,
+		flushDraftNow,
 		startEdit,
 		restoreDraft,
 		discardDraft,
@@ -3137,6 +3172,7 @@ function createWikiActions(
 		setSlug: (s: string) => void;
 		setCreating: (v: boolean) => void;
 		setEditing: (v: boolean) => void;
+		flushDraftNow: () => void;
 		setPage: (p: WikiPageData | null) => void;
 		setError: (e: string | null) => void;
 		setToc: (t: TocItem[]) => void;
@@ -3158,9 +3194,11 @@ function createWikiActions(
 		cancelMove,
 	} = args;
 
-	// Leaving edit mode here (setEditing(false)) runs the autosave hook's leave-flush,
-	// so in-progress edits are saved as a draft before the page switches.
+	// PROJ-800: flush the pending draft explicitly before clearing page state. Leaving
+	// edit mode and setPage(null) land in one render, so the autosave hook's leave-flush
+	// would otherwise see no page and drop the last second of typing.
 	function showSlug(s: string) {
+		args.flushDraftNow();
 		setCreating(false);
 		setEditing(false);
 		setPage(null);
@@ -3778,6 +3816,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		setSlug,
 		setCreating: createForm.setCreating,
 		setEditing: editState.setEditing,
+		flushDraftNow: editState.flushDraftNow,
 		setPage: pageData.setPage,
 		setError: pageData.setError,
 		setToc,
