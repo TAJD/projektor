@@ -532,21 +532,6 @@ async function assertIssueProjectVisible(ctx: ServiceCtx, projectId: string): Pr
 	}
 }
 
-// The cache is keyed by issue id, not user — re-check visibility so a member can't
-// read an entry warmed by an admin.
-async function getVisibleCachedIssue(
-	ctx: ServiceCtx,
-	issueId: string
-): Promise<Record<string, unknown> | null> {
-	const cached = await cache.get<Record<string, unknown>>(
-		ctx.kv,
-		`issue:${ctx.workspaceId}:${issueId}`
-	);
-	if (!cached) return null;
-	await assertIssueProjectVisible(ctx, cached.project_id as string);
-	return cached;
-}
-
 async function fetchIssueByIdOrRef(
 	orm: ReturnType<typeof drizzle>,
 	ctx: ServiceCtx,
@@ -568,33 +553,39 @@ function buildIssueUrl(issueRecord: Record<string, unknown>): string | null {
 		: null;
 }
 
-async function assembleFullIssue(
+// PROJ-863: what the KV cache holds for an issue — only data owned by the issue itself
+// and invalidated by its own writes (child rollup via the parent invalidation, custom
+// field values via the issue update). Everything that embeds OTHER entities — linked
+// issues' titles/statuses, status/type names, project key, sprint — is read live on
+// every request (the row fetch is one joined query, links one more), so renaming or
+// deleting those can never leave a stale copy behind. Entries written in the old
+// full-payload shape still carry these two keys, so they stay readable.
+type CachedIssueExtras = { rollup: ReturnType<typeof computeChildRollup>; customFields: unknown[] };
+
+async function loadIssueExtras(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
-	issueId: string,
-	issueRecord: Record<string, unknown>
-) {
+	issueId: string
+): Promise<CachedIssueExtras> {
+	const key = `issue:${ctx.workspaceId}:${issueId}`;
+	const cached = await cache.get<CachedIssueExtras>(ctx.kv, key);
+	if (cached?.rollup && cached.customFields) {
+		return { rollup: cached.rollup, customFields: cached.customFields };
+	}
+
 	type ChildCount = { status: string; count: number };
 	const childRows = (await orm.all(
 		sql`SELECT status, COUNT(*) as count FROM issues
 			WHERE parent_id = ${issueId} AND workspace_id = ${ctx.workspaceId}
 			GROUP BY status`
 	)) as ChildCount[];
-
-	const rollup = computeChildRollup(childRows);
-
-	const links = await listLinksForIssue(ctx, { issueId });
-
 	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, [issueId]);
-	const customFields = customFieldsByIssue[issueId] ?? [];
-
-	return {
-		...issueRecord,
-		rollup,
-		links,
-		customFields,
-		url: buildIssueUrl(issueRecord),
+	const extras: CachedIssueExtras = {
+		rollup: computeChildRollup(childRows),
+		customFields: customFieldsByIssue[issueId] ?? [],
 	};
+	await cache.set(ctx.kv, key, extras, ISSUE_TTL);
+	return extras;
 }
 
 export async function getIssue(ctx: ServiceCtx, raw: unknown) {
@@ -602,38 +593,26 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { id, ref } = result.data;
 
-	if (id) {
-		const cached = await getVisibleCachedIssue(ctx, id);
-		if (cached) return cached;
-	}
-
 	const orm = drizzle(ctx.db, { schema });
 
 	const issue = await fetchIssueByIdOrRef(orm, ctx, id, ref);
 	if (!issue) throw new NotFoundError("Issue not found");
 
-	await assertIssueProjectVisible(ctx, (issue as Record<string, unknown>).project_id as string);
+	const issueRecord = issue as Record<string, unknown>;
+	await assertIssueProjectVisible(ctx, issueRecord.project_id as string);
+	const issueId = issueRecord.id as string;
 
-	const issueId = (issue as Record<string, unknown>).id as string;
+	const { rollup, customFields } = await loadIssueExtras(ctx, orm, issueId);
+	const links = await listLinksForIssue(ctx, { issueId });
 
-	// PROJ-359: a ref lookup ("PROJ-42" — the primary MCP agent read path) resolves
-	// via fetchIssueByRef above rather than the id-keyed cache check at the top of
-	// this function, so it never got any cache benefit and paid for a KV write on
-	// every single call. Now that the id is known, check the cache before paying
-	// for the rollup/links/custom-fields queries below.
-	if (ref) {
-		const cached = await cache.get<Record<string, unknown>>(
-			ctx.kv,
-			`issue:${ctx.workspaceId}:${issueId}`
-		);
-		if (cached) return cached;
-	}
-
-	const fullIssue = await assembleFullIssue(ctx, orm, issueId, issue as Record<string, unknown>);
-
-	await cache.set(ctx.kv, `issue:${ctx.workspaceId}:${issueId}`, fullIssue, ISSUE_TTL);
-
-	return fullIssue;
+	const full: Record<string, unknown> = {
+		...issueRecord,
+		rollup,
+		links,
+		customFields,
+		url: buildIssueUrl(issueRecord),
+	};
+	return full;
 }
 
 async function resolveTypeId(
