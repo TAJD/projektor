@@ -1,7 +1,8 @@
 import { drizzle, schema } from "@projektor/db";
 import type { Role } from "@projektor/types";
-import { and, type Column, eq, type SQL, sql } from "drizzle-orm";
+import { and, type Column, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ForbiddenError, NotFoundError } from "./errors";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 // PROJ-311: group-based project access.
@@ -275,4 +276,54 @@ export async function visibleProjectIds(ctx: ServiceCtx): Promise<string[]> {
 		)
 		.all();
 	return rows.map((r) => r.id);
+}
+
+/**
+ * PROJ-821: of `userIds`, the ones who can currently READ content in `projectId`
+ * (`null` = workspace-level, visible to every member). Used when the caller acts on
+ * behalf of OTHER users (e.g. fanning out notifications), where the per-caller guards
+ * above don't apply.
+ * - Not a member of ctx.workspaceId any more → excluded.
+ * - Workspace owner/admin → included (admin bypass, as for the caller).
+ * - Anyone else, project-scoped → included only with a group grant on that project.
+ */
+export async function usersWithProjectReadAccess(
+	ctx: ServiceCtx,
+	projectId: string | null,
+	userIds: readonly string[]
+): Promise<Set<string>> {
+	if (userIds.length === 0) return new Set();
+	const orm = drizzle(ctx.db, { schema });
+	const members = await inChunks([...userIds], (chunk) =>
+		orm
+			.select({ userId: schema.workspaceMembers.userId, role: schema.workspaceMembers.role })
+			.from(schema.workspaceMembers)
+			.where(
+				and(
+					eq(schema.workspaceMembers.workspaceId, ctx.workspaceId),
+					inArray(schema.workspaceMembers.userId, chunk)
+				)
+			)
+	);
+	if (projectId === null) return new Set(members.map((m) => m.userId));
+
+	const allowed = new Set(members.filter((m) => isWorkspaceAdmin(m.role)).map((m) => m.userId));
+	const needGrant = members.filter((m) => !isWorkspaceAdmin(m.role)).map((m) => m.userId);
+	const granted = await inChunks(needGrant, (chunk) =>
+		orm
+			.select({ userId: schema.userGroupMembers.userId })
+			.from(schema.groupProjectGrants)
+			.innerJoin(
+				schema.userGroupMembers,
+				eq(schema.userGroupMembers.groupId, schema.groupProjectGrants.groupId)
+			)
+			.where(
+				and(
+					eq(schema.groupProjectGrants.projectId, projectId),
+					inArray(schema.userGroupMembers.userId, chunk)
+				)
+			)
+	);
+	for (const g of granted) allowed.add(g.userId);
+	return allowed;
 }
