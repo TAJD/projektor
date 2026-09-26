@@ -8,7 +8,7 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { SaveWikiDraftInputSchema } from "../schemas/wiki";
-import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
+import { assertProjectAccess } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -73,10 +73,11 @@ async function resolveDraftTarget(ctx: ServiceCtx, idOrSlug: string): Promise<Re
 	}
 	if (!page) throw new NotFoundError("Wiki page not found");
 
-	if (page.projectId !== null && !isWorkspaceAdmin(ctx.role)) {
-		if ((await effectiveProjectRole(ctx, page.projectId)) === null) {
-			throw new NotFoundError("Wiki page not found");
-		}
+	if (page.projectId !== null) {
+		await assertProjectAccess(ctx, page.projectId, "read", {
+			notFoundMessage: "Wiki page not found",
+			projectLoadedFromWorkspaceRow: true,
+		});
 	}
 	return { id: page.id, slug: page.slug };
 }

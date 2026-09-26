@@ -329,7 +329,13 @@ describe("Share tokens", () => {
 			const project = await seedProject(workspace.id);
 			if (grant !== "none") await seedGroupGrant(workspace.id, user.id, project.id, grant);
 			const issue = await seedIssue(workspace.id, project.id, user.id, { title: "Restricted" });
-			return { token, slug: workspace.slug, workspaceId: workspace.id, userId: user.id, issueId: issue.id };
+			return {
+				token,
+				slug: workspace.slug,
+				workspaceId: workspace.id,
+				userId: user.id,
+				issueId: issue.id,
+			};
 		}
 
 		it("member without a grant cannot create a share link (404, existence hidden)", async () => {

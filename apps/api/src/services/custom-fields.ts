@@ -2,6 +2,7 @@ import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { IdSchema } from "../schemas/common";
 import { CreateCustomFieldDefSchema, UpdateCustomFieldDefSchema } from "../schemas/custom-fields";
+import { visibleProjectFilter } from "./access";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -27,6 +28,14 @@ export interface CustomFieldValue {
 export async function listCustomFieldDefs(ctx: ServiceCtx, projectId?: string | null) {
 	const orm = drizzle(ctx.db, { schema });
 	const conditions = [eq(schema.customFieldDefinitions.workspaceId, ctx.workspaceId)];
+
+	// PROJ-837: a project-scoped definition is only listed when the caller can see
+	// its project (workspace-level definitions are visible to every member).
+	const visible = visibleProjectFilter(ctx, schema.customFieldDefinitions.projectId);
+	if (visible) {
+		// biome-ignore lint/style/noNonNullAssertion: or() with two args never returns undefined
+		conditions.push(or(isNull(schema.customFieldDefinitions.projectId), visible)!);
+	}
 
 	if (projectId !== undefined) {
 		conditions.push(

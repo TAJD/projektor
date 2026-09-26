@@ -6,6 +6,7 @@ import {
 	seedCustomFieldDef,
 	seedCustomFieldValue,
 	seedFixture,
+	seedGroupGrant,
 	seedIssue,
 	seedMember,
 	seedProject,
@@ -615,4 +616,30 @@ describe("PROJ-197: batchLoadCustomFields is workspace-scoped", () => {
 			expect(loaded[issueIds[i]][0].value).toBe(String(i));
 		}
 	}, 15000); // seeds 95 issues sequentially; coverage instrumentation pushes this past the 5s default
+});
+
+describe("PROJ-837: custom field definitions respect project access", () => {
+	it("a member only sees definitions for projects they are granted (plus workspace-level ones)", async () => {
+		const { workspace, user, token } = await seedFixture({ role: "member" });
+		const granted = await seedProject(workspace.id, "OPEN");
+		const restricted = await seedProject(workspace.id, "SECRET");
+		await seedGroupGrant(workspace.id, user.id, granted.id, "member");
+		await seedCustomFieldDef(workspace.id, { key: "ws_field" });
+		await seedCustomFieldDef(workspace.id, { key: "open_field", projectId: granted.id });
+		await seedCustomFieldDef(workspace.id, { key: "secret_field", projectId: restricted.id });
+
+		const all = await SELF.fetch("http://localhost/api/custom-fields", {
+			headers: authHeaders(token, workspace.slug),
+		});
+		expect(all.status).toBe(200);
+		const keys = ((await all.json()) as Array<{ key: string }>).map((d) => d.key).sort();
+		expect(keys).toEqual(["open_field", "ws_field"]);
+
+		const scoped = await SELF.fetch(
+			`http://localhost/api/custom-fields?projectId=${restricted.id}`,
+			{ headers: authHeaders(token, workspace.slug) }
+		);
+		const scopedKeys = ((await scoped.json()) as Array<{ key: string }>).map((d) => d.key);
+		expect(scopedKeys).toEqual(["ws_field"]);
+	});
 });

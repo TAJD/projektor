@@ -15,7 +15,7 @@ import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 // below for the `isNull(schema.wikiPages.deletedAt)` filters this adds.
 import { safeDecodeURIComponent, wikiPagePath } from "../lib/urls";
 import { ListBrokenWikiLinksInputSchema } from "../schemas/wiki";
-import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
+import { hasProjectAccess, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
 import { ForbiddenError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -459,7 +459,7 @@ async function visibleSourcePageIds(
 	];
 	const grantedProjectIds = new Set<string>();
 	for (const projectId of uniqueProjectIds) {
-		if ((await effectiveProjectRole(ctx, projectId)) !== null) grantedProjectIds.add(projectId);
+		if (await hasProjectAccess(ctx, projectId)) grantedProjectIds.add(projectId);
 	}
 	return rows
 		.filter((r) => r.projectId !== null && grantedProjectIds.has(r.projectId))
