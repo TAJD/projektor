@@ -67,6 +67,10 @@ export async function effectiveProjectRole(
 		);
 
 	if (rows.length === 0) return null;
+	// PROJ-581: the anonymous PUBLIC_READ_ONLY viewer is read-only everywhere, whatever
+	// role a group grant carries — publishing a project to the "Public viewers" group with
+	// the grant picker's default (`member`) must never let the internet write to it.
+	if (ctx.auth?.method === "public") return "viewer";
 	return strongestGrant(rows.map((r) => r.role));
 }
 

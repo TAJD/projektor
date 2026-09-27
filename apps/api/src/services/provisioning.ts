@@ -355,11 +355,20 @@ async function runProvisioning(env: Env, user: { id: string; email: string }): P
  * on this is the hot path for every anonymous request. There is exactly one public-viewer
  * identity, so the marker is shared by all of them.
  */
+// PROJ-581: the group the public viewer is placed in. Project access stays default-deny
+// (PROJ-311) for the public viewer exactly as for any other viewer: an admin publishes a
+// project to anonymous visitors by granting it to this group — nothing is public by
+// default. Bumping the marker suffix re-runs provisioning for deploys provisioned before
+// the group existed.
+export const PUBLIC_VIEWERS_GROUP_NAME = "Public viewers";
+const PUBLIC_VIEWER_MARKER_SUFFIX = ":public-v2";
+
 export async function provisionPublicViewer(
 	env: Env,
 	user: Readonly<{ id: string }>
 ): Promise<void> {
-	if (await alreadyProvisioned(env, user.id)) return;
+	const marker = `${user.id}${PUBLIC_VIEWER_MARKER_SUFFIX}`;
+	if (await alreadyProvisioned(env, marker)) return;
 
 	const slug = env.DEFAULT_WORKSPACE_SLUG?.trim() || "projektor";
 	const orm = drizzle(env.DB, { schema });
@@ -380,5 +389,34 @@ export async function provisionPublicViewer(
 			joinedAt: Math.floor(Date.now() / 1000),
 		})
 		.onConflictDoNothing();
-	await markProvisioned(env, user.id);
+
+	const now = Math.floor(Date.now() / 1000);
+	await orm
+		.insert(schema.userGroups)
+		.values({
+			id: crypto.randomUUID(),
+			workspaceId: ws.id,
+			name: PUBLIC_VIEWERS_GROUP_NAME,
+			description:
+				"Anonymous PUBLIC_READ_ONLY visitors. Grant a project to this group to publish it read-only.",
+			createdAt: now,
+		})
+		.onConflictDoNothing();
+	const group = await orm
+		.select({ id: schema.userGroups.id })
+		.from(schema.userGroups)
+		.where(
+			and(
+				eq(schema.userGroups.workspaceId, ws.id),
+				eq(schema.userGroups.name, PUBLIC_VIEWERS_GROUP_NAME)
+			)
+		)
+		.get();
+	if (group) {
+		await orm
+			.insert(schema.userGroupMembers)
+			.values({ groupId: group.id, userId: user.id, addedBy: user.id, addedAt: now })
+			.onConflictDoNothing();
+	}
+	await markProvisioned(env, marker);
 }
