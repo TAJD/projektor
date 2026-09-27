@@ -1,10 +1,10 @@
-import type { RefObject } from "preact";
+import { Fragment, type RefObject } from "preact";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "preact/hooks";
 import { currentProject, ensureProjectResolved, projectReady } from "../lib/project-context";
 import { slugify } from "../lib/slugify";
 import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
-import { apiFetch } from "../utils/api-client";
+import { apiFetch, undeleteWikiPage } from "../utils/api-client";
 import { getBrandName } from "../utils/brand";
 import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
 import { usePublicViewer } from "../utils/public-viewer";
@@ -333,12 +333,66 @@ interface TocItem {
 	id: string;
 }
 
+// PROJ-804: pure and exported so it's unit-testable without mounting WikiPage. Turns
+// heading text into a URL-safe id and de-duplicates within one pass over the page's
+// headings — repeated text (two "Overview" headings) gets `-1`, `-2`, … suffixes
+// instead of two headings sharing an id (which broke the second TOC entry's link and
+// its React/Preact list key). A heading whose text produces an empty slug (e.g. all
+// punctuation, or a script `[^a-z0-9]` strips entirely) falls back to `section-N`
+// (1-based, N = that heading's position) rather than `id=""`.
+//
+// Uniqueness is checked against every id handed out so far, not a per-base counter:
+// ["Overview", "Overview", "Overview 1"] must not give `overview-1` twice, so a suffix
+// is only taken once it's actually free. An id the author wrote (`<h2 id="install">`,
+// which DOMPurify keeps) is reserved up front and left as-is — links elsewhere point
+// at it — and generated ids steer around it. Only a *repeated* authored id is
+// re-suffixed, since two elements can't share it either. Because kept ids are left
+// alone, running this again over headings it already labelled is a no-op.
+export function assignHeadingIds(
+	headings: ReadonlyArray<{ text: string; id?: string | null }>
+): string[] {
+	const used = new Set<string>();
+	const result: (string | null)[] = headings.map((h) => {
+		const authored = h.id?.trim();
+		if (!authored || used.has(authored)) return null;
+		used.add(authored);
+		return authored;
+	});
+	return headings.map((h, index) => {
+		const kept = result[index];
+		if (kept !== null) return kept;
+		const slug = h.text
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-|-$/g, "");
+		const base = h.id?.trim() || slug || `section-${index + 1}`;
+		let candidate = base;
+		for (let n = 1; used.has(candidate); n++) candidate = `${base}-${n}`;
+		used.add(candidate);
+		return candidate;
+	});
+}
+
 interface WikiRevision {
 	id: string;
 	author_id: string | null;
 	author_name: string | null;
 	created_at: number;
 	summary: string | null;
+}
+
+// PROJ-807: state for the "page moved to trash" toast shown after a delete, with an
+// Undo action wired to the existing trash-undelete endpoint.
+interface UndoToast {
+	message: string;
+	/** The undo itself. Only a rejection here is reported as "Undo failed". */
+	undo: () => Promise<string>;
+	/**
+	 * Best-effort follow-up once `undo` has succeeded (refresh the tree, go back to the
+	 * page), given what `undo` resolved to. Its failures are swallowed: the page is
+	 * already restored, so "Undo failed" would be false.
+	 */
+	afterUndo?: (result: string) => void | Promise<void>;
 }
 
 interface Attachment {
@@ -432,6 +486,7 @@ function TreeNodeItem({
 				class={`${TREE_ITEM_BASE_CLASS} ${isActive ? "!bg-accent !text-white font-semibold" : ""}`}
 				style={{ paddingLeft: `${0.5 + depth * 1}rem` }}
 				onClick={() => onNavigate(node.slug)}
+				aria-current={isActive ? "page" : undefined}
 			>
 				{depth > 0 && <span class="text-text-muted mr-1">{"›"}</span>}
 				{node.title}
@@ -756,6 +811,7 @@ function WikiSidebar({
 	stalePages,
 	staleLoading,
 	drawerOpen,
+	isMobile,
 	sidebarRef,
 }: {
 	workspaceSlug: string | undefined;
@@ -786,6 +842,10 @@ function WikiSidebar({
 	// PROJ-664: below 640px this aside becomes an off-canvas drawer (see
 	// WikiPageShell) instead of stacking full-width in flow above the article.
 	drawerOpen: boolean;
+	// PROJ-806: whether the drawer is acting as a drawer at all (mobile viewport) — on
+	// desktop the sidebar is always in normal flow and must never be inert, even though
+	// `drawerOpen` itself stays false there (it's only ever opened via the mobile trigger).
+	isMobile: boolean;
 	sidebarRef: RefObject<HTMLElement>;
 }) {
 	const asideClass = [
@@ -795,7 +855,13 @@ function WikiSidebar({
 	].join(" ");
 	const isPublicViewer = usePublicViewer(workspaceSlug);
 	return (
-		<aside id="wiki-page-tree" class={asideClass} aria-label="Wiki pages" ref={sidebarRef}>
+		<aside
+			id="wiki-page-tree"
+			class={asideClass}
+			aria-label="Wiki pages"
+			ref={sidebarRef}
+			inert={isMobile && !drawerOpen}
+		>
 			<ScopeControl workspaceSlug={workspaceSlug} projectId={projectId} />
 			{!isPublicViewer && (
 				<Button variant="primary" onClick={onCreate} class="w-full mb-4 max-sm:min-h-[44px]">
@@ -989,17 +1055,21 @@ function PageBreadcrumbs({
 				Home
 			</button>
 			{breadcrumbs.slice(1, -1).map((crumb) => (
-				<>
+				// PROJ-806: the key belongs on the list item itself (this fragment), not a
+				// DOM node nested inside it — Preact reconciles the fragment's children by
+				// their position, not the key on a descendant, so a key here (rather than on
+				// the button) is what actually makes each breadcrumb crumb identifiable
+				// across re-renders when the list changes.
+				<Fragment key={crumb.id}>
 					<span>›</span>
 					<button
-						key={crumb.id}
 						type="button"
 						class={BREADCRUMB_BUTTON_CLASS}
 						onClick={() => onNavigate(crumb.slug)}
 					>
 						{crumb.title}
 					</button>
-				</>
+				</Fragment>
 			))}
 			<span>›</span>
 			<span class="text-text-base">{breadcrumbs[breadcrumbs.length - 1].title}</span>
@@ -1116,16 +1186,43 @@ function PageActionOverflowMenu({
 		setOpen(true);
 	}
 
+	function menuItems(): HTMLElement[] {
+		return Array.from(popoverRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+	}
+
+	function closeToTrigger() {
+		setOpen(false);
+		triggerRef.current?.focus();
+	}
+
+	// PROJ-806: a menu that opens without moving focus into itself, or that doesn't
+	// support arrow keys, forces a screen reader or keyboard user to tab through the
+	// rest of the page to reach it. Focus moves to the first item on open; ArrowUp/
+	// ArrowDown cycle between items (wrapping), matching the standard menu pattern. The
+	// items are tabindex=-1 (arrows move between them, not Tab), and Tab or Escape close
+	// the menu back to its trigger — the menu is portalled to <body>, so letting Tab run
+	// on would jump to wherever the portal sits in the document, not the next control
+	// after ⋯.
 	useEffect(() => {
 		if (!open) return;
+		menuItems()[0]?.focus();
 		function onPointerDown(e: MouseEvent) {
 			if (!(e.target instanceof Node) || !isInside(e.target)) setOpen(false);
 		}
 		function onKeyDown(e: KeyboardEvent) {
-			if (e.key === "Escape") {
-				setOpen(false);
-				triggerRef.current?.focus();
+			if (e.key === "Escape" || e.key === "Tab") {
+				e.preventDefault();
+				closeToTrigger();
+				return;
 			}
+			if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+			const items = menuItems();
+			if (items.length === 0) return;
+			e.preventDefault();
+			const currentIndex = items.indexOf(document.activeElement as HTMLElement);
+			const delta = e.key === "ArrowDown" ? 1 : -1;
+			const nextIndex = (currentIndex + delta + items.length) % items.length;
+			items[nextIndex]?.focus();
 		}
 		document.addEventListener("mousedown", onPointerDown);
 		document.addEventListener("keydown", onKeyDown);
@@ -1135,8 +1232,11 @@ function PageActionOverflowMenu({
 		};
 	}, [open]);
 
+	// Refocus the trigger *before* running the action: the menu (and the focused item)
+	// is about to unmount, which would otherwise drop focus to <body>. An action that
+	// moves focus somewhere deliberately still gets the last word.
 	function runAndClose(fn: () => void) {
-		setOpen(false);
+		closeToTrigger();
 		fn();
 	}
 
@@ -1166,6 +1266,7 @@ function PageActionOverflowMenu({
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="page-action-menu-item"
 						onClick={() => runAndClose(() => onStartCreateChild(pageId))}
 					>
@@ -1174,6 +1275,7 @@ function PageActionOverflowMenu({
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="page-action-menu-item"
 						onClick={() => runAndClose(onStartMove)}
 					>
@@ -1182,6 +1284,7 @@ function PageActionOverflowMenu({
 					<button
 						type="button"
 						role="menuitem"
+						tabIndex={-1}
 						class="page-action-menu-item page-action-menu-item-danger"
 						onClick={() => runAndClose(onDelete)}
 					>
@@ -1353,18 +1456,27 @@ function RevisionDiffView({ diff }: { diff: string }) {
 	);
 }
 
+// PROJ-808: restoring while the page is being edited raced the edit's own save against
+// the restore's PUT — both build their request off the revision the user started from,
+// so whichever lands second gets a 409 against a revision it created itself. Simplest
+// correct fix: disable Restore during editing rather than trying to reconcile the two.
+const RESTORE_DISABLED_WHILE_EDITING_REASON =
+	"Finish or cancel editing before restoring a previous revision";
+
 function RevisionRow({
 	revision,
 	workspaceSlug,
 	pageSlug,
 	onRestore,
 	restoring,
+	editing,
 }: {
 	revision: WikiRevision;
 	workspaceSlug: string | undefined;
 	pageSlug: string;
 	onRestore: (revision: WikiRevision) => void;
 	restoring: boolean;
+	editing: boolean;
 }) {
 	const [diffOpen, setDiffOpen] = useState(false);
 	const [diff, setDiff] = useState<string | null>(null);
@@ -1408,7 +1520,8 @@ function RevisionRow({
 					variant="outline"
 					size="sm"
 					onClick={() => onRestore(revision)}
-					disabled={restoring}
+					disabled={restoring || editing}
+					title={editing ? RESTORE_DISABLED_WHILE_EDITING_REASON : undefined}
 					class="text-text-muted py-0 px-2"
 				>
 					{restoring ? "Restoring…" : "Restore"}
@@ -1437,6 +1550,7 @@ function RevisionsHistory({
 	pageSlug,
 	onRestore,
 	restoringId,
+	editing,
 }: {
 	revisions: WikiRevision[];
 	showHistory: boolean;
@@ -1445,6 +1559,7 @@ function RevisionsHistory({
 	pageSlug: string;
 	onRestore: (revision: WikiRevision) => void;
 	restoringId: string | null;
+	editing: boolean;
 }) {
 	if (revisions.length === 0) return null;
 	return (
@@ -1462,6 +1577,7 @@ function RevisionsHistory({
 							pageSlug={pageSlug}
 							onRestore={onRestore}
 							restoring={restoringId === r.id}
+							editing={editing}
 						/>
 					))}
 				</ul>
@@ -1653,7 +1769,10 @@ interface PageArticleProps {
 	showToc: boolean;
 	toc: TocItem[];
 	activeHeadingId: string;
-	contentRef: RefObject<HTMLDivElement>;
+	// PROJ-803: a callback ref (not a plain RefObject) so remounting the content div
+	// (Cancel edit / Verify / Move) is observable as a mount-token bump, not just a
+	// silent `.current` update — see useWikiPageData's contentMountToken.
+	setContentRef: (node: HTMLDivElement | null) => void;
 	editing: boolean;
 	editTitle: string;
 	onEditTitleChange: (value: string) => void;
@@ -1686,7 +1805,9 @@ interface PageArticleProps {
 	onDiscardDraft: () => void;
 	editContent: string;
 	onEditContentChange: (value: string) => void;
-	wikiPages: FlatEntry[];
+	// PROJ-860: pre-rendered (marked + wikilinks + DOMPurify), memoised on [content,
+	// wikiPages] one level up — PageArticle never calls renderMdWithWikilinks itself.
+	renderedHtml: string;
 	revisions: WikiRevision[];
 	showHistory: boolean;
 	onToggleHistory: () => void;
@@ -1847,6 +1968,23 @@ function PageArticleMeta(
 
 function PageArticle(props: PageArticleProps) {
 	const { page } = props;
+	// PROJ-860: memoise the rendered-content vnode itself, keyed on the already-memoised
+	// HTML (and the stable contentRef object) — not `preact/compat`'s `memo()`, which
+	// would switch this whole island to React event semantics (see LazyMarkdownEditor).
+	// Preact bails out of diffing a subtree when it receives the same vnode object it
+	// rendered last time, so as long as `renderedHtml` doesn't change, unrelated
+	// re-renders of PageArticle (sidebar search, filters, activeHeadingId, …) never touch
+	// this DOM at all — no re-parse, no re-diff of the (potentially large) article body.
+	const articleContent = useMemo(
+		() => (
+			<div
+				ref={props.setContentRef}
+				class="prose prose-sm max-w-none"
+				dangerouslySetInnerHTML={{ __html: props.renderedHtml }}
+			/>
+		),
+		[props.renderedHtml, props.setContentRef]
+	);
 	return (
 		<div class="flex gap-8 items-start">
 			<article class="flex-1 min-w-0">
@@ -1862,13 +2000,7 @@ function PageArticle(props: PageArticleProps) {
 						/>
 					</div>
 				) : (
-					<div
-						ref={props.contentRef}
-						class="prose prose-sm max-w-none"
-						dangerouslySetInnerHTML={{
-							__html: renderMdWithWikilinks(stripFrontmatter(page.content), props.wikiPages),
-						}}
-					/>
+					articleContent
 				)}
 
 				<RevisionsHistory
@@ -1879,6 +2011,7 @@ function PageArticle(props: PageArticleProps) {
 					pageSlug={page.slug}
 					onRestore={props.onRestoreRevision}
 					restoringId={props.restoringRevisionId}
+					editing={props.editing}
 				/>
 
 				<AttachmentsPanel
@@ -2148,6 +2281,14 @@ function useWikiFilters(
 	const [filterTags, setFilterTags] = useState("");
 	const [filteredResults, setFilteredResults] = useState<WikiListItem[]>([]);
 	const [filteredLoading, setFilteredLoading] = useState(false);
+	// PROJ-805: clearing the debounce timer stops a request that hasn't fired yet, but
+	// not one already in flight — a slow response for an earlier filter combination
+	// could still land after (and overwrite the results of) a faster, newer one. Each
+	// debounced fire takes a ticket; only the response whose ticket is still the latest
+	// gets applied. The effect cleanup also advances the ticket, so an in-flight
+	// response is dropped as soon as *any* input changes — including while the next
+	// debounce is still pending, or after the filters are cleared entirely.
+	const filterRequestRef = useRef(0);
 
 	const hasActiveFilters = Boolean(filterType || filterStatus || filterTags.trim());
 
@@ -2159,22 +2300,29 @@ function useWikiFilters(
 	useEffect(() => {
 		if (!hasActiveFilters || projectId === undefined) {
 			setFilteredResults([]);
+			// A request dropped by the previous run's cleanup never clears this itself.
+			setFilteredLoading(false);
 			return;
 		}
 		setFilteredLoading(true);
 		const timer = setTimeout(async () => {
+			const ticket = ++filterRequestRef.current;
 			try {
 				const qs = new URLSearchParams();
 				appendWikiFilterParams(qs, { projectId, filterType, filterStatus, filterTags });
 				const data = await apiFetch<WikiListItem[]>(`/api/wiki?${qs}`, { workspaceSlug });
+				if (ticket !== filterRequestRef.current) return;
 				setFilteredResults(Array.isArray(data) ? data : []);
 			} catch {
 				// non-fatal
 			} finally {
-				setFilteredLoading(false);
+				if (ticket === filterRequestRef.current) setFilteredLoading(false);
 			}
 		}, 300);
-		return () => clearTimeout(timer);
+		return () => {
+			clearTimeout(timer);
+			filterRequestRef.current++;
+		};
 	}, [filterType, filterStatus, filterTags, workspaceSlug, projectId, hasActiveFilters]);
 
 	return {
@@ -2200,26 +2348,37 @@ function useWikiSearch(
 	const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
 	const [searchLoading, setSearchLoading] = useState(false);
 	const { filterType, filterStatus, filterTags } = filters;
+	// PROJ-805: same stale-response guard as useWikiFilters above — a slow response for
+	// an earlier query could otherwise overwrite a faster, newer one's results, or
+	// repopulate the list after the query was cleared. Cleanup advances the ticket too.
+	const searchRequestRef = useRef(0);
 
 	useEffect(() => {
 		if (!searchQuery.trim() || projectId === undefined) {
 			setSearchResults([]);
+			// A request dropped by the previous run's cleanup never clears this itself.
+			setSearchLoading(false);
 			return;
 		}
 		setSearchLoading(true);
 		const timer = setTimeout(async () => {
+			const ticket = ++searchRequestRef.current;
 			try {
 				const qs = new URLSearchParams({ q: searchQuery });
 				appendWikiFilterParams(qs, { projectId, filterType, filterStatus, filterTags });
 				const data = await apiFetch<SearchResult[]>(`/api/wiki/search?${qs}`, { workspaceSlug });
+				if (ticket !== searchRequestRef.current) return;
 				setSearchResults(Array.isArray(data) ? data : []);
 			} catch {
 				// non-fatal
 			} finally {
-				setSearchLoading(false);
+				if (ticket === searchRequestRef.current) setSearchLoading(false);
 			}
 		}, 300);
-		return () => clearTimeout(timer);
+		return () => {
+			clearTimeout(timer);
+			searchRequestRef.current++;
+		};
 	}, [searchQuery, workspaceSlug, projectId, filterType, filterStatus, filterTags]);
 
 	return { searchQuery, setSearchQuery, searchResults, searchLoading };
@@ -2237,6 +2396,27 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 	const [revisionsLoaded, setRevisionsLoaded] = useState(false);
 	const [showHistory, setShowHistory] = useState(false);
 	const contentRef = useRef<HTMLDivElement>(null);
+	// PROJ-803: the content div only mounts when `!editing` (PageArticle), so Cancel
+	// edit / Verify / Move — anything that flips `editing` or otherwise remounts that
+	// div without page.content changing — used to leave the TOC pointing at detached
+	// nodes and mermaid blocks unrendered, because the post-render effects keyed only
+	// on content. A callback ref bumps this token on every mount so those effects can
+	// key on "the DOM actually changed" instead, composing with PROJ-860's HTML memo
+	// (effects now depend on [renderedHtml, contentMountToken] — either changing means
+	// there's new DOM to process).
+	//
+	// Why a counter and not the node itself in state: Preact recycles the same <div>
+	// across Edit → Cancel (it morphs the article div into MarkdownEditor's root and
+	// back, resetting innerHTML on the way), so the ref is called again with the
+	// *identical* node and a [node] dependency would never change — the original bug. It
+	// can also deliver the old mount's `null` after the new node. A bump on every non-null
+	// call survives both. The cost is one extra run of these effects on first mount (the
+	// bump lands in the commit after the HTML does).
+	const [contentMountToken, setContentMountToken] = useState(0);
+	const setContentRef = useCallback((node: HTMLDivElement | null) => {
+		contentRef.current = node;
+		if (node) setContentMountToken((t) => t + 1);
+	}, []);
 
 	// PROJ-801: every fetch takes a ticket, and only the latest ticket's response is
 	// applied. Clicking A then B used to let A's slower response land last — showing A
@@ -2311,6 +2491,8 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 		showHistory,
 		setShowHistory,
 		contentRef,
+		setContentRef,
+		contentMountToken,
 		fetchPage,
 	};
 }
@@ -2352,7 +2534,51 @@ function useWikiPageMeta(page: WikiPageData | null) {
 	}, [page]);
 }
 
-function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTMLDivElement>) {
+// PROJ-860: takes the already-memoised rendered HTML string, not `page`, so these
+// post-render effects re-run exactly when the DOM they inspect actually changed —
+// not on every WikiPage re-render.
+// PROJ-860: marked + wikilink resolution + DOMPurify is the single most expensive
+// thing WikiPage does (561 ms self time on a 187 KB page) — it used to run inline in
+// JSX on *every* render, including unrelated ones (a sidebar search keystroke, a
+// filter change, activeHeadingId ticking from the scroll observer). `wikiPages` must
+// itself be a stable array identity (see the `useMemo` around `Object.values(pageMap)`
+// in useWikiPageState) or this memo would recompute just as often as before.
+//
+// Keyed on the title map's *contents*, not the array's identity: every fetchTree()
+// (after a save, a move, a create, or an empty tree landing after the page) builds a
+// new array, and re-parsing an unchanged body for an unchanged title map is exactly the
+// waste this exists to avoid. A real change to any title or slug still re-renders.
+function useRenderedPageHtml(
+	content: string | undefined,
+	wikiPages: ReadonlyArray<{ title: string; slug: string }>
+): string {
+	const titleMapKey = useMemo(
+		() =>
+			wikiPages
+				.map((p) => `${p.title.toLowerCase()}\u0000${p.slug}`)
+				.sort()
+				.join("\u0001"),
+		[wikiPages]
+	);
+	const pagesRef = useRef(wikiPages);
+	pagesRef.current = wikiPages;
+	// titleMapKey stands in for wikiPages as the dependency (see above); the ref only
+	// carries the matching array into the parse.
+	return useMemo(() => {
+		if (content === undefined) return "";
+		return renderMdWithWikilinks(stripFrontmatter(content), pagesRef.current);
+	}, [content, titleMapKey]);
+}
+
+function useTableOfContents(
+	page: WikiPageData | null,
+	contentRef: RefObject<HTMLDivElement>,
+	renderedHtml: string,
+	// PROJ-803: bumped by the content div's callback ref every time it mounts, so
+	// Cancel/Verify/Move (which remount the div without page.content changing) still
+	// re-run these effects against the new DOM node.
+	contentMountToken: number
+) {
 	const [toc, setToc] = useState<TocItem[]>([]);
 	const [activeHeadingId, setActiveHeadingId] = useState("");
 
@@ -2364,22 +2590,23 @@ function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTM
 			return;
 		}
 		const headings = Array.from(container.querySelectorAll("h1, h2, h3")) as HTMLElement[];
-		headings.forEach((h) => {
-			if (!h.id) {
-				h.id = (h.textContent ?? "")
-					.toLowerCase()
-					.replace(/[^a-z0-9]+/g, "-")
-					.replace(/^-|-$/g, "");
-			}
+		// PROJ-804: one pass over every heading on the page, so de-duplication sees them
+		// all. Existing ids are passed in: authored ones (raw `<h2 id>` in the markdown)
+		// are kept, and ids this already assigned to the same DOM are left unchanged.
+		const ids = assignHeadingIds(
+			headings.map((h) => ({ text: h.textContent ?? "", id: h.getAttribute("id") }))
+		);
+		headings.forEach((h, i) => {
+			h.id = ids[i];
 		});
 		setToc(
-			headings.map((h) => ({
+			headings.map((h, i) => ({
 				level: parseInt(h.tagName[1], 10),
 				text: h.textContent ?? "",
-				id: h.id,
+				id: ids[i],
 			}))
 		);
-	}, [page?.content]);
+	}, [renderedHtml, contentMountToken]);
 
 	// Hydrate ```mermaid code blocks into rendered diagrams
 	useEffect(() => {
@@ -2388,7 +2615,7 @@ function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTM
 		renderMermaidDiagrams(container).catch(() => {
 			// non-fatal — leave the raw code block visible
 		});
-	}, [page?.content]);
+	}, [renderedHtml, contentMountToken]);
 
 	// PROJ-113: IntersectionObserver for active heading
 	useEffect(() => {
@@ -2414,6 +2641,77 @@ function useTableOfContents(page: WikiPageData | null, contentRef: RefObject<HTM
 	}, [toc]);
 
 	return { toc, setToc, activeHeadingId };
+}
+
+// PROJ-802: heading ids are only assigned once the content has rendered (the effects
+// above), so a link like /wiki/foo#setup used to always open at the top of the page —
+// nothing ever re-checked location.hash once the target id actually existed. `toc`
+// changing covers first load and in-app navigation (navigateTo/showSlug rebuild the
+// page and its TOC); hashchange covers clicking a same-page #anchor (including a TOC
+// link) without a full navigation; popstate covers Back/Forward.
+//
+// A TOC rebuild is *not* a navigation, though: Cancel edit, Verify, Move and a late tree
+// load all rebuild it on the same page and hash. Re-scrolling on each of those yanked the
+// reader back to the anchor and stole focus from whatever they were doing, so each
+// page-slug + hash pair is handled once; only hashchange/popstate (a real navigation,
+// even back to the same hash) clear that and allow another scroll.
+function findInContent(container: HTMLElement, id: string): HTMLElement | null {
+	// Only the rendered page body counts — an id elsewhere (the sidebar's
+	// `wiki-page-tree`, the TOC nav, …) must not hijack the anchor. Matched by property
+	// rather than a `#id` selector so ids needing CSS escaping still work.
+	for (const el of container.querySelectorAll<HTMLElement>("[id]")) {
+		if (el.id === id) return el;
+	}
+	return null;
+}
+
+function useHashScroll(
+	toc: readonly TocItem[],
+	contentRef: RefObject<HTMLDivElement>,
+	pageSlug: string | undefined
+) {
+	const handledRef = useRef<string | null>(null);
+	const slugRef = useRef(pageSlug);
+	slugRef.current = pageSlug;
+
+	const scrollToHash = useCallback(() => {
+		// PROJ-802: some call sites (and this file's own tests, see PROJ-487) swap
+		// `window.location` for a partial stand-in that may not define `hash` at all.
+		const raw = (window.location.hash ?? "").slice(1);
+		if (!raw) return;
+		const key = `${slugRef.current ?? ""}#${raw}`;
+		if (handledRef.current === key) return;
+		const container = contentRef.current;
+		if (!container) return;
+		const heading = findInContent(container, safeDecodeURIComponent(raw) ?? raw);
+		// Not rendered yet (or not on this page) — leave it unhandled so the next TOC
+		// build, once the target exists, can still scroll to it.
+		if (!heading) return;
+		handledRef.current = key;
+		heading.scrollIntoView();
+		// Headings aren't focusable by default — tabindex=-1 lets focus() target them
+		// programmatically (screen reader users land there too) without adding them to
+		// the normal Tab order.
+		heading.setAttribute("tabindex", "-1");
+		heading.focus({ preventScroll: true });
+	}, [contentRef]);
+
+	useEffect(() => {
+		scrollToHash();
+	}, [toc, scrollToHash]);
+
+	useEffect(() => {
+		function onNavigate() {
+			handledRef.current = null;
+			scrollToHash();
+		}
+		window.addEventListener("hashchange", onNavigate);
+		window.addEventListener("popstate", onNavigate);
+		return () => {
+			window.removeEventListener("hashchange", onNavigate);
+			window.removeEventListener("popstate", onNavigate);
+		};
+	}, [scrollToHash]);
 }
 
 function useWikiAttachments(workspaceSlug: string | undefined, page: WikiPageData | null) {
@@ -2927,12 +3225,17 @@ function useWikiRestore(
 	page: WikiPageData | null,
 	latestRevisionId: string | null | undefined,
 	fetchPage: (s: string) => Promise<void>,
-	fetchRevisions: (s: string) => Promise<void>
+	fetchRevisions: (s: string) => Promise<void>,
+	editing: boolean
 ) {
 	const [restoringId, setRestoringId] = useState<string | null>(null);
 
 	async function restore(revision: WikiRevision) {
 		if (!page) return;
+		// PROJ-808: the Restore button is disabled while editing, but guard the action
+		// itself too — restoring mid-edit races the edit's own save against this PUT,
+		// and whichever lands second 409s against a revision it created itself.
+		if (editing) return;
 		const when = new Date(revision.created_at * 1000).toLocaleString();
 		if (
 			!window.confirm(
@@ -3191,6 +3494,9 @@ function createWikiActions(
 		rawStartCreate: (parentId: string | null) => void;
 		rawSubmitCreate: () => Promise<string | undefined>;
 		cancelMove: () => void;
+		// PROJ-807: shown after a successful delete, with an Undo action that calls the
+		// existing trash-undelete endpoint. null dismisses whatever toast is showing.
+		showUndoToast: (toast: UndoToast | null) => void;
 	}>
 ) {
 	const {
@@ -3204,6 +3510,7 @@ function createWikiActions(
 		setError,
 		setToc,
 		cancelMove,
+		showUndoToast,
 	} = args;
 
 	// PROJ-800: flush the pending draft explicitly before clearing page state. Leaving
@@ -3238,9 +3545,22 @@ function createWikiActions(
 
 	async function deletePage() {
 		if (!page) return;
-		if (!window.confirm(`Delete "${page.title}"? This cannot be undone.`)) return;
+		// PROJ-807: the backend soft-deletes into a 30-day trash (undeleteWikiPage) —
+		// this used to claim the opposite.
+		if (
+			!window.confirm(
+				`Delete "${page.title}"? The page (and any children) will move to trash for 30 days. You can undo this right after, or restore it from the trash later.`
+			)
+		) {
+			return;
+		}
+		const deletedPage = page;
 		try {
-			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}`, {
+			// cascade=true trashes the children together with the page under one
+			// trash_batch_id — which is what the dialog promises, and what lets Undo bring
+			// the whole subtree back. Without it the API re-parents the children one level
+			// up instead, and undelete could only restore the page on its own.
+			await apiFetch(`/api/wiki/${encodeURIComponent(page.slug)}?cascade=true`, {
 				method: "DELETE",
 				workspaceSlug,
 			});
@@ -3248,6 +3568,14 @@ function createWikiActions(
 			setSlug("");
 			history.pushState(null, "", "/wiki");
 			await fetchTree();
+			showUndoToast({
+				message: `"${deletedPage.title}" moved to trash.`,
+				undo: async () => (await undeleteWikiPage(deletedPage.id, workspaceSlug)).slug,
+				afterUndo: async (restoredSlug) => {
+					navigateTo(restoredSlug || deletedPage.slug);
+					await fetchTree();
+				},
+			});
 		} catch (e) {
 			alert(`Delete failed: ${String(e)}`);
 		}
@@ -3333,12 +3661,21 @@ const WIKI_PAGE_STYLES = `
 			width: min(82vw, 280px);
 			max-width: 280px;
 			transform: translateX(-100%);
-			transition: transform 0.22s ease;
+			/* PROJ-806: translateX alone leaves the closed drawer keyboard/screen-reader
+			   reachable (it's still in the layout, just off-screen) — visibility:hidden
+			   (paired with the inert attribute set in JS below) takes it out of both. */
+			visibility: hidden;
+			/* Delay the switch to hidden until the slide-out has finished, or the drawer
+			   vanishes instantly on close instead of sliding away. */
+			transition: transform 0.22s ease, visibility 0s linear 0.22s;
 			z-index: 105;
 			box-shadow: none;
 		}
 		.wiki-sidebar.wiki-sidebar-open {
 			transform: translateX(0);
+			visibility: visible;
+			/* …but become visible immediately on open, so the slide-in is seen. */
+			transition: transform 0.22s ease, visibility 0s linear 0s;
 			box-shadow: 0 0 40px rgba(0, 0, 0, 0.35);
 		}
 		.wiki-drawer-overlay {
@@ -3411,7 +3748,16 @@ function useWikiSidebarDrawer() {
 		};
 	}, [open, close]);
 
+	// PROJ-806: this effect also fires on mount (effects always run after the first
+	// render, `open` "changing" from nothing to its initial value), which used to move
+	// focus to the "Pages" trigger button on every mobile page load even though the
+	// user never opened or closed anything. Only actual open/close transitions —
+	// something the person did — should move focus.
+	const isFirstRenderRef = useRef(true);
 	useEffect(() => {
+		const isFirstRender = isFirstRenderRef.current;
+		isFirstRenderRef.current = false;
+		if (isFirstRender) return;
 		if (!window.matchMedia(WIKI_MOBILE_QUERY).matches) return;
 		if (open) {
 			sidebarRef.current
@@ -3558,6 +3904,7 @@ function WikiPageShell(
 				stalePages={props.stale.stalePages}
 				staleLoading={props.stale.staleLoading}
 				drawerOpen={drawer.open}
+				isMobile={isMobile}
 				sidebarRef={drawer.sidebarRef}
 			/>
 
@@ -3571,6 +3918,9 @@ function WikiPageShell(
 function deriveWikiPageState(
 	pageData: ReturnType<typeof useWikiPageData>,
 	pageMap: Record<string, FlatEntry>,
+	// PROJ-860: passed in (memoised on [pageMap]) rather than recomputed here, so its
+	// identity stays stable across renders this function runs on but pageMap doesn't change.
+	wikiPages: readonly FlatEntry[],
 	editState: ReturnType<typeof useWikiEditing>,
 	createForm: ReturnType<typeof useCreatePageForm>,
 	toc: readonly TocItem[]
@@ -3583,14 +3933,13 @@ function deriveWikiPageState(
 	const createParentTitle = createForm.createParentId
 		? (pageMap[createForm.createParentId]?.title ?? null)
 		: null;
-	const wikiPages = Object.values(pageMap);
 	const moveOptions: SelectOption[] = [
 		{ value: "", label: "No parent (root)" },
 		...wikiPages
 			.filter((p) => p.id !== pageData.page?.id)
 			.map((p) => ({ value: p.id, label: p.title })),
 	];
-	return { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions };
+	return { latestRevision, breadcrumbs, showToc, createParentTitle, moveOptions };
 }
 
 function buildCreateFormProps(
@@ -3636,7 +3985,7 @@ function buildArticleProps(
 		showToc: boolean;
 		toc: TocItem[];
 		activeHeadingId: string;
-		contentRef: RefObject<HTMLDivElement>;
+		setContentRef: (node: HTMLDivElement | null) => void;
 		editing: boolean;
 		editTitle: string;
 		setEditTitle: (v: string) => void;
@@ -3658,7 +4007,7 @@ function buildArticleProps(
 		discardDraft: () => void;
 		editContent: string;
 		setEditContent: (v: string) => void;
-		wikiPages: FlatEntry[];
+		renderedHtml: string;
 		revisions: WikiRevision[];
 		showHistory: boolean;
 		setShowHistory: (updater: (h: boolean) => boolean) => void;
@@ -3676,7 +4025,7 @@ function buildArticleProps(
 		showToc: article.showToc,
 		toc: article.toc,
 		activeHeadingId: article.activeHeadingId,
-		contentRef: article.contentRef,
+		setContentRef: article.setContentRef,
 		editing: article.editing,
 		editTitle: article.editTitle,
 		onEditTitleChange: article.setEditTitle,
@@ -3698,7 +4047,7 @@ function buildArticleProps(
 		onDiscardDraft: article.discardDraft,
 		editContent: article.editContent,
 		onEditContentChange: article.setEditContent,
-		wikiPages: article.wikiPages,
+		renderedHtml: article.renderedHtml,
 		revisions: article.revisions,
 		showHistory: article.showHistory,
 		onToggleHistory: () => article.setShowHistory((h) => !h),
@@ -3737,6 +4086,8 @@ function useWikiPageState(
 	const { slug, setSlug } = useWikiUrlState(slugProp);
 	const scope = useWikiScope(workspaceSlug, projectIdProp);
 	const projectId = scope ?? "";
+	// PROJ-807: the "moved to trash" Undo toast shown after a delete.
+	const [undoToast, setUndoToast] = useState<UndoToast | null>(null);
 	const { pageTree, pageMap, treeLoading, fetchTree } = useWikiTree(workspaceSlug, scope);
 	const filters = useWikiFilters(workspaceSlug, scope, pageTree);
 	const stale = useWikiStalePages(workspaceSlug, scope);
@@ -3750,10 +4101,22 @@ function useWikiPageState(
 		}
 	);
 
+	// PROJ-860: stable array identity across renders that don't touch the tree, so this
+	// can be a `useRenderedPageHtml`/`useMemo` dependency instead of invalidating on
+	// every keystroke elsewhere in the page.
+	const wikiPages = useMemo(() => Object.values(pageMap), [pageMap]);
+
 	const pageData = useWikiPageData(workspaceSlug, slug);
 	useLegacyQuerySlugRedirect(pageData.page?.slug, slug);
 	useWikiPageMeta(pageData.page);
-	const { toc, setToc, activeHeadingId } = useTableOfContents(pageData.page, pageData.contentRef);
+	const renderedHtml = useRenderedPageHtml(pageData.page?.content, wikiPages);
+	const { toc, setToc, activeHeadingId } = useTableOfContents(
+		pageData.page,
+		pageData.contentRef,
+		renderedHtml,
+		pageData.contentMountToken
+	);
+	useHashScroll(toc, pageData.contentRef, pageData.page?.slug);
 	const attach = useWikiAttachments(workspaceSlug, pageData.page);
 	const editState = useWikiEditing(
 		workspaceSlug,
@@ -3771,7 +4134,8 @@ function useWikiPageState(
 		pageData.page,
 		pageData.revisionsLoaded ? (pageData.revisions[0]?.id ?? null) : undefined,
 		pageData.fetchPage,
-		pageData.fetchRevisions
+		pageData.fetchRevisions,
+		editState.editing
 	);
 
 	return {
@@ -3790,6 +4154,8 @@ function useWikiPageState(
 		searchResults,
 		searchLoading,
 		pageData,
+		wikiPages,
+		renderedHtml,
 		toc,
 		setToc,
 		activeHeadingId,
@@ -3800,6 +4166,8 @@ function useWikiPageState(
 		move,
 		verify,
 		restoreState,
+		undoToast,
+		setUndoToast,
 	};
 }
 
@@ -3809,6 +4177,8 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		pageMap,
 		fetchTree,
 		pageData,
+		wikiPages,
+		renderedHtml,
 		toc,
 		setToc,
 		activeHeadingId,
@@ -3819,6 +4189,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		move,
 		verify,
 		restoreState,
+		setUndoToast,
 	} = state;
 
 	const { navigateTo, showSlug, startCreate, submitCreate, deletePage } = createWikiActions({
@@ -3835,12 +4206,13 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		rawStartCreate: createForm.startCreate,
 		rawSubmitCreate: createForm.submitCreate,
 		cancelMove: move.cancelMove,
+		showUndoToast: setUndoToast,
 	});
 
 	usePopstateNavigation(showSlug);
 
-	const { latestRevision, breadcrumbs, showToc, createParentTitle, wikiPages, moveOptions } =
-		deriveWikiPageState(pageData, pageMap, editState, createForm, toc);
+	const { latestRevision, breadcrumbs, showToc, createParentTitle, moveOptions } =
+		deriveWikiPageState(pageData, pageMap, wikiPages, editState, createForm, toc);
 
 	function startEdit() {
 		move.cancelMove();
@@ -3870,7 +4242,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		showToc,
 		toc,
 		activeHeadingId,
-		contentRef: pageData.contentRef,
+		setContentRef: pageData.setContentRef,
 		editing: editState.editing,
 		editTitle: editState.editTitle,
 		setEditTitle: editState.setEditTitle,
@@ -3892,7 +4264,7 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 		discardDraft: editState.discardDraft,
 		editContent: editState.editContent,
 		setEditContent: editState.setEditContent,
-		wikiPages,
+		renderedHtml,
 		revisions: pageData.revisions,
 		showHistory: pageData.showHistory,
 		setShowHistory: pageData.setShowHistory,
@@ -3905,6 +4277,97 @@ function assembleWikiPageProps(state: ReturnType<typeof useWikiPageState>, works
 	});
 
 	return { navigateTo, startCreate, createProps, articleProps };
+}
+
+// PROJ-807: shown after deleting a page. No existing toast utility in apps/web/src —
+// this is deliberately minimal (a fixed-position bar, not a general-purpose stack)
+// rather than introducing a new shared abstraction for a single call site.
+const UNDO_TOAST_TIMEOUT_MS = 8000;
+
+// Each toast gets its own UndoToastBar instance (keyed per toast object), so undo/hover/
+// focus state always starts fresh — no reset effect that could race a hover or focus
+// arriving before it runs.
+const undoToastKeys = new WeakMap<UndoToast, number>();
+let nextUndoToastKey = 0;
+
+function UndoToastView({ toast, onDismiss }: { toast: UndoToast | null; onDismiss: () => void }) {
+	if (!toast) return null;
+	let key = undoToastKeys.get(toast);
+	if (key === undefined) {
+		key = ++nextUndoToastKey;
+		undoToastKeys.set(toast, key);
+	}
+	return <UndoToastBar key={key} toast={toast} onDismiss={onDismiss} />;
+}
+
+function UndoToastBar({ toast, onDismiss }: { toast: UndoToast; onDismiss: () => void }) {
+	const [undoing, setUndoing] = useState(false);
+	const [undoError, setUndoError] = useState<string | null>(null);
+	const [hovered, setHovered] = useState(false);
+	const [focusWithin, setFocusWithin] = useState(false);
+	// Don't pull the toast out from under someone who is reading it, reaching for Undo
+	// with a keyboard, or waiting on an Undo already in progress. Any of those resets the
+	// countdown; it restarts in full once they're all false again.
+	const paused = undoing || hovered || focusWithin;
+
+	useEffect(() => {
+		if (paused) return;
+		const timer = setTimeout(onDismiss, UNDO_TOAST_TIMEOUT_MS);
+		return () => clearTimeout(timer);
+	}, [paused, onDismiss]);
+
+	const current = toast;
+
+	async function handleUndo() {
+		setUndoing(true);
+		setUndoError(null);
+		let result: string;
+		try {
+			result = await current.undo();
+		} catch (e) {
+			setUndoError(`Undo failed: ${String(e)}`);
+			setUndoing(false);
+			return;
+		}
+		onDismiss();
+		try {
+			await current.afterUndo?.(result);
+		} catch {
+			// The undo itself succeeded — a failed refresh afterwards isn't an undo failure.
+		}
+	}
+
+	return (
+		<div
+			role="status"
+			class={[
+				"fixed bottom-4 left-1/2 -translate-x-1/2 z-[200] flex items-center gap-3",
+				"bg-surface border border-border rounded shadow-lg px-4 py-3 text-sm text-text-base",
+			].join(" ")}
+			onMouseEnter={() => setHovered(true)}
+			onMouseLeave={() => setHovered(false)}
+			onFocusIn={() => setFocusWithin(true)}
+			onFocusOut={(e) => {
+				const next = e.relatedTarget;
+				if (!(next instanceof Node) || !e.currentTarget.contains(next)) setFocusWithin(false);
+			}}
+		>
+			<span>{undoError ?? current.message}</span>
+			{!undoError && (
+				<Button variant="outline" size="sm" onClick={handleUndo} disabled={undoing}>
+					{undoing ? "Undoing…" : "Undo"}
+				</Button>
+			)}
+			<button
+				type="button"
+				aria-label="Dismiss"
+				class="bg-transparent border-none cursor-pointer text-text-muted"
+				onClick={onDismiss}
+			>
+				×
+			</button>
+		</div>
+	);
 }
 
 export default function WikiPage({
@@ -3927,38 +4390,44 @@ export default function WikiPage({
 		searchLoading,
 		pageData,
 		createForm,
+		undoToast,
+		setUndoToast,
 	} = state;
 	const { navigateTo, startCreate, createProps, articleProps } = assembleWikiPageProps(
 		state,
 		workspaceSlug
 	);
+	const dismissUndoToast = useCallback(() => setUndoToast(null), [setUndoToast]);
 
 	if (gate.pending) return <AccessPending />;
 
 	return (
-		<WikiPageShell
-			workspaceSlug={workspaceSlug}
-			projectId={projectId}
-			searchQuery={searchQuery}
-			onSearchQueryChange={setSearchQuery}
-			searchResults={searchResults}
-			searchLoading={searchLoading}
-			treeLoading={treeLoading}
-			pageTree={pageTree}
-			slug={slug}
-			onNavigate={navigateTo}
-			onCreate={() => startCreate(null)}
-			filters={filters}
-			stale={stale}
-			mainContentProps={{
-				creating: createForm.creating,
-				createProps,
-				slug,
-				loading: pageData.loading,
-				error: pageData.error,
-				page: pageData.page,
-				articleProps,
-			}}
-		/>
+		<>
+			<WikiPageShell
+				workspaceSlug={workspaceSlug}
+				projectId={projectId}
+				searchQuery={searchQuery}
+				onSearchQueryChange={setSearchQuery}
+				searchResults={searchResults}
+				searchLoading={searchLoading}
+				treeLoading={treeLoading}
+				pageTree={pageTree}
+				slug={slug}
+				onNavigate={navigateTo}
+				onCreate={() => startCreate(null)}
+				filters={filters}
+				stale={stale}
+				mainContentProps={{
+					creating: createForm.creating,
+					createProps,
+					slug,
+					loading: pageData.loading,
+					error: pageData.error,
+					page: pageData.page,
+					articleProps,
+				}}
+			/>
+			<UndoToastView toast={undoToast} onDismiss={dismissUndoToast} />
+		</>
 	);
 }

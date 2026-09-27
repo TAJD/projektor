@@ -6,10 +6,25 @@
 // revisions via apiFetch (which calls global fetch). The pattern: set the URL with
 // history.replaceState, override the default stub from setup.ts with
 // vi.stubGlobal, then await findBy* for the async state update.
-import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetProjectStoreForTests } from "../lib/project-context";
-import WikiPage, { type ServerDraft, type WikiPageData } from "./WikiPage";
+import * as markdownUtils from "../utils/markdown";
+import WikiPage, { assignHeadingIds, type ServerDraft, type WikiPageData } from "./WikiPage";
+
+// PROJ-860/PROJ-803: real marked/DOMPurify rendering (so headings, mermaid placeholders
+// etc. still show up in the DOM) wrapped in spies — `renderMdWithWikilinks`'s call count
+// is how PROJ-860's "typing in sidebar search causes 0 markdown parses" is asserted, and
+// `renderMermaidDiagrams` is mocked outright (PROJ-803's brief) since it dynamically
+// imports the real `mermaid` package, which isn't worth exercising here.
+vi.mock("../utils/markdown", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../utils/markdown")>();
+	return {
+		...actual,
+		renderMdWithWikilinks: vi.fn(actual.renderMdWithWikilinks),
+		renderMermaidDiagrams: vi.fn().mockResolvedValue(undefined),
+	};
+});
 
 const PAGE: WikiPageData = {
 	id: "w1",
@@ -89,6 +104,8 @@ async function movePageToOther(fetchMock: ReturnType<typeof mockFetchMovePage>) 
 
 beforeEach(() => {
 	history.replaceState(null, "", "/");
+	vi.mocked(markdownUtils.renderMdWithWikilinks).mockClear();
+	vi.mocked(markdownUtils.renderMermaidDiagrams).mockClear();
 });
 
 afterEach(() => {
@@ -1462,6 +1479,101 @@ describe("revision history: diff view + restore (PROJ-492)", () => {
 	});
 });
 
+// PROJ-808: restoring a revision while editing raced the edit's own save against the
+// restore's PUT, both built off the same base revision — whichever landed second 409'd
+// against a revision it created itself. Restore should be disabled (not merely racy)
+// while the page is being edited.
+describe("WikiPage — PROJ-808 Restore disabled while editing", () => {
+	const REVISION = {
+		id: "rev-old",
+		author_id: "u1",
+		author_name: "Ann",
+		created_at: 500,
+		summary: "Fixed a typo",
+	};
+
+	function mockFetchWithRevisionForEditing() {
+		return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (/\/revisions\/rev-old$/.test(u)) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ ...REVISION, content: "old content" }),
+				});
+			}
+			if (u.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve({ user: { id: "u1", email: "real-user@example.com", name: "User" } }),
+				});
+			}
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([REVISION]) });
+			}
+			if (u.includes("/tree")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (init?.method === "PUT") {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve({ ...PAGE }) });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+	}
+
+	it("disables Restore with an explanatory tooltip once the page enters edit mode", async () => {
+		const fetchMock = mockFetchWithRevisionForEditing();
+		vi.stubGlobal("fetch", fetchMock);
+		// Accept any confirm() — otherwise jsdom's default (false) would stop restore()
+		// before its PUT, and "no PUT went out" below would hold whether or not Restore is
+		// actually blocked while editing. Cleared because earlier tests leave the spy on.
+		const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+		confirmSpy.mockClear();
+		try {
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			fireEvent.click(screen.getByRole("button", { name: /History/i }));
+			const restoreButton = await screen.findByRole("button", { name: "Restore" });
+			expect(restoreButton.hasAttribute("disabled")).toBe(false);
+
+			fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+			expect(restoreButton.hasAttribute("disabled")).toBe(true);
+			expect(restoreButton.getAttribute("title")).toMatch(/before restoring/i);
+
+			fireEvent.click(restoreButton);
+			// Give a (wrongly) started restore time to fetch the old revision and PUT it.
+			await new Promise((r) => setTimeout(r, 50));
+			expect(confirmSpy).not.toHaveBeenCalled();
+			expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith("/revisions/rev-old"))).toBe(
+				false
+			);
+			expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+		} finally {
+			confirmSpy.mockRestore();
+		}
+	});
+
+	it("re-enables Restore once editing is cancelled", async () => {
+		const fetchMock = mockFetchWithRevisionForEditing();
+		vi.stubGlobal("fetch", fetchMock);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: /History/i }));
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+		const restoreButtonWhileEditing = await screen.findByRole("button", { name: "Restore" });
+		expect(restoreButtonWhileEditing.hasAttribute("disabled")).toBe(true);
+
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		const restoreButtonAfterCancel = await screen.findByRole("button", { name: "Restore" });
+		expect(restoreButtonAfterCancel.hasAttribute("disabled")).toBe(false);
+	});
+});
+
 // PROJ-494: inline image paste/drag upload + attachment referenced/orphaned badge.
 describe("WikiPage — inline images & attachment badges (PROJ-494)", () => {
 	const REFERENCED_ID = "att-referenced";
@@ -1872,5 +1984,1036 @@ describe("out-of-order page/revision responses (PROJ-801)", () => {
 			expect(String(putCall?.[0])).toContain("/api/wiki/page-b");
 			expect(JSON.parse(putCall?.[1].body)).toMatchObject({ baseRevisionId: "rev-b" });
 		});
+	});
+});
+
+describe("WikiPage — PROJ-860 memoised markdown rendering", () => {
+	it("does not re-parse the article body when typing in the sidebar search", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const callsAfterMount = vi.mocked(markdownUtils.renderMdWithWikilinks).mock.calls.length;
+		expect(callsAfterMount).toBeGreaterThan(0);
+
+		const searchInput = screen.getByLabelText(/Search wiki pages/i);
+		fireEvent.input(searchInput, { target: { value: "a" } });
+		fireEvent.input(searchInput, { target: { value: "ab" } });
+		fireEvent.input(searchInput, { target: { value: "abc" } });
+		// Let the debounced search fire and its response land, so any re-render it
+		// triggers has already happened by the time we assert.
+		await new Promise((r) => setTimeout(r, 350));
+
+		expect(vi.mocked(markdownUtils.renderMdWithWikilinks).mock.calls.length).toBe(callsAfterMount);
+	});
+
+	// The page usually lands before the tree (the tree is a bigger response), and the
+	// wikilink title map comes from the tree — so the tree's arrival is the one legitimate
+	// reason to re-render an unchanged page body. It must re-render exactly once, and the
+	// post-render work (heading ids, mermaid) must follow the new HTML.
+	it("re-renders exactly once when the tree arrives after the page, then reapplies ids and mermaid", async () => {
+		const LINKED_PAGE: WikiPageData = {
+			...PAGE,
+			content: "## Setup\n\nSee [[Other Page]].\n\n```mermaid\ngraph TD\nA --> B\n```\n",
+		};
+		let resolveTree: (v: unknown) => void = () => {};
+		const treeResponse = new Promise((r) => {
+			resolveTree = r;
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/tree")) return treeResponse;
+				if (u.includes("/revisions"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(LINKED_PAGE) });
+			})
+		);
+		const renderMd = vi.mocked(markdownUtils.renderMdWithWikilinks);
+		const mermaid = vi.mocked(markdownUtils.renderMermaidDiagrams);
+
+		render(<WikiPage slug="my-page" />);
+		await screen.findByRole("heading", { name: "My Page" });
+		await waitFor(() => expect(document.getElementById("setup")).toBeTruthy());
+		// No tree yet, so [[Other Page]] can't resolve and renders as a broken link.
+		expect(document.querySelector(".wiki-link-broken")).toBeTruthy();
+		await waitFor(() => expect(mermaid).toHaveBeenCalled());
+		const parsesBeforeTree = renderMd.mock.calls.length;
+		const mermaidBeforeTree = mermaid.mock.calls.length;
+
+		resolveTree({
+			ok: true,
+			json: () =>
+				Promise.resolve([
+					{ id: "w1", slug: "my-page", title: "My Page", type: null, children: [] },
+					{ id: "w2", slug: "other-page", title: "Other Page", type: null, children: [] },
+				]),
+		});
+
+		const link = await waitFor(() => {
+			const a = document.querySelector('.prose a[href="/wiki/other-page"]');
+			expect(a).toBeTruthy();
+			return a;
+		});
+		expect(link?.textContent).toBe("Other Page");
+		// Replacing innerHTML dropped the old heading ids; the TOC effect must put them back
+		// on the new nodes, and mermaid must hydrate the new placeholder.
+		await waitFor(() => {
+			expect(document.getElementById("setup")?.tagName).toBe("H2");
+			expect(mermaid.mock.calls.length).toBeGreaterThan(mermaidBeforeTree);
+		});
+		expect(renderMd.mock.calls.length).toBe(parsesBeforeTree + 1);
+	});
+});
+
+describe("WikiPage — PROJ-803 post-render effects survive remounts", () => {
+	// Three headings so the TOC renders (it needs >= 3), a mermaid block, and a verify
+	// signal so the Verify button is offered.
+	const REMOUNT_PAGE: WikiPageData = {
+		...PAGE,
+		content:
+			"# Title\n\n## Setup\n\nText.\n\n## Usage\n\nText.\n\n```mermaid\ngraph TD\nA --> B\n```\n",
+		verify_interval: 30,
+		verified_at: 1_000_000,
+		freshness: { state: "stale", staleSince: 1_000_000 + 30 * 86400 },
+	};
+	const mermaid = vi.mocked(markdownUtils.renderMermaidDiagrams);
+
+	beforeEach(() => {
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				observe() {}
+				unobserve() {}
+				disconnect() {}
+			}
+		);
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+				const u = String(url);
+				if (u.includes("/revisions"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				if (u.includes("/tree")) {
+					const other = { id: "w2", slug: "other-page", title: "Other Page", children: [] };
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([other]) });
+				}
+				if (u.includes("/verify") && init?.method === "POST") {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve({ ok: true, verifiedAt: 2_000_000 }),
+					});
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(REMOUNT_PAGE) });
+			})
+		);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	// The bug: after a remount the TOC still held ids that only existed on the old,
+	// detached heading nodes, so every TOC link pointed nowhere; and mermaid never ran
+	// on the new node, leaving the raw code block.
+	async function expectPostRenderWorkApplied(mermaidCallsBefore: number) {
+		await waitFor(() => {
+			expect(mermaid.mock.calls.length).toBeGreaterThan(mermaidCallsBefore);
+			const content = document.querySelector(".prose");
+			expect(content).toBeTruthy();
+			// The latest mermaid call was handed the live content div, not a detached one.
+			expect(mermaid.mock.calls.at(-1)?.[0]).toBe(content);
+			const toc = screen.getByRole("navigation", { name: "Table of contents" });
+			const hrefs = within(toc)
+				.getAllByRole("link")
+				.map((a) => a.getAttribute("href") ?? "");
+			expect(hrefs).toEqual(["#title", "#setup", "#usage"]);
+			for (const href of hrefs) {
+				const target = document.getElementById(href.slice(1));
+				expect(target && content?.contains(target)).toBe(true);
+			}
+		});
+	}
+
+	async function renderAndSettle() {
+		render(<WikiPage slug="my-page" />);
+		await screen.findByRole("heading", { name: "My Page" });
+		await expectPostRenderWorkApplied(0);
+		return mermaid.mock.calls.length;
+	}
+
+	// Verify/Move refetch asynchronously; until the refetch lands the old (correct) DOM is
+	// still there, so assert only once the content div has actually been replaced —
+	// otherwise the TOC checks would pass against the pre-action DOM.
+	async function waitForContentRemount(oldNode: Element | null) {
+		await waitFor(() => {
+			const current = document.querySelector(".prose");
+			expect(current).toBeTruthy();
+			expect(current).not.toBe(oldNode);
+		});
+	}
+
+	it("re-applies heading ids and mermaid after Cancel edit remounts the content div", async () => {
+		const before = await renderAndSettle();
+
+		// Editing swaps the rendered-content div for MarkdownEditor; Cancel brings back a
+		// fresh node even though page.content never changed.
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+		await expectPostRenderWorkApplied(before);
+	});
+
+	it("re-applies heading ids and mermaid after Verify refetches the page", async () => {
+		const before = await renderAndSettle();
+		const oldNode = document.querySelector(".prose");
+
+		fireEvent.click(screen.getByRole("button", { name: "Verify" }));
+
+		await waitForContentRemount(oldNode);
+		await expectPostRenderWorkApplied(before);
+	});
+
+	it("re-applies heading ids and mermaid after Move refetches the page", async () => {
+		const before = await renderAndSettle();
+		const oldNode = document.querySelector(".prose");
+
+		fireEvent.click(screen.getByRole("button", { name: "Move" }));
+		fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
+		fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
+		const moveButtons = screen.getAllByRole("button", { name: "Move" });
+		fireEvent.click(moveButtons[moveButtons.length - 1]);
+
+		await waitForContentRemount(oldNode);
+		await expectPostRenderWorkApplied(before);
+	});
+});
+
+describe("WikiPage — PROJ-802 hash link scroll on load/nav/back-forward", () => {
+	// Three headings so the ToC's IntersectionObserver effect also runs — jsdom has no
+	// real IntersectionObserver, so it needs a stub.
+	const HEADINGS_PAGE: WikiPageData = {
+		...PAGE,
+		content:
+			"# Title\n\n## Setup\n\nSetup text.\n\n## Usage\n\nUsage text.\n\n## Notes\n\nMore text.",
+	};
+
+	let scrollIntoView: ReturnType<typeof vi.fn>;
+	// biome-ignore lint/suspicious/noExplicitAny: jsdom doesn't implement scrollIntoView at all.
+	const originalScrollIntoView = (Element.prototype as any).scrollIntoView;
+
+	beforeEach(() => {
+		scrollIntoView = vi.fn();
+		// biome-ignore lint/suspicious/noExplicitAny: jsdom doesn't implement scrollIntoView at all.
+		(Element.prototype as any).scrollIntoView = scrollIntoView;
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				observe() {}
+				unobserve() {}
+				disconnect() {}
+			}
+		);
+	});
+
+	afterEach(() => {
+		// biome-ignore lint/suspicious/noExplicitAny: matches the cast above.
+		(Element.prototype as any).scrollIntoView = originalScrollIntoView;
+		vi.unstubAllGlobals();
+	});
+
+	it("scrolls to and focuses the heading matching location.hash once it renders", async () => {
+		history.replaceState(null, "", "/wiki/my-page#setup");
+		mockFetchWiki(HEADINGS_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		await waitFor(() => {
+			expect(scrollIntoView).toHaveBeenCalled();
+		});
+		const heading = document.getElementById("setup");
+		expect(heading).toBeTruthy();
+		expect(heading?.getAttribute("tabindex")).toBe("-1");
+		expect(document.activeElement).toBe(heading);
+	});
+
+	it("scrolls again on hashchange (in-app navigation) and on popstate (Back/Forward)", async () => {
+		mockFetchWiki(HEADINGS_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => expect(document.getElementById("usage")).toBeTruthy());
+
+		history.replaceState(null, "", "/wiki/my-page#usage");
+		window.dispatchEvent(new Event("hashchange"));
+		await waitFor(() => {
+			expect(document.activeElement).toBe(document.getElementById("usage"));
+		});
+
+		history.replaceState(null, "", "/wiki/my-page#notes");
+		window.dispatchEvent(new PopStateEvent("popstate"));
+		await waitFor(() => {
+			expect(document.activeElement).toBe(document.getElementById("notes"));
+		});
+	});
+
+	it("does not re-scroll or steal focus when the TOC rebuilds on the same page and hash", async () => {
+		history.replaceState(null, "", "/wiki/my-page#usage");
+		mockFetchWiki(HEADINGS_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => {
+			expect(document.activeElement).toBe(document.getElementById("usage"));
+		});
+		const scrollsAfterLoad = scrollIntoView.mock.calls.length;
+
+		// Edit → Cancel remounts the content and rebuilds the TOC (PROJ-803) without any
+		// navigation having happened. The user is working with the Edit/Cancel buttons;
+		// yanking them back to #usage (and moving focus there) is the bug.
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+		const editButton = screen.getByRole("button", { name: "Edit" });
+		editButton.focus();
+		// Wait until the rebuilt content has its ids again, i.e. the TOC rebuild happened.
+		await waitFor(() => expect(document.getElementById("usage")?.tagName).toBe("H2"));
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(scrollIntoView.mock.calls.length).toBe(scrollsAfterLoad);
+		expect(document.activeElement).toBe(editButton);
+
+		// A real navigation back to the same hash still scrolls again.
+		window.dispatchEvent(new Event("hashchange"));
+		await waitFor(() => {
+			expect(scrollIntoView.mock.calls.length).toBe(scrollsAfterLoad + 1);
+			expect(document.activeElement).toBe(document.getElementById("usage"));
+		});
+	});
+
+	it("only scrolls to targets inside the page content, not ids elsewhere on the page", async () => {
+		// The sidebar drawer carries id="wiki-page-tree" — a hash naming it must not scroll
+		// the sidebar into view or focus it.
+		history.replaceState(null, "", "/wiki/my-page#wiki-page-tree");
+		mockFetchWiki(HEADINGS_PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		await waitFor(() => expect(document.getElementById("usage")).toBeTruthy());
+		expect(document.getElementById("wiki-page-tree")).toBeTruthy();
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(scrollIntoView).not.toHaveBeenCalled();
+		expect(document.activeElement).not.toBe(document.getElementById("wiki-page-tree"));
+	});
+});
+
+describe("assignHeadingIds (PROJ-804)", () => {
+	it("gives repeated heading text de-duplicated suffixes", () => {
+		expect(
+			assignHeadingIds([{ text: "Overview" }, { text: "Setup" }, { text: "Overview" }])
+		).toEqual(["overview", "setup", "overview-1"]);
+	});
+
+	it("falls back to section-N (never an empty id) when text produces an empty slug", () => {
+		expect(assignHeadingIds([{ text: "Setup" }, { text: "---" }, { text: "" }])).toEqual([
+			"setup",
+			"section-2",
+			"section-3",
+		]);
+	});
+
+	it("still de-dupes a section-N fallback against a heading literally titled that", () => {
+		expect(assignHeadingIds([{ text: "Section 2" }, { text: "" }])).toEqual([
+			"section-2",
+			"section-2-1",
+		]);
+	});
+
+	it("never hands out a suffixed id that a later heading's own text already produces", () => {
+		const ids = assignHeadingIds([
+			{ text: "Overview" },
+			{ text: "Overview" },
+			{ text: "Overview 1" },
+		]);
+		expect(ids).toEqual(["overview", "overview-1", "overview-1-1"]);
+		expect(new Set(ids).size).toBe(ids.length);
+
+		// Same collision with the order reversed: the suffix skips the taken id.
+		expect(
+			assignHeadingIds([{ text: "Overview 1" }, { text: "Overview" }, { text: "Overview" }])
+		).toEqual(["overview-1", "overview", "overview-2"]);
+	});
+
+	it("keeps authored ids and steers generated ones around them", () => {
+		expect(
+			assignHeadingIds([
+				{ text: "Setup" }, // would be `setup`, but an author claimed that below
+				{ text: "Install", id: "setup" },
+				{ text: "Custom anchor", id: "my-anchor" },
+				{ text: "My anchor" }, // slugs to `my-anchor`, which is taken
+			])
+		).toEqual(["setup-1", "setup", "my-anchor", "my-anchor-1"]);
+	});
+
+	it("re-suffixes only a repeated authored id, and is a no-op on ids it already assigned", () => {
+		expect(
+			assignHeadingIds([
+				{ text: "A", id: "dup" },
+				{ text: "B", id: "dup" },
+			])
+		).toEqual(["dup", "dup-1"]);
+
+		const first = assignHeadingIds([{ text: "Overview" }, { text: "Overview" }, { text: "" }]);
+		const again = assignHeadingIds(
+			[{ text: "Overview" }, { text: "Overview" }, { text: "" }].map((h, i) => ({
+				...h,
+				id: first[i],
+			}))
+		);
+		expect(again).toEqual(first);
+	});
+});
+
+describe("WikiPage — PROJ-804 duplicate/empty heading ids in the rendered TOC", () => {
+	beforeEach(() => {
+		// Three headings mean the ToC's IntersectionObserver effect also runs — jsdom has
+		// no real IntersectionObserver, so it needs a stub (see PROJ-802's describe block).
+		vi.stubGlobal(
+			"IntersectionObserver",
+			class {
+				observe() {}
+				unobserve() {}
+				disconnect() {}
+			}
+		);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("renders unique anchors and TOC entries for duplicate and blank headings", async () => {
+		mockFetchWiki({
+			...PAGE,
+			content: "# Overview\n\nIntro.\n\n## Setup\n\nSetup text.\n\n## Overview\n\nMore text.",
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		await waitFor(() => {
+			expect(document.querySelectorAll('[id="overview"]')).toHaveLength(1);
+			expect(document.querySelectorAll('[id="overview-1"]')).toHaveLength(1);
+		});
+		const toc = within(screen.getByRole("navigation", { name: "Table of contents" }));
+		expect(toc.getByRole("link", { name: "Setup" }).getAttribute("href")).toBe("#setup");
+		const overviewLinks = toc.getAllByRole("link", { name: "Overview" });
+		expect(overviewLinks.map((a) => a.getAttribute("href")).sort()).toEqual([
+			"#overview",
+			"#overview-1",
+		]);
+	});
+
+	it("keeps an authored heading id from the markdown instead of overwriting it", async () => {
+		mockFetchWiki({
+			...PAGE,
+			content:
+				'# Guide\n\n<h2 id="install-guide">Install</h2>\n\nText.\n\n## Overview\n\nText.\n\n## Overview 1\n\nText.\n\n## Overview\n\nText.',
+		});
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		await waitFor(() => {
+			expect(document.getElementById("install-guide")?.textContent).toBe("Install");
+		});
+		const toc = within(screen.getByRole("navigation", { name: "Table of contents" }));
+		expect(toc.getByRole("link", { name: "Install" }).getAttribute("href")).toBe("#install-guide");
+		const hrefs = toc.getAllByRole("link").map((a) => a.getAttribute("href"));
+		expect(hrefs).toEqual(["#guide", "#install-guide", "#overview", "#overview-1", "#overview-2"]);
+		// Every heading id in the article is unique.
+		const headingIds = Array.from(document.querySelectorAll(".prose :is(h1, h2, h3)")).map(
+			(h) => h.id
+		);
+		expect(new Set(headingIds).size).toBe(headingIds.length);
+	});
+});
+
+describe("WikiPage — PROJ-805 stale sidebar search responses", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	function searchResult(id: string, title: string) {
+		return {
+			id,
+			slug: id,
+			title,
+			project_id: null,
+			excerpt: null,
+			type: null,
+			status: null,
+			tags: [] as string[],
+			freshness: null,
+		};
+	}
+
+	it("discards a slower response for an earlier query once a newer query's response has landed", async () => {
+		let resolveFirst: (v: unknown) => void = () => {};
+		const firstResponse = new Promise((r) => {
+			resolveFirst = r;
+		});
+
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = new URL(String(url), "http://localhost");
+			if (u.pathname.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ user: { id: "u1", email: "a@example.com", name: "A" } }),
+				});
+			}
+			if (u.pathname.includes("/revisions"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.pathname.includes("/tree"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.pathname === "/api/wiki/search") {
+				const q = u.searchParams.get("q");
+				if (q === "ab") return firstResponse; // slow — resolves later, below
+				if (q === "abc") {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([searchResult("r2", "Second Result")]),
+					});
+				}
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const searchInput = screen.getByLabelText(/Search wiki pages/i);
+		fireEvent.input(searchInput, { target: { value: "ab" } });
+		await vi.advanceTimersByTimeAsync(300); // "ab"'s debounce fires; its fetch is left in flight.
+
+		fireEvent.input(searchInput, { target: { value: "abc" } });
+		await vi.advanceTimersByTimeAsync(300); // "abc"'s debounce fires and its fetch resolves.
+
+		expect(await screen.findByText("Second Result")).toBeTruthy();
+
+		// The slow "ab" response finally arrives after "abc"'s has already landed — it
+		// must not overwrite the newer, already-displayed results.
+		resolveFirst({
+			ok: true,
+			json: () => Promise.resolve([searchResult("r1", "First Result")]),
+		});
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(screen.queryByText("First Result")).toBeNull();
+		expect(screen.getByText("Second Result")).toBeTruthy();
+	});
+
+	function listItem(id: string, title: string) {
+		return { id, slug: id, title, type: null, status: null, tags: [] as string[] };
+	}
+
+	it("discards a slower filter response for an earlier tag filter once a newer one has landed", async () => {
+		let resolveFirst: (v: unknown) => void = () => {};
+		const firstResponse = new Promise((r) => {
+			resolveFirst = r;
+		});
+
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = new URL(String(url), "http://localhost");
+			if (u.pathname.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () => Promise.resolve({ user: { id: "u1", email: "a@example.com", name: "A" } }),
+				});
+			}
+			if (u.pathname.includes("/revisions"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.pathname.includes("/tree"))
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			if (u.pathname === "/api/wiki" && u.searchParams.has("tags")) {
+				const tags = u.searchParams.get("tags");
+				if (tags === "ab") return firstResponse; // slow — resolves later, below
+				if (tags === "abc") {
+					return Promise.resolve({
+						ok: true,
+						json: () => Promise.resolve([listItem("f2", "Second Filtered")]),
+					});
+				}
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const tagsInput = screen.getByLabelText(/Filter wiki pages by tags/i);
+		fireEvent.input(tagsInput, { target: { value: "ab" } });
+		await vi.advanceTimersByTimeAsync(300);
+
+		fireEvent.input(tagsInput, { target: { value: "abc" } });
+		await vi.advanceTimersByTimeAsync(300);
+
+		expect(await screen.findByText("Second Filtered")).toBeTruthy();
+
+		resolveFirst({
+			ok: true,
+			json: () => Promise.resolve([listItem("f1", "First Filtered")]),
+		});
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(screen.queryByText("First Filtered")).toBeNull();
+		expect(screen.getByText("Second Filtered")).toBeTruthy();
+	});
+
+	// The first two tests only cover a stale response landing *after* the newer one. It
+	// can also land while the newer input's debounce is still pending — before any newer
+	// request exists to out-rank it — and used to be applied then (clearing the loading
+	// state and showing results for input the user has already changed).
+	function mockFetchWithSlowFirst(
+		match: (u: URL) => string | null,
+		slowKey: string,
+		fastKey: string,
+		fastBody: unknown
+	) {
+		let resolveSlow: (v: unknown) => void = () => {};
+		const slow = new Promise((r) => {
+			resolveSlow = r;
+		});
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = new URL(String(url), "http://localhost");
+				if (u.pathname.includes("/revisions") || u.pathname.includes("/tree"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				const key = match(u);
+				if (key === slowKey) return slow;
+				if (key === fastKey)
+					return Promise.resolve({ ok: true, json: () => Promise.resolve(fastBody) });
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+			})
+		);
+		return (body: unknown) => resolveSlow({ ok: true, json: () => Promise.resolve(body) });
+	}
+
+	it("drops an in-flight search response once the query changes, even before the new debounce fires", async () => {
+		const resolveSlow = mockFetchWithSlowFirst(
+			(u) => (u.pathname === "/api/wiki/search" ? u.searchParams.get("q") : null),
+			"ab",
+			"abc",
+			[searchResult("r2", "Second Result")]
+		);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const searchInput = screen.getByLabelText(/Search wiki pages/i);
+		fireEvent.input(searchInput, { target: { value: "ab" } });
+		await vi.advanceTimersByTimeAsync(300); // "ab" is now in flight.
+		fireEvent.input(searchInput, { target: { value: "abc" } }); // debounce pending.
+
+		resolveSlow([searchResult("r1", "First Result")]);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByText("First Result")).toBeNull();
+		expect(screen.getByText("Searching…")).toBeTruthy();
+
+		await vi.advanceTimersByTimeAsync(300);
+		expect(await screen.findByText("Second Result")).toBeTruthy();
+		expect(screen.queryByText("First Result")).toBeNull();
+	});
+
+	it("drops an in-flight filter response once the filter changes, even before the new debounce fires", async () => {
+		const resolveSlow = mockFetchWithSlowFirst(
+			(u) => (u.pathname === "/api/wiki" ? u.searchParams.get("tags") : null),
+			"ab",
+			"abc",
+			[listItem("f2", "Second Filtered")]
+		);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const tagsInput = screen.getByLabelText(/Filter wiki pages by tags/i);
+		fireEvent.input(tagsInput, { target: { value: "ab" } });
+		await vi.advanceTimersByTimeAsync(300);
+		fireEvent.input(tagsInput, { target: { value: "abc" } });
+
+		resolveSlow([listItem("f1", "First Filtered")]);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByText("First Filtered")).toBeNull();
+
+		await vi.advanceTimersByTimeAsync(300);
+		expect(await screen.findByText("Second Filtered")).toBeTruthy();
+		expect(screen.queryByText("First Filtered")).toBeNull();
+	});
+});
+
+describe("WikiPage — PROJ-806 a11y: closed drawer, menu, tree, breadcrumb", () => {
+	it("keeps the closed mobile drawer inert and does not move focus to it on initial mount", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			const drawer = document.getElementById("wiki-page-tree");
+			expect(drawer).toBeTruthy();
+			expect(drawer?.hasAttribute("inert")).toBe(true);
+			// The "Pages" trigger must not have received focus just because the page loaded.
+			expect(document.activeElement).not.toBe(screen.getByRole("button", { name: "Pages" }));
+		} finally {
+			restore();
+		}
+	});
+
+	it("is not inert once opened, and is inert again after closing", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			const trigger = screen.getByRole("button", { name: "Pages" });
+			const drawer = document.getElementById("wiki-page-tree");
+
+			fireEvent.click(trigger);
+			expect(drawer?.hasAttribute("inert")).toBe(false);
+
+			fireEvent.click(trigger);
+			expect(drawer?.hasAttribute("inert")).toBe(true);
+		} finally {
+			restore();
+		}
+	});
+
+	it("marks the current page's tree item with aria-current=page", async () => {
+		const treeNode = {
+			id: "w1",
+			slug: "my-page",
+			title: "My Page",
+			type: null,
+			children: [{ id: "w2", slug: "other-page", title: "Other Page", type: null, children: [] }],
+		};
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockImplementation((url: string) => {
+				const u = String(url);
+				if (u.includes("/tree"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([treeNode]) });
+				if (u.includes("/revisions"))
+					return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+				return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+			})
+		);
+		render(<WikiPage slug="my-page" />);
+		// The tree also has a "My Page" node, so this waits on the heading specifically
+		// rather than plain text (which would match both and fail as ambiguous).
+		await screen.findByRole("heading", { name: "My Page" });
+
+		await waitFor(() => {
+			expect(screen.getByRole("button", { name: "My Page" }).getAttribute("aria-current")).toBe(
+				"page"
+			);
+		});
+		expect(
+			screen.getByRole("button", { name: /Other Page/ }).getAttribute("aria-current")
+		).toBeNull();
+	});
+
+	it("moves focus into the ⋯ menu on open and supports ArrowDown/ArrowUp navigation", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+
+			fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+			const childItem = await screen.findByRole("menuitem", { name: "+ Child page" });
+			const moveItem = screen.getByRole("menuitem", { name: "Move" });
+			const deleteItem = screen.getByRole("menuitem", { name: "Delete" });
+
+			expect(document.activeElement).toBe(childItem);
+
+			fireEvent.keyDown(childItem, { key: "ArrowDown" });
+			expect(document.activeElement).toBe(moveItem);
+
+			fireEvent.keyDown(moveItem, { key: "ArrowDown" });
+			expect(document.activeElement).toBe(deleteItem);
+
+			// Wraps back to the first item.
+			fireEvent.keyDown(deleteItem, { key: "ArrowDown" });
+			expect(document.activeElement).toBe(childItem);
+
+			fireEvent.keyDown(childItem, { key: "ArrowUp" });
+			expect(document.activeElement).toBe(deleteItem);
+		} finally {
+			restore();
+		}
+	});
+
+	it("keeps menu items out of the Tab order and closes the menu back to its trigger on Tab, Escape, or an action", async () => {
+		const restore = mockMobileViewport();
+		try {
+			mockFetchWiki(PAGE);
+			render(<WikiPage slug="my-page" />);
+			await screen.findByText("My Page");
+			const trigger = screen.getByRole("button", { name: "More page actions" });
+
+			fireEvent.click(trigger);
+			const items = await screen.findAllByRole("menuitem");
+			expect(items.map((i) => i.getAttribute("tabindex"))).toEqual(["-1", "-1", "-1"]);
+
+			// Tab closes the menu and lands back on ⋯ (not wherever the portal sits).
+			fireEvent.keyDown(document.activeElement ?? document.body, { key: "Tab" });
+			expect(screen.queryByRole("menu")).toBeNull();
+			expect(document.activeElement).toBe(trigger);
+
+			fireEvent.click(trigger);
+			await screen.findByRole("menu");
+			fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+			expect(screen.queryByRole("menu")).toBeNull();
+			expect(document.activeElement).toBe(trigger);
+
+			// Choosing an action unmounts the focused item; focus returns to ⋯ rather than
+			// falling to <body>.
+			fireEvent.click(trigger);
+			fireEvent.click(await screen.findByRole("menuitem", { name: "Move" }));
+			expect(screen.queryByRole("menu")).toBeNull();
+			expect(await screen.findByRole("combobox", { name: /new parent page/i })).toBeTruthy();
+			expect(document.activeElement).toBe(trigger);
+		} finally {
+			restore();
+		}
+	});
+
+	it("delays the closed drawer's visibility:hidden until its slide-out transition finishes", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		const css = Array.from(document.querySelectorAll("style"))
+			.map((el) => el.textContent ?? "")
+			.find((text) => text.includes(".wiki-sidebar.wiki-sidebar-open"));
+		expect(css).toBeTruthy();
+		const rule = (selector: string) =>
+			css?.match(new RegExp(`${selector.replace(/\./g, "\\.")}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+		const closed = rule(".wiki-sidebar");
+		const opened = rule(".wiki-sidebar.wiki-sidebar-open");
+		expect(closed).toMatch(/visibility:\s*hidden/);
+		expect(closed).toMatch(/transition:[^;]*visibility 0s linear 0\.22s/);
+		expect(opened).toMatch(/transition:[^;]*visibility 0s linear 0s/);
+	});
+});
+
+// PROJ-807: the delete confirmation used to say "This cannot be undone" even though the
+// backend soft-deletes into a 30-day trash with an undelete endpoint. The dialog copy
+// should say so, and a successful delete should offer an in-page Undo rather than
+// forcing the user straight to the trash view to recover.
+describe("WikiPage — PROJ-807 delete confirmation wording + undo toast", () => {
+	const UNDELETED = { ok: true, id: "w1", slug: "my-page", url: "/wiki/my-page", restoredCount: 2 };
+
+	function mockFetchWikiWithDelete(
+		opts: Readonly<{
+			undelete?: Promise<unknown>;
+			treeFailsAfterUndelete?: boolean;
+		}> = {}
+	) {
+		let undeleted = false;
+		const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+			const u = String(url);
+			if (u.includes("/auth/me")) {
+				return Promise.resolve({
+					ok: true,
+					json: () =>
+						Promise.resolve({ user: { id: "u1", email: "real-user@example.com", name: "User" } }),
+				});
+			}
+			if (u.includes("/revisions")) {
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/tree")) {
+				if (undeleted && opts.treeFailsAfterUndelete) {
+					return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+				}
+				return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+			}
+			if (u.includes("/undelete")) {
+				undeleted = true;
+				return (
+					opts.undelete ?? Promise.resolve({ ok: true, json: () => Promise.resolve(UNDELETED) })
+				);
+			}
+			if (init?.method === "DELETE") {
+				return Promise.resolve({ ok: true, status: 204 });
+			}
+			return Promise.resolve({ ok: true, json: () => Promise.resolve(PAGE) });
+		});
+		vi.stubGlobal("fetch", fetchMock);
+		return fetchMock;
+	}
+
+	const callsTo = (fetchMock: ReturnType<typeof vi.fn>, method: string, match: RegExp) =>
+		fetchMock.mock.calls
+			.filter(([u, init]) => (init as RequestInit)?.method === method && match.test(String(u)))
+			.map(([u]) => String(u));
+
+	// Earlier tests in this file spy on window.confirm without restoring it (see the
+	// PROJ-796 restore-banner tests above) — vi.spyOn on an already-spied method reuses the
+	// same mock and its call history, so clear it before asserting call counts.
+	function mockConfirm(answer: boolean) {
+		const spy = vi.spyOn(window, "confirm").mockReturnValue(answer);
+		spy.mockClear();
+		return spy;
+	}
+
+	async function deleteMyPage() {
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		return screen.findByRole("status");
+	}
+
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	it("tells the user the page moves to trash for 30 days, not that deletion is permanent", async () => {
+		const fetchMock = mockFetchWikiWithDelete();
+		const confirmSpy = mockConfirm(false);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+		expect(confirmSpy).toHaveBeenCalledTimes(1);
+		const message = confirmSpy.mock.calls[0][0];
+		expect(message).toMatch(/trash/i);
+		expect(message).toMatch(/30 days/);
+		expect(message).not.toMatch(/cannot be undone/i);
+		// User declined the confirm() above — no DELETE should have been issued.
+		expect(callsTo(fetchMock, "DELETE", /./)).toEqual([]);
+	});
+
+	it("deletes with cascade=true, so the children really go to the trash with the page", async () => {
+		const fetchMock = mockFetchWikiWithDelete();
+		mockConfirm(true);
+		await deleteMyPage();
+
+		// Without cascade the API re-parents the children instead of trashing them — the
+		// dialog's "and any children" would be false and Undo couldn't restore the tree.
+		expect(callsTo(fetchMock, "DELETE", /^\/api\/wiki\//)).toEqual([
+			"/api/wiki/my-page?cascade=true",
+		]);
+	});
+
+	it("Undo POSTs the deleted page's id to the undelete endpoint and returns to the page", async () => {
+		const fetchMock = mockFetchWikiWithDelete();
+		mockConfirm(true);
+		const toast = await deleteMyPage();
+		expect(within(toast).getByText(/moved to trash/i)).toBeTruthy();
+		expect(window.location.pathname).toBe("/wiki");
+
+		fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+		await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+		// By id, not slug: a trashed page's slug may already belong to a live page.
+		expect(callsTo(fetchMock, "POST", /undelete/)).toEqual(["/api/wiki/trash/w1/undelete"]);
+		expect(window.location.pathname).toBe("/wiki/my-page");
+		expect(await screen.findByRole("heading", { name: "My Page" })).toBeTruthy();
+	});
+
+	it("keeps the toast and reports the failure when the undelete itself fails", async () => {
+		mockFetchWikiWithDelete({
+			undelete: Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) }),
+		});
+		mockConfirm(true);
+		const toast = await deleteMyPage();
+
+		fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+		expect(await within(toast).findByText(/Undo failed/)).toBeTruthy();
+		expect(screen.getByRole("status")).toBe(toast);
+		expect(window.location.pathname).toBe("/wiki");
+	});
+
+	it("does not report 'Undo failed' when the undelete succeeded but the tree refresh after it fails", async () => {
+		mockFetchWikiWithDelete({ treeFailsAfterUndelete: true });
+		mockConfirm(true);
+		const toast = await deleteMyPage();
+
+		fireEvent.click(within(toast).getByRole("button", { name: "Undo" }));
+
+		await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+		expect(screen.queryByText(/Undo failed/)).toBeNull();
+		expect(window.location.pathname).toBe("/wiki/my-page");
+	});
+
+	it("auto-dismisses after 8s, but not while hovered, focused, or while Undo is running", async () => {
+		vi.useFakeTimers();
+		let resolveUndelete: (v: unknown) => void = () => {};
+		mockFetchWikiWithDelete({
+			undelete: new Promise((r) => {
+				resolveUndelete = r;
+			}),
+		});
+		mockConfirm(true);
+		render(<WikiPage slug="my-page" />);
+		await vi.advanceTimersByTimeAsync(0);
+		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		// Let the toast mount and its (after-paint) timer effect run.
+		await vi.advanceTimersByTimeAsync(200);
+		const toast = screen.getByRole("status");
+
+		// Hovered: the countdown is suspended however long they read it…
+		fireEvent.mouseEnter(toast);
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(screen.queryByRole("status")).toBe(toast);
+		// …and restarts in full on leave.
+		fireEvent.mouseLeave(toast);
+		await vi.advanceTimersByTimeAsync(7_000);
+		expect(screen.queryByRole("status")).toBe(toast);
+
+		// Keyboard focus inside the toast pauses it too.
+		// (Real focus(): jsdom then fires genuine bubbling focusin/focusout.)
+		const undoButton = within(toast).getByRole("button", { name: "Undo" });
+		undoButton.focus();
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(screen.queryByRole("status")).toBe(toast);
+
+		// An Undo in flight keeps it up even once focus and pointer have left. (Focus
+		// moves to a real control outside the toast — the Undo button is disabled while
+		// running, and blur() on it is a no-op in jsdom.)
+		fireEvent.click(undoButton);
+		screen.getByLabelText(/Search wiki pages/i).focus();
+		expect(toast.contains(document.activeElement)).toBe(false);
+		await vi.advanceTimersByTimeAsync(20_000);
+		expect(screen.queryByRole("status")).toBe(toast);
+		expect(within(toast).getByText("Undoing…")).toBeTruthy();
+
+		resolveUndelete({ ok: true, json: () => Promise.resolve(UNDELETED) });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(screen.queryByRole("status")).toBeNull();
+	});
+
+	it("dismisses itself after 8s when left alone", async () => {
+		vi.useFakeTimers();
+		mockFetchWikiWithDelete();
+		mockConfirm(true);
+		render(<WikiPage slug="my-page" />);
+		await vi.advanceTimersByTimeAsync(0);
+		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		// Let the toast mount and its (after-paint) timer effect run.
+		await vi.advanceTimersByTimeAsync(200);
+		expect(screen.getByRole("status")).toBeTruthy();
+
+		await vi.advanceTimersByTimeAsync(7_500);
+		expect(screen.queryByRole("status")).toBeTruthy();
+		await vi.advanceTimersByTimeAsync(500);
+		expect(screen.queryByRole("status")).toBeNull();
 	});
 });

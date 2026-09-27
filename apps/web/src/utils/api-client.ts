@@ -218,3 +218,28 @@ async function apiFetchUncached<T>(path: string, opts: ApiFetchOpts, method: str
 	if (res.headers?.get?.("content-length") === "0") return undefined as T;
 	return res.json() as Promise<T>;
 }
+
+/** Response of `POST /api/wiki/trash/:id/undelete` (wikiService.undeleteWikiPage). */
+export interface UndeletedWikiPage {
+	ok: true;
+	id: string;
+	slug: string;
+	url: string;
+	/** The page plus every descendant trashed in the same cascade batch. */
+	restoredCount: number;
+}
+
+/**
+ * PROJ-807: restore a trashed wiki page. Undelete is by id (a trashed page's slug can
+ * already be reused by a live page) and restores the whole `trash_batch_id` batch, so a
+ * page deleted with `?cascade=true` comes back with its children.
+ */
+export function undeleteWikiPage(
+	pageId: string,
+	workspaceSlug?: string
+): Promise<UndeletedWikiPage> {
+	return apiFetch<UndeletedWikiPage>(`/api/wiki/trash/${encodeURIComponent(pageId)}/undelete`, {
+		method: "POST",
+		workspaceSlug,
+	});
+}
