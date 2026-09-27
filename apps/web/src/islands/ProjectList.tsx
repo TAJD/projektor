@@ -19,6 +19,7 @@ interface Project {
 	workspace_name: string;
 	workspace_slug: string;
 	open_issue_count: number;
+	backlog_issue_count: number;
 	archived_at: number | null;
 	created_at: number;
 	updated_at: number;
@@ -201,6 +202,7 @@ function useProjectCreateForm(workspaceSlug: string | undefined, onCreated: (p: 
 				workspace_name: "",
 				workspace_slug: workspaceSlug ?? "",
 				open_issue_count: 0,
+				backlog_issue_count: 0,
 				created_at: Math.floor(Date.now() / 1000),
 				updated_at: Math.floor(Date.now() / 1000),
 			});
@@ -230,9 +232,16 @@ function useProjectCreateForm(workspaceSlug: string | undefined, onCreated: (p: 
 }
 
 function ProjectCard({ project }: { project: Project }) {
-	const count = project.open_issue_count ?? 0;
+	const open = project.open_issue_count ?? 0;
+	const backlog = project.backlog_issue_count ?? 0;
+	// "open" on the tile excludes backlog (API open_issue_count includes it).
+	const active = open - backlog;
 	const countLabel =
-		count === 0 ? "No open issues" : `${count} open issue${count !== 1 ? "s" : ""}`;
+		open === 0
+			? "No open issues"
+			: backlog === 0
+				? `${active} open`
+				: `${active} open · ${backlog} backlog`;
 	const archived = project.archived_at != null;
 
 	return (

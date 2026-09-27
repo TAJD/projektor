@@ -66,6 +66,7 @@ import m0062 from "../../../../packages/db/migrations/0062_repair_zero_lead_time
 import m0063 from "../../../../packages/db/migrations/0063_wiki_title_fold.sql?raw";
 import m0064 from "../../../../packages/db/migrations/0064_strip_large_activity_diffs.sql?raw";
 import m0065 from "../../../../packages/db/migrations/0065_wiki_fts_rowid.sql?raw";
+import m0066 from "../../../../packages/db/migrations/0066_repair_status_category.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -134,4 +135,5 @@ export const MIGRATIONS = [
 	m0063,
 	m0064,
 	m0065,
+	m0066,
 ];

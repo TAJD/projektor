@@ -73,6 +73,7 @@ export interface ProjectSummary {
 	workspace_name: string;
 	workspace_slug: string;
 	open_issue_count: number;
+	backlog_issue_count: number;
 	archived_at: number | null;
 	created_at: number;
 	updated_at: number;
@@ -98,7 +99,10 @@ export async function listProjectsAcrossWorkspaces(
         w.name AS workspace_name,
         w.slug AS workspace_slug,
         COUNT(CASE WHEN COALESCE(NULLIF(i.status_category, ''), i.status) NOT IN ('done','cancelled') THEN 1 END)
-          AS open_issue_count
+          AS open_issue_count,
+        COUNT(CASE WHEN COALESCE(NULLIF(i.status_category, ''), i.status) NOT IN ('done','cancelled')
+                     AND i.status = 'backlog' THEN 1 END)
+          AS backlog_issue_count
       FROM projects p
       JOIN workspaces w         ON w.id  = p.workspace_id
       JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = ?

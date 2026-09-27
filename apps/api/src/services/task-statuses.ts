@@ -117,7 +117,7 @@ export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown
 	}
 
 	const existing = await orm
-		.select({ id: schema.taskStatuses.id })
+		.select({ id: schema.taskStatuses.id, category: schema.taskStatuses.category })
 		.from(schema.taskStatuses)
 		.where(
 			and(eq(schema.taskStatuses.id, id), eq(schema.taskStatuses.workspaceId, ctx.workspaceId))
@@ -125,12 +125,28 @@ export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown
 		.get();
 	if (!existing) throw new NotFoundError("Task status not found");
 
-	await orm
+	// PROJ-849: a status's category can change after issues already reference it by
+	// status_id — re-sync issues.status_category for every issue on this status in the
+	// same batch as the status update, so the two never drift (open/backlog tile counts
+	// and anything else reading status_category depend on it staying in sync).
+	const categoryChanged = setObj.category !== undefined && setObj.category !== existing.category;
+
+	const statusUpdate = orm
 		.update(schema.taskStatuses)
 		.set(setObj)
 		.where(
 			and(eq(schema.taskStatuses.id, id), eq(schema.taskStatuses.workspaceId, ctx.workspaceId))
 		);
+
+	if (categoryChanged) {
+		const issuesResync = orm
+			.update(schema.issues)
+			.set({ statusCategory: setObj.category as string })
+			.where(and(eq(schema.issues.statusId, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
+		await orm.batch([statusUpdate, issuesResync]);
+	} else {
+		await statusUpdate;
+	}
 
 	await invalidateTaskStatusesCache(ctx);
 	return { ok: true };

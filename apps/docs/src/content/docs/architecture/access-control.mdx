@@ -58,6 +58,13 @@ nothing — no projects, issues, or project wiki — until an admin adds them to
 group. This is the "access pending" state, and it is the whole point: membership
 is not access.
 
+The anonymous `PUBLIC_READ_ONLY` viewer follows the same rule (PROJ-581). It joins the
+default workspace as `viewer` and is placed in a **Public viewers** group (created without
+grants; an existing group of that name is adopted with whatever grants it has). To publish
+a project to anonymous visitors, grant it to that group; everything else stays private. The
+public viewer is capped at read whatever role the grant carries, so it can never write.
+Unpublish by removing the grant; the group membership is re-provisioned automatically.
+
 Workspace **owner/admin bypass groups entirely** and see everything. This
 preserves the `ADMIN_EMAILS` bootstrap and makes lockout impossible — there is
 always someone who can hand out the first grant.

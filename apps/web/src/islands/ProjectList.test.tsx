@@ -39,6 +39,7 @@ const PROJECT = {
 	workspace_name: "WS",
 	workspace_slug: "ws",
 	open_issue_count: 3,
+	backlog_issue_count: 0,
 	archived_at: null,
 	created_at: 0,
 	updated_at: 0,
@@ -57,12 +58,19 @@ describe("ProjectList", () => {
 		expect(await screen.findByText(/No projects yet/i)).toBeTruthy();
 	});
 
-	it("renders a card with the project name, key and open-issue count", async () => {
+	it("renders a card with the project name, key and open count when there's no backlog", async () => {
 		mockFetchOk([PROJECT]);
 		render(<ProjectList />);
 		expect(await screen.findByText("Projektor")).toBeTruthy();
 		expect(screen.getByText("PROJ")).toBeTruthy();
-		expect(screen.getByText("3 open issues")).toBeTruthy();
+		expect(screen.getByText("3 open")).toBeTruthy();
+	});
+
+	it("splits the count into open and backlog when the project has backlog issues (PROJ-849)", async () => {
+		mockFetchOk([{ ...PROJECT, open_issue_count: 10, backlog_issue_count: 4 }]);
+		render(<ProjectList />);
+		expect(await screen.findByText("Projektor")).toBeTruthy();
+		expect(screen.getByText("6 open · 4 backlog")).toBeTruthy();
 	});
 
 	it("shows an error message when the request fails", async () => {
