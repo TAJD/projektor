@@ -10,7 +10,8 @@
 		"test:coverage": "vitest run --coverage",
 		"test:e2e": "playwright test --grep-invert @long",
 		"test:e2e:long": "playwright test --grep @long",
-		"verify:sw": "node scripts/assert-sw.mjs"
+		"verify:sw": "node scripts/assert-sw.mjs",
+		"subset:fonts": "node scripts/subset-monaspace.mjs"
 	},
 	"dependencies": {
 		"@astrojs/preact": "^6.0.2",

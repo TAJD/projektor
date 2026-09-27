@@ -21,7 +21,9 @@
 
 :root {
 	--font-family-sans: "IBM Plex Sans Var", system-ui, -apple-system, sans-serif;
-	--font-family-mono: "Monaspace Neon", ui-monospace, "Cascadia Code", "Fira Code", monospace;
+	/* PROJ-861: "Projektor Mono" is our renamed subset of Monaspace Neon — see the
+	   @font-face in Base.astro / share/view.astro and apps/web/scripts/subset-monaspace.mjs. */
+	--font-family-mono: "Projektor Mono", ui-monospace, "Cascadia Code", "Fira Code", monospace;
 
 	--sidebar-width: 220px;
 	--sidebar-width-collapsed: 56px;
