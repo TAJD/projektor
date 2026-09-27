@@ -45,6 +45,24 @@ const SESSION_TTL_SECONDS = 120;
 
 const liveCutoff = () => Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 
+// PROJ-928: an agentless claim (agentId null — see loadActiveClaimsByPath) has no
+// heartbeat to judge staleness by, so it used to be treated as live forever, reclaimable
+// only via `force`. This TTL bounds that: after it elapses since claimedAt, the claim is
+// reclaimed by the next claimer the same way a dead agent's claim is. Configurable via
+// FILE_CLAIM_TTL_SECONDS (default 24h); invalid/non-positive values fall back to it.
+//
+// Fix-up: the raw env value is parsed once, in ctxFromHono, into ctx.config —
+// never carried on ServiceCtx as a whole, which (PluginContext being shared by every
+// service and MCP/plugin handler) would otherwise hand every tool every secret and
+// binding. This function is exported so ctxFromHono can reuse the same parsing/default
+// without duplicating it.
+export const DEFAULT_FILE_CLAIM_TTL_SECONDS = 24 * 60 * 60;
+
+export function parseFileClaimTtlSeconds(raw: string | undefined): number {
+	const n = Number(raw);
+	return Number.isFinite(n) && n > 0 ? n : DEFAULT_FILE_CLAIM_TTL_SECONDS;
+}
+
 type ActiveClaim = typeof schema.issueFileClaims.$inferSelect & { live: boolean };
 
 // inChunks keeps each query under D1's 100-bound-parameter cap. See services/sql.ts.
@@ -52,7 +70,8 @@ async function loadActiveClaimsByPath(
 	orm: ReturnType<typeof drizzle>,
 	workspaceId: string,
 	paths: string[],
-	cutoff: number
+	cutoff: number,
+	agentlessCutoff: number
 ): Promise<Map<string, ActiveClaim>> {
 	const activeClaims = await inChunks(paths, (chunk) =>
 		orm
@@ -87,12 +106,13 @@ async function loadActiveClaimsByPath(
 				...claim,
 				// agentId is nullable — a claim can be made without a session, and the
 				// agent_id FK is ON DELETE SET NULL. There is no heartbeat to judge those by,
-				// so they are treated as live and stay reclaimable only via `force`. Inferring
-				// staleness from claim age instead would reintroduce the TTL that this tier
-				// deliberately does not have.
+				// so staleness is judged by claim age instead (PROJ-928): live until
+				// FILE_CLAIM_TTL_SECONDS has elapsed since claimedAt, then reclaimable by the
+				// next claimer just like a claim whose agent session went stale.
 				live:
-					claim.agentId === null ||
-					(sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff),
+					claim.agentId === null
+						? claim.claimedAt > agentlessCutoff
+						: sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff,
 			},
 		])
 	);
@@ -215,8 +235,15 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	}
 
 	// Pre-check all paths for active claims — all-or-nothing on conflict.
-	const claimsByPath = await loadActiveClaimsByPath(orm, ctx.workspaceId, paths, liveCutoff());
 	const now = Math.floor(Date.now() / 1000);
+	const agentlessTtl = ctx.config?.fileClaimTtlSeconds ?? DEFAULT_FILE_CLAIM_TTL_SECONDS;
+	const claimsByPath = await loadActiveClaimsByPath(
+		orm,
+		ctx.workspaceId,
+		paths,
+		liveCutoff(),
+		now - agentlessTtl
+	);
 
 	// PROJ-636: split stale holders out before conflict evaluation — a dead holder neither
 	// blocks the claim nor lands in claim_conflicts. Same semantics as before reclaimStaleClaims
@@ -466,11 +493,15 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	);
 	if (vis) conditions.push(vis);
 
-	// PROJ-636: carries `live` for the same reason listIssueLeases does — false means the
-	// holder stopped heartbeating and the next claim on that path will reclaim it. Without
-	// it a reclaimable claim is indistinguishable from a held one, which would make the
-	// self-healing the docs now describe unobservable.
+	// PROJ-636/928: carries `live` for the same reason listIssueLeases does — false means
+	// the holder stopped heartbeating (or, for an agentless claim, its TTL elapsed) and the
+	// next claim on that path will reclaim it. Without it a reclaimable claim is
+	// indistinguishable from a held one, which would make the self-healing the docs now
+	// describe unobservable.
 	const cutoff = liveCutoff();
+	const agentlessCutoff =
+		Math.floor(Date.now() / 1000) -
+		(ctx.config?.fileClaimTtlSeconds ?? DEFAULT_FILE_CLAIM_TTL_SECONDS);
 	const rows = await orm
 		.select({
 			id: schema.issueFileClaims.id,
@@ -492,7 +523,9 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	const items = rows.map(({ sessionStatus, sessionHeartbeat, ...claim }) => ({
 		...claim,
 		live:
-			claim.agentId === null || (sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff),
+			claim.agentId === null
+				? claim.claimedAt > agentlessCutoff
+				: sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff,
 	}));
 
 	return { items };
@@ -520,4 +553,33 @@ export async function releaseClaimsForAgent(ctx: ServiceCtx, agentId: string) {
 				isNull(schema.issueFileClaims.releasedAt)
 			)
 		);
+}
+
+/**
+ * Build (without executing) the UPDATE that releases every active file claim on an
+ * issue when it moves to done/cancelled (PROJ-928), mirroring
+ * buildReleaseLeaseForClosedIssueStatement — a closed issue shouldn't keep files claimed
+ * against it. Distinct release_reason from releaseFiles' "released". Returned as a
+ * statement so the caller (updateIssue) folds it into its single ctx.db.batch().
+ */
+export function buildReleaseClaimsForClosedIssueStatement(
+	ctx: ServiceCtx,
+	issueId: string
+): D1PreparedStatement {
+	const orm = drizzle(ctx.db, { schema });
+	const now = Math.floor(Date.now() / 1000);
+	return toD1Statement(
+		ctx,
+		orm
+			.update(schema.issueFileClaims)
+			.set({ releasedAt: now, releaseReason: "issue_closed" })
+			.where(
+				and(
+					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+					eq(schema.issueFileClaims.issueId, issueId),
+					isNull(schema.issueFileClaims.releasedAt)
+				)
+			)
+			.toSQL()
+	);
 }

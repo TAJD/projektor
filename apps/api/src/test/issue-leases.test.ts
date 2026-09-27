@@ -411,4 +411,72 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		const res = await claim(second.id, agent);
 		expect(res.status).toBe(409);
 	});
+
+	// PROJ-928: moving an issue to done/cancelled releases its lease (release_reason
+	// "issue_closed") so a closed issue doesn't keep blocking the fleet's WIP cap on a
+	// lease no one is still working.
+	describe("PROJ-928: issue close releases its lease", () => {
+		function patchStatus(id: string, status: string, completionReport?: object) {
+			return SELF.fetch(`http://localhost/api/issues/${id}`, {
+				method: "PATCH",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify(completionReport ? { status, completionReport } : { status }),
+			});
+		}
+		// An issue an agent held a lease on requires a completion report to close as done.
+		const REPORT = { summary: "Done", verification: "pnpm test" };
+
+		it("marking a leased issue done releases its lease", async () => {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Closes done" });
+			const a1 = await registerAgent("a1");
+			expect((await claim(issue.id, a1)).status).toBe(201);
+
+			expect((await patchStatus(issue.id, "done", REPORT)).status).toBe(200);
+
+			const leases = await env.DB.prepare(
+				"SELECT release_reason FROM issue_leases WHERE issue_id = ? AND released_at IS NOT NULL"
+			)
+				.bind(issue.id)
+				.first<{ release_reason: string }>();
+			expect(leases?.release_reason).toBe("issue_closed");
+
+			// Freed for another agent to pick up (e.g. reopened and reworked).
+			const a2 = await registerAgent("a2");
+			expect((await claim(issue.id, a2)).status).toBe(201);
+		});
+
+		it("marking a leased issue cancelled releases its lease", async () => {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Closes cancelled" });
+			const a1 = await registerAgent("a1");
+			expect((await claim(issue.id, a1)).status).toBe(201);
+
+			expect((await patchStatus(issue.id, "cancelled")).status).toBe(200);
+
+			const a2 = await registerAgent("a2");
+			expect((await claim(issue.id, a2)).status).toBe(201);
+		});
+
+		it("a non-status update of a done issue does not disturb a newer lease", async () => {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Already done" });
+			expect((await patchStatus(issue.id, "done")).status).toBe(200);
+
+			// A fresh lease claimed after the issue was already closed (e.g. reopened work).
+			const a1 = await registerAgent("a1");
+			expect((await claim(issue.id, a1)).status).toBe(201);
+
+			const res = await SELF.fetch(`http://localhost/api/issues/${issue.id}`, {
+				method: "PATCH",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title: "Renamed" }),
+			});
+			expect(res.status).toBe(200);
+
+			const leases = await env.DB.prepare(
+				"SELECT COUNT(*) AS n FROM issue_leases WHERE issue_id = ? AND released_at IS NULL"
+			)
+				.bind(issue.id)
+				.first<{ n: number }>();
+			expect(leases?.n).toBe(1);
+		});
+	});
 });

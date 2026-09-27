@@ -31,7 +31,9 @@ import {
 import { dorColumns } from "./definition-of-ready";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { isExternallyVerifiableEvidence } from "./evidence-classification";
+import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
+	buildReleaseLeaseForClosedIssueStatement,
 	isLiveAgentSessionId,
 	issueEverHadAgentLease,
 	issueHasLiveAgentLease,
@@ -945,6 +947,13 @@ function isDoneState(category: string | null | undefined, key: string | null | u
 	return category === "done" || key === "done";
 }
 
+function isCancelledState(
+	category: string | null | undefined,
+	key: string | null | undefined
+): boolean {
+	return category === "cancelled" || key === "cancelled";
+}
+
 // PROJ-921: an issue becomes "ready" when it leaves backlog for an open status —
 // todo/ready, or straight into in_progress (PROJ-252: a fast-tracked issue was ready the
 // moment it was picked up, so its lead time equals its cycle time). Going straight from
@@ -1114,9 +1123,18 @@ async function applyStatusFields(
 	setValues: SetValues;
 	reviewOrDoneTransition: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
+	// PROJ-928: resolved to done/cancelled by category OR legacy key — a workspace with
+	// no custom task_statuses row backing this key has category === null (see
+	// resolveStatus), so status_category alone would miss the legacy-key case.
+	closing: boolean;
 }> {
 	if (data.status === undefined && !("statusId" in data)) {
-		return { setValues: {}, reviewOrDoneTransition: false, gateRejectionStatement: null };
+		return {
+			setValues: {},
+			reviewOrDoneTransition: false,
+			gateRejectionStatement: null,
+			closing: false,
+		};
 	}
 
 	// PROJ-870: resolveStatus returns the category from the same row lookup that resolves
@@ -1183,6 +1201,9 @@ async function applyStatusFields(
 		setValues,
 		reviewOrDoneTransition: transition.enteringInReview || transition.enteringDone,
 		gateRejectionStatement,
+		closing:
+			isDoneState(newStatusCategory, resolvedStatusKey) ||
+			isCancelledState(newStatusCategory, resolvedStatusKey),
 	};
 }
 
@@ -1277,6 +1298,7 @@ async function buildUpdateSetValues(
 	setValues: SetValues;
 	recordCompletionReport: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
+	closing: boolean;
 }> {
 	const setValues: SetValues = { updatedAt: now(), ...buildSimpleFields(data) };
 	const statusFields = await applyStatusFields(ctx, data, existing);
@@ -1298,6 +1320,7 @@ async function buildUpdateSetValues(
 		setValues,
 		recordCompletionReport,
 		gateRejectionStatement: statusFields.gateRejectionStatement,
+		closing: statusFields.closing,
 	};
 }
 
@@ -1431,12 +1454,8 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		await requireWorkspaceMember(ctx, data.assigneeId);
 	}
 
-	const { setValues, recordCompletionReport, gateRejectionStatement } = await buildUpdateSetValues(
-		ctx,
-		orm,
-		data,
-		existing
-	);
+	const { setValues, recordCompletionReport, gateRejectionStatement, closing } =
+		await buildUpdateSetValues(ctx, orm, data, existing);
 
 	// PROJ-870: custom-field writes are validated (read) before the batch, same as before,
 	// but the upserts themselves are now built as statements and folded in below instead of
@@ -1499,6 +1518,19 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 			diff,
 		})
 	);
+
+	// PROJ-928: an issue moving to done/cancelled releases its lease and file claims so
+	// they don't keep blocking the fleet after the work they were guarding is over — folded
+	// into this same batch (PROJ-870 convention) rather than a separate round trip. `closing`
+	// is only computed when this update actually carries a status/statusId change (see
+	// applyStatusFields' early return), so a title-only save of an already-closed issue
+	// never reaches here; re-saving status=done again is a harmless no-op release.
+	if (closing) {
+		statements.push(
+			buildReleaseLeaseForClosedIssueStatement(ctx, id),
+			buildReleaseClaimsForClosedIssueStatement(ctx, id)
+		);
+	}
 
 	await ctx.db.batch(statements);
 

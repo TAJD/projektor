@@ -83,6 +83,10 @@ export interface Env {
 	WIKI_NOTIFICATION_RETENTION_DAYS?: string; // default 90
 	AGENT_SESSION_RETENTION_DAYS?: string; // ended agent_sessions with no referencing lease, default 90
 	ACTIVITY_RETENTION_DAYS?: string; // default 365
+	// PROJ-928: TTL in seconds before a file claim with no agentId (agentId is nullable —
+	// see services/file-claims.ts) becomes reclaimable by the next claimant, same as a
+	// claim whose agent session went stale. Default 86400 (24h).
+	FILE_CLAIM_TTL_SECONDS?: string;
 }
 
 export interface RealtimeEvent<T = unknown> {

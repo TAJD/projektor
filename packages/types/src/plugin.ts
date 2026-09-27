@@ -70,6 +70,15 @@ export interface PluginContext {
 	auth?: AuthInfo;
 	workspaceHub?: DurableObjectNamespace;
 	waitUntil?: (promise: Promise<unknown>) => void;
+	// PROJ-928: parsed, narrowly-typed config tunables a service may need — never the raw
+	// worker env. A prior version of this put the whole `env` here, which (since
+	// PluginContext is shared by every service and MCP/plugin handler) would have handed
+	// every tool secrets and bindings it has no business touching. Each field is parsed
+	// once from the real env (see ctxFromHono) and defaults are applied there, not by
+	// the reading service.
+	config?: {
+		fileClaimTtlSeconds?: number;
+	};
 }
 
 export interface Plugin {

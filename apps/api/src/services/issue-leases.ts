@@ -274,6 +274,35 @@ export async function releaseIssue(ctx: ServiceCtx, raw: unknown) {
 	return { ok: true };
 }
 
+/**
+ * Build (without executing) the UPDATE that releases the active lease on an issue when
+ * it moves to done/cancelled (PROJ-928) — an issue closed by any path (human or agent)
+ * shouldn't keep blocking the fleet on a lease no one is still working. Distinct
+ * release_reason from releaseIssue's "released" so the factory-health tile can tell a
+ * deliberate release from a close-triggered one. Returned as a statement (PROJ-870
+ * convention) so the caller (updateIssue) folds it into its single ctx.db.batch() instead
+ * of spending an extra D1 round trip.
+ */
+export function buildReleaseLeaseForClosedIssueStatement(
+	ctx: ServiceCtx,
+	issueId: string
+): D1PreparedStatement {
+	const orm = drizzle(ctx.db, { schema });
+	const now = Math.floor(Date.now() / 1000);
+	const query = orm
+		.update(schema.issueLeases)
+		.set({ releasedAt: now, releaseReason: "issue_closed" })
+		.where(
+			and(
+				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+				eq(schema.issueLeases.issueId, issueId),
+				isNull(schema.issueLeases.releasedAt)
+			)
+		)
+		.toSQL();
+	return ctx.db.prepare(query.sql).bind(...query.params);
+}
+
 /** Release every active lease held by an agent session (called when it ends). */
 export async function releaseLeasesForAgent(ctx: ServiceCtx, agentSessionId: string) {
 	const orm = drizzle(ctx.db, { schema });

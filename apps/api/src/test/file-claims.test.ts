@@ -471,9 +471,10 @@ describe("File Claims API", () => {
 			expect((await claimRow("src/held.ts"))?.released_at).toBeNull();
 		});
 
-		it("an agentless claim is never auto-reclaimed", async () => {
-			// No session means no heartbeat to judge, so these stay held and `force` remains the
-			// only way past them. Guards the deliberate choice not to fall back on claim age.
+		it("an agentless claim within its TTL is not auto-reclaimed", async () => {
+			// No session means no heartbeat to judge, so freshness is judged by claim age instead
+			// (PROJ-928, FILE_CLAIM_TTL_SECONDS, default 24h) — a claim made moments ago is well
+			// inside that window and still blocks; `force` remains the only way past it early.
 			await claimFiles({ issueId, paths: ["src/no-agent.ts"] });
 
 			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Blocked" });
@@ -556,6 +557,107 @@ describe("File Claims API", () => {
 			const byPath = new Map(body.items.map((i) => [i.path, i.live]));
 			expect(byPath.get("src/listed-dead.ts")).toBe(false);
 			expect(byPath.get("src/listed-live.ts")).toBe(true);
+		});
+
+		// PROJ-928: an agentless claim has no heartbeat to judge staleness by, so it is judged
+		// by claim age against a configurable TTL (FILE_CLAIM_TTL_SECONDS, default 24h) instead —
+		// same reclaim path as a claim whose agent session went stale.
+		describe("PROJ-928: agentless claim TTL", () => {
+			async function backdateClaim(path: string, secondsAgo: number) {
+				const claimedAt = Math.floor(Date.now() / 1000) - secondsAgo;
+				await env.DB.prepare(
+					"UPDATE issue_file_claims SET claimed_at = ? WHERE path = ? AND workspace_id = ?"
+				)
+					.bind(claimedAt, path, workspaceId)
+					.run();
+			}
+
+			it("an agentless claim past the default 24h TTL is reclaimed by the next claimer", async () => {
+				await claimFiles({ issueId, paths: ["src/ttl-expired.ts"] });
+				await backdateClaim("src/ttl-expired.ts", 24 * 60 * 60 + 1);
+
+				const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Takes over" });
+				const res = await claimFiles({ issueId: issue2.id, paths: ["src/ttl-expired.ts"] });
+				expect(res.status).toBe(201);
+				const body = (await res.json()) as {
+					reclaimed: Array<{ path: string; releaseReason: string }>;
+				};
+				expect(body.reclaimed.map((r) => r.path)).toEqual(["src/ttl-expired.ts"]);
+				expect(body.reclaimed[0].releaseReason).toBe("expired");
+			});
+
+			it("FILE_CLAIM_TTL_SECONDS overrides the default", async () => {
+				const previous = env.FILE_CLAIM_TTL_SECONDS;
+				env.FILE_CLAIM_TTL_SECONDS = "60";
+				try {
+					await claimFiles({ issueId, paths: ["src/ttl-short.ts"] });
+					await backdateClaim("src/ttl-short.ts", 61);
+
+					const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Takes over" });
+					const res = await claimFiles({ issueId: issue2.id, paths: ["src/ttl-short.ts"] });
+					expect(res.status).toBe(201);
+				} finally {
+					env.FILE_CLAIM_TTL_SECONDS = previous;
+				}
+			});
+		});
+	});
+
+	// PROJ-928: moving an issue to done/cancelled releases its file claims (release_reason
+	// "issue_closed") so a closed issue doesn't keep blocking the fleet on paths no one is
+	// still working.
+	describe("PROJ-928: issue close releases file claims", () => {
+		async function patchStatus(id: string, status: string) {
+			return SELF.fetch(`http://localhost/api/issues/${id}`, {
+				method: "PATCH",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ status }),
+			});
+		}
+
+		it("marking an issue done releases its file claims", async () => {
+			await claimFiles({ issueId, paths: ["src/done-releases.ts"] });
+
+			expect((await patchStatus(issueId, "done")).status).toBe(200);
+
+			const listRes = await listFileClaims({ path: "src/done-releases.ts" });
+			const listBody = (await listRes.json()) as { items: Array<unknown> };
+			expect(listBody.items).toHaveLength(0);
+
+			const row = await env.DB.prepare(
+				"SELECT release_reason FROM issue_file_claims WHERE path = ? AND workspace_id = ?"
+			)
+				.bind("src/done-releases.ts", workspaceId)
+				.first<{ release_reason: string }>();
+			expect(row?.release_reason).toBe("issue_closed");
+		});
+
+		it("marking an issue cancelled releases its file claims", async () => {
+			await claimFiles({ issueId, paths: ["src/cancelled-releases.ts"] });
+
+			expect((await patchStatus(issueId, "cancelled")).status).toBe(200);
+
+			const listRes = await listFileClaims({ path: "src/cancelled-releases.ts" });
+			const listBody = (await listRes.json()) as { items: Array<unknown> };
+			expect(listBody.items).toHaveLength(0);
+		});
+
+		it("a title-only update of an already-done issue does not re-release a new claim", async () => {
+			expect((await patchStatus(issueId, "done")).status).toBe(200);
+			// A fresh claim made after the issue is already done — a subsequent non-status
+			// update must not sweep it up.
+			await claimFiles({ issueId, paths: ["src/after-done.ts"] });
+
+			const res = await SELF.fetch(`http://localhost/api/issues/${issueId}`, {
+				method: "PATCH",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title: "Renamed" }),
+			});
+			expect(res.status).toBe(200);
+
+			const listRes = await listFileClaims({ path: "src/after-done.ts" });
+			const listBody = (await listRes.json()) as { items: Array<unknown> };
+			expect(listBody.items).toHaveLength(1);
 		});
 	});
 });
