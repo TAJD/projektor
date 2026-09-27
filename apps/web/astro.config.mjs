@@ -80,6 +80,48 @@ export default defineConfig({
     // Tailwind v4 is a Vite plugin rather than an Astro integration; @astrojs/tailwind is
     // deprecated and was the only thing pinning astro to 5 (PROJ-302).
     plugins: [tailwindcss(), collectLazyOnlyChunks()],
+    build: {
+      rollupOptions: {
+        output: {
+          // PROJ-868: the actual culprit (confirmed via a one-off `moduleIds` dump of
+          // the offending chunk) is the synthetic `\0rolldown/runtime.js` module —
+          // rolldown's own tiny generated interop helper, not a real npm package. Both
+          // @preact/signals-core and mermaid's bundled d3-selection/dayjs code need it,
+          // and rolldown's automatic "commons" chunking put the helper inside the same
+          // physical chunk as mermaid's d3-selection + dayjs code (an anonymous
+          // `src.<hash>.js`) rather than splitting it out on its own — so every
+          // client:load island that imports @preact/signals (ProjectNav, WikiPage,
+          // IssueList, ...) pulled that whole chunk in, 16 KB gzip on every page even
+          // when no mermaid diagram was ever rendered (see apps/web/scripts/
+          // assert-eager-chunks.mjs, which asserts this never regresses).
+          //
+          // Pinning the runtime helper to its own near-empty chunk breaks that fusion:
+          // mermaid's own d3-selection/dayjs modules go back to being purely part of
+          // mermaid's lazy-loaded graph, and @preact/signals-core picks up the helper
+          // from a chunk with nothing else eager-vs-lazy-conflicting in it.
+          manualChunks(id) {
+            if (id === '\0rolldown/runtime.js') return 'rolldown-runtime';
+            if (id.includes('node_modules') && /[/\\]@preact[/\\]signals(-core)?[/\\]/.test(id)) {
+              return 'preact-signals';
+            }
+            // Required, not just belt-and-suspenders: removing this rule and rebuilding
+            // still fails assert-eager-chunks.mjs — pinning only the runtime helper above
+            // isn't enough, because rolldown's "commons" heuristic re-merges d3-selection
+            // and dayjs (the two modules that made the runtime-helper chunk "big" in the
+            // first place) right back into it on its own. Naming them explicitly here is
+            // what actually keeps mermaid's bundled d3-selection/dayjs code out of the
+            // chunk @preact/signals-core needs eagerly.
+            if (
+              id.includes('node_modules') &&
+              /[/\\](d3-selection|d3-dispatch|dayjs)[/\\]/.test(id)
+            ) {
+              return 'mermaid-shared-vendor';
+            }
+            return undefined;
+          },
+        },
+      },
+    },
     server: {
       proxy: {
         '/api': 'http://localhost:8787',
