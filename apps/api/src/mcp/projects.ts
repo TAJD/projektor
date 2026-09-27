@@ -6,6 +6,7 @@ import {
 	listProjects,
 	updateProject,
 } from "../services/projects";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 
 export const projectsTools: MCPTool[] = [
 	{
@@ -20,6 +21,7 @@ export const projectsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { includeArchived } = (input ?? {}) as { includeArchived?: boolean };
 			return listProjects(ctx, { includeArchived });
@@ -40,6 +42,7 @@ export const projectsTools: MCPTool[] = [
 				description: { type: "string", description: "Optional description, max 500 characters" },
 			},
 		},
+		annotations: CREATE,
 		async handler(input, ctx) {
 			return createProject(ctx, input);
 		},
@@ -52,6 +55,7 @@ export const projectsTools: MCPTool[] = [
 			required: ["id"],
 			properties: { id: { type: "string", description: "Project ID" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
 			return getProject(ctx, id);
@@ -71,6 +75,7 @@ export const projectsTools: MCPTool[] = [
 				archived: { type: "boolean", description: "Archive (true) or unarchive (false)" },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		async handler(input, ctx) {
 			const { id, ...fields } = input as { id: string; [k: string]: unknown };
 			return updateProject(ctx, id, fields);
@@ -84,6 +89,7 @@ export const projectsTools: MCPTool[] = [
 			required: ["id"],
 			properties: { id: { type: "string", description: "Project ID" } },
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
 			return deleteProject(ctx, id);

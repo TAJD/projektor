@@ -1,5 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { getCodeHeatmap } from "../services/code-heatmap";
+import { READ } from "./annotations";
 
 export const codeHeatmapTools: MCPTool[] = [
 	{
@@ -41,6 +42,7 @@ export const codeHeatmapTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return getCodeHeatmap(ctx, input);
 		},

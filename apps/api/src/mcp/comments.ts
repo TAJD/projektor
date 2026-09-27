@@ -1,5 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { addComment, deleteComment, listComments, updateComment } from "../services/comments";
+import { DESTRUCTIVE, IDEMPOTENT_WRITE, PLAIN_WRITE, READ } from "./annotations";
 
 export const commentsTools: MCPTool[] = [
 	{
@@ -10,6 +11,7 @@ export const commentsTools: MCPTool[] = [
 			required: ["issueId"],
 			properties: { issueId: { type: "string" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return listComments(ctx, input);
 		},
@@ -25,6 +27,7 @@ export const commentsTools: MCPTool[] = [
 				body: { type: "string", minLength: 1, maxLength: 10000 },
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			return addComment(ctx, input);
 		},
@@ -41,6 +44,7 @@ export const commentsTools: MCPTool[] = [
 				body: { type: "string", minLength: 1, maxLength: 10000 },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		async handler(input, ctx) {
 			return updateComment(ctx, input);
 		},
@@ -56,6 +60,7 @@ export const commentsTools: MCPTool[] = [
 				commentId: { type: "string" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			return deleteComment(ctx, input);
 		},

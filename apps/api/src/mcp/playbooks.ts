@@ -2,6 +2,7 @@ import type { MCPTool } from "@projektor/types";
 import { ValidationError } from "../services/errors";
 import { composePlaybook } from "../services/playbook-compose";
 import { getPlaybook, listPlaybooks } from "../services/playbooks";
+import { PLAIN_WRITE, READ } from "./annotations";
 
 export const playbooksTools: MCPTool[] = [
 	{
@@ -13,6 +14,7 @@ export const playbooksTools: MCPTool[] = [
 			type: "object",
 			properties: {},
 		},
+		annotations: READ,
 		async handler() {
 			return listPlaybooks();
 		},
@@ -27,6 +29,7 @@ export const playbooksTools: MCPTool[] = [
 			},
 			required: ["name"],
 		},
+		annotations: READ,
 		async handler(input) {
 			const { name } = input as { name?: unknown };
 			if (!name || typeof name !== "string") {
@@ -59,6 +62,7 @@ export const playbooksTools: MCPTool[] = [
 			},
 			required: ["name", "params"],
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			return composePlaybook(ctx, input);
 		},

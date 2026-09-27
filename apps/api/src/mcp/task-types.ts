@@ -6,6 +6,7 @@ import {
 	listTaskTypes,
 	updateTaskType,
 } from "../services/task-types";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 
 export const taskTypesTools: MCPTool[] = [
 	{
@@ -15,6 +16,7 @@ export const taskTypesTools: MCPTool[] = [
 			type: "object",
 			properties: {},
 		},
+		annotations: READ,
 		handler(_input, ctx) {
 			return listTaskTypes(ctx);
 		},
@@ -34,6 +36,7 @@ export const taskTypesTools: MCPTool[] = [
 				isDefault: { type: "boolean", description: "Set as the default type for new issues" },
 			},
 		},
+		annotations: CREATE,
 		handler(input, ctx) {
 			return createTaskType(ctx, input);
 		},
@@ -53,6 +56,7 @@ export const taskTypesTools: MCPTool[] = [
 				isDefault: { type: "boolean", description: "Set as the default type for new issues" },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		handler(input, ctx) {
 			const { id, ...fields } = input as { id?: string; [k: string]: unknown };
 			if (!id || typeof id !== "string") {
@@ -72,6 +76,7 @@ export const taskTypesTools: MCPTool[] = [
 				id: { type: "string" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {

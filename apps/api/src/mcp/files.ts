@@ -5,6 +5,7 @@ import {
 	getAttachment,
 	listAttachments,
 } from "../services/files";
+import { CREATE, DESTRUCTIVE, READ } from "./annotations";
 
 // Binary upload and streamed download can't cross JSON-RPC, so those two operations
 // stay REST-only (POST /api/files, GET /api/files/:id) — a deliberate parity exception
@@ -22,6 +23,7 @@ export const filesTools: MCPTool[] = [
 				entityId: { type: "string" },
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return listAttachments(ctx, input);
 		},
@@ -36,6 +38,7 @@ export const filesTools: MCPTool[] = [
 			required: ["id"],
 			properties: { id: { type: "string" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return getAttachment(ctx, input);
 		},
@@ -55,6 +58,7 @@ export const filesTools: MCPTool[] = [
 				label: { type: "string", description: "Optional display label when kind is 'url'" },
 			},
 		},
+		annotations: CREATE,
 		async handler(input, ctx) {
 			return createLinkAttachment(ctx, input);
 		},
@@ -67,6 +71,7 @@ export const filesTools: MCPTool[] = [
 			required: ["id"],
 			properties: { id: { type: "string" } },
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { r2Key } = await deleteAttachment(ctx, input);
 			// R2 object I/O is streaming-specific in the REST route; do the equivalent

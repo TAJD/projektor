@@ -6,6 +6,7 @@ import {
 	listTaskStatuses,
 	updateTaskStatus,
 } from "../services/task-statuses";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 
 export const taskStatusesTools: MCPTool[] = [
 	{
@@ -15,6 +16,7 @@ export const taskStatusesTools: MCPTool[] = [
 			type: "object",
 			properties: {},
 		},
+		annotations: READ,
 		handler(_input, ctx) {
 			return listTaskStatuses(ctx);
 		},
@@ -38,6 +40,7 @@ export const taskStatusesTools: MCPTool[] = [
 				isDefault: { type: "boolean", description: "Set as the default status for new issues" },
 			},
 		},
+		annotations: CREATE,
 		handler(input, ctx) {
 			return createTaskStatus(ctx, input);
 		},
@@ -57,6 +60,7 @@ export const taskStatusesTools: MCPTool[] = [
 				isDefault: { type: "boolean", description: "Set as the default status for new issues" },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		handler(input, ctx) {
 			const { id, ...fields } = input as { id?: string; [k: string]: unknown };
 			if (!id || typeof id !== "string") {
@@ -76,6 +80,7 @@ export const taskStatusesTools: MCPTool[] = [
 				id: { type: "string" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {

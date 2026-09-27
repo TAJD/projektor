@@ -5,6 +5,7 @@ export type {
 	AuthInfo,
 	AuthMethod,
 	MCPTool,
+	MCPToolAnnotations,
 	Migration,
 	Plugin,
 	PluginContext,

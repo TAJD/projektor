@@ -8,6 +8,7 @@ import {
 	rotateFeedbackSourceToken,
 	updateFeedbackSource,
 } from "../services/feedback-sources";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, PLAIN_WRITE, READ } from "./annotations";
 
 export const feedbackTools: MCPTool[] = [
 	{
@@ -35,6 +36,7 @@ export const feedbackTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: CREATE,
 		async handler(input, ctx) {
 			return createFeedbackSource(ctx, input);
 		},
@@ -50,6 +52,7 @@ export const feedbackTools: MCPTool[] = [
 			required: ["projectId"],
 			properties: { projectId: { type: "string" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return listFeedbackSources(ctx, input);
 		},
@@ -64,6 +67,7 @@ export const feedbackTools: MCPTool[] = [
 			required: ["sourceId"],
 			properties: { sourceId: { type: "string" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return getFeedbackSource(ctx, input);
 		},
@@ -85,6 +89,7 @@ export const feedbackTools: MCPTool[] = [
 				isActive: { type: "boolean" },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		async handler(input, ctx) {
 			return updateFeedbackSource(ctx, input);
 		},
@@ -101,6 +106,7 @@ export const feedbackTools: MCPTool[] = [
 			required: ["sourceId"],
 			properties: { sourceId: { type: "string" } },
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			return rotateFeedbackSourceToken(ctx, input);
 		},
@@ -116,6 +122,7 @@ export const feedbackTools: MCPTool[] = [
 			required: ["sourceId"],
 			properties: { sourceId: { type: "string" } },
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			return revokeFeedbackSource(ctx, input);
 		},
@@ -137,6 +144,7 @@ export const feedbackTools: MCPTool[] = [
 				sourceId: { type: "string" },
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return listFeedback(ctx, input);
 		},
@@ -153,6 +161,7 @@ export const feedbackTools: MCPTool[] = [
 				status: { type: "string", enum: ["new", "reviewed", "actioned"] },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		async handler(input, ctx) {
 			return updateFeedbackStatus(ctx, input);
 		},
@@ -169,6 +178,7 @@ export const feedbackTools: MCPTool[] = [
 			required: ["feedbackId"],
 			properties: { feedbackId: { type: "string" } },
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			return convertFeedbackToIssue(ctx, input);
 		},

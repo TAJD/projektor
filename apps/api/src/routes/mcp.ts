@@ -160,6 +160,7 @@ router.post("/:workspaceId", async (c) => {
 						name: t.name,
 						description: t.description,
 						inputSchema: t.inputSchema,
+						...(t.annotations ? { annotations: t.annotations } : {}),
 					})),
 					// PROJ-454: the tool list is workspace-scoped (core tools + the
 					// plugin registry's tools for this workspace) and changes rarely,

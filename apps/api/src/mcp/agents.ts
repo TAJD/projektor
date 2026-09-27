@@ -1,6 +1,7 @@
 import type { MCPTool } from "@projektor/types";
 import { endAgent, heartbeatAgent, listActiveAgents, registerAgent } from "../services/agents";
 import { ValidationError } from "../services/errors";
+import { PLAIN_WRITE, READ } from "./annotations";
 
 export const agentsTools: MCPTool[] = [
 	{
@@ -20,6 +21,7 @@ export const agentsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
 			return registerAgent(ctx, input);
 		},
@@ -34,6 +36,7 @@ export const agentsTools: MCPTool[] = [
 				id: { type: "string", description: "Agent session UUID" },
 			},
 		},
+		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {
@@ -52,6 +55,7 @@ export const agentsTools: MCPTool[] = [
 				id: { type: "string", description: "Agent session UUID" },
 			},
 		},
+		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {
@@ -69,6 +73,7 @@ export const agentsTools: MCPTool[] = [
 				issueId: { type: "string", description: "Filter by issue UUID (optional)" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return listActiveAgents(ctx, input);
 		},

@@ -1,5 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { listProjectActivity } from "../services/project-activity";
+import { READ } from "./annotations";
 
 export const projectActivityTools: MCPTool[] = [
 	{
@@ -23,6 +24,7 @@ export const projectActivityTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return listProjectActivity(ctx, input);
 		},

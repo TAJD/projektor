@@ -15,6 +15,7 @@ import {
 	updateWorkspace,
 	updateWorkspaceBrand,
 } from "../services/workspaces";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, PLAIN_WRITE, READ } from "./annotations";
 
 async function currentWorkspaceSlug(ctx: PluginContext): Promise<string> {
 	const orm = drizzle(ctx.db, { schema });
@@ -32,6 +33,7 @@ export const workspacesTools: MCPTool[] = [
 		name: "list_workspaces",
 		description: "List all workspaces the authenticated user belongs to, with their role in each",
 		inputSchema: { type: "object", properties: {} },
+		annotations: READ,
 		async handler(_input, ctx) {
 			return listWorkspaces(ctx.db, ctx.userId);
 		},
@@ -51,6 +53,7 @@ export const workspacesTools: MCPTool[] = [
 				name: { type: "string", description: "Human-readable display name for the workspace" },
 			},
 		},
+		annotations: CREATE,
 		async handler(input, ctx) {
 			return createWorkspace(ctx.db, ctx.userId, input);
 		},
@@ -70,6 +73,7 @@ export const workspacesTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const parsed = DeleteWorkspaceInput.safeParse(input);
 			if (!parsed.success) throw new ValidationError(parsed.error.flatten());
@@ -92,6 +96,7 @@ export const workspacesTools: MCPTool[] = [
 				name: { type: "string", description: "New display name for the workspace" },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		async handler(input, ctx) {
 			return updateWorkspace(ctx, input);
 		},
@@ -100,6 +105,7 @@ export const workspacesTools: MCPTool[] = [
 		name: "list_members",
 		description: "List all members of the current workspace with their roles",
 		inputSchema: { type: "object", properties: {} },
+		annotations: READ,
 		async handler(_input, ctx) {
 			const orm = drizzle(ctx.db, { schema });
 			const ws = await orm
@@ -132,6 +138,7 @@ export const workspacesTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			return inviteMember(ctx, input);
 		},
@@ -146,6 +153,7 @@ export const workspacesTools: MCPTool[] = [
 				userId: { type: "string", description: "ID of the user to remove" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { userId } = input as { userId: string };
 			return removeMember(ctx, userId);
@@ -166,6 +174,7 @@ export const workspacesTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { userId, role } = input as { userId: string; role: string };
 			return updateMemberRole(ctx, userId, { role });
@@ -176,6 +185,7 @@ export const workspacesTools: MCPTool[] = [
 		description:
 			"Get the current workspace's white-label branding overrides (display name, accent colors, logo, font). Unset fields are null.",
 		inputSchema: { type: "object", properties: {} },
+		annotations: READ,
 		async handler(_input, ctx) {
 			return getWorkspaceBrand(ctx, await currentWorkspaceSlug(ctx));
 		},
@@ -203,6 +213,7 @@ export const workspacesTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		async handler(input, ctx) {
 			return updateWorkspaceBrand(ctx, await currentWorkspaceSlug(ctx), input);
 		},

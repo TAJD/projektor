@@ -16,6 +16,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { MCPTool } from "@projektor/types";
 import { TOOL_COUNT, TOOL_DOMAINS } from "../src/mcp/catalog";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,16 @@ function escapeCell(text: string): string {
 const groups = ["Coordination", "Project data"] as const;
 const domainCount = TOOL_DOMAINS.length;
 
+// PROJ-887: a compact marker for each tool's MCP annotations, shown as its own
+// table column so the read-only/destructive split is visible without opening
+// the source.
+function annotationMarker(annotations: MCPTool["annotations"]): string {
+	if (!annotations) return "";
+	if (annotations.readOnlyHint) return "read-only";
+	if (annotations.destructiveHint) return "destructive";
+	return "write";
+}
+
 // ── Render just the generated block (count + tables) ──
 const body: string[] = [];
 body.push(`**${TOOL_COUNT} tools across ${domainCount} domains.**`);
@@ -55,9 +66,14 @@ for (const group of groups) {
 	for (const d of domains) {
 		body.push(`### ${d.title}`);
 		body.push("");
-		body.push("| Tool | Description |");
-		body.push("|------|-------------|");
-		body.push(...d.tools.map((t) => `| \`${escapeCell(t.name)}\` | ${escapeCell(t.description)} |`));
+		body.push("| Tool | Description | Kind |");
+		body.push("|------|-------------|------|");
+		body.push(
+			...d.tools.map(
+				(t) =>
+					`| \`${escapeCell(t.name)}\` | ${escapeCell(t.description)} | ${annotationMarker(t.annotations)} |`,
+			),
+		);
 		body.push("");
 	}
 }

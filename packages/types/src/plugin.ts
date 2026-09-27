@@ -3,10 +3,31 @@ export interface Migration {
 	sql: string;
 }
 
+/**
+ * MCP tool annotation hints (PROJ-887), per the MCP spec's tool annotations:
+ * https://modelcontextprotocol.io/specification/2025-11-25/server/tools.
+ * All optional so a plugin-provided tool without them still type-checks, but
+ * every core tool in apps/api/src/mcp/*.ts declares readOnlyHint and
+ * openWorldHint (see mcp/annotations.ts).
+ */
+export interface MCPToolAnnotations {
+	/** Human-readable title distinct from `name`. */
+	title?: string;
+	/** True if the tool only reads data and never mutates state. */
+	readOnlyHint?: boolean;
+	/** True if calling the tool may perform destructive/irreversible updates. */
+	destructiveHint?: boolean;
+	/** True if repeated calls with the same arguments have no additional effect. */
+	idempotentHint?: boolean;
+	/** True if the tool interacts with an "open world" of external entities. */
+	openWorldHint?: boolean;
+}
+
 export interface MCPTool {
 	name: string;
 	description: string;
 	inputSchema: Record<string, unknown>;
+	annotations?: MCPToolAnnotations;
 	handler: (input: unknown, ctx: PluginContext) => Promise<unknown>;
 }
 
