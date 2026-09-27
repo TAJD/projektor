@@ -1336,27 +1336,41 @@ describe("PROJ-430: CF Access certs fetch failure", () => {
 		env.CF_ACCESS_TEAM_DOMAIN = domain;
 		env.CF_ACCESS_AUDIENCE = audience;
 
-		// Cold both cache layers so validateCfAccessJwt has to hit the network,
-		// which fails for this domain in the test runtime.
+		// Cold both cache layers so validateCfAccessJwt has to hit the network.
 		resetAuthCachesForTests();
 		await env.KV.delete("cf-access-certs");
 
-		// Claims are entirely valid — only the certs fetch is broken.
-		const jwt = await signTestJwt(keyPair.privateKey, {
-			exp: Math.floor(Date.now() / 1000) + 3600,
-			aud: audience,
-			iss: `https://${domain}`,
-			email: `proj-430-${crypto.randomUUID().slice(0, 8)}@example.com`,
-		});
+		// Stub fetch to simulate the certs endpoint being unreachable, rather
+		// than letting a real DNS lookup for this non-existent domain happen:
+		// a real lookup here triggers a workerd `jsg.Error: internal error`
+		// under vitest-pool-workers and can hang a full test run (PROJ-640).
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => {
+				throw new TypeError("Network connection lost");
+			})
+		);
 
-		const res = await SELF.fetch("http://localhost/auth/me", {
-			headers: { "Cf-Access-Jwt-Assertion": jwt },
-		});
+		try {
+			// Claims are entirely valid — only the certs fetch is broken.
+			const jwt = await signTestJwt(keyPair.privateKey, {
+				exp: Math.floor(Date.now() / 1000) + 3600,
+				aud: audience,
+				iss: `https://${domain}`,
+				email: `proj-430-${crypto.randomUUID().slice(0, 8)}@example.com`,
+			});
 
-		expect(res.status).toBe(503);
-		expect((await res.json()) as { error: string }).toEqual({
-			error: "Authentication temporarily unavailable",
-		});
+			const res = await SELF.fetch("http://localhost/auth/me", {
+				headers: { "Cf-Access-Jwt-Assertion": jwt },
+			});
+
+			expect(res.status).toBe(503);
+			expect((await res.json()) as { error: string }).toEqual({
+				error: "Authentication temporarily unavailable",
+			});
+		} finally {
+			vi.unstubAllGlobals();
+		}
 	});
 
 	describe("GET /auth/login", () => {
