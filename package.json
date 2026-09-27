@@ -10,6 +10,8 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "gen:docs": "pnpm --filter @projektor/api gen:catalog && pnpm --filter @projektor/api gen:workflow-spec && pnpm --filter @projektor/api gen:playbooks && tsx scripts/gen-conventions-page.ts && tsx scripts/gen-feedback-example-page.ts",
+    "bundle-budget": "tsx scripts/bundle-budget.ts",
+    "bundle-budget:update": "tsx scripts/bundle-budget.ts --update",
     "prepare": "lefthook install"
   },
   "devDependencies": {

@@ -4,13 +4,15 @@
 	"private": true,
 	"scripts": {
 		"dev": "astro dev",
-		"build": "astro build && node scripts/assert-sw.mjs && node scripts/gen-csp-headers.mjs",
+		"build": "astro build && node scripts/assert-sw.mjs && node scripts/assert-eager-chunks.mjs && node scripts/gen-csp-headers.mjs",
 		"type-check": "astro check",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
 		"test:e2e": "playwright test --grep-invert @long",
 		"test:e2e:long": "playwright test --grep @long",
-		"verify:sw": "node scripts/assert-sw.mjs"
+		"verify:sw": "node scripts/assert-sw.mjs",
+		"verify:eager-chunks": "node scripts/assert-eager-chunks.mjs",
+		"subset:fonts": "node scripts/subset-monaspace.mjs"
 	},
 	"dependencies": {
 		"@astrojs/preact": "^6.0.2",
