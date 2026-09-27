@@ -1,5 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { getFlowMetrics } from "../services/flow-metrics";
+import { READ } from "./annotations";
 
 export const flowMetricsTools: MCPTool[] = [
 	{
@@ -36,6 +37,7 @@ export const flowMetricsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return getFlowMetrics(ctx, input);
 		},

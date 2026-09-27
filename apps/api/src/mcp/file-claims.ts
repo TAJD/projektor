@@ -1,5 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { claimFiles, listFileClaims, releaseFiles } from "../services/file-claims";
+import { DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 
 export const fileClaimsTools: MCPTool[] = [
 	{
@@ -26,6 +27,7 @@ export const fileClaimsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		handler(input, ctx) {
 			return claimFiles(ctx, input);
 		},
@@ -48,6 +50,7 @@ export const fileClaimsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: DESTRUCTIVE,
 		handler(input, ctx) {
 			return releaseFiles(ctx, input);
 		},
@@ -66,6 +69,7 @@ export const fileClaimsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return listFileClaims(ctx, input);
 		},

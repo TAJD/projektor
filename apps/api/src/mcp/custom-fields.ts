@@ -6,6 +6,7 @@ import {
 	updateCustomFieldDef,
 } from "../services/custom-fields";
 import { ValidationError } from "../services/errors";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 
 export const customFieldsTools: MCPTool[] = [
 	{
@@ -21,6 +22,7 @@ export const customFieldsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			const { projectId } = (input as { projectId?: string }) ?? {};
 			return listCustomFieldDefs(ctx, projectId);
@@ -52,6 +54,7 @@ export const customFieldsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: CREATE,
 		handler(input, ctx) {
 			return createCustomFieldDef(ctx, input);
 		},
@@ -68,6 +71,7 @@ export const customFieldsTools: MCPTool[] = [
 				options: { type: "array", items: { type: "string" }, nullable: true },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		handler(input, ctx) {
 			const { id, ...fields } = input as { id?: string; [k: string]: unknown };
 			if (!id || typeof id !== "string") {
@@ -87,6 +91,7 @@ export const customFieldsTools: MCPTool[] = [
 				id: { type: "string" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {

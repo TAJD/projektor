@@ -1,5 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { getWorkflow } from "../services/workflow";
+import { READ } from "./annotations";
 
 export const workflowTools: MCPTool[] = [
 	{
@@ -11,6 +12,7 @@ export const workflowTools: MCPTool[] = [
 			type: "object",
 			properties: {},
 		},
+		annotations: READ,
 		async handler() {
 			return getWorkflow();
 		},

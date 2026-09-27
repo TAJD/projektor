@@ -9,6 +9,7 @@ import {
 	moveIssuesToSprint,
 	updateSprint,
 } from "../services/sprints";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, PLAIN_WRITE, READ } from "./annotations";
 
 export const sprintsTools: MCPTool[] = [
 	{
@@ -21,6 +22,7 @@ export const sprintsTools: MCPTool[] = [
 				projectId: { type: "string", description: "Project UUID" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return listSprints(ctx, input);
 		},
@@ -35,6 +37,7 @@ export const sprintsTools: MCPTool[] = [
 				id: { type: "string", description: "Sprint UUID" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {
@@ -57,6 +60,7 @@ export const sprintsTools: MCPTool[] = [
 				endDate: { type: "number", description: "Unix timestamp for sprint end" },
 			},
 		},
+		annotations: CREATE,
 		handler(input, ctx) {
 			return createSprint(ctx, input);
 		},
@@ -76,6 +80,7 @@ export const sprintsTools: MCPTool[] = [
 				endDate: { type: "number", nullable: true },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		handler(input, ctx) {
 			const { id, ...fields } = input as { id?: string; [k: string]: unknown };
 			if (!id || typeof id !== "string") {
@@ -94,6 +99,7 @@ export const sprintsTools: MCPTool[] = [
 				id: { type: "string", description: "Sprint UUID" },
 			},
 		},
+		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {
@@ -112,6 +118,7 @@ export const sprintsTools: MCPTool[] = [
 				id: { type: "string", description: "Sprint UUID" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {
@@ -135,6 +142,7 @@ export const sprintsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
 			return moveIssuesToSprint(ctx, input);
 		},

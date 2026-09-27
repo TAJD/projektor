@@ -24,10 +24,12 @@ import { getPrompt, listPrompts } from "../mcp/prompts";
 import { sprintsTools } from "../mcp/sprints";
 import { taskStatusesTools } from "../mcp/task-statuses";
 import { taskTypesTools } from "../mcp/task-types";
+import { validateToolArgs } from "../mcp/validate-args";
 import { wikiTools } from "../mcp/wiki";
 import { workflowTools } from "../mcp/workflow";
 import { workspacesTools } from "../mcp/workspaces";
 import { pluginRegistry } from "../plugins/registry";
+import { ValidationError } from "../services/errors";
 import { ctxFromHono } from "../services/types";
 
 // __PROJEKTOR_VERSION__ is injected by esbuild --define at release-build time
@@ -68,12 +70,6 @@ const router = new Hono<HonoEnv>();
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
 	return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function missingRequiredArgs(tool: MCPTool, args: Record<string, unknown>): string[] {
-	const required = (tool.inputSchema as { required?: unknown }).required;
-	if (!Array.isArray(required)) return [];
-	return required.filter((k): k is string => typeof k === "string" && args[k] === undefined);
 }
 
 // MCP endpoint: POST /mcp/{workspaceId}
@@ -160,6 +156,7 @@ router.post("/:workspaceId", async (c) => {
 						name: t.name,
 						description: t.description,
 						inputSchema: t.inputSchema,
+						...(t.annotations ? { annotations: t.annotations } : {}),
 					})),
 					// PROJ-454: the tool list is workspace-scoped (core tools + the
 					// plugin registry's tools for this workspace) and changes rarely,
@@ -186,11 +183,26 @@ router.post("/:workspaceId", async (c) => {
 			}
 			const tool = getAllTools(workspace.id).find((t) => t.name === name);
 			if (!tool) return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
-			const missing = missingRequiredArgs(tool, args);
-			if (missing.length > 0) {
-				return c.json(
-					jsonRpcError(body.id, -32602, `Missing required argument(s): ${missing.join(", ")}`)
+			// PROJ-877/920: required presence AND types/enums/lengths against the tool's
+			// inputSchema, before the handler runs — a bad argument is -32602 naming the field.
+			const argIssues = validateToolArgs(tool.inputSchema, args);
+			if (argIssues.length > 0) {
+				const missing = argIssues.filter((i) => i.message === "is required").map((i) => i.path);
+				if (missing.length === argIssues.length) {
+					return c.json(
+						jsonRpcError(body.id, -32602, `Missing required argument(s): ${missing.join(", ")}`)
+					);
+				}
+				// Same shape as a service ValidationError: message summary + Zod-style data.
+				const fieldErrors: Record<string, string[]> = {};
+				for (const i of argIssues) {
+					fieldErrors[i.path] = [...(fieldErrors[i.path] ?? []), i.message];
+				}
+				const { code, message, data } = toMcpError(
+					new ValidationError({ formErrors: [], fieldErrors }),
+					crypto.randomUUID()
 				);
+				return c.json(jsonRpcError(body.id, code, message, data));
 			}
 
 			// PROJ-17: enforce token scope per-tool. tokenScopes is undefined when

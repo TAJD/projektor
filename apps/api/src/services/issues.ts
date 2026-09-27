@@ -3,7 +3,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, notInArray, or, sql } from "d
 import type { z } from "zod";
 import { issuePath } from "../lib/urls";
 import { AddCommentSchema } from "../schemas/comments";
-import { IdSchema } from "../schemas/common";
+import { BooleanQueryParam, IdSchema } from "../schemas/common";
 import {
 	CreateIssueSchema,
 	GetIssueSchema,
@@ -1520,13 +1520,21 @@ function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
 		includeNotReady?: unknown;
 		projectId?: unknown;
 	};
+	// PROJ-920: MCP clients may send "5" / "false" (the arg validator allows what the
+	// services coerce), so parse like BooleanQueryParam / z.coerce rather than comparing
+	// with === true / !== false, which read the string "false" as true.
+	const flag = (v: unknown, fallback: boolean): boolean => {
+		const parsed = BooleanQueryParam.safeParse(v);
+		return parsed.success ? parsed.data : fallback;
+	};
+	const rawLimit = typeof input.limit === "string" ? Number(input.limit) : input.limit;
 	const limit =
-		typeof input.limit === "number" && input.limit > 0
-			? Math.min(Math.floor(input.limit), 100)
+		typeof rawLimit === "number" && Number.isFinite(rawLimit) && rawLimit > 0
+			? Math.min(Math.floor(rawLimit), 100)
 			: 10;
-	const includeBacklog = input.includeBacklog !== false;
-	const excludeClaimed = input.excludeClaimed === true;
-	const includeNotReady = input.includeNotReady === true;
+	const includeBacklog = flag(input.includeBacklog, true);
+	const excludeClaimed = flag(input.excludeClaimed, false);
+	const includeNotReady = flag(input.includeNotReady, false);
 	const projectId =
 		typeof input.projectId === "string" && input.projectId ? input.projectId : undefined;
 	return { limit, includeBacklog, excludeClaimed, includeNotReady, projectId };

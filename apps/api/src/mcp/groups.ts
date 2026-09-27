@@ -11,6 +11,7 @@ import {
 	setGroupGrant,
 	updateGroup,
 } from "../services/groups";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, PLAIN_WRITE, READ } from "./annotations";
 
 export const groupsTools: MCPTool[] = [
 	{
@@ -18,6 +19,7 @@ export const groupsTools: MCPTool[] = [
 		description:
 			"List access groups. Owner/admin see all groups in the workspace; other members see only groups they belong to.",
 		inputSchema: { type: "object", properties: {} },
+		annotations: READ,
 		async handler(_input, ctx) {
 			return listGroups(ctx);
 		},
@@ -30,6 +32,7 @@ export const groupsTools: MCPTool[] = [
 			required: ["id"],
 			properties: { id: { type: "string", description: "Group ID" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
 			return getGroup(ctx, id);
@@ -41,6 +44,7 @@ export const groupsTools: MCPTool[] = [
 			"List every workspace member with the access groups they belong to (owner/admin only). " +
 			"Members with no groups appear with an empty list — the pending/default-deny state.",
 		inputSchema: { type: "object", properties: {} },
+		annotations: READ,
 		async handler(_input, ctx) {
 			return listMemberGroups(ctx);
 		},
@@ -56,6 +60,7 @@ export const groupsTools: MCPTool[] = [
 				description: { type: "string", description: "Optional description (max 500)" },
 			},
 		},
+		annotations: CREATE,
 		async handler(input, ctx) {
 			return createGroup(ctx, input);
 		},
@@ -72,6 +77,7 @@ export const groupsTools: MCPTool[] = [
 				description: { type: "string", description: "New description" },
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		async handler(input, ctx) {
 			const { id, ...fields } = input as { id: string; [k: string]: unknown };
 			return updateGroup(ctx, id, fields);
@@ -86,6 +92,7 @@ export const groupsTools: MCPTool[] = [
 			required: ["id"],
 			properties: { id: { type: "string", description: "Group ID" } },
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
 			return deleteGroup(ctx, id);
@@ -102,6 +109,7 @@ export const groupsTools: MCPTool[] = [
 				userId: { type: "string", description: "User ID (must be a workspace member)" },
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			const { groupId, ...fields } = input as { groupId: string; [k: string]: unknown };
 			return addGroupMember(ctx, groupId, fields);
@@ -118,6 +126,7 @@ export const groupsTools: MCPTool[] = [
 				userId: { type: "string", description: "User ID" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { groupId, userId } = input as { groupId: string; userId: string };
 			return removeGroupMember(ctx, groupId, userId);
@@ -140,6 +149,7 @@ export const groupsTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		async handler(input, ctx) {
 			const { groupId, ...fields } = input as { groupId: string; [k: string]: unknown };
 			return setGroupGrant(ctx, groupId, fields);
@@ -156,6 +166,7 @@ export const groupsTools: MCPTool[] = [
 				projectId: { type: "string", description: "Project ID" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { groupId, projectId } = input as { groupId: string; projectId: string };
 			return removeGroupGrant(ctx, groupId, projectId);

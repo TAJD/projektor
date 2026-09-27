@@ -4,6 +4,7 @@ import { ValidationError } from "../services/errors";
 import * as wikiService from "../services/wiki";
 import * as wikiDraftsService from "../services/wiki-drafts";
 import * as wikiWatchersService from "../services/wiki-watchers";
+import { CREATE, DESTRUCTIVE, PLAIN_WRITE, READ } from "./annotations";
 
 // PROJ-513: `type` is freeform — these are advertised as hints, never as an
 // inputSchema `enum` (which clients treat as the only legal values).
@@ -40,9 +41,10 @@ export const wikiTools: MCPTool[] = [
 					description: "Filter to pages whose frontmatter `status` matches",
 				},
 				tags: {
-					type: "array",
+					type: ["array", "string"],
 					items: { type: "string" },
-					description: "Filter to pages carrying at least one of these frontmatter tags",
+					description:
+						"Filter to pages carrying at least one of these frontmatter tags (array, or a comma-separated string)",
 				},
 				includeTemplates: {
 					type: "boolean",
@@ -54,6 +56,7 @@ export const wikiTools: MCPTool[] = [
 				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiService.listWikiPages(ctx, input);
 		},
@@ -85,9 +88,10 @@ export const wikiTools: MCPTool[] = [
 					description: TYPE_FILTER_DESCRIPTION,
 				},
 				tags: {
-					type: "array",
+					type: ["array", "string"],
 					items: { type: "string" },
-					description: "Filter to pages carrying at least one of these frontmatter tags",
+					description:
+						"Filter to pages carrying at least one of these frontmatter tags (array, or a comma-separated string)",
 				},
 				status: {
 					type: "string",
@@ -97,6 +101,7 @@ export const wikiTools: MCPTool[] = [
 				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiService.searchWiki(ctx, input);
 		},
@@ -110,6 +115,7 @@ export const wikiTools: MCPTool[] = [
 			required: ["slug"],
 			properties: { slug: { type: "string" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
 			return wikiService.getWikiPage(ctx, slug);
@@ -154,6 +160,7 @@ export const wikiTools: MCPTool[] = [
 				projectId: { type: "string", description: "Project ID to scope this page to" },
 			},
 		},
+		annotations: CREATE,
 		async handler(input, ctx) {
 			return wikiService.createWikiPage(ctx, input);
 		},
@@ -206,6 +213,7 @@ export const wikiTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			const { id, slug, newSlug, ...rest } = input as {
 				id?: string;
@@ -298,6 +306,7 @@ export const wikiTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			const { id, slug, ...rest } = input as { id?: string; slug?: string };
 			const idOrSlug = id ?? slug;
@@ -327,6 +336,7 @@ export const wikiTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { slug, cascade } = input as { slug: string; cascade?: boolean };
 			return wikiService.deleteWikiPage(ctx, slug, { cascade });
@@ -342,6 +352,7 @@ export const wikiTools: MCPTool[] = [
 				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiService.getWikiTree(ctx, input);
 		},
@@ -359,6 +370,7 @@ export const wikiTools: MCPTool[] = [
 				slug: { type: "string", description: "Page ID or slug to find backlinks for" },
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
 			return wikiService.getWikiBacklinks(ctx, slug);
@@ -377,6 +389,7 @@ export const wikiTools: MCPTool[] = [
 				projectId: { type: "string", description: "Restrict to links from pages in this project" },
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiService.listBrokenWikiLinks(ctx, input);
 		},
@@ -387,6 +400,7 @@ export const wikiTools: MCPTool[] = [
 			"One-time (idempotent, safe to re-run) recompute of the wiki_links graph for every " +
 			"existing page in the workspace. Owner/admin only.",
 		inputSchema: { type: "object", properties: {} },
+		annotations: PLAIN_WRITE,
 		async handler(_input, ctx) {
 			return wikiService.backfillWikiLinks(ctx);
 		},
@@ -399,6 +413,7 @@ export const wikiTools: MCPTool[] = [
 			required: ["slug"],
 			properties: { slug: { type: "string" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
 			return wikiService.listWikiRevisions(ctx, slug);
@@ -415,6 +430,7 @@ export const wikiTools: MCPTool[] = [
 				revisionId: { type: "string" },
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { slug, revisionId } = input as { slug: string; revisionId: string };
 			return wikiService.getWikiRevision(ctx, slug, revisionId);
@@ -440,6 +456,7 @@ export const wikiTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { slug, revisionId, against } = input as {
 				slug: string;
@@ -464,6 +481,7 @@ export const wikiTools: MCPTool[] = [
 				slug: { type: "string", description: "Page ID or slug" },
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
 			return wikiService.verifyWikiPage(ctx, slug);
@@ -488,6 +506,7 @@ export const wikiTools: MCPTool[] = [
 				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiService.listStaleWikiPages(ctx, input);
 		},
@@ -509,6 +528,7 @@ export const wikiTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiService.listWikiTemplates(ctx, input);
 		},
@@ -536,6 +556,7 @@ export const wikiTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			const { slug, ...rest } = input as { slug: string; subtree?: boolean };
 			return wikiWatchersService.watchWikiPage(ctx, slug, rest);
@@ -549,6 +570,7 @@ export const wikiTools: MCPTool[] = [
 			required: ["slug"],
 			properties: { slug: { type: "string", description: "Page ID or slug" } },
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
 			return wikiWatchersService.unwatchWikiPage(ctx, slug);
@@ -558,6 +580,7 @@ export const wikiTools: MCPTool[] = [
 		name: "list_wiki_watches",
 		description: "List the pages the calling user is currently watching.",
 		inputSchema: { type: "object", properties: {} },
+		annotations: READ,
 		async handler(_input, ctx) {
 			return wikiWatchersService.listWikiWatches(ctx);
 		},
@@ -577,6 +600,7 @@ export const wikiTools: MCPTool[] = [
 				offset: { type: "number", default: 0 },
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiWatchersService.listWikiNotifications(ctx, input);
 		},
@@ -599,6 +623,7 @@ export const wikiTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			return wikiWatchersService.markWikiNotificationsRead(ctx, input);
 		},
@@ -632,6 +657,7 @@ export const wikiTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiWatchersService.listWikiChanges(ctx, input);
 		},
@@ -651,6 +677,7 @@ export const wikiTools: MCPTool[] = [
 			required: ["slug"],
 			properties: { slug: { type: "string", description: "Page ID or slug" } },
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
 			return wikiDraftsService.getWikiDraft(ctx, slug);
@@ -673,12 +700,14 @@ export const wikiTools: MCPTool[] = [
 				content: { type: "string" },
 				baseRevisionId: {
 					type: "string",
+					nullable: true,
 					description:
 						"The page's latest revision id when this draft was started; null if the " +
 						"page had no revisions yet",
 				},
 			},
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			const { slug, ...rest } = input as { slug: string; title: string; content: string };
 			return wikiDraftsService.saveWikiDraft(ctx, slug, rest);
@@ -695,6 +724,7 @@ export const wikiTools: MCPTool[] = [
 			required: ["slug"],
 			properties: { slug: { type: "string", description: "Page ID or slug" } },
 		},
+		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
 			const { slug } = input as { slug: string };
 			return wikiDraftsService.discardWikiDraft(ctx, slug);
@@ -719,6 +749,7 @@ export const wikiTools: MCPTool[] = [
 				offset: { type: "number", default: 0 },
 			},
 		},
+		annotations: READ,
 		async handler(input, ctx) {
 			return wikiService.listWikiTrash(ctx, input);
 		},
@@ -741,6 +772,7 @@ export const wikiTools: MCPTool[] = [
 			required: ["id"],
 			properties: { id: { type: "string", description: "Trashed page ID" } },
 		},
+		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {
 			const { id } = input as { id: string };
 			return wikiService.undeleteWikiPage(ctx, id);
@@ -756,6 +788,7 @@ export const wikiTools: MCPTool[] = [
 			"runs automatically once daily via a Workers Cron Trigger — call this manually only " +
 			"to force an off-cycle purge.",
 		inputSchema: { type: "object", properties: {} },
+		annotations: DESTRUCTIVE,
 		async handler(_input, ctx) {
 			return wikiService.purgeExpiredWikiPages(ctx);
 		},

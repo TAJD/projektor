@@ -1,6 +1,7 @@
 import type { MCPTool } from "@projektor/types";
 import { ValidationError } from "../services/errors";
 import { createLink, deleteLink, listLinksForIssue } from "../services/issue-links";
+import { CREATE, DESTRUCTIVE, READ } from "./annotations";
 
 export const issueLinksTools: MCPTool[] = [
 	{
@@ -26,6 +27,7 @@ export const issueLinksTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: CREATE,
 		handler(input, ctx) {
 			return createLink(ctx, input);
 		},
@@ -40,6 +42,7 @@ export const issueLinksTools: MCPTool[] = [
 				id: { type: "string", description: "UUID of the link to delete" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {
@@ -58,6 +61,7 @@ export const issueLinksTools: MCPTool[] = [
 				issueId: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return listLinksForIssue(ctx, input);
 		},

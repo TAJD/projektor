@@ -1,5 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { claimIssue, listIssueLeases, releaseIssue } from "../services/issue-leases";
+import { DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 
 export const issueLeasesTools: MCPTool[] = [
 	{
@@ -18,6 +19,7 @@ export const issueLeasesTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		handler(input, ctx) {
 			return claimIssue(ctx, input);
 		},
@@ -37,6 +39,7 @@ export const issueLeasesTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: DESTRUCTIVE,
 		handler(input, ctx) {
 			return releaseIssue(ctx, input);
 		},
@@ -53,6 +56,7 @@ export const issueLeasesTools: MCPTool[] = [
 				agentId: { type: "string", description: "Filter to leases held by this agent (optional)" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return listIssueLeases(ctx, input);
 		},

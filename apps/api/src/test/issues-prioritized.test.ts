@@ -193,3 +193,24 @@ describe("PROJ-859: bounded query count", () => {
 		expect(after).toEqual({ dor_ready: 1, dor_missing: "[]" });
 	});
 });
+
+// PROJ-920: the MCP argument validator lets through the string forms the services coerce
+// ("false", "5"), so get_prioritized_issues must read them the same way — not treat the
+// string "false" as true.
+describe("PROJ-920: string flags and limit are coerced like BooleanQueryParam / z.coerce", () => {
+	it('includeBacklog: "false" and limit: "3" behave like false and 3', async () => {
+		const { ctx } = await seedWorkspaceWithIssues(40);
+		const asBool = (await getPrioritizedIssues(ctx, {
+			limit: 3,
+			includeBacklog: false,
+			includeNotReady: true,
+		})) as { issues: Array<{ id: string }> };
+		const asString = (await getPrioritizedIssues(ctx, {
+			limit: "3",
+			includeBacklog: "false",
+			includeNotReady: "1",
+		})) as { issues: Array<{ id: string }> };
+		expect(asString.issues.map((i) => i.id)).toEqual(asBool.issues.map((i) => i.id));
+		expect(asString.issues).toHaveLength(3);
+	});
+});

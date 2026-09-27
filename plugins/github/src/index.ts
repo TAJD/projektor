@@ -21,6 +21,7 @@ export default definePlugin({
     defineMCPTool({
       name: 'github_link_pr',
       description: 'Link a GitHub pull request to an issue',
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
       inputSchema: {
         type: 'object',
         required: ['issueId', 'prUrl', 'prNumber', 'repo'],

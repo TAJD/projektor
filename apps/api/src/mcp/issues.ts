@@ -9,6 +9,7 @@ import {
 	searchIssues,
 	updateIssue,
 } from "../services/issues";
+import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 
 export const issuesTools: MCPTool[] = [
 	{
@@ -104,12 +105,13 @@ export const issuesTools: MCPTool[] = [
 					description: "Include the `body` field on each item (omitted by default)",
 				},
 				cursor: {
-					type: "string",
+					type: ["string", "integer"],
 					description: "Pagination cursor: pass the previous page's `nextCursor` unchanged",
 				},
 				limit: { type: "number", default: 50, description: "Max 100" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return listIssues(ctx, input);
 		},
@@ -124,6 +126,7 @@ export const issuesTools: MCPTool[] = [
 				ref: { type: "string", description: "Project key and number, e.g. PROJ-42" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return getIssue(ctx, input);
 		},
@@ -161,6 +164,7 @@ export const issuesTools: MCPTool[] = [
 				typeId: { type: "string", description: "UUID of the task type to assign" },
 			},
 		},
+		annotations: CREATE,
 		handler(input, ctx) {
 			return createIssue(ctx, input);
 		},
@@ -215,6 +219,7 @@ export const issuesTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: IDEMPOTENT_WRITE,
 		handler(input, ctx) {
 			const { id, ...fields } = input as { id?: string; [k: string]: unknown };
 			if (!id || typeof id !== "string") {
@@ -238,6 +243,7 @@ export const issuesTools: MCPTool[] = [
 				limit: { type: "number", default: 20, description: "Max 50" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return searchIssues(ctx, input);
 		},
@@ -252,6 +258,7 @@ export const issuesTools: MCPTool[] = [
 				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
 			},
 		},
+		annotations: DESTRUCTIVE,
 		handler(input, ctx) {
 			const { id } = input as { id?: string };
 			if (!id || typeof id !== "string") {
@@ -301,6 +308,7 @@ export const issuesTools: MCPTool[] = [
 				},
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return getPrioritizedIssues(ctx, input);
 		},

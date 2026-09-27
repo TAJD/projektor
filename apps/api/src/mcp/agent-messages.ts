@@ -1,5 +1,6 @@
 import type { MCPTool } from "@projektor/types";
 import { listMessages, postMessage } from "../services/agent-messages";
+import { PLAIN_WRITE, READ } from "./annotations";
 
 export const agentMessagesTools: MCPTool[] = [
 	{
@@ -22,6 +23,7 @@ export const agentMessagesTools: MCPTool[] = [
 				body: { type: "string", description: "Message body (1–5000 characters)" },
 			},
 		},
+		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
 			return postMessage(ctx, input);
 		},
@@ -39,12 +41,13 @@ export const agentMessagesTools: MCPTool[] = [
 					description: 'Channel scope: "workspace" or "issue:<uuid>"',
 				},
 				cursor: {
-					type: "number",
-					description: "Pagination cursor (created_at of last received item)",
+					type: "string",
+					description: "Pagination cursor: pass the previous page's `nextCursor` unchanged",
 				},
 				limit: { type: "number", description: "Max messages to return (1–100, default 50)" },
 			},
 		},
+		annotations: READ,
 		handler(input, ctx) {
 			return listMessages(ctx, input);
 		},
