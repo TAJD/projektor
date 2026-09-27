@@ -936,6 +936,7 @@ function buildCreateWikiPageInsertStatement(
 			.insert(schema.wikiPages)
 			.values({
 				id,
+				searchRowid: newSearchRowid(), // PROJ-816
 				workspaceId: ctx.workspaceId,
 				projectId,
 				slug,
@@ -1046,7 +1047,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		ctx,
 		[
 			insertStatement,
-			buildFtsInsertStatement(ctx, id, title, content, meta.tags),
+			...buildFtsInsertStatements(ctx, id, title, content, meta.tags),
 			...linkStatements,
 			incomingLinkStatement,
 		],
@@ -1337,25 +1338,47 @@ function toD1Statement(
 	return ctx.db.prepare(query.sql).bind(...query.params);
 }
 
+// PROJ-816: a new page's wiki_fts rowid. Random 52-bit (safe JS integer), offset past
+// the small rowids migration 0065 backfilled from wiki_pages.rowid; the unique index on
+// wiki_pages.search_rowid backs it.
+export function newSearchRowid(): number {
+	const [hi, lo] = crypto.getRandomValues(new Uint32Array(2));
+	// 20 + 32 = 52 random bits; + 2^40 stays below Number.MAX_SAFE_INTEGER (2^53).
+	return 2 ** 40 + ((hi & 0xfffff) * 2 ** 32 + lo);
+}
+
+// PROJ-816: wiki_fts rows are keyed by the page's search_rowid, so both the insert and
+// the delete below are rowid lookups instead of a scan over the UNINDEXED page_id column.
+const FTS_ROWID_OF_PAGE = "(SELECT search_rowid FROM wiki_pages WHERE id = ? AND workspace_id = ?)";
+
 // PROJ-486/PROJ-511: builds (without executing) the INSERT that mirrors a page into
 // wiki_fts. tags is passed in explicitly rather than re-read from the DB — callers
 // already know the post-write title/content/tags before any statement runs, since that's
 // what lets these statements sit alongside the content write in one atomic batch.
-function buildFtsInsertStatement(
+function buildFtsInsertStatements(
 	ctx: ServiceCtx,
 	id: string,
 	title: string,
 	content: string,
 	tags: readonly string[]
-): D1PreparedStatement {
+): D1PreparedStatement[] {
 	// PROJ-488: tags is space-joined — wiki_fts's default unicode61 tokenizer splits on
 	// non-alphanumeric, so a comma join would tokenize identically, but space matches how
 	// title/content are naturally tokenized.
-	return ctx.db
-		.prepare(
-			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
-		)
-		.bind(id, ctx.workspaceId, title, content, tags.join(" "));
+	return [
+		// A page written outside this module (or before 0065) may have no search_rowid yet.
+		ctx.db
+			.prepare(
+				"UPDATE wiki_pages SET search_rowid = ? WHERE id = ? AND workspace_id = ? AND search_rowid IS NULL"
+			)
+			.bind(newSearchRowid(), id, ctx.workspaceId),
+		ctx.db
+			.prepare(
+				`INSERT INTO wiki_fts (rowid, page_id, workspace_id, title, content, tags)
+				 VALUES (${FTS_ROWID_OF_PAGE}, ?, ?, ?, ?, ?)`
+			)
+			.bind(id, ctx.workspaceId, id, ctx.workspaceId, title, content, tags.join(" ")),
+	];
 }
 
 // PROJ-486/PROJ-511: mirrors issues.ts's reindexIssueFts — delete-then-reinsert the
@@ -1371,9 +1394,9 @@ function buildFtsReindexStatements(
 ): D1PreparedStatement[] {
 	return [
 		ctx.db
-			.prepare("DELETE FROM wiki_fts WHERE page_id = ? AND workspace_id = ?")
+			.prepare(`DELETE FROM wiki_fts WHERE rowid = ${FTS_ROWID_OF_PAGE}`)
 			.bind(id, ctx.workspaceId),
-		buildFtsInsertStatement(ctx, id, title, content, tags),
+		...buildFtsInsertStatements(ctx, id, title, content, tags),
 	];
 }
 
@@ -1395,13 +1418,18 @@ async function currentPageTags(
 	return row?.tags ?? [];
 }
 
+// PROJ-816: must run BEFORE the pages themselves are deleted (it finds the FTS rowids
+// through wiki_pages.search_rowid).
 // PROJ-486: chunked so a cascade delete of a large subtree stays under D1's 100-bound
 // parameter cap (services/sql.ts#inChunks).
 async function deleteWikiFtsEntries(ctx: ServiceCtx, pageIds: string[]): Promise<void> {
 	await inChunks(pageIds, async (chunk) => {
 		const placeholders = chunk.map(() => "?").join(",");
 		await ctx.db
-			.prepare(`DELETE FROM wiki_fts WHERE page_id IN (${placeholders}) AND workspace_id = ?`)
+			.prepare(
+				`DELETE FROM wiki_fts WHERE rowid IN (
+				   SELECT search_rowid FROM wiki_pages WHERE id IN (${placeholders}) AND workspace_id = ?)`
+			)
 			.bind(...chunk, ctx.workspaceId)
 			.run();
 		return [];
@@ -2285,6 +2313,7 @@ export async function seedDefaultWikiTemplates(
 	const parentId = crypto.randomUUID();
 	await orm.insert(schema.wikiPages).values({
 		id: parentId,
+		searchRowid: newSearchRowid(), // PROJ-816
 		workspaceId,
 		projectId: null,
 		slug: "page-templates",
@@ -2303,15 +2332,17 @@ export async function seedDefaultWikiTemplates(
 	// invisible to search_wiki until someone happens to edit it.
 	await db
 		.prepare(
-			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
+			`INSERT INTO wiki_fts (rowid, page_id, workspace_id, title, content, tags)
+			 VALUES ((SELECT search_rowid FROM wiki_pages WHERE id = ?), ?, ?, ?, ?, ?)`
 		)
-		.bind(parentId, workspaceId, "Templates", "", "")
+		.bind(parentId, parentId, workspaceId, "Templates", "", "")
 		.run();
 
 	for (const t of DEFAULT_WIKI_TEMPLATES) {
 		const content = `---\ntype: ${t.type}\nstatus: draft\ntemplate: true\n---\n${t.body}`;
 		await orm.insert(schema.wikiPages).values({
 			id: crypto.randomUUID(),
+			searchRowid: newSearchRowid(), // PROJ-816
 			workspaceId,
 			projectId: null,
 			slug: t.slug,
@@ -2919,6 +2950,7 @@ export async function purgeExpiredWikiPages(
 	// pages are deleted — once they're gone, ON DELETE SET NULL (where enforced) would
 	// already have cleared target_page_id and there'd be nothing left to re-point.
 	await repointIncomingLinks(ctx, ids);
+	await deleteWikiFtsEntries(ctx, ids); // PROJ-816: before the pages go
 	await inChunks(ids, async (chunk) => {
 		await orm.delete(schema.wikiRevisions).where(inArray(schema.wikiRevisions.pageId, chunk));
 		return [];
@@ -2927,7 +2959,6 @@ export async function purgeExpiredWikiPages(
 		await orm.delete(schema.wikiPages).where(inArray(schema.wikiPages.id, chunk));
 		return [];
 	});
-	await deleteWikiFtsEntries(ctx, ids);
 	await deleteWikiLinksForPages(ctx, ids);
 	await deleteWikiWatchersForPages(ctx, ids);
 	await deleteWikiDraftsForPages(ctx, ids);
