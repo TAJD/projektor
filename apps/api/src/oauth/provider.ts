@@ -109,7 +109,7 @@ export async function tokenEndpointRateLimited(
 
 	let count: number;
 	try {
-		count = await bumpRateCounter(env.DB, `oauth-token:${ip}`, windowSecs);
+		count = await bumpRateCounter(env, `oauth-token:${ip}`, windowSecs);
 	} catch (err) {
 		console.error("oauth token rate-limit counter unavailable, failing open", {
 			err: String(err),

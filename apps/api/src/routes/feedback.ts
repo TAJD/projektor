@@ -52,8 +52,18 @@ async function checkFeedbackRateLimit(
 	const ipLimit = parseInt(c.env.RATE_LIMIT_FEEDBACK_IP_MAX ?? "100", 10);
 	const ip = c.req.header("CF-Connecting-IP") ?? "127.0.0.1";
 	const tokenHash = await hashFeedbackToken(token);
-	const tokenCount = await bumpRateCounter(c.env.DB, `feedback:${tokenHash}`, windowSecs);
-	const ipCount = await bumpRateCounter(c.env.DB, `feedback-ip:${ip}`, windowSecs);
+	// PROJ-867: both counters in parallel; a limiter outage fails open rather than 500ing.
+	let tokenCount: number;
+	let ipCount: number;
+	try {
+		[tokenCount, ipCount] = await Promise.all([
+			bumpRateCounter(c.env, `feedback:${tokenHash}`, windowSecs),
+			bumpRateCounter(c.env, `feedback-ip:${ip}`, windowSecs),
+		]);
+	} catch (err) {
+		console.error("feedback rate-limit counter unavailable, failing open", { err: String(err) });
+		return null;
+	}
 	if (tokenCount > tokenLimit || ipCount > ipLimit) {
 		return c.json({ error: "Too Many Requests" }, 429);
 	}

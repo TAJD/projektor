@@ -205,22 +205,49 @@ alongside `/api/*`, `/mcp/*` and `/wiki`. Without it the static-asset handler
 answers discovery requests with the SPA shell and the client reports the server
 as not supporting OAuth at all.
 
-### 7. Realtime WebSockets (Optional, Workers Paid)
+### 7. Realtime WebSockets (optional)
 
 To enable live event streaming over `/api/workspaces/:slug/realtime` (for external dashboards and status boards), bind the `WorkspaceHub` Durable Object in your `wrangler.toml`:
 
 ```toml
-[durable_objects]
-bindings = [
-  { name = "WORKSPACE_HUB", class_name = "WorkspaceHub" }
-]
+[[durable_objects.bindings]]
+name = "WORKSPACE_HUB"
+class_name = "WorkspaceHub"
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["WorkspaceHub"]
 ```
 
-If omitted, the Worker operates in standard polling mode with zero overhead.
+If the binding is omitted, the Worker operates in standard polling mode with zero
+overhead. **Keep the `v1` migration even if you leave the binding out**, and keep it
+above the rate limiter's `v2` (below): wrangler only applies migrations after the last
+tag it deployed, so a `v1` added after `v2` is skipped and WorkspaceHub is never created.
+
+### 7a. Rate limiter (required)
+
+Request rate limits (`RATE_LIMIT_*` vars) are counted in the `RateLimiter` Durable
+Object, one object per API token or client IP, held in memory — no D1 write per
+request (PROJ-867). It is SQLite-backed, so it works on the Workers Free plan.
+`wrangler.example.toml` already includes it:
+
+```toml
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RateLimiter"]
+```
+
+**Upgrading:** add these blocks, and the `v1` migration from step 7 if you don't have it,
+to your existing `wrangler.toml` (if you used the older `[durable_objects]
+bindings = [ … ]` table form, convert it to `[[durable_objects.bindings]]` entries —
+TOML can't mix the two). Deploying resets every rate-limit window. Until you add the
+binding, the Worker falls back to the deprecated D1 limiter and logs a warning; that fallback is
+removed in a later release (PROJ-924), after which a missing binding disables rate
+limiting.
 
 ### 8. Deploy
 

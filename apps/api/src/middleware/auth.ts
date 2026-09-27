@@ -54,8 +54,16 @@ async function tooManyAuthFailures(c: Context<HonoEnv>): Promise<boolean> {
 	const ip = c.req.header("CF-Connecting-IP") ?? "127.0.0.1";
 	const windowSecs = parseInt(c.env.RATE_LIMIT_WINDOW_SECS ?? "60", 10);
 	const limit = parseInt(c.env.RATE_LIMIT_AUTH_FAIL_MAX ?? "50", 10);
-	const count = await bumpRateCounter(c.env.DB, `authfail:${ip}`, windowSecs);
-	return count > limit;
+	// PROJ-867: a limiter outage must not turn a 401 into a 500 — fail open.
+	try {
+		const count = await bumpRateCounter(c.env, `authfail:${ip}`, windowSecs);
+		return count > limit;
+	} catch (err) {
+		console.error("auth-failure rate-limit counter unavailable, failing open", {
+			err: String(err),
+		});
+		return false;
+	}
 }
 
 export interface AuthUser {

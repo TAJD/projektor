@@ -10,6 +10,7 @@ import {
 	seedProjectFixture,
 	seedWorkspaceRoles,
 } from "./helpers";
+import { seedRateLimitCounter } from "./rate-limit-reset";
 
 describe("feedback migration", () => {
 	it("creates feedback_sources and feedback tables", async () => {
@@ -146,6 +147,33 @@ async function mintSource(
 }
 
 describe("Feedback submit (public)", () => {
+	it("fails open (201, not 500) when the rate limiter is unavailable (PROJ-867)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f);
+		const saved = env.RATE_LIMITER;
+		let calls = 0;
+		env.RATE_LIMITER = {
+			idFromName: (name: string) => name,
+			get: () => ({
+				increment: () => {
+					calls++;
+					return Promise.reject(new Error("DO down"));
+				},
+			}),
+		} as unknown as typeof env.RATE_LIMITER;
+		try {
+			const res = await SELF.fetch("http://localhost/api/feedback/submit", {
+				method: "POST",
+				headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+				body: JSON.stringify({ body: "Still works" }),
+			});
+			expect(calls).toBe(2);
+			expect(res.status).toBe(201);
+		} finally {
+			env.RATE_LIMITER = saved;
+		}
+	});
+
 	it("accepts a body-only submission and returns { id } only", async () => {
 		const f = await seedProjectFixture({ role: "owner" });
 		const token = await mintSource(f);
@@ -309,27 +337,10 @@ describe("Feedback submit (public)", () => {
 	});
 });
 
-// PROJ-637: the limiter is a fixed window keyed by (key, window_start), and its upsert
-// resets count to 1 whenever the request's slot differs from the stored one. So if the
-// request lands in a later slot than the row seeded here, the cap is silently cleared and
-// the call is allowed — seeding near the end of a window is a coin flip on the wall clock.
-// That was the intermittent "expected 201 to be 429", which reads as a limiter bug rather
-// than a test one. Wait out the tail of the window so the seeded row and the request agree.
+// RATE_LIMIT_FEEDBACK_MAX and _IP_MAX are both 5 in wrangler.test.toml — seed to the cap.
+// (seedRateLimitCounter waits out the tail of a window first — PROJ-637.)
 async function seedRateLimitAtCap(key: string): Promise<void> {
-	const WINDOW_MS = 60_000; // RATE_LIMIT_WINDOW_SECS=60 in wrangler.test.toml
-	// Slots are floor(epochSeconds / 60) * 60, so boundaries land on epoch minutes and the
-	// modulo below is genuinely "how far into the current window we are".
-	const intoWindow = Date.now() % WINDOW_MS;
-	const HEADROOM_MS = 5_000; // covers the seed + fetch even on a loaded machine
-	if (intoWindow > WINDOW_MS - HEADROOM_MS) {
-		await new Promise((resolve) => setTimeout(resolve, WINDOW_MS - intoWindow + 50));
-	}
-	// RATE_LIMIT_FEEDBACK_MAX and _IP_MAX are both 5 in wrangler.test.toml — seed to the cap.
-	await env.DB.prepare(
-		"INSERT OR REPLACE INTO rate_limit (key, count, window_start) VALUES (?, 5, ?)"
-	)
-		.bind(key, Math.floor(Date.now() / 1000 / 60) * 60)
-		.run();
+	await seedRateLimitCounter(key, 5);
 }
 
 async function seedFeedbackRow(

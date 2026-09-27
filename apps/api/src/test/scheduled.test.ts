@@ -2,6 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { purgeAllWorkspacesExpiredWikiPages } from "../index";
 import { authHeaders, seedFixture } from "./helpers";
+import { resetRateLimits } from "./rate-limit-reset";
 
 // PROJ-496: the Workers Cron Trigger itself can't be exercised locally (no local cron
 // firing in dev/test), so this calls the exported `purgeAllWorkspacesExpiredWikiPages`
@@ -19,7 +20,7 @@ describe("scheduled wiki trash purge (PROJ-496)", () => {
 	});
 
 	async function req(url: string, opts?: RequestInit) {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		return SELF.fetch(url, opts);
 	}
 

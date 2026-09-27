@@ -34,6 +34,15 @@ id = "00000000-0000-0000-0000-000000000002"
 binding = "R2"
 bucket_name = "projektor-files-test"
 
+# PROJ-867: rate-limit counters (one Durable Object per key, in-memory only).
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RateLimiter"]
+
 [vars]
 ENVIRONMENT = "development"
 JWT_SECRET = "test-secret-do-not-use-in-production"

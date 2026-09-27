@@ -66,6 +66,11 @@ export interface Env {
 	// Optional: opt-in real-time WebSocket hub (Durable Objects). Omitted for
 	// free-tier/1-click deployments; present when opt-in real-time features are enabled.
 	WORKSPACE_HUB?: DurableObjectNamespace;
+	// PROJ-867: fixed-window rate-limit counters (apps/api/src/lib/rate-limiter-do.ts).
+	// Optional only for the one-release D1 fallback (PROJ-924).
+	RATE_LIMITER?: DurableObjectNamespace<RateLimiterRpc>;
+	// Test-only (ignored in production): changes every limiter key so each test starts fresh.
+	RATE_LIMIT_TEST_EPOCH?: string;
 	RATE_LIMIT_TEST_NOW_MS?: string;
 	BRAND_NAME?: string;
 	BRAND_MARK?: string;
@@ -105,3 +110,8 @@ export interface Variables {
 }
 
 export type HonoEnv = { Bindings: Env; Variables: Variables };
+
+/** RPC surface of the RateLimiter Durable Object (apps/api/src/lib/rate-limiter-do.ts). */
+export interface RateLimiterRpc extends Rpc.DurableObjectBranded {
+	increment(windowSecs: number, nowSecs: number): { count: number; slot: number };
+}

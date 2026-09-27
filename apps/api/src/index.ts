@@ -485,4 +485,5 @@ export default {
 	scheduled,
 } satisfies ExportedHandler<Env>;
 
+export { RateLimiter } from "./lib/rate-limiter-do";
 export { WorkspaceHub } from "./realtime/workspace-hub";

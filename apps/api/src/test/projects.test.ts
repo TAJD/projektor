@@ -1,6 +1,7 @@
-import { env, SELF } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, type JsonRpcError, type JsonRpcResult, seedWorkspaceRoles } from "./helpers";
+import { resetRateLimits } from "./rate-limit-reset";
 
 async function mcpCall<T>(
 	workspaceId: string,
@@ -245,7 +246,7 @@ describe("Projects REST", () => {
 		expect(archived).toBeTruthy();
 		expect(archived!.archived_at).not.toBeNull();
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 
 		const unarchiveRes = await SELF.fetch(`http://localhost/api/projects/${id}`, {
 			method: "PATCH",

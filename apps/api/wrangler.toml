@@ -48,14 +48,30 @@ id = "REPLACE_WITH_YOUR_OAUTH_KV_NAMESPACE_ID"
 binding = "R2"
 bucket_name = "projektor-files"
 
-# [durable_objects]
-# bindings = [
-#   { name = "WORKSPACE_HUB", class_name = "WorkspaceHub" }
-# ]
+# [[durable_objects.bindings]]
+# name = "WORKSPACE_HUB"
+# class_name = "WorkspaceHub"
 #
-# [[migrations]]
-# tag = "v1"
-# new_sqlite_classes = ["WorkspaceHub"]
+# Always keep this migration, even with the binding above commented out: the class
+# ships in every build, and wrangler only applies migrations after the last deployed
+# tag, so adding "v1" later (after "v2") would never create WorkspaceHub.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WorkspaceHub"]
+
+# PROJ-867 rate limiter (required): request rate-limit counters, one Durable Object
+# per key, kept in memory (no storage writes). SQLite-backed, so it works on the
+# Workers Free plan. Keep this migration AFTER the WorkspaceHub "v1" above:
+# wrangler applies migration tags in file order. Without this binding projektor falls
+# back to the deprecated D1 limiter (a D1 write on every request) and logs a warning;
+# that fallback is removed in a later release (PROJ-924).
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiter"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["RateLimiter"]
 
 [vars]
 ENVIRONMENT = "development"

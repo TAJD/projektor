@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, beforeEach } from "vitest";
 import { MIGRATIONS } from "./migrations";
+import { resetRateLimits } from "./rate-limit-reset";
 
 // Strip line comments before splitting on ; — Drizzle breakpoints and any
 // semicolons inside comments (e.g. "ON CONFLICT; old windows are") would
@@ -28,5 +29,5 @@ beforeAll(async () => {
 // low test limits (AUTH_LIMIT=3). Reset it before each test so every test starts
 // from a clean window — restoring the per-test freshness the old isolation gave.
 beforeEach(async () => {
-	await env.DB.prepare("DELETE FROM rate_limit").run();
+	await resetRateLimits();
 });

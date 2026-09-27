@@ -13,6 +13,7 @@ import {
 	seedUser,
 	seedWorkspaceRoles,
 } from "./helpers";
+import { resetRateLimits } from "./rate-limit-reset";
 
 const ENTITY_ID = crypto.randomUUID();
 
@@ -665,7 +666,7 @@ describe("Files API", () => {
 			// title/url details for a page the user can no longer see live.
 			expect(trashedEntry?.wikiPage).toBeNull();
 
-			await env.DB.prepare("DELETE FROM rate_limit").run();
+			await resetRateLimits();
 			const metadata = await mcpToolResult<{ wikiPage: unknown }>(
 				workspaceId,
 				"get_attachment",
@@ -677,14 +678,14 @@ describe("Files API", () => {
 			await env.DB.prepare("UPDATE wiki_pages SET deleted_at = ? WHERE id = ?")
 				.bind(Math.floor(Date.now() / 1000) - 31 * 24 * 60 * 60, wikiPageId)
 				.run();
-			await env.DB.prepare("DELETE FROM rate_limit").run();
+			await resetRateLimits();
 			const purgeRes = await SELF.fetch("http://localhost/api/wiki/purge-trash", {
 				method: "POST",
 				headers: adminHeaders,
 			});
 			expect(purgeRes.status).toBe(200);
 
-			await env.DB.prepare("DELETE FROM rate_limit").run();
+			await resetRateLimits();
 			const listAfterPurge = await SELF.fetch(
 				`http://localhost/api/files?entityType=issue&entityId=${entityId}`,
 				{ headers: adminHeaders }

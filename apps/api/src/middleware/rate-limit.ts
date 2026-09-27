@@ -1,21 +1,14 @@
-import type { HonoEnv } from "@projektor/types";
+import type { Env, HonoEnv } from "@projektor/types";
 import type { Context, Next } from "hono";
 
-// Fixed-window rate-limit middleware backed by D1.
+// Fixed-window rate-limit middleware.
 //
-// PROJ-125 investigation: KV state IS shared between SELF.fetch() calls in the
-// @cloudflare/vitest-pool-workers test runtime (see cache.test.ts, which writes
-// to KV inside a handler and reads it back in a subsequent SELF.fetch()). The
-// original reason for using D1 was incorrect.
-//
-// Why D1 remains: wiki.test.ts resets rate-limit state mid-test via
-// `env.DB.prepare("DELETE FROM rate_limit").run()` — a D1-specific escape hatch
-// added so the wiki nesting-depth test can fire its 6th request without being
-// rate-limited. Migrating to KV would break that test, which is outside this
-// ticket's file scope. A future migration needs wiki.test.ts to also clear KV.
-//
-// The upsert and its read-back are issued as one D1 batch, so this costs a single round
-// trip (see incrementCounter — RETURNING would be tidier but isn't reliable locally).
+// PROJ-867: counters live in the RateLimiter Durable Object (lib/rate-limiter-do.ts), one
+// object per key, held in memory. Before this every /api, /mcp, /oauth and /.well-known
+// request — GETs included — was a D1 write transaction on the database's single writer,
+// plus a 1% full-table prune. A deploy that hasn't added the RATE_LIMITER binding yet
+// falls back to the old D1 counter (logged once per isolate); that fallback and the
+// rate_limit table are removed in a later release (PROJ-924).
 //
 // Key selection: when the request carries a bearer token the bucket is keyed by a
 // SHA-256 prefix of that token (own quota per credential, brute-force bounded).
@@ -36,7 +29,6 @@ export async function rateLimitMiddleware(
 			: NaN;
 	const nowMs = Number.isFinite(testNow) ? testNow : Date.now();
 	const now = Math.floor(nowMs / 1000);
-	const slot = Math.floor(now / windowSecs) * windowSecs; // fixed-window start timestamp
 
 	const authHeader = c.req.header("Authorization");
 	let key: string;
@@ -52,13 +44,13 @@ export async function rateLimitMiddleware(
 		limit = parseInt(c.env.RATE_LIMIT_AUTH_MAX ?? "300", 10);
 	}
 
-	// PROJ-430: every request writes then reads one hot row, so a burst from a
-	// single key serialises on it. A D1 error here is a limiter outage, not a
-	// client problem — fail open rather than turning it into a 500 for a request
-	// that would otherwise have succeeded.
+	// PROJ-430: a limiter error or stall is a limiter outage, not a client problem —
+	// fail open rather than turning it into a 500 (or added latency) for a request that
+	// would otherwise have succeeded.
 	let count: number;
+	let slot: number;
 	try {
-		count = await incrementCounter(c.env.DB, key, slot, windowSecs);
+		({ count, slot } = await incrementCounter(c.env, key, windowSecs, now));
 	} catch (err) {
 		console.error("rate-limit counter unavailable, failing open", { key, err: String(err) });
 		await next();
@@ -94,13 +86,9 @@ function oauthGrantKey(token: string): string | null {
  * throttle (middleware/auth.ts, PROJ-198) reuses the same backing table and window math
  * as the request limiter above.
  */
-export async function bumpRateCounter(
-	db: D1Database,
-	key: string,
-	windowSecs: number
-): Promise<number> {
-	const slot = Math.floor(Math.floor(Date.now() / 1000) / windowSecs) * windowSecs;
-	return incrementCounter(db, key, slot, windowSecs);
+export async function bumpRateCounter(env: Env, key: string, windowSecs: number): Promise<number> {
+	const { count } = await incrementCounter(env, key, windowSecs, Math.floor(Date.now() / 1000));
+	return count;
 }
 
 async function sha256Prefix(input: string): Promise<string> {
@@ -123,7 +111,52 @@ function pruneStaleRateLimitRows(db: D1Database, windowSecs: number): D1Prepared
 	return db.prepare("DELETE FROM rate_limit WHERE window_start < ?").bind(cutoff);
 }
 
+// A limiter call that hasn't answered by now is treated as an outage (fail open), so a
+// stalled or far-away Durable Object can't add more than this to every request.
+export const LIMITER_TIMEOUT_MS = 500;
+
+/**
+ * The Durable Object name for a limiter key. Outside production a test can set
+ * RATE_LIMIT_TEST_EPOCH to start every counter afresh (test/rate-limit-reset.ts).
+ */
+export function rateLimiterObjectName(env: Env, key: string): string {
+	const epoch = env.ENVIRONMENT !== "production" ? env.RATE_LIMIT_TEST_EPOCH : undefined;
+	return epoch ? `${epoch}|${key}` : key;
+}
+
+let warnedD1Fallback = false;
+
 async function incrementCounter(
+	env: Env,
+	key: string,
+	windowSecs: number,
+	nowSecs: number
+): Promise<{ count: number; slot: number }> {
+	const ns = env.RATE_LIMITER;
+	if (ns) {
+		const stub = ns.get(ns.idFromName(rateLimiterObjectName(env, key)));
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timeout = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => reject(new Error("rate limiter timed out")), LIMITER_TIMEOUT_MS);
+		});
+		try {
+			return await Promise.race([stub.increment(windowSecs, nowSecs), timeout]);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	if (!warnedD1Fallback) {
+		warnedD1Fallback = true;
+		console.warn(
+			"RATE_LIMITER Durable Object binding missing: using the deprecated D1 rate limiter. " +
+				"Add the binding from wrangler.example.toml; the D1 fallback will be removed."
+		);
+	}
+	const slot = Math.floor(nowSecs / windowSecs) * windowSecs;
+	return { count: await incrementD1Counter(env.DB, key, slot, windowSecs), slot };
+}
+
+async function incrementD1Counter(
 	db: D1Database,
 	key: string,
 	slot: number,
