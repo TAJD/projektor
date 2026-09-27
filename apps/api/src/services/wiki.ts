@@ -40,6 +40,8 @@ import {
 } from "./wiki-frontmatter";
 import {
 	backlinksForResolvedPage,
+	buildResolveIncomingLinksStatement,
+	buildUnresolveStaleIncomingLinksStatement,
 	buildWikiLinksReindexStatements,
 	clearIncomingLinkTargets,
 	countBacklinkSources,
@@ -976,6 +978,10 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	// statements exist, so by the time the batch below runs there's nothing left to throw
 	// mid-write — the content row, its FTS mirror, and its wiki_links all land atomically.
 	const linkStatements = await buildWikiLinksReindexStatements(ctx, orm, id, content);
+	// PROJ-814: other pages' links whose raw text names this page by its title/slug and
+	// are still unresolved (created before this page existed) become resolved to it now,
+	// without those pages needing to be re-saved.
+	const incomingLinkStatement = buildResolveIncomingLinksStatement(ctx, { id, title, slug });
 
 	await writeCreateWikiPageBatch(
 		ctx,
@@ -983,6 +989,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 			insertStatement,
 			buildFtsInsertStatement(ctx, id, title, content, meta.tags),
 			...linkStatements,
+			incomingLinkStatement,
 		],
 		slug
 	);
@@ -1598,6 +1605,23 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	statements.push(
 		...(await buildUpdateWikiPageReindexStatements(ctx, orm, page, { title, content, meta }))
 	);
+
+	// PROJ-814: a title and/or slug change can make this page newly match (or stop
+	// matching) other pages' raw link text — re-resolve both directions in the same
+	// batch as the rename itself.
+	const titleChanged = title !== undefined && title !== page.title;
+	if (titleChanged || isRename) {
+		const finalTitle = title ?? page.title;
+		const finalSlug = slug ?? page.slug;
+		statements.push(
+			buildResolveIncomingLinksStatement(ctx, { id: page.id, title: finalTitle, slug: finalSlug }),
+			buildUnresolveStaleIncomingLinksStatement(
+				ctx,
+				{ id: page.id, title: finalTitle, slug: finalSlug },
+				{ title: page.title, slug: page.slug }
+			)
+		);
+	}
 
 	await writeUpdateWikiPageBatch(ctx, page, statements, isRename, slug);
 	await finalizeWikiPageUpdate(ctx, page, { title, content, parentId, slug, meta });
@@ -2454,6 +2478,10 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 				.where(inArray(schema.wikiPages.id, chunk));
 			return [];
 		});
+		// PROJ-814: links pointing at a page just trashed become unresolved (mirrors
+		// purgeExpiredWikiPages, which already does this at purge time) — a link stays
+		// broken while its target is in the trash rather than staying silently "resolved".
+		await clearIncomingLinkTargets(ctx, allIds);
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
@@ -2501,6 +2529,9 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 			version: sql`${schema.wikiPages.version} + 1`,
 		})
 		.where(eq(schema.wikiPages.id, page.id));
+	// PROJ-814: same as the cascade branch above — links pointing at this now-trashed
+	// page become unresolved.
+	await clearIncomingLinkTargets(ctx, [page.id]);
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
 		entityId: page.id,
@@ -2614,6 +2645,15 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 			.where(inArray(schema.wikiPages.id, chunk));
 		return [];
 	});
+
+	// PROJ-814: every restored page (root and cascade-restored descendants) can be the
+	// target other pages' still-unresolved links were waiting on — re-resolve for each.
+	await ctx.db.batch([
+		buildResolveIncomingLinksStatement(ctx, { id: page.id, title: page.title, slug: page.slug }),
+		...descendantRows.map((d) =>
+			buildResolveIncomingLinksStatement(ctx, { id: d.id, title: d.title, slug: d.slug })
+		),
+	]);
 
 	// PROJ-496: recorded as "updated" (not a new activity/notification action) so it
 	// slots into the existing typed action union (recordActivity, WikiChangeEvent,

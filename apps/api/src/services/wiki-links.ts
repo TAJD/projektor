@@ -489,6 +489,56 @@ export async function clearIncomingLinkTargets(ctx: ServiceCtx, pageIds: string[
 	});
 }
 
+// PROJ-814: builds (without executing) the set-based UPDATE that resolves OTHER pages'
+// unresolved links whose raw target text names this page by its (current) title or slug
+// — e.g. a page linked via [[Onboarding]] before "Onboarding" existed becomes resolved
+// the moment it's created, without the linking page being re-saved. Used on create,
+// rename and restore; meant to be folded into the same db.batch() as the page write where
+// the caller already builds one (create, rename) — restore executes it directly since it
+// isn't otherwise batched. Title matching is case-folded via foldWikiTitle (the ONE place
+// PROJ-818 will change); slug matching is exact, mirroring resolveSlugTargets.
+export function buildResolveIncomingLinksStatement(
+	ctx: ServiceCtx,
+	page: Readonly<{ id: string; title: string; slug: string }>
+): D1PreparedStatement {
+	return ctx.db
+		.prepare(
+			`UPDATE wiki_links SET target_page_id = ?
+			 WHERE workspace_id = ? AND target_page_id IS NULL
+			   AND (lower(target_title) = ? OR target_title = ?)`
+		)
+		.bind(page.id, ctx.workspaceId, foldWikiTitle(page.title), page.slug);
+}
+
+// PROJ-814: on rename (title and/or slug), links that had resolved to this page BY ITS
+// OLD title/slug become unresolved again if their raw target text no longer matches the
+// NEW title/slug — e.g. a link's raw text is still "[[OldName]]"; once this page is no
+// longer named that, a different (or no) page should be able to claim that text. Disjoint
+// from buildResolveIncomingLinksStatement (that one only touches target_page_id IS NULL,
+// this one only touches target_page_id = page.id), so the two can run in either order in
+// the same batch.
+export function buildUnresolveStaleIncomingLinksStatement(
+	ctx: ServiceCtx,
+	page: Readonly<{ id: string; title: string; slug: string }>,
+	old: Readonly<{ title: string; slug: string }>
+): D1PreparedStatement {
+	return ctx.db
+		.prepare(
+			`UPDATE wiki_links SET target_page_id = NULL
+			 WHERE workspace_id = ? AND target_page_id = ?
+			   AND (lower(target_title) = ? OR target_title = ?)
+			   AND NOT (lower(target_title) = ? OR target_title = ?)`
+		)
+		.bind(
+			ctx.workspaceId,
+			page.id,
+			foldWikiTitle(old.title),
+			old.slug,
+			foldWikiTitle(page.title),
+			page.slug
+		);
+}
+
 // PROJ-485: count of distinct pages that link to any page in `pageIds`, for delete
 // warnings ("N pages link here"). Must be read BEFORE the delete runs — target_page_id
 // is ON DELETE SET NULL, so the count would read as 0 afterwards.
