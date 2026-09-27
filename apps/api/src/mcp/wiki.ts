@@ -397,12 +397,36 @@ export const wikiTools: MCPTool[] = [
 	{
 		name: "backfill_wiki_links",
 		description:
-			"One-time (idempotent, safe to re-run) recompute of the wiki_links graph for every " +
-			"existing page in the workspace. Owner/admin only.",
-		inputSchema: { type: "object", properties: {} },
+			"Idempotent, safe-to-re-run recompute of the wiki_links graph for pages in the " +
+			"workspace, one page-budget-sized chunk per call (default 200, max 500) so it can run " +
+			"incrementally and resume after a timeout. Skips trashed pages. Pass back `nextCursor` " +
+			"as `cursor` to continue; call repeatedly until `nextCursor` is null. `updatedSince` " +
+			"(unix seconds) limits the scope to pages touched at/after that time. Owner/admin only.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				cursor: {
+					type: "object",
+					description: "Resume point from a previous call's nextCursor",
+					required: ["updatedAt", "id"],
+					properties: {
+						updatedAt: { type: "number" },
+						id: { type: "string" },
+					},
+				},
+				pageBudget: {
+					type: "number",
+					description: "Max pages to process in this call (1-500, default 200)",
+				},
+				updatedSince: {
+					type: "number",
+					description: "Only process pages updated at/after this unix-seconds timestamp",
+				},
+			},
+		},
 		annotations: PLAIN_WRITE,
-		async handler(_input, ctx) {
-			return wikiService.backfillWikiLinks(ctx);
+		async handler(input, ctx) {
+			return wikiService.backfillWikiLinks(ctx, input);
 		},
 	},
 	{

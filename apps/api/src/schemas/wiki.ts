@@ -164,6 +164,24 @@ export const ListBrokenWikiLinksInputSchema = z.object({
 	projectId: z.string().uuid().optional(),
 });
 
+// PROJ-815: a page-id/updated_at cursor — pages are walked in (updatedAt, id) order, so
+// resuming means "everything strictly after this pair". Both fields must travel together
+// (updatedAt alone is ambiguous when several pages share a second).
+export const BackfillWikiLinksCursorSchema = z.object({
+	updatedAt: z.coerce.number().int().nonnegative(),
+	id: z.string().min(1),
+});
+
+// PROJ-815: incremental/resumable backfill. `pageBudget` bounds how many pages one call
+// processes (and therefore its D1 call count — see backfillWikiLinks); `cursor` resumes a
+// previous call; `updatedSince` limits the scope to pages touched at/after that time
+// (e.g. "just what changed since the last run").
+export const BackfillWikiLinksInputSchema = z.object({
+	cursor: BackfillWikiLinksCursorSchema.nullish(),
+	pageBudget: z.coerce.number().int().min(1).max(500).optional().default(200),
+	updatedSince: z.coerce.number().int().nonnegative().optional(),
+});
+
 // PROJ-489 (R7): the maintenance queue of computed-stale/unverified/explicitly stale-or-
 // deprecated pages (services/wiki.ts#listStaleWikiPages).
 export const ListStaleWikiPagesInputSchema = z.object({
