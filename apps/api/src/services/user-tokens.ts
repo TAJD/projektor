@@ -69,9 +69,15 @@ export async function createUserToken(ctx: UserCtx, raw: unknown) {
 }
 
 export async function deleteUserToken(ctx: UserCtx, id: string) {
-	await ctx.db
-		.prepare("DELETE FROM api_tokens WHERE id = ? AND user_id = ?")
-		.bind(id, ctx.userId)
-		.run();
+	// PROJ-923: null agent_sessions.token_id explicitly (ON DELETE SET NULL isn't
+	// guaranteed on D1, PROJ-407), in the same batch as the delete.
+	await ctx.db.batch([
+		ctx.db
+			.prepare(
+				"UPDATE agent_sessions SET token_id = NULL WHERE token_id IN (SELECT id FROM api_tokens WHERE id = ? AND user_id = ?)"
+			)
+			.bind(id, ctx.userId),
+		ctx.db.prepare("DELETE FROM api_tokens WHERE id = ? AND user_id = ?").bind(id, ctx.userId),
+	]);
 	return { ok: true };
 }

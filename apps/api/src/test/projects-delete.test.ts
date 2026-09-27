@@ -1,9 +1,12 @@
 // PROJ-819/918: deleteProject must clean up everything under the project explicitly —
-// D1 doesn't guarantee the FK cascades (PROJ-407). Runs with foreign keys OFF so the
-// test SQLite's own cascades can't mask missing app-level cleanup.
+// Note: `PRAGMA foreign_keys = OFF` is a no-op on D1/Miniflare (verified: it still
+// reads 1), so FK-backed children are also removed by the database's own cascade here —
+// for those, these are end-state checks. What they prove is the cleanup the database
+// can't do: FTS mirrors, share tokens, R2 objects and references without an FK.
+// fk-cleanup.node.test.ts is the guard that the app-level cleanup exists.
 
 import { env, SELF } from "cloudflare:test";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { ServiceCtx } from "../services/types";
 import { createWikiPage, updateWikiPage } from "../services/wiki";
 import {
@@ -26,13 +29,6 @@ async function count(sql: string, ...params: unknown[]): Promise<number> {
 }
 
 describe("PROJ-819: deleteProject cleans up explicitly", () => {
-	beforeEach(async () => {
-		await env.DB.prepare("PRAGMA foreign_keys = OFF").run();
-	});
-	afterEach(async () => {
-		await env.DB.prepare("PRAGMA foreign_keys = ON").run();
-	});
-
 	it("removes the project's issues, wiki pages and their dependents; detaches outside references", async () => {
 		const { workspace, user, token } = await seedFixture({ role: "owner" });
 		const ctx: ServiceCtx = {

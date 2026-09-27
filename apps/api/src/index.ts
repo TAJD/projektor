@@ -545,6 +545,24 @@ export async function purgeExpiredRetentionData(env: Env): Promise<void> {
 
 	for (const category of categories) {
 		try {
+			// PROJ-923: agent_sessions is an FK parent (messages, file claims, claim
+			// conflicts and WIP denials SET NULL) and D1 doesn't guarantee those actions
+			// (PROJ-407) — detach the expiring sessions' references first. No issue_leases
+			// statement here (PROJ-869 correction): the whereSql above's NOT EXISTS means no
+			// session this deletes has a lease row to begin with, and issue_leases is never
+			// pruned by this cron regardless (flow metrics need old leases readable).
+			if (category.table === "agent_sessions") {
+				const expiring = `SELECT id FROM agent_sessions WHERE ${category.whereSql}`;
+				await env.DB.batch(
+					[
+						`UPDATE agent_messages SET agent_id = NULL WHERE agent_id IN (${expiring})`,
+						`UPDATE issue_file_claims SET agent_id = NULL WHERE agent_id IN (${expiring})`,
+						`UPDATE claim_conflicts SET rejected_agent_id = NULL WHERE rejected_agent_id IN (${expiring})`,
+						`UPDATE claim_conflicts SET holding_agent_id = NULL WHERE holding_agent_id IN (${expiring})`,
+						`UPDATE wip_cap_denials SET agent_session_id = NULL WHERE agent_session_id IN (${expiring})`,
+					].map((sql) => env.DB.prepare(sql).bind(...category.params))
+				);
+			}
 			counts[category.name] = await deleteExpiredInChunks(
 				env.DB,
 				category.table,
