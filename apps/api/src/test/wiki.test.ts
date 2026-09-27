@@ -13,6 +13,7 @@ import {
 	seedUser,
 	seedWorkspaceRoles,
 } from "./helpers";
+import { resetRateLimits } from "./rate-limit-reset";
 
 async function mcpCall<T>(
 	workspaceId: string,
@@ -46,7 +47,7 @@ function mcpData<T>(r: JsonRpcResult<{ content: Array<{ text: string }> }> | Jso
 // many describe blocks below fire more than that against one token — reset the counter
 // before every request.
 async function resetRateLimitAndFetch(url: string, opts?: RequestInit) {
-	await env.DB.prepare("DELETE FROM rate_limit").run();
+	await resetRateLimits();
 	return SELF.fetch(url, opts);
 }
 
@@ -57,7 +58,7 @@ async function resetRateLimitAndMcpCall<T>(
 	name: string,
 	args: unknown
 ) {
-	await env.DB.prepare("DELETE FROM rate_limit").run();
+	await resetRateLimits();
 	return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
 }
 
@@ -443,7 +444,7 @@ describe("Wiki API", () => {
 			});
 			expect(createRes.status).toBe(201);
 		}
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 
 		const fetchAll = () =>
 			SELF.fetch("http://localhost/api/wiki/search?q=tie-rank-search-term&limit=2", {
@@ -451,11 +452,11 @@ describe("Wiki API", () => {
 			}).then((r) => r.json() as Promise<Array<{ id: string }>>);
 
 		const first = await fetchAll();
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const second = await fetchAll();
 		expect(first.map((r) => r.id)).toEqual(second.map((r) => r.id));
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const page2 = await SELF.fetch(
 			"http://localhost/api/wiki/search?q=tie-rank-search-term&limit=2&offset=2",
 			{ headers: authHeaders(token, slug) }
@@ -795,7 +796,7 @@ describe("Wiki API", () => {
 		}
 
 		// Reset rate limit so the validation check (not the limiter) fires on the 6th request.
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 
 		// Level 6 must be rejected (parent is at depth 5 → child would be depth 6)
 		const res = await SELF.fetch("http://localhost/api/wiki", {
@@ -939,7 +940,7 @@ describe("Wiki API", () => {
 		expect(delRes.status).toBe(200);
 		expect(await delRes.json()).toEqual({ ok: true, deletedCount: 3, linkedByCount: 0 });
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		for (const s of [parent.slug, child.slug, grandchild.slug]) {
 			const res = await SELF.fetch(`http://localhost/api/wiki/${s}`, {
 				headers: ownerHeaders,
@@ -2088,7 +2089,7 @@ describe("Wiki revisions/delete resolve by old slug after rename (PROJ-509)", ()
 			body: JSON.stringify({ slug: "operations-runbook" }),
 		});
 		expect(renameRes.status).toBe(200);
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 
 		// "runbook" is now only a redirect — the old slug must still resolve here, same
 		// as GET /:slug (getWikiPage).
@@ -2122,7 +2123,7 @@ describe("Wiki revisions/delete resolve by old slug after rename (PROJ-509)", ()
 			headers: authHeaders(token, slug),
 			body: JSON.stringify({ slug: "team-playbook" }),
 		});
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 
 		const detailRes = await SELF.fetch(
 			`http://localhost/api/wiki/playbook/revisions/${revision.id}`,
@@ -2149,14 +2150,14 @@ describe("Wiki revisions/delete resolve by old slug after rename (PROJ-509)", ()
 			{ slug: created.slug, content: "v2" },
 			authHeaders(token, slug)
 		);
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		await mcpCall(
 			workspaceId,
 			"update_wiki_page",
 			{ slug: created.slug, newSlug: "team-charter" },
 			authHeaders(token, slug)
 		);
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 
 		const revisions = mcpData<Array<{ id: string; title: string }>>(
 			await mcpCall(
@@ -2193,7 +2194,7 @@ describe("Wiki revisions/delete resolve by old slug after rename (PROJ-509)", ()
 			headers: authHeaders(owner.token, owner.workspace.slug),
 			body: JSON.stringify({ slug: "archived-notes" }),
 		});
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 
 		// "draft-notes" is now only a redirect — deleting by the old slug should resolve
 		// to the same (renamed) page rather than 404ing.
@@ -2996,7 +2997,7 @@ describe("Wiki patch operations (PROJ-490)", () => {
 
 	it("REST: viewer role cannot patch a workspace-level page", async () => {
 		const roles = await seedWorkspaceRoles();
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const createRes = await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(roles.owner.token, roles.workspace.slug),
@@ -3004,7 +3005,7 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		});
 		expect(createRes.status).toBe(201);
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const res = await SELF.fetch("http://localhost/api/wiki/patch-viewer", {
 			method: "PATCH",
 			headers: authHeaders(roles.viewer.token, roles.workspace.slug),
@@ -4003,7 +4004,7 @@ describe("Wiki write atomicity (PROJ-511)", () => {
 		});
 		const source = (await sourceRes.json()) as { slug: string };
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const updateRes = await SELF.fetch(`http://localhost/api/wiki/${source.slug}`, {
 			method: "PUT",
 			headers: authHeaders(token, slug),
@@ -4011,7 +4012,7 @@ describe("Wiki write atomicity (PROJ-511)", () => {
 		});
 		expect(updateRes.status).toBe(409);
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const pageRes = await SELF.fetch(`http://localhost/api/wiki/${source.slug}`, {
 			headers: authHeaders(token, slug),
 		});
@@ -4019,14 +4020,14 @@ describe("Wiki write atomicity (PROJ-511)", () => {
 			expect.objectContaining({ content: "see [[Atomic Runbook]]" })
 		);
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const backlinksRes = await SELF.fetch("http://localhost/api/wiki/atomic-runbook/backlinks", {
 			headers: authHeaders(token, slug),
 		});
 		const backlinks = (await backlinksRes.json()) as Array<{ slug: string }>;
 		expect(backlinks.map((b) => b.slug)).toEqual(["atomic-source"]);
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const searchRes = await SELF.fetch("http://localhost/api/wiki/search?q=links+anywhere", {
 			headers: authHeaders(token, slug),
 		});
@@ -4399,7 +4400,7 @@ describe("Wiki freshness model (PROJ-489)", () => {
 
 		// PROJ-489: 5 creates already used up this token's test-env rate limit
 		// (wrangler.test.toml RATE_LIMIT_API_MAX=5) — reset before the read below.
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const res = await SELF.fetch("http://localhost/api/wiki/stale-pages", {
 			headers: authHeaders(token, slug),
 		});
@@ -5243,7 +5244,7 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		// Several MCP calls back-to-back would otherwise trip the same per-token rate
 		// limit that req() clears for REST calls above.
 		async function mcp<T>(name: string, args: unknown) {
-			await env.DB.prepare("DELETE FROM rate_limit").run();
+			await resetRateLimits();
 			return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
 		}
 
@@ -5525,7 +5526,7 @@ describe("Wiki server-side drafts (PROJ-495)", () => {
 
 	it("MCP: save_wiki_draft / get_wiki_draft / discard_wiki_draft mirror the REST behavior", async () => {
 		async function mcp<T>(name: string, args: unknown) {
-			await env.DB.prepare("DELETE FROM rate_limit").run();
+			await resetRateLimits();
 			return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
 		}
 		const page = await createPage("mcp-draft", "MCP Draft", "content");
@@ -5894,7 +5895,7 @@ describe("Wiki trash (PROJ-496)", () => {
 
 	it("MCP list_wiki_trash / undelete_wiki_page / purge_wiki_trash mirror the REST behavior", async () => {
 		async function mcp<T>(name: string, args: unknown) {
-			await env.DB.prepare("DELETE FROM rate_limit").run();
+			await resetRateLimits();
 			return mcpCall<T>(workspaceId, name, args, authHeaders(token, slug));
 		}
 		const page = await createPage("MCP Trash Page", "content");

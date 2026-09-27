@@ -9,6 +9,7 @@ import {
 	seedToken,
 	seedUser,
 } from "./helpers";
+import { resetRateLimits } from "./rate-limit-reset";
 
 // PROJ-821: a watcher who loses access to a page (grant revoked, or removed from the
 // workspace) must stop receiving its notifications, which carry the page title.
@@ -50,7 +51,7 @@ describe("wiki watch notifications respect current access (PROJ-821)", () => {
 	}
 
 	async function edit(pageId: string, content: string): Promise<void> {
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		const res = await SELF.fetch(`http://localhost/api/wiki/${pageId}`, {
 			method: "PUT",
 			headers: authHeaders(adminToken, slug),
@@ -111,7 +112,7 @@ describe("wiki watch notifications respect current access (PROJ-821)", () => {
 		});
 		expect(res.status).toBeLessThan(300);
 
-		await env.DB.prepare("DELETE FROM rate_limit").run();
+		await resetRateLimits();
 		await createPage({ title: "Child", content: "c", parentId, projectId: project.id });
 		expect(await notificationCount()).toBe(1);
 	});

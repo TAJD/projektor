@@ -9,6 +9,7 @@ import {
 	seedIssueFixture,
 	seedProject,
 } from "./helpers";
+import { resetRateLimits } from "./rate-limit-reset";
 
 describe("Share tokens", () => {
 	let token: string;
@@ -420,7 +421,7 @@ describe("Share tokens", () => {
 
 		async function shareStatus(shareToken: string): Promise<number> {
 			// The public share route is rate-limited too; these tests hit it several times.
-			await env.DB.prepare("DELETE FROM rate_limit").run();
+			await resetRateLimits();
 			return (await SELF.fetch(`http://localhost/api/share/${shareToken}`)).status;
 		}
 
@@ -453,7 +454,7 @@ describe("Share tokens", () => {
 				.bind(f.groupId, f.projectId)
 				.run();
 			expect(await shareStatus(f.shareToken)).toBe(404);
-			await env.DB.prepare("DELETE FROM rate_limit").run();
+			await resetRateLimits();
 			expect((await SELF.fetch(`http://localhost/api/share/${f.shareToken}/logo`)).status).toBe(
 				404
 			);
