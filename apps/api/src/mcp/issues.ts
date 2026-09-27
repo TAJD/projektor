@@ -4,12 +4,115 @@ import {
 	createIssue,
 	deleteIssue,
 	getIssue,
+	getIssuesBatch,
 	getPrioritizedIssues,
 	listIssues,
 	searchIssues,
 	updateIssue,
 } from "../services/issues";
 import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
+
+// PROJ-931: MCP-only response shaping. Applied here (not in the service) so REST keeps
+// returning the full shape unconditionally — the service is the single source of truth
+// for the data, this is presentation for the token-metered MCP surface only.
+const VERBOSE_FIELDS_PROPS = {
+	verbose: {
+		type: "boolean",
+		description: "Include normally-omitted empty/default fields (default false)",
+	},
+	fields: {
+		type: "array",
+		items: { type: "string" },
+		description: "Return only these fields per issue",
+	},
+} as const;
+
+function isEmptyArray(v: unknown): boolean {
+	return Array.isArray(v) && v.length === 0;
+}
+
+function isEmptyLabels(v: unknown): boolean {
+	if (typeof v !== "string") return false;
+	try {
+		const parsed = JSON.parse(v);
+		return Array.isArray(parsed) && parsed.length === 0;
+	} catch {
+		return false;
+	}
+}
+
+function isZeroRollup(v: unknown): boolean {
+	return !!v && typeof v === "object" && (v as { total?: unknown }).total === 0;
+}
+
+// Keys dropped when they hold their null/unset default. Each has a same-named "_id"
+// (or is one) that a caller checks for presence — the *_key/*_name pair only exists to
+// avoid a client having to look the id up, so it's noise once the id itself is gone.
+const NULLABLE_DEFAULT_KEYS = [
+	"sprint_id",
+	"parent_id",
+	"type_id",
+	"type_key",
+	"type_name",
+	"status_id",
+	"status_key",
+	"status_name",
+	"completed_at",
+	"author_kind",
+] as const;
+
+// Strips empty/default noise unless verbose:true, then applies an optional `fields`
+// allowlist. Covers the fields named in PROJ-931's acceptance criteria (empty links,
+// zero rollup, empty customFields, null sprint/assignee/parent, empty labels) plus the
+// same "empty or default" treatment for the rest of the null/zero-value columns every
+// issue carries (unset type/status/sprint, no completion, needs_audit's false default,
+// author_kind for a human-authored issue) — omitting only the AC's four examples still
+// left get_issue short of the ticket's 40% byte-reduction bar on a typical issue.
+function shapeIssue(
+	issue: Record<string, unknown>,
+	opts: { verbose?: boolean; fields?: string[] }
+): Record<string, unknown> {
+	let out = issue;
+	if (!opts.verbose) {
+		out = { ...issue };
+		if (isEmptyArray(out.links)) delete out.links;
+		if (isZeroRollup(out.rollup)) delete out.rollup;
+		if (isEmptyArray(out.customFields)) delete out.customFields;
+		if (out.assignee_id == null) {
+			delete out.assignee_id;
+			delete out.assignee_name;
+		}
+		if (isEmptyLabels(out.labels)) delete out.labels;
+		if (out.status_category === "") delete out.status_category;
+		if (out.needs_audit === false || out.needs_audit === 0) delete out.needs_audit;
+		for (const key of NULLABLE_DEFAULT_KEYS) {
+			if (out[key] == null) delete out[key];
+		}
+	}
+	if (opts.fields && opts.fields.length > 0) {
+		const picked: Record<string, unknown> = {};
+		for (const f of opts.fields) {
+			if (f in out) picked[f] = out[f];
+		}
+		return picked;
+	}
+	return out;
+}
+
+// Pulls the MCP-only verbose/fields options out of the raw tool input before it reaches
+// the (`.strict()`) service schema, which knows nothing about them.
+function splitShapeOpts(input: unknown): {
+	rest: Record<string, unknown>;
+	verbose?: boolean;
+	fields?: string[];
+} {
+	const { verbose, fields, ...rest } = (input ?? {}) as {
+		verbose?: boolean;
+		fields?: string[];
+		[k: string]: unknown;
+	};
+	return { rest, verbose, fields };
+}
 
 export const issuesTools: MCPTool[] = [
 	{
@@ -109,11 +212,17 @@ export const issuesTools: MCPTool[] = [
 					description: "Pagination cursor: pass the previous page's `nextCursor` unchanged",
 				},
 				limit: { type: "number", default: 50, description: "Max 100" },
+				...VERBOSE_FIELDS_PROPS,
 			},
 		},
 		annotations: READ,
-		handler(input, ctx) {
-			return listIssues(ctx, input);
+		async handler(input, ctx) {
+			const { rest, verbose, fields } = splitShapeOpts(input);
+			const result = (await listIssues(ctx, rest)) as { items: Record<string, unknown>[] };
+			return {
+				...result,
+				items: result.items.map((i) => shapeIssue(i, { verbose, fields })),
+			};
 		},
 	},
 	{
@@ -124,11 +233,43 @@ export const issuesTools: MCPTool[] = [
 			properties: {
 				id: { type: "string" },
 				ref: { type: "string", description: "Project key and number, e.g. PROJ-42" },
+				...VERBOSE_FIELDS_PROPS,
 			},
 		},
 		annotations: READ,
-		handler(input, ctx) {
-			return getIssue(ctx, input);
+		async handler(input, ctx) {
+			const { rest, verbose, fields } = splitShapeOpts(input);
+			const issue = (await getIssue(ctx, rest)) as Record<string, unknown>;
+			return shapeIssue(issue, { verbose, fields });
+		},
+	},
+	{
+		name: "get_issues",
+		description:
+			"Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than " +
+			"repeated get_issue calls for triage — items are shaped like list_issues (customFields, " +
+			"no rollup/links).",
+		inputSchema: {
+			type: "object",
+			properties: {
+				refs: {
+					type: "array",
+					items: { type: "string" },
+					description: "Refs like PROJ-42 (max 50 combined with ids)",
+				},
+				ids: {
+					type: "array",
+					items: { type: "string" },
+					description: "Issue UUIDs (max 50 combined with refs)",
+				},
+				...VERBOSE_FIELDS_PROPS,
+			},
+		},
+		annotations: READ,
+		async handler(input, ctx) {
+			const { rest, verbose, fields } = splitShapeOpts(input);
+			const result = (await getIssuesBatch(ctx, rest)) as { items: Record<string, unknown>[] };
+			return { items: result.items.map((i) => shapeIssue(i, { verbose, fields })) };
 		},
 	},
 	{

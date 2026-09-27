@@ -100,6 +100,10 @@ const REST_ONLY: Record<string, string> = {
  * is the public contract and reads better; the service name is internal.
  */
 const TOOL_NAME_ALIASES: Record<string, string> = {
+	// PROJ-931: "get_issues" reads better as the public tool name than the derived
+	// "get_issues_batch" — the service name spells out the implementation (batched), the
+	// tool name is the public contract.
+	"issues.ts:getIssuesBatch": "get_issues",
 	"issue-links.ts:createLink": "create_issue_link",
 	"issue-links.ts:deleteLink": "delete_issue_link",
 	"issue-links.ts:listLinksForIssue": "list_issue_links",

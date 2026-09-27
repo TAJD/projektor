@@ -2596,3 +2596,188 @@ describe("Issues — assignee workspace membership (PROJ-785)", () => {
 		expect(issue.assignee_id).toBeNull();
 	});
 });
+
+describe("PROJ-931 — compact MCP responses", () => {
+	let token: string, slug: string, workspaceId: string, projectId: string, userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({
+			role: "owner",
+		}));
+	});
+
+	async function mcpCall(params: unknown) {
+		return callMcpTool(workspaceId, token, slug, params);
+	}
+
+	it("MCP tool result text is minified (no pretty-printing whitespace)", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "Minified check" });
+		const res = await mcpCall({ name: "list_issues", arguments: {} });
+		expect(res.error).toBeUndefined();
+		const text = res.result!.content[0].text;
+		expect(text).not.toContain("\n");
+		expect(text).not.toContain("  ");
+		expect(JSON.parse(text)).toBeTruthy();
+	});
+
+	it("REST get_issue is still pretty-shaped (unaffected) and keeps null/empty fields", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "REST unaffected" });
+		const res = await SELF.fetch(`http://localhost/api/issues/${id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const issue = (await res.json()) as Record<string, unknown>;
+		// REST keeps the full shape: empty/null fields are still present.
+		expect(issue.links).toEqual([]);
+		expect(issue.customFields).toEqual([]);
+		expect(issue).toHaveProperty("sprint_id", null);
+		expect(issue).toHaveProperty("assignee_id", null);
+		expect(issue).toHaveProperty("parent_id", null);
+	});
+
+	it("get_issue omits empty links/rollup/customFields and null sprint/assignee/parent/labels by default", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Compact me" });
+		const res = await mcpCall({ name: "get_issue", arguments: { id } });
+		expect(res.error).toBeUndefined();
+		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
+		expect(issue).not.toHaveProperty("links");
+		expect(issue).not.toHaveProperty("rollup");
+		expect(issue).not.toHaveProperty("customFields");
+		expect(issue).not.toHaveProperty("sprint_id");
+		expect(issue).not.toHaveProperty("assignee_id");
+		expect(issue).not.toHaveProperty("parent_id");
+		expect(issue).not.toHaveProperty("labels");
+		// Non-empty/non-default fields survive untouched.
+		expect(issue.title).toBe("Compact me");
+	});
+
+	it("get_issue with verbose:true restores the full shape", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Verbose me" });
+		const res = await mcpCall({ name: "get_issue", arguments: { id, verbose: true } });
+		expect(res.error).toBeUndefined();
+		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
+		expect(issue).toHaveProperty("links", []);
+		expect(issue).toHaveProperty("rollup");
+		expect(issue).toHaveProperty("customFields", []);
+		expect(issue).toHaveProperty("sprint_id", null);
+		expect(issue).toHaveProperty("assignee_id", null);
+		expect(issue).toHaveProperty("parent_id", null);
+	});
+
+	it("get_issue keeps non-empty links/customFields/rollup/assignee/parent/labels", async () => {
+		const assignee = await seedUser("proj931-assignee@example.com");
+		await seedMember(workspaceId, assignee.id);
+		const parent = await seedIssue(workspaceId, projectId, userId, { title: "Parent" });
+		const field = await seedCustomFieldDef(workspaceId, { key: "proj931_cf", type: "text" });
+		const { id: childId } = await seedIssue(workspaceId, projectId, userId, {
+			title: "Child with everything",
+			assigneeId: assignee.id,
+			parentId: parent.id,
+		});
+		await seedCustomFieldValue(childId, field.id, "hello");
+		await mcpCall({
+			name: "update_issue",
+			arguments: { id: childId, labels: ["bug"] },
+		});
+		await seedIssue(workspaceId, projectId, userId, { title: "Grandchild", parentId: parent.id });
+
+		const parentRes = await mcpCall({ name: "get_issue", arguments: { id: parent.id } });
+		const parentIssue = JSON.parse(parentRes.result!.content[0].text) as Record<string, unknown>;
+		expect(parentIssue.rollup).toEqual({
+			total: 2,
+			byStatus: { backlog: 2 },
+			done: 0,
+			remaining: 2,
+		});
+
+		const childRes = await mcpCall({ name: "get_issue", arguments: { id: childId } });
+		const child = JSON.parse(childRes.result!.content[0].text) as Record<string, unknown>;
+		expect(child.assignee_id).toBe(assignee.id);
+		expect(child.parent_id).toBe(parent.id);
+		expect(child.customFields).toEqual([
+			expect.objectContaining({ key: "proj931_cf", value: "hello" }),
+		]);
+		expect(JSON.parse(child.labels as string)).toEqual(["bug"]);
+	});
+
+	it("list_issues items are compacted the same way as get_issue", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "Compact list item" });
+		const res = await mcpCall({ name: "list_issues", arguments: { includeRollups: true } });
+		expect(res.error).toBeUndefined();
+		const page = JSON.parse(res.result!.content[0].text) as { items: Record<string, unknown>[] };
+		expect(page.items[0]).not.toHaveProperty("rollup");
+		expect(page.items[0]).not.toHaveProperty("customFields");
+		expect(page.items[0]).not.toHaveProperty("assignee_id");
+	});
+
+	it("fields:[...] returns only the named fields", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, {
+			title: "Fields test",
+			priority: "high",
+		});
+		const res = await mcpCall({
+			name: "get_issue",
+			arguments: { id, fields: ["id", "title", "priority"] },
+		});
+		expect(res.error).toBeUndefined();
+		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
+		expect(Object.keys(issue).sort()).toEqual(["id", "priority", "title"]);
+		expect(issue.title).toBe("Fields test");
+	});
+
+	it("get_issues fetches up to 50 issues in one call by ref and id", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Batch A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "Batch B" });
+		const row = await env.DB.prepare("SELECT key FROM projects WHERE id = ?")
+			.bind(projectId)
+			.first<{ key: string }>();
+		const ref = `${row!.key}-${a.number}`;
+
+		const res = await mcpCall({ name: "get_issues", arguments: { refs: [ref], ids: [b.id] } });
+		expect(res.error).toBeUndefined();
+		const data = JSON.parse(res.result!.content[0].text) as { items: Array<{ title: string }> };
+		const titles = data.items.map((i) => i.title).sort();
+		expect(titles).toEqual(["Batch A", "Batch B"]);
+	});
+
+	it("get_issues rejects more than 50 combined ids", async () => {
+		const ids = Array.from({ length: 51 }, () => crypto.randomUUID());
+		const res = await mcpCall({ name: "get_issues", arguments: { ids } });
+		expect(res.error).toBeDefined();
+	});
+
+	it("REST GET /api/issues/batch has parity with the MCP get_issues tool", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "REST Batch A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "REST Batch B" });
+		const res = await SELF.fetch(`http://localhost/api/issues/batch?ids=${a.id},${b.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as { items: Array<{ title: string }> };
+		expect(data.items.map((i) => i.title).sort()).toEqual(["REST Batch A", "REST Batch B"]);
+	});
+
+	it("PROJ-931: get_issue MCP bytes drop by at least 40% vs the full pretty shape", async () => {
+		// A "typical" seeded issue per the ticket: no assignee, no custom fields, no
+		// children/parent, no links — exactly the empty/default fields PROJ-931 targets.
+		const { id } = await seedIssue(workspaceId, projectId, userId, {
+			title: "A typical seeded issue for byte measurement",
+			priority: "high",
+		});
+
+		// "Before": the full shape, pretty-printed — what every MCP tool result looked like
+		// pre-PROJ-931 (REST returns exactly this shape and formatting is reproduced here).
+		const restRes = await SELF.fetch(`http://localhost/api/issues/${id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const fullIssue = await restRes.json();
+		const beforeBytes = JSON.stringify(fullIssue, null, 2).length;
+
+		// "After": the actual MCP get_issue tool result (minified + compacted).
+		const mcpRes = await mcpCall({ name: "get_issue", arguments: { id } });
+		const afterBytes = mcpRes.result!.content[0].text.length;
+
+		const reduction = (beforeBytes - afterBytes) / beforeBytes;
+		console.log(`PROJ-931 get_issue bytes: before=${beforeBytes} after=${afterBytes}`);
+		expect(reduction).toBeGreaterThanOrEqual(0.4);
+	});
+});

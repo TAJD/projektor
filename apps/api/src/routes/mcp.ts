@@ -220,7 +220,9 @@ router.post("/:workspaceId", async (c) => {
 				const result = await tool.handler(args, ctx);
 				return c.json(
 					jsonRpcResult(body.id, {
-						content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+						// PROJ-931: minified — pretty-printing roughly doubled token cost
+						// for agents reading tool results. REST responses are unaffected.
+						content: [{ type: "text", text: JSON.stringify(result) }],
 					})
 				);
 			} catch (err) {

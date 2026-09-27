@@ -7,6 +7,7 @@ import { BooleanQueryParam, IdSchema } from "../schemas/common";
 import {
 	CreateIssueSchema,
 	GetIssueSchema,
+	GetIssuesBatchSchema,
 	ListIssuesSchema,
 	SearchIssuesInputSchema,
 	UpdateIssueSchema,
@@ -629,6 +630,83 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 		url: buildIssueUrl(issueRecord),
 	};
 	return full;
+}
+
+// PROJ-931: fetch up to 50 issues in one call, by ref (KEY-NUMBER) and/or id, for agents
+// triaging many issues at once. Refs are resolved to ids first — one query per distinct
+// project key (batching the numbers for that key via inChunks) since a tuple IN
+// (project_id, number) isn't expressible through drizzle's inArray. The resolved ids are
+// then merged with any explicit ids and fetched in one inChunks-batched query, scoped by
+// workspace and project visibility like every other issue read. Shape matches listIssues'
+// items (customFields, no rollup/links) rather than getIssue's full shape, since loading
+// rollup/links per issue here would be an N+1 the batch is meant to avoid.
+export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
+	const result = GetIssuesBatchSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { refs = [], ids = [] } = result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+
+	const numbersByKey = new Map<string, number[]>();
+	for (const ref of refs) {
+		const m = ref.match(ISSUE_REF_PATTERN);
+		if (!m)
+			throw new ValidationError({
+				formErrors: [`Invalid ref: ${ref} (expected KEY-NUMBER)`],
+				fieldErrors: {},
+			});
+		const nums = numbersByKey.get(m[1]) ?? [];
+		nums.push(parseInt(m[2], 10));
+		numbersByKey.set(m[1], nums);
+	}
+
+	const resolvedIds: string[] = [];
+	for (const [key, numbers] of numbersByKey) {
+		const rows = await inChunks(numbers, (chunk) =>
+			orm
+				.select({ id: schema.issues.id })
+				.from(schema.issues)
+				.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+				.where(
+					and(
+						eq(schema.projects.key, key),
+						eq(schema.issues.workspaceId, ctx.workspaceId),
+						inArray(schema.issues.number, chunk)
+					)
+				)
+		);
+		resolvedIds.push(...rows.map((r) => r.id));
+	}
+
+	const allIds = Array.from(new Set([...ids, ...resolvedIds]));
+	if (allIds.length === 0) return { items: [] };
+
+	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
+	const rows = await inChunks(allIds, (chunk) => {
+		const conditions = [
+			inArray(schema.issues.id, chunk),
+			eq(schema.issues.workspaceId, ctx.workspaceId),
+		];
+		if (visible) conditions.push(visible);
+		return orm
+			.select(issueColumns)
+			.from(schema.issues)
+			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
+			.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
+			.where(and(...conditions));
+	});
+
+	const issueIds = (rows as Array<{ id: string }>).map((r) => r.id);
+	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
+
+	const items = (rows as Array<Record<string, unknown>>).map((r) => ({
+		...r,
+		customFields: customFieldsByIssue[r.id as string] ?? [],
+		url: buildIssueUrl(r),
+	}));
+
+	return { items };
 }
 
 async function resolveTypeId(
