@@ -1,8 +1,38 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { ListMessagesSchema, PostMessageSchema } from "../schemas/agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
+
+// PROJ-929: mirrors ACTIVE_TTL in services/agents.ts (and SESSION_TTL_SECONDS in
+// services/issue-leases.ts / file-claims.ts). Kept local rather than imported for the
+// same circular-import reason as those: agents.ts already imports from sibling service
+// files, so importing back from here would cycle.
+const SESSION_TTL_SECONDS = 120;
+
+// PROJ-929: a post_message call that carries an already-live agentId implicitly
+// refreshes that session's heartbeat, same as claim_issue/claim_files. Gated on the
+// session being live ALREADY (status='active' AND heartbeat > cutoff) — see
+// touchAgentHeartbeatIfLive in file-claims.ts for why an unconditional touch would
+// defeat PROJ-636 stale-holder reclaim.
+async function touchAgentHeartbeatIfLive(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	agentId: string
+): Promise<void> {
+	const cutoff = Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
+	await orm
+		.update(schema.agentSessions)
+		.set({ lastHeartbeatAt: Math.floor(Date.now() / 1000) })
+		.where(
+			and(
+				eq(schema.agentSessions.id, agentId),
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+				eq(schema.agentSessions.status, "active"),
+				gt(schema.agentSessions.lastHeartbeatAt, cutoff)
+			)
+		);
+}
 
 function toD1Statement(
 	ctx: ServiceCtx,
@@ -76,6 +106,9 @@ export async function postMessage(ctx: ServiceCtx, raw: unknown) {
 			)
 			.get();
 		if (!agent) throw new NotFoundError("Agent session not found");
+
+		// PROJ-929: refresh the poster's heartbeat, live sessions only.
+		await touchAgentHeartbeatIfLive(orm, ctx, agentId);
 	}
 
 	const id = crypto.randomUUID();

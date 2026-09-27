@@ -15,4 +15,8 @@ export const ACCESS_GUARD_ALLOWLIST: Record<string, string> = {
 		"Internal boolean probe used by issue update/review gating after the caller already resolved the issue through the guard; workspace-scoped and returns no issue data.",
 	"issue-leases:issueEverHadAgentLease":
 		"Same as issueHasLiveAgentLease: internal boolean probe after the guarded issue load; returns no issue data.",
+	"issue-leases:buildReleaseLeaseForClosedIssueStatement":
+		"PROJ-928: internal cleanup called from updateIssue only after that call's own access guard already authorized the status change; workspace-scoped write, returns no issue data.",
+	"file-claims:buildReleaseClaimsForClosedIssueStatement":
+		"PROJ-928: same as issue-leases:buildReleaseLeaseForClosedIssueStatement — internal cleanup called from updateIssue post-guard; workspace-scoped write, returns no issue data.",
 };

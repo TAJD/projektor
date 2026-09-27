@@ -2,14 +2,18 @@ import { drizzle, schema } from "@projektor/db";
 import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import {
 	EndAgentSchema,
+	FinishWorkSchema,
 	HeartbeatAgentSchema,
 	ListActiveAgentsSchema,
 	RegisterAgentSchema,
+	StartWorkSchema,
 } from "../schemas/agents";
 import { visibleProjectPredicate } from "./access";
+import { postMessage } from "./agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
-import { releaseClaimsForAgent } from "./file-claims";
-import { releaseLeasesForAgent } from "./issue-leases";
+import { claimFiles, releaseClaimsForAgent } from "./file-claims";
+import { claimIssue, releaseLeasesForAgent } from "./issue-leases";
+import { updateIssue } from "./issues";
 import type { ServiceCtx } from "./types";
 
 const ACTIVE_TTL = 120;
@@ -73,6 +77,58 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 
 	// biome-ignore lint/style/noNonNullAssertion: row was just inserted; SELECT immediately after guarantees it exists
 	return row!;
+}
+
+/**
+ * PROJ-929: register_agent + claim_issue + claim_files (if paths given) + post_message
+ * in one call, replacing that 4-call sequence with the caller's own conflict handling
+ * intact — claimIssue/claimFiles throw the same ConflictError/ValidationError they
+ * always have, unchanged.
+ *
+ * All-or-nothing with compensating cleanup: D1 has no cross-call interactive
+ * transaction (see AGENTS.md), so this is a compensating-action sequence rather than a
+ * single atomic write. If claim_issue or claim_files fails after the session was
+ * registered, the session is ended immediately (which also releases anything it did
+ * manage to claim before the failure), so no live, unaccounted-for session/lease/claim
+ * is left behind by a failed start_work call in the ordinary case. If the process
+ * itself crashes mid-call (so the compensating end_agent never runs), the claims it
+ * made are still reclaimable by the next caller once the session's heartbeat goes
+ * stale after ACTIVE_TTL (120s) — see claim_issue/claim_files's stale-holder reclaim.
+ */
+export async function startWork(ctx: ServiceCtx, raw: unknown) {
+	const result = StartWorkSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { issue: issueId, paths, name } = result.data;
+
+	const session = await registerAgent(ctx, { name, issueId });
+
+	try {
+		const lease = await claimIssue(ctx, { issueId, agentId: session.id });
+
+		const claimed =
+			paths && paths.length > 0
+				? await claimFiles(ctx, { issueId, agentId: session.id, paths })
+				: null;
+
+		await postMessage(ctx, {
+			scope: `issue:${issueId}`,
+			agentId: session.id,
+			body: `${name} started work`,
+		});
+
+		return {
+			sessionId: session.id,
+			lease,
+			claimedFiles: claimed?.created ?? [],
+		};
+	} catch (err) {
+		try {
+			await endAgent(ctx, { id: session.id });
+		} catch (cleanupErr) {
+			console.error("startWork: compensating endAgent failed", cleanupErr);
+		}
+		throw err;
+	}
 }
 
 export async function heartbeatAgent(ctx: ServiceCtx, raw: unknown) {
@@ -146,6 +202,32 @@ export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 
 	// biome-ignore lint/style/noNonNullAssertion: row was just updated; SELECT immediately after guarantees it exists
 	return row!;
+}
+
+/**
+ * PROJ-929: optionally transitions the issue via the existing updateIssue path (so
+ * completion-report/review-gate rules apply exactly as they do for a plain
+ * update_issue call), then ends the session — which already releases every claim and
+ * lease it holds (see endAgent). Replaces release_issue + release_files + end_agent
+ * (+ an update_issue call, if the issue is being closed) with one call.
+ */
+export async function finishWork(ctx: ServiceCtx, raw: unknown) {
+	const result = FinishWorkSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { sessionId, issue: issueId, completionReport, status } = result.data;
+
+	if (status !== undefined || completionReport !== undefined) {
+		await updateIssue(ctx, issueId, {
+			...(status !== undefined ? { status } : {}),
+			...(completionReport !== undefined ? { completionReport } : {}),
+			// Attributes the transition to this session for the PROJ-375 audit flag and
+			// the review-gate's completion-report requirement, exactly as a caller passing
+			// agentSessionId on a plain update_issue already does.
+			agentSessionId: sessionId,
+		});
+	}
+
+	return endAgent(ctx, { id: sessionId });
 }
 
 export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {

@@ -1,7 +1,8 @@
-import { SELF } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
+	seedAgentLease,
 	seedFixture,
 	seedIssue,
 	seedIssueFixture,
@@ -358,5 +359,37 @@ describe("Agent Messages API", () => {
 		expect(isoRes.status).toBe(200);
 		const isoBody = (await isoRes.json()) as { items: Array<{ body: string }> };
 		expect(isoBody.items.some((m) => m.body === "ws-channel msg")).toBe(false);
+	});
+
+	// --- Heartbeat refresh on a live agentId (PROJ-929) ---
+
+	async function heartbeatOf(id: string): Promise<number> {
+		const row = await env.DB.prepare("SELECT last_heartbeat_at FROM agent_sessions WHERE id = ?")
+			.bind(id)
+			.first<{ last_heartbeat_at: number }>();
+		return row!.last_heartbeat_at;
+	}
+
+	it("post_message refreshes a live agentId's heartbeat, but never revives a stale one", async () => {
+		const { agentSessionId: live } = await seedAgentLease(workspaceId, issueId);
+		const backdated = Math.floor(Date.now() / 1000) - 10;
+		await env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+			.bind(backdated, live)
+			.run();
+
+		const res = await postMessage({ scope: `issue:${issueId}`, agentId: live, body: "still here" });
+		expect(res.status).toBe(201);
+		expect(await heartbeatOf(live)).toBeGreaterThan(backdated);
+
+		const { agentSessionId: dead } = await seedAgentLease(workspaceId, issueId, { live: false });
+		const deadBefore = await heartbeatOf(dead);
+
+		const res2 = await postMessage({
+			scope: `issue:${issueId}`,
+			agentId: dead,
+			body: "ghost post",
+		});
+		expect(res2.status).toBe(201);
+		expect(await heartbeatOf(dead)).toBe(deadBefore);
 	});
 });
