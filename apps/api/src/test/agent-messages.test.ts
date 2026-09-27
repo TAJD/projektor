@@ -126,6 +126,29 @@ describe("Agent Messages API", () => {
 			items: Array<{ body: string }>;
 		};
 		expect(mcpData.items).toHaveLength(3);
+
+		// PROJ-920: MCP paging round-trip — page 1's nextCursor (a "createdAt:id" string)
+		// must be accepted back by the argument validator.
+		const token5 = await seedToken(workspaceId, userId);
+		const p1Res = await mcpCall("list_messages", { scope, limit: 2 }, token5, slug);
+		const p1Body = (await p1Res.json()) as { result: { content: Array<{ text: string }> } };
+		const p1 = JSON.parse(p1Body.result.content[0].text) as { nextCursor: string | null };
+		expect(typeof p1.nextCursor).toBe("string");
+		const p2Res = await mcpCall(
+			"list_messages",
+			{ scope, limit: 2, cursor: p1.nextCursor },
+			token5,
+			slug
+		);
+		const p2Body = (await p2Res.json()) as {
+			result?: { content: Array<{ text: string }> };
+			error?: { message: string };
+		};
+		expect(p2Body.error).toBeUndefined();
+		const p2 = JSON.parse(p2Body.result?.content[0].text ?? "{}") as {
+			items: Array<{ body: string }>;
+		};
+		expect(p2.items.map((m) => m.body)).toEqual(["message three"]);
 	});
 
 	// C2: workspace scope; messages visible via workspace scope; not returned under issue scope

@@ -41,8 +41,8 @@ export const agentMessagesTools: MCPTool[] = [
 					description: 'Channel scope: "workspace" or "issue:<uuid>"',
 				},
 				cursor: {
-					type: "number",
-					description: "Pagination cursor (created_at of last received item)",
+					type: "string",
+					description: "Pagination cursor: pass the previous page's `nextCursor` unchanged",
 				},
 				limit: { type: "number", description: "Max messages to return (1–100, default 50)" },
 			},

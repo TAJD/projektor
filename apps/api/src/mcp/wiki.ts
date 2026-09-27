@@ -41,9 +41,10 @@ export const wikiTools: MCPTool[] = [
 					description: "Filter to pages whose frontmatter `status` matches",
 				},
 				tags: {
-					type: "array",
+					type: ["array", "string"],
 					items: { type: "string" },
-					description: "Filter to pages carrying at least one of these frontmatter tags",
+					description:
+						"Filter to pages carrying at least one of these frontmatter tags (array, or a comma-separated string)",
 				},
 				includeTemplates: {
 					type: "boolean",
@@ -87,9 +88,10 @@ export const wikiTools: MCPTool[] = [
 					description: TYPE_FILTER_DESCRIPTION,
 				},
 				tags: {
-					type: "array",
+					type: ["array", "string"],
 					items: { type: "string" },
-					description: "Filter to pages carrying at least one of these frontmatter tags",
+					description:
+						"Filter to pages carrying at least one of these frontmatter tags (array, or a comma-separated string)",
 				},
 				status: {
 					type: "string",
@@ -698,6 +700,7 @@ export const wikiTools: MCPTool[] = [
 				content: { type: "string" },
 				baseRevisionId: {
 					type: "string",
+					nullable: true,
 					description:
 						"The page's latest revision id when this draft was started; null if the " +
 						"page had no revisions yet",
