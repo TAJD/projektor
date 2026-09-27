@@ -1321,10 +1321,15 @@ function buildFtsReindexStatements(
 	];
 }
 
+// PROJ-869: body can be arbitrarily large and is already persisted on the issue row
+// itself and re-indexed into issues_fts on every update — storing it again in `diff`
+// (kept for the activity retention window) is the dominant source of the `activity`
+// table's growth. Record just that body changed, not the text itself; every other field
+// here is a small scalar, so those keep recording the actual (new) value.
 function buildUpdateDiffCore(data: UpdateIssueData): Record<string, unknown> {
 	const diff: Record<string, unknown> = {};
 	if (data.title !== undefined) diff.title = data.title;
-	if (data.body !== undefined) diff.body = data.body;
+	if (data.body !== undefined) diff.bodyChanged = true;
 	if (data.status !== undefined) diff.status = data.status;
 	if (data.priority !== undefined) diff.priority = data.priority;
 	if (data.labels !== undefined) diff.labels = data.labels;

@@ -6,7 +6,7 @@
 // duplicated in miniature here rather than imported, mirroring services/wiki-links.ts's
 // resolveSlugTargets precedent.
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { wikiPagePath } from "../lib/urls";
 import {
 	ListWikiChangesInputSchema,
@@ -494,13 +494,17 @@ export interface WikiChangeEvent {
 // projectId, which is what lets a deleted project-scoped page's event still be hidden
 // from a caller who can't see that project (the workspace-scoping invariant applies to
 // deleted pages too, not just live ones).
-function extractDeletedPageInfo(diff: Record<string, unknown> | null): {
+// PROJ-869: `diff` now arrives as the raw JSON text (see listWikiChanges' CASE
+// expression, which only selects it for 'deleted' rows) rather than pre-parsed, since a
+// raw sql fragment loses the wiki_pages.diff column's mode:"json" auto-decoding.
+function extractDeletedPageInfo(rawDiff: string | null): {
 	slug: string | null;
 	title: string | null;
 	projectId: string | null;
 	deletedPageIds: string[] | null;
 	deletedPageIdsTruncated: boolean;
 } {
+	const diff = parseJsonObject(rawDiff);
 	if (!diff)
 		return {
 			slug: null,
@@ -522,12 +526,23 @@ function extractDeletedPageInfo(diff: Record<string, unknown> | null): {
 	};
 }
 
+function parseJsonObject(raw: string | null): Record<string, unknown> | null {
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw);
+		return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+	} catch {
+		return null;
+	}
+}
+
 type WikiActivityRow = {
 	id: string;
 	action: string;
 	entityId: string;
 	actorId: string | null;
-	diff: Record<string, unknown> | null;
+	// PROJ-869: raw JSON text, NULL for every non-'deleted' row (see listWikiChanges).
+	diff: string | null;
 	createdAt: number;
 	pageSlug: string | null;
 	pageTitle: string | null;
@@ -732,7 +747,14 @@ export async function listWikiChanges(
 			action: schema.activity.action,
 			entityId: schema.activity.entityId,
 			actorId: schema.activity.actorId,
-			diff: schema.activity.diff,
+			// PROJ-869: only 'deleted' events read `diff` at all (extractDeletedPageInfo,
+			// for the small slug/title/projectId/deletedPageIds fields it captures) — every
+			// other action returns NULL here instead of D1 shipping the full diff blob back
+			// for every row, which is what made list_wiki_changes' response size scale with
+			// page content size.
+			diff: sql<
+				string | null
+			>`CASE WHEN ${schema.activity.action} = 'deleted' THEN ${schema.activity.diff} ELSE NULL END`,
 			createdAt: schema.activity.createdAt,
 			pageSlug: schema.wikiPages.slug,
 			pageTitle: schema.wikiPages.title,

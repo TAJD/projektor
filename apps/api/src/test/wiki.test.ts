@@ -1,6 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { computeFreshness } from "../services/wiki-freshness";
+import { listWikiChanges } from "../services/wiki-watchers";
 import {
 	authHeaders,
 	type JsonRpcError,
@@ -14,6 +15,59 @@ import {
 	seedWorkspaceRoles,
 } from "./helpers";
 import { resetRateLimits } from "./rate-limit-reset";
+
+// PROJ-869: wraps a D1Database so every row a `.all()`/`.first()`/`.raw()` call resolves
+// with is pushed into `captured` — used to inspect what actually came back over the D1
+// binding from a service call, since a service's return value (here, WikiChangeEvent)
+// can hide a regression that already happened one layer down (the full row read out of
+// D1). drizzle-orm's D1 driver uses `.raw()` (not `.all()`) whenever a query selects a
+// custom field shape — which is exactly what listWikiChanges' select does — so all three
+// read methods need to be captured, not just `.all()`.
+function wrapD1CapturingReads(db: D1Database, captured: unknown[]): D1Database {
+	const READ_METHODS = new Set(["all", "first", "raw"]);
+	return new Proxy(db, {
+		get(dbTarget, dbProp, dbReceiver) {
+			if (dbProp === "prepare") {
+				return (sql: string) => {
+					const stmt = Reflect.get(dbTarget, "prepare", dbReceiver).call(dbTarget, sql);
+					return new Proxy(stmt, {
+						get(stmtTarget, stmtProp, stmtReceiver) {
+							if (stmtProp === "bind") {
+								return (...args: unknown[]) => {
+									const bound = Reflect.get(stmtTarget, "bind", stmtReceiver).call(
+										stmtTarget,
+										...args
+									);
+									return new Proxy(bound, {
+										get(boundTarget, boundProp, boundReceiver) {
+											const orig = Reflect.get(boundTarget, boundProp, boundReceiver);
+											if (typeof boundProp === "string" && READ_METHODS.has(boundProp)) {
+												return async (...a: unknown[]) => {
+													const result = await orig.apply(boundTarget, a);
+													captured.push(
+														boundProp === "all"
+															? (result as { results: unknown[] }).results
+															: result
+													);
+													return result;
+												};
+											}
+											return typeof orig === "function" ? orig.bind(boundTarget) : orig;
+										},
+									});
+								};
+							}
+							const orig = Reflect.get(stmtTarget, stmtProp, stmtReceiver);
+							return typeof orig === "function" ? orig.bind(stmtTarget) : orig;
+						},
+					});
+				};
+			}
+			const orig = Reflect.get(dbTarget, dbProp, dbReceiver);
+			return typeof orig === "function" ? orig.bind(dbTarget) : orig;
+		},
+	});
+}
 
 async function mcpCall<T>(
 	workspaceId: string,
@@ -5229,6 +5283,50 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 			})
 		).json()) as { changes: unknown[] };
 		expect(empty.changes).toEqual([]);
+	});
+
+	// PROJ-869: list_wiki_changes used to select the full activity `diff` for EVERY row
+	// (created/updated/deleted alike), even though only 'deleted' events read it — so a
+	// batch of up to 500 rows could pull the full new content of every changed page out of
+	// D1 into the Worker's memory. That never showed up in the HTTP response itself (a
+	// WikiChangeEvent never serializes `diff`), so the regression test has to look at what
+	// comes back from D1, not at the JSON sent to the client: it wraps ctx.db to record
+	// every row D1 hands back during a real listWikiChanges call and asserts a
+	// deliberately huge 'updated'-row diff never appears in any of them.
+	it("list_wiki_changes never pulls a non-deleted row's full diff out of D1 (PROJ-869)", async () => {
+		const page = await createPage("delta-size", "Delta Size", "seed");
+		const bigContent = "x".repeat(50_000);
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+		// Simulate an 'updated' activity row still carrying a large diff (either legacy
+		// data predating the 0064 migration, or a future regression that reintroduces
+		// storing full content) — the row-fetch guard must exclude it regardless of how it
+		// got there.
+		await env.DB.prepare(
+			`INSERT INTO activity (id, workspace_id, entity_type, entity_id, actor_id, action, diff, created_at)
+			 VALUES (?, ?, 'wiki_page', ?, ?, 'updated', ?, ?)`
+		)
+			.bind(
+				crypto.randomUUID(),
+				workspaceId,
+				page.id,
+				userId,
+				JSON.stringify({ content: bigContent }),
+				Math.floor(Date.now() / 1000)
+			)
+			.run();
+
+		const captured: unknown[] = [];
+		const wrappedDb = wrapD1CapturingReads(env.DB, captured);
+
+		await listWikiChanges(
+			{ db: wrappedDb, kv: env.KV, r2: env.R2, workspaceId, userId, role: "admin" },
+			{ since: t0, limit: 50 }
+		);
+
+		const capturedText = JSON.stringify(captured);
+		expect(captured.length).toBeGreaterThan(0);
+		expect(capturedText.length).toBeGreaterThan(0);
+		expect(capturedText).not.toContain(bigContent);
 	});
 
 	it("list_wiki_changes reports a deleted page's slug/title even though the row is gone", async () => {

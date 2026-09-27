@@ -433,6 +433,12 @@ function buildWikiPageUpdateSet(
 	return setData;
 }
 
+// PROJ-869: content can be up to the wiki page size cap, and is already persisted in
+// wiki_pages, wiki_revisions and the FTS index — storing it a 4th time in `diff` (times
+// every workspace's `activity` retention window) is the dominant source of table growth,
+// and it's read back in full by list_wiki_changes for every row even though only
+// "deleted" events use `diff` at all (services/wiki-watchers.ts). Record just that
+// content changed; the actual before/after text lives in wiki_revisions.
 function buildWikiPageUpdateDiff(
 	fields: Readonly<{
 		title?: string;
@@ -441,7 +447,7 @@ function buildWikiPageUpdateDiff(
 ): Record<string, unknown> {
 	const diff: Record<string, unknown> = {};
 	if (fields.title !== undefined) diff.title = fields.title;
-	if (fields.content !== undefined) diff.content = fields.content;
+	if (fields.content !== undefined) diff.contentChanged = true;
 	return diff;
 }
 

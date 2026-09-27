@@ -356,6 +356,23 @@ commit, and push.
 
 ## Operating notes
 
+- **Data retention (PROJ-869):** a daily cron (`scheduled` in `apps/api/src/index.ts`)
+  prunes tables that would otherwise grow forever, in small bounded batches per run so a
+  large backlog is worked off over several days rather than in one invocation:
+  - `wiki_notifications` older than 90 days (`WIKI_NOTIFICATION_RETENTION_DAYS`)
+  - ended `agent_sessions` older than 90 days, but only ones no `issue_leases` row
+    references (`AGENT_SESSION_RETENTION_DAYS`)
+  - `activity` (the audit/diff log behind `list_wiki_changes` and project activity feeds)
+    older than 1 year (`ACTIVITY_RETENTION_DAYS`)
+
+  `issue_leases` itself is never pruned by age — flow metrics (autonomy ratio, flow
+  efficiency, lease expiries) read old leases directly, so deleting them would silently
+  zero out historical reporting.
+
+  All three env vars above are overridable via the matching `[vars]` in `wrangler.toml`,
+  same as any other setting there: changing them still needs a deploy (`wrangler deploy` /
+  the release workflow) to take effect. `wiki_revisions` (page history) is never pruned by
+  this cron; that's tracked separately if it's ever wanted.
 - **Roll out a specific version:** `echo "v1.3.0" > projektor.version && git commit -am … && git push`.
 - **Migrations** apply automatically on every deploy and are idempotent — only
   unapplied ones run (`✅ No migrations to apply!` when there are none).

@@ -415,6 +415,110 @@ export async function scheduled(
 ): Promise<void> {
 	ctx.waitUntil(purgeAllWorkspacesExpiredWikiPages(env));
 	ctx.waitUntil(purgeExpiredOAuthData(env));
+	ctx.waitUntil(purgeExpiredRetentionData(env));
+}
+
+// PROJ-869: retention for tables that grow forever and are never pruned otherwise —
+// wiki_notifications, released issue_leases, ended agent_sessions, and the activity log.
+// wiki_revisions is deliberately left untouched (page history is a product decision, not
+// covered by this ticket).
+//
+// Each category runs a small, independent `DELETE ... WHERE rowid IN (SELECT rowid ...
+// LIMIT chunkSize)` loop rather than one unbounded DELETE: a workspace that's never had
+// this cron run before could have years of backlog, and a single DELETE over all of it
+// risks the invocation's CPU/time budget. `RETENTION_CHUNK_SIZE` rows per statement,
+// up to `RETENTION_MAX_CHUNKS_PER_CATEGORY` statements per category per invocation — if a
+// category still has more expired rows than that after one run, it simply continues
+// making progress on the next scheduled run (the WHERE clause always targets the oldest
+// remaining expired rows, so this needs no separate cursor to resume from).
+//
+// Global (not workspace-scoped): these tables hold no cross-tenant secret by their age
+// alone, and the tables are internal housekeeping, not something the workspace-scoping
+// invariant (AGENTS.md) applies to for a delete-by-age sweep.
+const RETENTION_CHUNK_SIZE = 500;
+const RETENTION_MAX_CHUNKS_PER_CATEGORY = 20;
+
+function retentionCutoff(raw: string | undefined, defaultDays: number): number {
+	const days = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : Number.NaN;
+	const effectiveDays = Number.isFinite(days) && days > 0 ? days : defaultDays;
+	return Math.floor(Date.now() / 1000) - effectiveDays * 86400;
+}
+
+async function deleteExpiredInChunks(
+	db: D1Database,
+	table: string,
+	whereSql: string,
+	params: readonly unknown[]
+): Promise<number> {
+	let totalDeleted = 0;
+	for (let i = 0; i < RETENTION_MAX_CHUNKS_PER_CATEGORY; i++) {
+		const result = await db
+			.prepare(
+				`DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${whereSql} LIMIT ?)`
+			)
+			.bind(...params, RETENTION_CHUNK_SIZE)
+			.run();
+		const changes = result.meta.changes ?? 0;
+		totalDeleted += changes;
+		if (changes < RETENTION_CHUNK_SIZE) break;
+	}
+	return totalDeleted;
+}
+
+export async function purgeExpiredRetentionData(env: Env): Promise<void> {
+	const notificationCutoff = retentionCutoff(env.WIKI_NOTIFICATION_RETENTION_DAYS, 90);
+	const sessionCutoff = retentionCutoff(env.AGENT_SESSION_RETENTION_DAYS, 90);
+	const activityCutoff = retentionCutoff(env.ACTIVITY_RETENTION_DAYS, 365);
+
+	const counts: Record<string, number> = {};
+	const failures: string[] = [];
+
+	const categories: Array<{ name: string; table: string; whereSql: string; params: unknown[] }> = [
+		{
+			name: "wiki_notifications",
+			table: "wiki_notifications",
+			whereSql: "created_at < ?",
+			params: [notificationCutoff],
+		},
+		{
+			name: "agent_sessions",
+			// PROJ-869: only a session no issue_leases row references — flow metrics can still
+			// read a referenced session's lease-held time and expiries however old the session
+			// is. The FK from issue_leases.agent_session_id is CASCADE and D1 does enforce FKs
+			// (verified in PROJ-923), so with this clause no session this deletes ever has a
+			// lease to begin with — the detach block below no longer needs to touch issue_leases.
+			table: "agent_sessions",
+			whereSql: `status = 'ended' AND ended_at IS NOT NULL AND ended_at < ?
+				AND NOT EXISTS (SELECT 1 FROM issue_leases l WHERE l.agent_session_id = agent_sessions.id)`,
+			params: [sessionCutoff],
+		},
+		{
+			name: "activity",
+			table: "activity",
+			whereSql: "created_at < ?",
+			params: [activityCutoff],
+		},
+	];
+
+	for (const category of categories) {
+		try {
+			counts[category.name] = await deleteExpiredInChunks(
+				env.DB,
+				category.table,
+				category.whereSql,
+				category.params
+			);
+		} catch (err) {
+			failures.push(category.name);
+			console.error("scheduled retention purge failed", {
+				category: category.name,
+				err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+			});
+		}
+	}
+
+	// PROJ-865/869: one summary line with counts, not per-category noise on the happy path.
+	console.log("scheduled retention purge complete", { deleted: counts, failed: failures });
 }
 
 // PROJ-659 review checkpoint: KV keeps a record per authorization code, access token and
