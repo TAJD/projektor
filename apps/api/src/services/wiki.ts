@@ -50,7 +50,7 @@ import {
 	repointIncomingLinks,
 	type WikiBacklink,
 } from "./wiki-links";
-import { idFirst, idOrSlugMatch, isIdShapedSlug } from "./wiki-lookup";
+import { idFirst, idOrSlugMatch, isIdShapedSlug, WIKI_MAX_NESTING_DEPTH } from "./wiki-lookup";
 import {
 	deleteWikiWatchersForPages,
 	notifyCascadeDescendantWatchers,
@@ -243,6 +243,42 @@ async function resolvePageByIdOrSlug(
 	throw new NotFoundError("Wiki page not found");
 }
 
+// PROJ-820: the height (in extra levels) of the subtree rooted at `pageId` — 0 for a
+// leaf, 1 if it has children, etc. Computed with a single workspace-scoped recursive
+// CTE rather than a per-level walk, since a move can carry an arbitrarily deep subtree
+// with it and we only need the max depth, not the shape.
+async function getSubtreeHeight(
+	db: D1Database,
+	pageId: string,
+	workspaceId: string
+): Promise<number> {
+	// PROJ-820 (post-review correction): a legacy row with a cyclic parent_id (pre-dating
+	// validateParentDepth, or written directly against D1) would otherwise make this
+	// recursive CTE never terminate — SQLite keeps joining back into the cycle forever.
+	// The depth bound below caps recursion at one level past what validateParentDepth would
+	// ever allow anyway, so a real (acyclic) subtree is never truncated, while a cycle stops
+	// after WIKI_MAX_NESTING_DEPTH + 1 steps instead of hanging until statement timeout.
+	const row = await db
+		.prepare(
+			`WITH RECURSIVE subtree(id, depth) AS (
+				SELECT id, 0 FROM wiki_pages WHERE id = ?1 AND workspace_id = ?2
+				UNION ALL
+				SELECT wp.id, subtree.depth + 1
+				FROM wiki_pages wp
+				JOIN subtree ON wp.parent_id = subtree.id
+				WHERE wp.workspace_id = ?2 AND subtree.depth < ?3
+			)
+			SELECT MAX(depth) AS maxDepth FROM subtree`
+		)
+		.bind(pageId, workspaceId, WIKI_MAX_NESTING_DEPTH + 1)
+		.first<{ maxDepth: number | null }>();
+	return row?.maxDepth ?? 0;
+}
+
+// PROJ-820: the check must account for the new parent's depth PLUS the height of the
+// subtree being moved — a page with 3 levels of children moved under a level-3 parent
+// would otherwise land at 7 levels deep even though this function only ever "saw" the
+// single hop from parent to moved page.
 async function validateParentDepth(
 	db: D1Database,
 	parentId: string,
@@ -252,7 +288,7 @@ async function validateParentDepth(
 	if (forbidPageId && parentId === forbidPageId) {
 		throw new ValidationError({ formErrors: ["A page cannot be its own parent"], fieldErrors: {} });
 	}
-	let depth = 0;
+	let parentDepth = 0;
 	let cur = parentId;
 	const seen = new Set<string>([parentId]);
 	for (;;) {
@@ -271,13 +307,22 @@ async function validateParentDepth(
 			});
 		}
 		cur = pid;
-		depth++;
-		if (depth >= 4) {
+		parentDepth++;
+		if (parentDepth >= WIKI_MAX_NESTING_DEPTH - 1) {
 			throw new ValidationError({
-				formErrors: ["Maximum wiki nesting depth (5) exceeded"],
+				formErrors: [`Maximum wiki nesting depth (${WIKI_MAX_NESTING_DEPTH}) exceeded`],
 				fieldErrors: {},
 			});
 		}
+	}
+	// forbidPageId is only passed when moving an existing page (validateUpdatedPageParent) —
+	// a brand-new page (validateNewPageParent) has no subtree yet, so height is 0.
+	const subtreeHeight = forbidPageId ? await getSubtreeHeight(db, forbidPageId, workspaceId) : 0;
+	if (parentDepth + 1 + subtreeHeight > WIKI_MAX_NESTING_DEPTH - 1) {
+		throw new ValidationError({
+			formErrors: [`Maximum wiki nesting depth (${WIKI_MAX_NESTING_DEPTH}) exceeded`],
+			fieldErrors: {},
+		});
 	}
 }
 

@@ -18,7 +18,7 @@ import { assertProjectAccess, hasProjectAccess, usersWithProjectReadAccess } fro
 import { NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
-import { idFirst, idOrSlugMatch } from "./wiki-lookup";
+import { idFirst, idOrSlugMatch, WIKI_MAX_NESTING_DEPTH } from "./wiki-lookup";
 
 type Orm = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -171,11 +171,12 @@ export async function listWikiWatches(ctx: ServiceCtx) {
 	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug) }));
 }
 
-// PROJ-493: walks UP from `pageId` through parent_id, bounded by the wiki's own max
-// nesting depth (5 — services/wiki.ts's validateParentDepth) plus one for headroom.
-// Takes `parentId` explicitly (rather than re-reading pageId's own row) so callers can
-// use it for a page that's about to be created (parentId known, pageId's row doesn't
-// exist yet) or one that's mid-delete (parentId captured before the row is removed).
+// PROJ-493/PROJ-820: walks UP from `pageId` through parent_id, bounded by the wiki's
+// own max nesting depth (WIKI_MAX_NESTING_DEPTH — services/wiki.ts's
+// validateParentDepth) plus one for headroom. Takes `parentId` explicitly (rather than
+// re-reading pageId's own row) so callers can use it for a page that's about to be
+// created (parentId known, pageId's row doesn't exist yet) or one that's mid-delete
+// (parentId captured before the row is removed).
 async function resolveAncestorChain(
 	db: D1Database,
 	pageId: string,
@@ -185,7 +186,7 @@ async function resolveAncestorChain(
 	const chain = [pageId];
 	let cur = parentId;
 	let depth = 0;
-	while (cur && depth < 6) {
+	while (cur && depth < WIKI_MAX_NESTING_DEPTH + 1) {
 		chain.push(cur);
 		const row = await db
 			.prepare("SELECT parent_id FROM wiki_pages WHERE id = ? AND workspace_id = ?")
@@ -620,8 +621,9 @@ async function loadWikiWatchSets(
 }
 
 // Walks every candidate's parent chain in lock-step — one batched query per tree level
-// (nesting is capped at depth 5) rather than a per-candidate chain walk, which would be
-// O(candidates x depth) round-trips for a `limit` of up to 500. Mutates `matched` in place.
+// (nesting is capped at WIKI_MAX_NESTING_DEPTH) rather than a per-candidate chain walk,
+// which would be O(candidates x depth) round-trips for a `limit` of up to 500. Mutates
+// `matched` in place.
 async function matchSubtreeWatches(
 	ctx: ServiceCtx,
 	orm: Orm,
@@ -629,7 +631,7 @@ async function matchSubtreeWatches(
 	subtreeRootIds: ReadonlySet<string>,
 	matched: Set<string>
 ): Promise<void> {
-	for (let depth = 0; depth < 6 && pending.size > 0; depth++) {
+	for (let depth = 0; depth < WIKI_MAX_NESTING_DEPTH + 1 && pending.size > 0; depth++) {
 		const frontier = [...new Set(pending.values())];
 		const rows = await inChunks(frontier, (chunk) =>
 			orm

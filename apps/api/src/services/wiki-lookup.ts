@@ -11,6 +11,13 @@ export function isIdShapedSlug(slug: string): boolean {
 	return ID_SHAPED.test(slug);
 }
 
+// PROJ-820: single source of truth for the wiki hierarchy's maximum nesting depth
+// (root = depth 0 .. WIKI_MAX_NESTING_DEPTH - 1, i.e. 5 levels total). Shared by
+// wiki.ts's validateParentDepth (the authoritative check, applied at write time) and
+// wiki-watchers.ts's ancestor walks (which must never stop short of a tree that
+// validateParentDepth would have allowed).
+export const WIKI_MAX_NESTING_DEPTH = 5;
+
 // WHERE fragment for "this id, or this slug". Pair it with idFirst() in orderBy so a
 // row whose id matches always wins over a row whose slug happens to equal that id.
 // Slugs shaped like ids are rejected on write, but pages created before PROJ-812 may
