@@ -16,6 +16,7 @@ import {
 	effectiveProjectRole,
 	isWorkspaceAdmin,
 	requireProjectInWorkspace,
+	requireWorkspaceMember,
 	visibleProjectPredicate,
 	visibleProjectSqlFragment,
 } from "./access";
@@ -808,6 +809,12 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
 	}
 
+	// PROJ-785: an assignee must be a member of this workspace — otherwise we'd
+	// persist a dangling or wrong-workspace user reference.
+	if (assigneeId) {
+		await requireWorkspaceMember(ctx, assigneeId);
+	}
+
 	const { resolvedTypeId, resolvedStatusId, resolvedStatusKey, resolvedStatusCategory, cfWrites } =
 		await resolveCreateIssueDeps(ctx, data);
 
@@ -1410,6 +1417,13 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		const projRole = await effectiveProjectRole(ctx, existing.projectId);
 		if (projRole === null) throw new NotFoundError("Issue not found");
 		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
+	}
+
+	// PROJ-785: a non-null assigneeId must be a member of this workspace —
+	// otherwise we'd persist a dangling or wrong-workspace user reference. `null`
+	// (clearing the assignee) and "not provided" (key absent) both skip this.
+	if ("assigneeId" in data && data.assigneeId) {
+		await requireWorkspaceMember(ctx, data.assigneeId);
 	}
 
 	const { setValues, recordCompletionReport, gateRejectionStatement } = await buildUpdateSetValues(
