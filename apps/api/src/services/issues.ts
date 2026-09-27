@@ -681,6 +681,8 @@ function buildInsertIssueStatement(
 		labels: string[];
 		parentId: string | null;
 		resolvedTypeId: string | null;
+		// PROJ-921: set when the issue is created straight into a ready status.
+		readyAt: number | null;
 		now: number;
 	}>
 ): D1PreparedStatement {
@@ -693,10 +695,10 @@ function buildInsertIssueStatement(
 			`INSERT INTO issues
 			   (id, workspace_id, project_id, number, title, body, status, status_id,
 			    status_category, priority, assignee_id, labels, parent_id, type_id,
-			    created_by_id, author_kind, created_at, updated_at, dor_ready, dor_missing)
+			    created_by_id, author_kind, created_at, updated_at, dor_ready, dor_missing, ready_at)
 			 VALUES
 			   (?, ?, ?, (SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE project_id = ?),
-			    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 RETURNING number`
 		)
 		.bind(
@@ -720,7 +722,8 @@ function buildInsertIssueStatement(
 			ctx.authKind ?? null,
 			params.now,
 			params.now,
-			...dorColumns(params.resolvedBody)
+			...dorColumns(params.resolvedBody),
+			params.readyAt
 		);
 }
 
@@ -833,6 +836,7 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 			labels: labels ?? [],
 			parentId: parentId ?? null,
 			resolvedTypeId,
+			readyAt: isOpenPastBacklog(resolvedStatusKey, resolvedStatusCategory) ? nowTs : null,
 			now: nowTs,
 		}),
 		buildFtsInsertStatement(ctx, id, title, resolvedBody),
@@ -934,6 +938,17 @@ function isDoneState(category: string | null | undefined, key: string | null | u
 	return category === "done" || key === "done";
 }
 
+// PROJ-921: an issue becomes "ready" when it leaves backlog for an open status —
+// todo/ready, or straight into in_progress (PROJ-252: a fast-tracked issue was ready the
+// moment it was picked up, so its lead time equals its cycle time). Going straight from
+// backlog to done or cancelled in one update is NOT a ready transition: that issue never
+// waited to be worked, and used to get ready_at = done_at, a 0s lead time that dragged
+// the median to zero. Issues created in an open non-backlog status are ready from creation.
+function isOpenPastBacklog(key: string, category: string | null | undefined): boolean {
+	if (key === "backlog" || key === "cancelled" || category === "cancelled") return false;
+	return !isDoneState(category, key);
+}
+
 function buildFlowTimestampTransitions(
 	existing: ExistingIssue,
 	resolvedStatusKey: string,
@@ -942,8 +957,7 @@ function buildFlowTimestampTransitions(
 ): SetValues {
 	const setValues: SetValues = {};
 
-	const wasReady = existing.status !== "backlog";
-	if (resolvedStatusKey !== "backlog" && !wasReady && existing.readyAt == null) {
+	if (existing.readyAt == null && isOpenPastBacklog(resolvedStatusKey, newStatusCategory)) {
 		setValues.readyAt = now();
 	}
 

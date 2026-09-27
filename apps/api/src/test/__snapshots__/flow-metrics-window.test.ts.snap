@@ -464,6 +464,7 @@ exports[`PROJ-866: bucket-rewrite fidelity (snapshot on a representative fixture
     "p50": 1810785,
     "p90": 1810785,
   },
+  "leadTimeExcluded": 0,
   "reviewLatency": {
     "avg": 100,
     "count": 1,
