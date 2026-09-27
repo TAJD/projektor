@@ -38,6 +38,11 @@ export const taskStatusesTools: MCPTool[] = [
 				color: { type: "string", description: "Optional color (hex or named)" },
 				position: { type: "number", description: "Sort order position" },
 				isDefault: { type: "boolean", description: "Set as the default status for new issues" },
+				isReviewStep: {
+					type: "boolean",
+					description:
+						"Mark this status as a review step (completion-report gate, review flow metrics). Not inferred from the key.",
+				},
 			},
 		},
 		annotations: CREATE,
@@ -58,6 +63,11 @@ export const taskStatusesTools: MCPTool[] = [
 				color: { type: "string", nullable: true },
 				position: { type: "number" },
 				isDefault: { type: "boolean", description: "Set as the default status for new issues" },
+				isReviewStep: {
+					type: "boolean",
+					description:
+						"Mark this status as a review step (completion-report gate, review flow metrics). Not inferred from the key.",
+				},
 			},
 		},
 		annotations: IDEMPOTENT_WRITE,

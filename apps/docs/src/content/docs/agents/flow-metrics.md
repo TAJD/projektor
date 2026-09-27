@@ -22,6 +22,19 @@ not "who did the work."
 | `reviewLatency` | in_review → done — the primary human choke point, with a `reviewLatencyOverTime` trend |
 | `agingWip` | every currently open (in_progress/in_review) issue with its age since claim — a present-state snapshot, not scoped to `since`/`until`. Read it against `cycleTime`'s p50/p90 as reference lines: it surfaces stuck items before they finish and skew the percentiles. |
 
+**When is an issue "ready"?** When it leaves backlog for an open status (todo, or
+straight into in_progress), or is created in one. An issue that goes from backlog
+straight to done or cancelled in one update was never ready: it has no lead time,
+and `leadTimeExcluded` counts how many such issues finished in the window
+(`leadTime.count` is the sample the lead-time percentiles are computed from).
+
+**What counts as review?** A status is a review step only when it is flagged
+`isReviewStep` (`create_task_status` / `update_task_status`); the built-in
+`in_review` is flagged by default. Entering one requires a completion report when an
+agent holds the lease, stamps `in_review_at`, and leaving it for in_progress counts
+toward `reviewLatency`, `humanInterventions` and `gateRejections`. A status merely
+*named* like a review (e.g. "Contract Review") is not one unless flagged.
+
 ## Collaboration shape
 
 | Metric | Definition |

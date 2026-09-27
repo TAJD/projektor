@@ -1,7 +1,7 @@
 import { drizzle, schema } from "@projektor/db";
 import type { Role } from "@projektor/types";
 import { and, type Column, eq, inArray, type SQL, sql } from "drizzle-orm";
-import { ForbiddenError, NotFoundError } from "./errors";
+import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -276,6 +276,37 @@ export async function visibleProjectIds(ctx: ServiceCtx): Promise<string[]> {
 		)
 		.all();
 	return rows.map((r) => r.id);
+}
+
+/**
+ * PROJ-785: throw ValidationError unless `userId` is a member of `ctx.workspaceId`.
+ * Call this whenever a caller-supplied user id (assignee, owner, …) is about to be
+ * stamped onto a workspace-scoped row, so we never persist a dangling or
+ * wrong-workspace user reference. `field` names the offending input field in the
+ * thrown error so REST/MCP callers can surface it against the right form field.
+ */
+export async function requireWorkspaceMember(
+	ctx: Pick<ServiceCtx, "db" | "workspaceId">,
+	userId: string,
+	field = "assigneeId"
+): Promise<void> {
+	const orm = drizzle(ctx.db, { schema });
+	const member = await orm
+		.select({ userId: schema.workspaceMembers.userId })
+		.from(schema.workspaceMembers)
+		.where(
+			and(
+				eq(schema.workspaceMembers.workspaceId, ctx.workspaceId),
+				eq(schema.workspaceMembers.userId, userId)
+			)
+		)
+		.get();
+	if (!member) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { [field]: ["User is not a member of this workspace"] },
+		});
+	}
 }
 
 /**

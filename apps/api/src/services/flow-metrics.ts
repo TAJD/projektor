@@ -778,6 +778,12 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 
 	return {
 		leadTime: summarize(leadTimes),
+		// PROJ-921: issues done in the window that never sat in a ready status (straight from
+		// backlog to in_progress/done). They have no lead time and are not in leadTime's
+		// sample (leadTime.count); reported so a small or skewed sample is visible.
+		leadTimeExcluded: issues.filter(
+			(i) => i.readyAt === null && i.doneAt !== null && inWindow(i.doneAt)
+		).length,
 		cycleTime: summarize(cycleTimes),
 		wipOverTime,
 		throughputOverTime,

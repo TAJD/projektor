@@ -16,6 +16,7 @@ import {
 	effectiveProjectRole,
 	isWorkspaceAdmin,
 	requireProjectInWorkspace,
+	requireWorkspaceMember,
 	visibleProjectPredicate,
 	visibleProjectSqlFragment,
 } from "./access";
@@ -681,6 +682,8 @@ function buildInsertIssueStatement(
 		labels: string[];
 		parentId: string | null;
 		resolvedTypeId: string | null;
+		// PROJ-921: set when the issue is created straight into a ready status.
+		readyAt: number | null;
 		now: number;
 	}>
 ): D1PreparedStatement {
@@ -693,10 +696,10 @@ function buildInsertIssueStatement(
 			`INSERT INTO issues
 			   (id, workspace_id, project_id, number, title, body, status, status_id,
 			    status_category, priority, assignee_id, labels, parent_id, type_id,
-			    created_by_id, author_kind, created_at, updated_at, dor_ready, dor_missing)
+			    created_by_id, author_kind, created_at, updated_at, dor_ready, dor_missing, ready_at)
 			 VALUES
 			   (?, ?, ?, (SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE project_id = ?),
-			    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 RETURNING number`
 		)
 		.bind(
@@ -720,7 +723,8 @@ function buildInsertIssueStatement(
 			ctx.authKind ?? null,
 			params.now,
 			params.now,
-			...dorColumns(params.resolvedBody)
+			...dorColumns(params.resolvedBody),
+			params.readyAt
 		);
 }
 
@@ -805,6 +809,12 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
 	}
 
+	// PROJ-785: an assignee must be a member of this workspace — otherwise we'd
+	// persist a dangling or wrong-workspace user reference.
+	if (assigneeId) {
+		await requireWorkspaceMember(ctx, assigneeId);
+	}
+
 	const { resolvedTypeId, resolvedStatusId, resolvedStatusKey, resolvedStatusCategory, cfWrites } =
 		await resolveCreateIssueDeps(ctx, data);
 
@@ -833,6 +843,7 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 			labels: labels ?? [],
 			parentId: parentId ?? null,
 			resolvedTypeId,
+			readyAt: isOpenPastBacklog(resolvedStatusKey, resolvedStatusCategory) ? nowTs : null,
 			now: nowTs,
 		}),
 		buildFtsInsertStatement(ctx, id, title, resolvedBody),
@@ -875,6 +886,8 @@ type ExistingIssue = {
 	completionReportAt: number | null;
 	inReviewAt: number | null;
 	reviewBounceCount: number;
+	// PROJ-749: whether the issue's current status is a designated review step.
+	statusIsReviewStep: boolean;
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
@@ -922,29 +935,45 @@ function buildCompletedAtTransition(
 // from the legacy `status` key instead: any status other than 'backlog'.
 function isClaimedState(
 	category: string | null | undefined,
-	key: string | null | undefined
+	key: string | null | undefined,
+	isReviewStep: boolean
 ): boolean {
-	return category === "in_progress" || key === "in_progress" || key === "in_review";
+	return category === "in_progress" || key === "in_progress" || isReviewStep;
 }
 
 function isDoneState(category: string | null | undefined, key: string | null | undefined): boolean {
 	return category === "done" || key === "done";
 }
 
+// PROJ-921: an issue becomes "ready" when it leaves backlog for an open status —
+// todo/ready, or straight into in_progress (PROJ-252: a fast-tracked issue was ready the
+// moment it was picked up, so its lead time equals its cycle time). Going straight from
+// backlog to done or cancelled in one update is NOT a ready transition: that issue never
+// waited to be worked, and used to get ready_at = done_at, a 0s lead time that dragged
+// the median to zero. Issues created in an open non-backlog status are ready from creation.
+function isOpenPastBacklog(key: string, category: string | null | undefined): boolean {
+	if (key === "backlog" || key === "cancelled" || category === "cancelled") return false;
+	return !isDoneState(category, key);
+}
+
 function buildFlowTimestampTransitions(
 	existing: ExistingIssue,
 	resolvedStatusKey: string,
-	newStatusCategory: string | undefined
+	newStatusCategory: string | undefined,
+	newIsReviewStep: boolean
 ): SetValues {
 	const setValues: SetValues = {};
 
-	const wasReady = existing.status !== "backlog";
-	if (resolvedStatusKey !== "backlog" && !wasReady && existing.readyAt == null) {
+	if (existing.readyAt == null && isOpenPastBacklog(resolvedStatusKey, newStatusCategory)) {
 		setValues.readyAt = now();
 	}
 
-	const wasClaimed = isClaimedState(existing.statusCategory, existing.status);
-	const isClaimed = isClaimedState(newStatusCategory, resolvedStatusKey);
+	const wasClaimed = isClaimedState(
+		existing.statusCategory,
+		existing.status,
+		existing.statusIsReviewStep
+	);
+	const isClaimed = isClaimedState(newStatusCategory, resolvedStatusKey, newIsReviewStep);
 	if (isClaimed && !wasClaimed && existing.claimedAt == null) setValues.claimedAt = now();
 
 	const wasDone = isDoneState(existing.statusCategory, existing.status);
@@ -972,17 +1001,18 @@ function buildReviewTransitions(
 	transition: Readonly<{
 		resolvedStatusKey: string;
 		newStatusCategory: string | undefined;
+		newIsReviewStep: boolean;
 		enteringInReview: boolean;
 		enteringDone: boolean;
 	}>
 ): { setValues: SetValues; isGateRejection: boolean } {
-	const { resolvedStatusKey, newStatusCategory, enteringInReview, enteringDone } = transition;
+	const { resolvedStatusKey, newStatusCategory, newIsReviewStep, enteringInReview, enteringDone } =
+		transition;
 	const setValues: SetValues = {};
 	if (enteringInReview && existing.inReviewAt == null) setValues.inReviewAt = now();
 
-	const wasInReview = isReviewStatusKey(existing.status);
-	const leavingReviewNotDone =
-		wasInReview && !isReviewStatusKey(resolvedStatusKey) && !enteringDone;
+	const wasInReview = existing.statusIsReviewStep;
+	const leavingReviewNotDone = wasInReview && !newIsReviewStep && !enteringDone;
 	if (leavingReviewNotDone) setValues.reviewBounceCount = existing.reviewBounceCount + 1;
 
 	const isGateRejection =
@@ -1004,24 +1034,23 @@ function assertCompletionReportPresent(data: UpdateIssueData): void {
 	}
 }
 
-// PROJ-292: a review step is identified by its status key naming a review, NOT by a
-// dedicated category — there is no 'in_review' category (the default review status is
-// category 'in_progress'), and keying on the single literal "in_review" let a
-// workspace's custom review status (e.g. "code-review", "peer_review") slip the gate.
-function isReviewStatusKey(key: string | undefined): boolean {
-	return key != null && /review/i.test(key);
-}
-
 // Pure classification of what this status change is entering, shared by the gate
 // (what to enforce) and the completion-report stamp (PROJ-293 — stamp/post only on a
 // real transition, not on any update that happens to carry a completionReport).
+//
+// PROJ-749 (supersedes PROJ-292's /review/i key match): a review step is the status's
+// explicit task_statuses.is_review_step flag. Matching the key let any status merely
+// *named* like a review ("contract_review", "legal_review") acquire the completion-report
+// gate and pollute review flow metrics. Migration 0061 backfilled the flag from the old
+// rule, so existing custom review statuses ("code_review", "peer_review") keep the gate.
 function classifyStatusTransition(
 	existing: ExistingIssue,
 	resolvedStatusKey: string,
-	newStatusCategory: string | undefined
+	newStatusCategory: string | undefined,
+	newIsReviewStep: boolean
 ): { enteringInReview: boolean; enteringDone: boolean } {
-	const wasInReview = isReviewStatusKey(existing.status);
-	const enteringInReview = isReviewStatusKey(resolvedStatusKey) && !wasInReview;
+	const wasInReview = existing.statusIsReviewStep;
+	const enteringInReview = newIsReviewStep && !wasInReview;
 
 	const wasDone = existing.statusCategory === "done" || existing.status === "done";
 	const enteringDone = (newStatusCategory === "done" || resolvedStatusKey === "done") && !wasDone;
@@ -1101,7 +1130,13 @@ async function applyStatusFields(
 	const { id: resolvedStatusId, key: resolvedStatusKey } = resolved;
 	const newStatusCategory = resolved.category ?? undefined;
 
-	const transition = classifyStatusTransition(existing, resolvedStatusKey, newStatusCategory);
+	const newIsReviewStep = resolved.isReviewStep;
+	const transition = classifyStatusTransition(
+		existing,
+		resolvedStatusKey,
+		newStatusCategory,
+		newIsReviewStep
+	);
 	await assertReviewGate(ctx, data, existing, transition);
 
 	const setValues: SetValues = {
@@ -1119,11 +1154,12 @@ async function applyStatusFields(
 	);
 	Object.assign(
 		setValues,
-		buildFlowTimestampTransitions(existing, resolvedStatusKey, newStatusCategory)
+		buildFlowTimestampTransitions(existing, resolvedStatusKey, newStatusCategory, newIsReviewStep)
 	);
 	const { setValues: reviewSetValues, isGateRejection } = buildReviewTransitions(existing, {
 		resolvedStatusKey,
 		newStatusCategory,
+		newIsReviewStep,
 		enteringInReview: transition.enteringInReview,
 		enteringDone: transition.enteringDone,
 	});
@@ -1338,7 +1374,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	const orm = drizzle(ctx.db, { schema });
 
-	const existing = await orm
+	const existingRow = await orm
 		.select({
 			id: schema.issues.id,
 			projectId: schema.issues.projectId,
@@ -1354,11 +1390,26 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 			completionReportAt: schema.issues.completionReportAt,
 			inReviewAt: schema.issues.inReviewAt,
 			reviewBounceCount: schema.issues.reviewBounceCount,
+			statusReviewFlag: schema.taskStatuses.isReviewStep,
 		})
 		.from(schema.issues)
+		.leftJoin(
+			schema.taskStatuses,
+			and(
+				eq(schema.taskStatuses.id, schema.issues.statusId),
+				eq(schema.taskStatuses.workspaceId, ctx.workspaceId)
+			)
+		)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
-	if (!existing) throw new NotFoundError("Issue not found");
+	if (!existingRow) throw new NotFoundError("Issue not found");
+	// PROJ-749: a status row's flag decides; without one only the built-in "in_review" counts.
+	const { statusReviewFlag, ...existingFields } = existingRow;
+	const existing = {
+		...existingFields,
+		statusIsReviewStep:
+			statusReviewFlag == null ? existingRow.status === "in_review" : statusReviewFlag === 1,
+	};
 
 	// PROJ-311: gate the write on the effective project role (owner/admin bypass).
 	// No grant → invisible → 404; a viewer grant is read-only → 403.
@@ -1366,6 +1417,13 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		const projRole = await effectiveProjectRole(ctx, existing.projectId);
 		if (projRole === null) throw new NotFoundError("Issue not found");
 		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
+	}
+
+	// PROJ-785: a non-null assigneeId must be a member of this workspace —
+	// otherwise we'd persist a dangling or wrong-workspace user reference. `null`
+	// (clearing the assignee) and "not provided" (key absent) both skip this.
+	if ("assigneeId" in data && data.assigneeId) {
+		await requireWorkspaceMember(ctx, data.assigneeId);
 	}
 
 	const { setValues, recordCompletionReport, gateRejectionStatement } = await buildUpdateSetValues(
@@ -1471,31 +1529,186 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
+	// PROJ-922: every dependent-row statement below keys on this id, several without a
+	// workspace filter of their own — so the id MUST be proven to be in this workspace
+	// first, or an admin of workspace A could wipe workspace B's comments/links/files by
+	// passing one of B's issue UUIDs.
+	if (!existing) throw new NotFoundError("Issue not found");
 
 	// PROJ-311: deletion needs admin inside the project — workspace owner/admin bypass
 	// groups; everyone else needs a project-admin grant.
 	if (!isWorkspaceAdmin(ctx.role)) {
-		const projRole = existing ? await effectiveProjectRole(ctx, existing.projectId) : null;
+		const projRole = await effectiveProjectRole(ctx, existing.projectId);
 		if (projRole !== "admin") throw new ForbiddenError("Insufficient permissions");
 	}
 
-	await orm
-		.delete(schema.issues)
-		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
-	await ctx.db
-		.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
+	// PROJ-922: D1 does not reliably enforce the FK ON DELETE CASCADE/SET NULL declared in
+	// the schema (PROJ-407), so every row that references this issue must be cleaned up
+	// explicitly here, in the same batch as the issue row itself — final list from
+	// grepping packages/db/migrations for `REFERENCES issues`, plus two references that
+	// exist without a physical FK constraint (issues.parent_id, attachments' polymorphic
+	// entity_type/entity_id) but the same dangling-reference risk.
+	//
+	// R2 objects for "file"-kind attachments hanging directly off this issue
+	// (entity_type='issue') are looked up before the batch (their D1 rows are deleted in
+	// it) and removed only after the batch commits, so a failed batch never leaves
+	// attachment metadata pointing at bytes we already destroyed.
+	const fileAttachments = await orm
+		.select({ r2Key: schema.attachments.r2Key })
+		.from(schema.attachments)
+		.where(
+			and(
+				eq(schema.attachments.workspaceId, ctx.workspaceId),
+				eq(schema.attachments.entityType, "issue"),
+				eq(schema.attachments.entityId, id),
+				eq(schema.attachments.kind, "file")
+			)
+		);
+	// Issues whose cached payload mentions this one (link targets/sources, children) —
+	// invalidated after the batch so they stop showing a deleted issue.
+	const affected = await ctx.db
+		.prepare(
+			`SELECT target_issue_id AS id FROM issue_links WHERE source_issue_id = ?1
+			 UNION SELECT source_issue_id FROM issue_links WHERE target_issue_id = ?1
+			 UNION SELECT id FROM issues WHERE parent_id = ?1 AND workspace_id = ?2`
+		)
 		.bind(id, ctx.workspaceId)
-		.run();
-	await recordActivity(ctx, { entityType: "issue", entityId: id, action: "deleted" });
-	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${id}`);
+		.all<{ id: string }>();
 
-	if (existing?.parentId) {
-		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.parentId}`);
+	const deleteStatements: D1PreparedStatement[] = [
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.issues)
+				.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+				.toSQL()
+		),
+		ctx.db
+			.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
+			.bind(id, ctx.workspaceId),
+		// share_tokens has no FK at all (0017), so nothing ever removed a deleted issue's
+		// public share links.
+		ctx.db
+			.prepare("DELETE FROM share_tokens WHERE issue_id = ? AND workspace_id = ?")
+			.bind(id, ctx.workspaceId),
+		// ON DELETE CASCADE rows — delete outright.
+		toD1Statement(
+			ctx,
+			orm.delete(schema.issueComments).where(eq(schema.issueComments.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.issueLinks)
+				.where(or(eq(schema.issueLinks.sourceIssueId, id), eq(schema.issueLinks.targetIssueId, id)))
+				.toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm.delete(schema.customFieldValues).where(eq(schema.customFieldValues.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm.delete(schema.issueFileClaims).where(eq(schema.issueFileClaims.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm.delete(schema.issueLeases).where(eq(schema.issueLeases.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.claimConflicts)
+				.where(
+					or(
+						eq(schema.claimConflicts.rejectedIssueId, id),
+						eq(schema.claimConflicts.holdingIssueId, id)
+					)
+				)
+				.toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm.delete(schema.wipCapDenials).where(eq(schema.wipCapDenials.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.issueGateRejections)
+				.where(eq(schema.issueGateRejections.issueId, id))
+				.toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.attachments)
+				.where(
+					and(
+						eq(schema.attachments.workspaceId, ctx.workspaceId),
+						eq(schema.attachments.entityType, "issue"),
+						eq(schema.attachments.entityId, id)
+					)
+				)
+				.toSQL()
+		),
+		// ON DELETE SET NULL rows — null the referencing column instead.
+		toD1Statement(
+			ctx,
+			orm
+				.update(schema.agentSessions)
+				.set({ issueId: null })
+				.where(
+					and(
+						eq(schema.agentSessions.issueId, id),
+						eq(schema.agentSessions.workspaceId, ctx.workspaceId)
+					)
+				)
+				.toSQL()
+		),
+		ctx.db
+			.prepare(
+				"UPDATE feedback SET linked_issue_id = NULL WHERE linked_issue_id = ? AND workspace_id = ?"
+			)
+			.bind(id, ctx.workspaceId),
+		// Not a physically-declared FK (issues.parent_id carries no REFERENCES clause), but
+		// the same dangling-reference risk: null child issues' parent_id.
+		toD1Statement(
+			ctx,
+			orm
+				.update(schema.issues)
+				.set({ parentId: null })
+				.where(and(eq(schema.issues.parentId, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+				.toSQL()
+		),
+	];
+
+	await ctx.db.batch(deleteStatements);
+
+	// The issue is gone once the batch commits; failing to remove its R2 bytes now only
+	// leaks storage, so log it rather than failing the request. One call for all keys.
+	const r2Keys = fileAttachments.map((a) => a.r2Key).filter((k): k is string => Boolean(k));
+	if (r2Keys.length > 0) {
+		try {
+			await ctx.r2.delete(r2Keys);
+		} catch (err) {
+			console.error("deleteIssue: R2 cleanup failed", {
+				id,
+				count: r2Keys.length,
+				err: String(err),
+			});
+		}
 	}
+
+	await recordActivity(ctx, { entityType: "issue", entityId: id, action: "deleted" });
+	const toInvalidate = new Set([id, ...affected.results.map((r) => r.id)]);
+	if (existing.parentId) toInvalidate.add(existing.parentId);
+	await Promise.all(
+		[...toInvalidate].map((iid) => cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${iid}`))
+	);
 
 	await broadcastWorkspaceEvent(ctx, {
 		type: "issue.deleted",
-		projectId: existing?.projectId ?? undefined,
+		projectId: existing.projectId,
 		data: { id },
 	});
 

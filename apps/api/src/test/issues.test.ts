@@ -2460,3 +2460,139 @@ describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
 		expect(res.error?.message).toContain("parentRef");
 	});
 });
+
+// PROJ-785: assigneeId must reference a member of the issue's workspace.
+describe("Issues — assignee workspace membership (PROJ-785)", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, projectId } = await seedOwnerProjectFixture());
+	});
+
+	async function mcpCall(params: unknown) {
+		return callMcpTool(workspaceId, token, slug, params);
+	}
+
+	it("REST POST rejects an assigneeId from another workspace with 400", async () => {
+		const otherFixture = await seedFixture();
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Bad assignee", assigneeId: otherFixture.user.id }),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { fieldErrors: Record<string, string[]> } };
+		expect(body.error.fieldErrors.assigneeId).toBeDefined();
+	});
+
+	it("REST POST accepts an assigneeId that is a real workspace member", async () => {
+		const assignee = await seedUser("proj785-member@example.com");
+		await seedMember(workspaceId, assignee.id);
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Good assignee", assigneeId: assignee.id }),
+		});
+		expect(res.status).toBe(201);
+	});
+
+	it("REST PATCH rejects reassigning to a user from another workspace with 400", async () => {
+		const otherFixture = await seedFixture();
+		const createRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "To reassign" }),
+		});
+		const { id } = (await createRes.json()) as { id: string };
+
+		const patchRes = await SELF.fetch(`http://localhost/api/issues/${id}`, {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ assigneeId: otherFixture.user.id }),
+		});
+		expect(patchRes.status).toBe(400);
+	});
+
+	it("REST PATCH null clears the assignee without a membership check", async () => {
+		const assignee = await seedUser("proj785-clear@example.com");
+		await seedMember(workspaceId, assignee.id);
+		const createRes = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "Will be cleared", assigneeId: assignee.id }),
+		});
+		const { id } = (await createRes.json()) as { id: string };
+
+		const patchRes = await SELF.fetch(`http://localhost/api/issues/${id}`, {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ assigneeId: null }),
+		});
+		expect(patchRes.status).toBe(200);
+
+		const getRes = await SELF.fetch(`http://localhost/api/issues/${id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const issue = (await getRes.json()) as { assignee_id: string | null };
+		expect(issue.assignee_id).toBeNull();
+	});
+
+	it("MCP create_issue rejects an assigneeId from another workspace", async () => {
+		const otherFixture = await seedFixture();
+		const res = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Bad assignee via MCP", assigneeId: otherFixture.user.id },
+		});
+		expect(res.error).toBeDefined();
+	});
+
+	it("MCP create_issue accepts a real workspace member as assignee", async () => {
+		const assignee = await seedUser("proj785-mcp-member@example.com");
+		await seedMember(workspaceId, assignee.id);
+		const res = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Good assignee via MCP", assigneeId: assignee.id },
+		});
+		expect(res.error).toBeUndefined();
+	});
+
+	it("MCP update_issue rejects reassigning to a user from another workspace", async () => {
+		const otherFixture = await seedFixture();
+		const createResp = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "To reassign via MCP" },
+		});
+		const { id } = JSON.parse(createResp.result!.content[0].text) as { id: string };
+
+		const res = await mcpCall({
+			name: "update_issue",
+			arguments: { id, assigneeId: otherFixture.user.id },
+		});
+		expect(res.error).toBeDefined();
+	});
+
+	it("MCP update_issue null clears the assignee without a membership check", async () => {
+		const assignee = await seedUser("proj785-mcp-clear@example.com");
+		await seedMember(workspaceId, assignee.id);
+		const createResp = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Will be cleared via MCP", assigneeId: assignee.id },
+		});
+		const { id } = JSON.parse(createResp.result!.content[0].text) as { id: string };
+
+		const res = await mcpCall({
+			name: "update_issue",
+			arguments: { id, assigneeId: null },
+		});
+		expect(res.error).toBeUndefined();
+
+		const getRes = await SELF.fetch(`http://localhost/api/issues/${id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const issue = (await getRes.json()) as { assignee_id: string | null };
+		expect(issue.assignee_id).toBeNull();
+	});
+});
