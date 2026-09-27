@@ -158,6 +158,8 @@ export const wikiLinks = sqliteTable(
 		targetFold: text("target_fold"),
 		// PROJ-818: the target as written (title text or slug) — see migration 0063.
 		targetText: text("target_text"),
+		// PROJ-814/818: 'title' | 'slug' — how the link was written (NULL: legacy row).
+		targetKind: text("target_kind"),
 		createdAt: integer("created_at").notNull(),
 	},
 	(t) => ({

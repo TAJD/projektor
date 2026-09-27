@@ -106,3 +106,27 @@ describe("PROJ-818: link reads don't reveal pages in hidden projects", () => {
 		expect(asOwner.filter((b) => b.sourceSlug === "public-index")).toEqual([]);
 	});
 });
+
+describe("PROJ-818: legacy link rows don't leak a hidden page's title", () => {
+	it("a pre-0063 resolved row (no target_text) into a hidden project shows no title", async () => {
+		const { workspace, owner, member } = await seedWorkspaceRoles();
+		const hidden = await seedProject(workspace.id, "HID");
+		const secret = await createPage(owner.token, workspace.slug, {
+			title: "Hidden Title",
+			projectId: hidden.id,
+		});
+		const src = await createPage(owner.token, workspace.slug, { title: "Legacy Src" });
+		// As a pre-0063 slug link resolved to the hidden page would look.
+		await env.DB.prepare(
+			`INSERT INTO wiki_links (id, workspace_id, source_page_id, target_page_id, target_title, created_at)
+			 VALUES (?, ?, ?, ?, 'Hidden Title', 0)`
+		)
+			.bind(crypto.randomUUID(), workspace.id, src.id, secret.id)
+			.run();
+		const rows = (await broken(member.token, workspace.slug)).filter(
+			(b) => b.sourceSlug === src.slug
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].targetTitle).not.toContain("Hidden");
+	});
+});

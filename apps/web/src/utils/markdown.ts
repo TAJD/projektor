@@ -84,13 +84,15 @@ function resolveWikilinks(
 	markdown: string,
 	pages: ReadonlyArray<{ title: string; slug: string }>
 ): string {
-	const titleMap = new Map(pages.map((p) => [p.title.toLowerCase(), p.slug]));
+	// PROJ-818: same fold as the API (services/wiki-links.ts#foldWikiTitle).
+	const fold = (t: string) => t.normalize("NFC").toLowerCase();
+	const titleMap = new Map(pages.map((p) => [fold(p.title), p.slug]));
 	return markdown.replace(
 		/\[\[([^\]|]+?)(?:\|([^\]]+?))?\]\]/g,
 		(_, rawTitle: string, rawLabel: string | undefined) => {
 			const title = rawTitle.trim();
 			const displayText = rawLabel?.trim() ?? title;
-			const slug = titleMap.get(title.toLowerCase());
+			const slug = titleMap.get(fold(title));
 			if (slug) {
 				return `[${displayText}](/wiki/${encodeURIComponent(slug)})`;
 			}

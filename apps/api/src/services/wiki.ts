@@ -43,11 +43,11 @@ import {
 	buildResolveIncomingLinksStatement,
 	buildUnresolveStaleIncomingLinksStatement,
 	buildWikiLinksReindexStatements,
-	clearIncomingLinkTargets,
 	countBacklinkSources,
 	deleteWikiLinksForPages,
 	foldWikiTitle,
 	healTitleFolds,
+	repointIncomingLinks,
 	type WikiBacklink,
 } from "./wiki-links";
 import { idFirst, idOrSlugMatch, isIdShapedSlug } from "./wiki-lookup";
@@ -2487,10 +2487,9 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 				.where(inArray(schema.wikiPages.id, chunk));
 			return [];
 		});
-		// PROJ-814: links pointing at a page just trashed become unresolved (mirrors
-		// purgeExpiredWikiPages, which already does this at purge time) — a link stays
-		// broken while its target is in the trash rather than staying silently "resolved".
-		await clearIncomingLinkTargets(ctx, allIds);
+		// PROJ-814: links keep pointing at a trashed page (reads already treat a trashed
+		// target as broken/hidden), so restore brings them back intact; a new page with the
+		// same title/slug may claim them meanwhile (buildResolveIncomingLinksStatement).
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
@@ -2538,9 +2537,6 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 			version: sql`${schema.wikiPages.version} + 1`,
 		})
 		.where(eq(schema.wikiPages.id, page.id));
-	// PROJ-814: same as the cascade branch above — links pointing at this now-trashed
-	// page become unresolved.
-	await clearIncomingLinkTargets(ctx, [page.id]);
 	await recordActivity(ctx, {
 		entityType: "wiki_page",
 		entityId: page.id,
@@ -2819,6 +2815,10 @@ export async function purgeExpiredWikiPages(
 		await deleteWikiPageAttachments(ctx, orm, chunk);
 		return [];
 	});
+	// PROJ-814: re-point incoming links to another live match (else unresolve) BEFORE the
+	// pages are deleted — once they're gone, ON DELETE SET NULL (where enforced) would
+	// already have cleared target_page_id and there'd be nothing left to re-point.
+	await repointIncomingLinks(ctx, ids);
 	await inChunks(ids, async (chunk) => {
 		await orm.delete(schema.wikiRevisions).where(inArray(schema.wikiRevisions.pageId, chunk));
 		return [];
@@ -2829,7 +2829,6 @@ export async function purgeExpiredWikiPages(
 	});
 	await deleteWikiFtsEntries(ctx, ids);
 	await deleteWikiLinksForPages(ctx, ids);
-	await clearIncomingLinkTargets(ctx, ids);
 	await deleteWikiWatchersForPages(ctx, ids);
 	await deleteWikiDraftsForPages(ctx, ids);
 	// PROJ-407-style defensive cleanup, same rationale as every other per-table helper

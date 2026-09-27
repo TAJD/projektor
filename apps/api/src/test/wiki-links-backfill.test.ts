@@ -105,7 +105,8 @@ describe("PROJ-815: backfillWikiLinks batching, trash, cursor, updatedSince", ()
 		expect(result.processed).toBe(200);
 		// One page-select query plus a handful of chunked title-resolution reads — not
 		// one (or more) reads per page, which would scale to hundreds.
-		expect(selects.length).toBeLessThanOrEqual(10);
+		// +2 constant: the PROJ-818 fold heal and the unhealed-title fallback query.
+		expect(selects.length).toBeLessThanOrEqual(12);
 		// Every page's DELETE+INSERT lands in exactly one db.batch() round trip for the
 		// whole chunk, not one batch per page.
 		// one link-write batch, plus at most one PROJ-818 fold-heal batch (constant, not per page)

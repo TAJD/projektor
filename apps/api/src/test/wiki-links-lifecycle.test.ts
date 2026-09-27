@@ -3,6 +3,8 @@
 
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import type { ServiceCtx } from "../services/types";
+import { purgeExpiredWikiPages } from "../services/wiki";
 import { authHeaders, seedFixture } from "./helpers";
 import { resetRateLimits } from "./rate-limit-reset";
 
@@ -140,30 +142,85 @@ describe("PROJ-814: lifecycle events re-resolve other pages' wiki links", () => 
 		).toBe(true);
 	});
 
-	it("trash: a link to a page just trashed becomes unresolved without editing the linking page", async () => {
+	it("trash: the link is reported broken but keeps its target, so restore brings it back", async () => {
 		const { workspace, token } = await seedFixture({ role: "owner" });
 		const target = await createPage(token, workspace.slug, "Doomed");
 		const linker = await createPage(token, workspace.slug, "Linker4", "See [[Doomed]].");
-		expect(
-			(await backlinks(token, workspace.slug, target.slug)).some((b) => b.pageId === linker.id)
-		).toBe(true);
 
 		await deletePage(token, workspace.slug, target.slug);
-
-		// list_broken_wiki_links already flags this via its "target page is trashed" EXISTS
-		// check even without target_page_id being cleared, so assert the raw column too —
-		// that's the part this ticket actually changes (clearIncomingLinkTargets now runs
-		// at trash time, not just at purge time).
-		const row = await env.DB.prepare(
-			"SELECT target_page_id FROM wiki_links WHERE source_page_id = ?"
-		)
-			.bind(linker.id)
-			.first<{ target_page_id: string | null }>();
-		expect(row?.target_page_id).toBeNull();
-
 		const broken = await brokenLinks(token, workspace.slug);
 		expect(broken.some((l) => l.sourcePageId === linker.id && l.targetTitle === "Doomed")).toBe(
 			true
 		);
+		expect(await targetOf(linker.id)).toBe(target.id);
+
+		await undeletePage(token, workspace.slug, target.id);
+		expect(
+			(await backlinks(token, workspace.slug, target.slug)).some((b) => b.pageId === linker.id)
+		).toBe(true);
+	});
+
+	it("purge: links re-point to another live page with the same title, else unresolve", async () => {
+		const { workspace, token, user } = await seedFixture({ role: "owner" });
+		const first = await createPage(token, workspace.slug, "Twin");
+		// Titles aren't unique (slugs are): make a second "Twin" by renaming.
+		const second = await createPage(token, workspace.slug, "Twin two");
+		await updatePage(token, workspace.slug, second.slug, { title: "Twin" });
+		// Same-second creates would tie; make "first" unambiguously the oldest.
+		await env.DB.prepare("UPDATE wiki_pages SET created_at = 1 WHERE id = ?").bind(first.id).run();
+		const lone = await createPage(token, workspace.slug, "Lonely");
+		const linker = await createPage(token, workspace.slug, "Linker5", "[[Twin]] [[Lonely]]");
+		// Oldest page wins a duplicate title.
+		expect(await targetsOf(linker.id)).toEqual([first.id, lone.id].sort());
+
+		for (const p of [first, lone]) {
+			await deletePage(token, workspace.slug, p.slug);
+			await env.DB.prepare("UPDATE wiki_pages SET deleted_at = 1 WHERE id = ?").bind(p.id).run();
+		}
+		const ctx: ServiceCtx = {
+			db: env.DB,
+			kv: env.KV,
+			r2: env.R2,
+			workspaceId: workspace.id,
+			userId: user.id,
+			role: "owner",
+		};
+		await purgeExpiredWikiPages(ctx);
+		const rows = await env.DB.prepare(
+			"SELECT target_title AS t, target_page_id AS id FROM wiki_links WHERE source_page_id = ?"
+		)
+			.bind(linker.id)
+			.all<{ t: string; id: string | null }>();
+		const byTitle = Object.fromEntries(rows.results.map((r) => [r.t, r.id]));
+		expect(byTitle).toEqual({ Twin: second.id, Lonely: null });
+	});
+
+	it("rename: a URL/slug link keeps its target when the title changes", async () => {
+		const { workspace, token } = await seedFixture({ role: "owner" });
+		const target = await createPage(token, workspace.slug, "Foo");
+		const byUrl = await createPage(token, workspace.slug, "ByUrl", `[x](/wiki/${target.slug})`);
+		const byTitle = await createPage(token, workspace.slug, "ByTitle", "[[Foo]]");
+		await updatePage(token, workspace.slug, target.slug, { title: "Bar" });
+		// The URL link still points at the page; the [[Foo]] title link no longer matches.
+		expect(await targetOf(byUrl.id)).toBe(target.id);
+		expect(await targetOf(byTitle.id)).toBeNull();
 	});
 });
+
+async function targetOf(sourceId: string): Promise<string | null> {
+	const row = await env.DB.prepare(
+		"SELECT target_page_id AS t FROM wiki_links WHERE source_page_id = ?"
+	)
+		.bind(sourceId)
+		.first<{ t: string | null }>();
+	return row?.t ?? null;
+}
+
+async function targetsOf(sourceId: string): Promise<Array<string | null>> {
+	const rows = await env.DB.prepare(
+		"SELECT target_page_id AS t FROM wiki_links WHERE source_page_id = ? ORDER BY target_page_id"
+	)
+		.bind(sourceId)
+		.all<{ t: string | null }>();
+	return rows.results.map((r) => r.t);
+}

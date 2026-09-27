@@ -12,6 +12,15 @@ ALTER TABLE wiki_links ADD COLUMN target_fold TEXT;
 -- broken-links report shows it for links whose target the caller can't see, instead of
 -- target_title (which, for a slug link, is the resolved page's title).
 ALTER TABLE wiki_links ADD COLUMN target_text TEXT;
+-- 'title' ([[Title]]) or 'slug' (a /wiki/<slug> URL link), so lifecycle re-resolution
+-- matches each link the way it was written. NULL for rows written before this
+-- migration; they keep the pre-PROJ-814 behaviour until their page is re-saved or
+-- backfill_wiki_links runs.
+ALTER TABLE wiki_links ADD COLUMN target_kind TEXT;
+-- For unresolved legacy rows target_title already IS the text as written (title text,
+-- or the slug), so copy it; resolved legacy rows stay NULL (their target_title may be a
+-- resolved page's title, which must not be shown when that page is hidden).
+UPDATE wiki_links SET target_text = target_title WHERE target_page_id IS NULL;
 UPDATE wiki_pages SET title_fold = lower(title) WHERE title NOT GLOB '*[^ -~]*';
 UPDATE wiki_links SET target_fold = lower(target_title) WHERE target_title NOT GLOB '*[^ -~]*';
 CREATE INDEX IF NOT EXISTS idx_wiki_pages_ws_title_fold ON wiki_pages(workspace_id, title_fold);
