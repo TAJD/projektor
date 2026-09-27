@@ -1529,31 +1529,186 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 		.from(schema.issues)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
+	// PROJ-922: every dependent-row statement below keys on this id, several without a
+	// workspace filter of their own — so the id MUST be proven to be in this workspace
+	// first, or an admin of workspace A could wipe workspace B's comments/links/files by
+	// passing one of B's issue UUIDs.
+	if (!existing) throw new NotFoundError("Issue not found");
 
 	// PROJ-311: deletion needs admin inside the project — workspace owner/admin bypass
 	// groups; everyone else needs a project-admin grant.
 	if (!isWorkspaceAdmin(ctx.role)) {
-		const projRole = existing ? await effectiveProjectRole(ctx, existing.projectId) : null;
+		const projRole = await effectiveProjectRole(ctx, existing.projectId);
 		if (projRole !== "admin") throw new ForbiddenError("Insufficient permissions");
 	}
 
-	await orm
-		.delete(schema.issues)
-		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)));
-	await ctx.db
-		.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
+	// PROJ-922: D1 does not reliably enforce the FK ON DELETE CASCADE/SET NULL declared in
+	// the schema (PROJ-407), so every row that references this issue must be cleaned up
+	// explicitly here, in the same batch as the issue row itself — final list from
+	// grepping packages/db/migrations for `REFERENCES issues`, plus two references that
+	// exist without a physical FK constraint (issues.parent_id, attachments' polymorphic
+	// entity_type/entity_id) but the same dangling-reference risk.
+	//
+	// R2 objects for "file"-kind attachments hanging directly off this issue
+	// (entity_type='issue') are looked up before the batch (their D1 rows are deleted in
+	// it) and removed only after the batch commits, so a failed batch never leaves
+	// attachment metadata pointing at bytes we already destroyed.
+	const fileAttachments = await orm
+		.select({ r2Key: schema.attachments.r2Key })
+		.from(schema.attachments)
+		.where(
+			and(
+				eq(schema.attachments.workspaceId, ctx.workspaceId),
+				eq(schema.attachments.entityType, "issue"),
+				eq(schema.attachments.entityId, id),
+				eq(schema.attachments.kind, "file")
+			)
+		);
+	// Issues whose cached payload mentions this one (link targets/sources, children) —
+	// invalidated after the batch so they stop showing a deleted issue.
+	const affected = await ctx.db
+		.prepare(
+			`SELECT target_issue_id AS id FROM issue_links WHERE source_issue_id = ?1
+			 UNION SELECT source_issue_id FROM issue_links WHERE target_issue_id = ?1
+			 UNION SELECT id FROM issues WHERE parent_id = ?1 AND workspace_id = ?2`
+		)
 		.bind(id, ctx.workspaceId)
-		.run();
-	await recordActivity(ctx, { entityType: "issue", entityId: id, action: "deleted" });
-	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${id}`);
+		.all<{ id: string }>();
 
-	if (existing?.parentId) {
-		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.parentId}`);
+	const deleteStatements: D1PreparedStatement[] = [
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.issues)
+				.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+				.toSQL()
+		),
+		ctx.db
+			.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
+			.bind(id, ctx.workspaceId),
+		// share_tokens has no FK at all (0017), so nothing ever removed a deleted issue's
+		// public share links.
+		ctx.db
+			.prepare("DELETE FROM share_tokens WHERE issue_id = ? AND workspace_id = ?")
+			.bind(id, ctx.workspaceId),
+		// ON DELETE CASCADE rows — delete outright.
+		toD1Statement(
+			ctx,
+			orm.delete(schema.issueComments).where(eq(schema.issueComments.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.issueLinks)
+				.where(or(eq(schema.issueLinks.sourceIssueId, id), eq(schema.issueLinks.targetIssueId, id)))
+				.toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm.delete(schema.customFieldValues).where(eq(schema.customFieldValues.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm.delete(schema.issueFileClaims).where(eq(schema.issueFileClaims.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm.delete(schema.issueLeases).where(eq(schema.issueLeases.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.claimConflicts)
+				.where(
+					or(
+						eq(schema.claimConflicts.rejectedIssueId, id),
+						eq(schema.claimConflicts.holdingIssueId, id)
+					)
+				)
+				.toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm.delete(schema.wipCapDenials).where(eq(schema.wipCapDenials.issueId, id)).toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.issueGateRejections)
+				.where(eq(schema.issueGateRejections.issueId, id))
+				.toSQL()
+		),
+		toD1Statement(
+			ctx,
+			orm
+				.delete(schema.attachments)
+				.where(
+					and(
+						eq(schema.attachments.workspaceId, ctx.workspaceId),
+						eq(schema.attachments.entityType, "issue"),
+						eq(schema.attachments.entityId, id)
+					)
+				)
+				.toSQL()
+		),
+		// ON DELETE SET NULL rows — null the referencing column instead.
+		toD1Statement(
+			ctx,
+			orm
+				.update(schema.agentSessions)
+				.set({ issueId: null })
+				.where(
+					and(
+						eq(schema.agentSessions.issueId, id),
+						eq(schema.agentSessions.workspaceId, ctx.workspaceId)
+					)
+				)
+				.toSQL()
+		),
+		ctx.db
+			.prepare(
+				"UPDATE feedback SET linked_issue_id = NULL WHERE linked_issue_id = ? AND workspace_id = ?"
+			)
+			.bind(id, ctx.workspaceId),
+		// Not a physically-declared FK (issues.parent_id carries no REFERENCES clause), but
+		// the same dangling-reference risk: null child issues' parent_id.
+		toD1Statement(
+			ctx,
+			orm
+				.update(schema.issues)
+				.set({ parentId: null })
+				.where(and(eq(schema.issues.parentId, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+				.toSQL()
+		),
+	];
+
+	await ctx.db.batch(deleteStatements);
+
+	// The issue is gone once the batch commits; failing to remove its R2 bytes now only
+	// leaks storage, so log it rather than failing the request. One call for all keys.
+	const r2Keys = fileAttachments.map((a) => a.r2Key).filter((k): k is string => Boolean(k));
+	if (r2Keys.length > 0) {
+		try {
+			await ctx.r2.delete(r2Keys);
+		} catch (err) {
+			console.error("deleteIssue: R2 cleanup failed", {
+				id,
+				count: r2Keys.length,
+				err: String(err),
+			});
+		}
 	}
+
+	await recordActivity(ctx, { entityType: "issue", entityId: id, action: "deleted" });
+	const toInvalidate = new Set([id, ...affected.results.map((r) => r.id)]);
+	if (existing.parentId) toInvalidate.add(existing.parentId);
+	await Promise.all(
+		[...toInvalidate].map((iid) => cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${iid}`))
+	);
 
 	await broadcastWorkspaceEvent(ctx, {
 		type: "issue.deleted",
-		projectId: existing?.projectId ?? undefined,
+		projectId: existing.projectId,
 		data: { id },
 	});
 
