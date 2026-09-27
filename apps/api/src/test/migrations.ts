@@ -63,6 +63,7 @@ import m0059 from "../../../../packages/db/migrations/0059_wiki_page_version.sql
 import m0060 from "../../../../packages/db/migrations/0060_wiki_reserved_slug_rename.sql?raw";
 import m0061 from "../../../../packages/db/migrations/0061_task_status_review_step.sql?raw";
 import m0062 from "../../../../packages/db/migrations/0062_repair_zero_lead_time.sql?raw";
+import m0063 from "../../../../packages/db/migrations/0063_wiki_title_fold.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -128,4 +129,5 @@ export const MIGRATIONS = [
 	m0060,
 	m0061,
 	m0062,
+	m0063,
 ];

@@ -46,6 +46,8 @@ import {
 	clearIncomingLinkTargets,
 	countBacklinkSources,
 	deleteWikiLinksForPages,
+	foldWikiTitle,
+	healTitleFolds,
 	type WikiBacklink,
 } from "./wiki-links";
 import { idFirst, idOrSlugMatch, isIdShapedSlug } from "./wiki-lookup";
@@ -364,7 +366,10 @@ function buildWikiPageUpdateSet(
 		updatedById,
 		version: sql`${schema.wikiPages.version} + 1`,
 	};
-	if (fields.title !== undefined) setData.title = fields.title;
+	if (fields.title !== undefined) {
+		setData.title = fields.title;
+		setData.titleFold = foldWikiTitle(fields.title); // PROJ-818
+	}
 	if (fields.content !== undefined) setData.content = fields.content;
 	if (fields.parentId !== undefined) setData.parentId = fields.parentId;
 	if (fields.slug !== undefined) setData.slug = fields.slug;
@@ -882,6 +887,7 @@ function buildCreateWikiPageInsertStatement(
 				projectId,
 				slug,
 				title,
+				titleFold: foldWikiTitle(title),
 				content,
 				parentId,
 				createdById: ctx.userId,
@@ -1611,6 +1617,7 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// batch as the rename itself.
 	const titleChanged = title !== undefined && title !== page.title;
 	if (titleChanged || isRename) {
+		await healTitleFolds(ctx); // PROJ-818: link folds must be filled before matching
 		const finalTitle = title ?? page.title;
 		const finalSlug = slug ?? page.slug;
 		statements.push(
@@ -2229,6 +2236,7 @@ export async function seedDefaultWikiTemplates(
 		projectId: null,
 		slug: "page-templates",
 		title: "Templates",
+		titleFold: foldWikiTitle("Templates"),
 		content: "",
 		parentId: null,
 		createdById: userId,
@@ -2255,6 +2263,7 @@ export async function seedDefaultWikiTemplates(
 			projectId: null,
 			slug: t.slug,
 			title: t.title,
+			titleFold: foldWikiTitle(t.title),
 			content,
 			parentId,
 			createdById: userId,
@@ -2648,6 +2657,7 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 
 	// PROJ-814: every restored page (root and cascade-restored descendants) can be the
 	// target other pages' still-unresolved links were waiting on — re-resolve for each.
+	await healTitleFolds(ctx); // PROJ-818
 	await ctx.db.batch([
 		buildResolveIncomingLinksStatement(ctx, { id: page.id, title: page.title, slug: page.slug }),
 		...descendantRows.map((d) =>

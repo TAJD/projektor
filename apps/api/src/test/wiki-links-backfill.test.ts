@@ -108,7 +108,8 @@ describe("PROJ-815: backfillWikiLinks batching, trash, cursor, updatedSince", ()
 		expect(selects.length).toBeLessThanOrEqual(10);
 		// Every page's DELETE+INSERT lands in exactly one db.batch() round trip for the
 		// whole chunk, not one batch per page.
-		expect(batchSpy).toHaveBeenCalledTimes(1);
+		// one link-write batch, plus at most one PROJ-818 fold-heal batch (constant, not per page)
+		expect(batchSpy.mock.calls.length).toBeLessThanOrEqual(2);
 	});
 
 	it("a cursor resumes where the previous call stopped", async () => {

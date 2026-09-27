@@ -69,8 +69,50 @@ export function parseWikiLinkTargets(content: string): ParsedLinkTarget[] {
 // normalization) — every title comparison in this file, both initial resolution and
 // lifecycle re-resolution below, routes through here so that ticket only has to touch
 // this one function.
+//
+// PROJ-818: NFC-normalise then lowercase in JS. SQLite's lower() only folds ASCII, so
+// titles are compared through the stored folds (wiki_pages.title_fold,
+// wiki_links.target_fold), which are always computed here — never with SQL lower().
 export function foldWikiTitle(value: string): string {
-	return value.toLowerCase();
+	return value.normalize("NFC").toLowerCase();
+}
+
+const HEAL_BATCH = 200;
+
+/**
+ * PROJ-818: fill NULL title/target folds left by migration 0063 (it only backfills
+ * ASCII-only values, which SQL lower() folds exactly). Bounded per call and a no-op
+ * once a workspace is healed (partial indexes on `fold IS NULL` keep the check cheap).
+ * Called before title resolution and by backfill_wiki_links.
+ */
+export async function healTitleFolds(ctx: ServiceCtx): Promise<void> {
+	const [pages, links] = await Promise.all([
+		ctx.db
+			.prepare(
+				"SELECT id, title AS t FROM wiki_pages WHERE workspace_id = ? AND title_fold IS NULL LIMIT ?"
+			)
+			.bind(ctx.workspaceId, HEAL_BATCH)
+			.all<{ id: string; t: string }>(),
+		ctx.db
+			.prepare(
+				"SELECT id, target_title AS t FROM wiki_links WHERE workspace_id = ? AND target_fold IS NULL LIMIT ?"
+			)
+			.bind(ctx.workspaceId, HEAL_BATCH)
+			.all<{ id: string; t: string }>(),
+	]);
+	const statements = [
+		...pages.results.map((r) =>
+			ctx.db
+				.prepare("UPDATE wiki_pages SET title_fold = ? WHERE id = ? AND workspace_id = ?")
+				.bind(foldWikiTitle(r.t), r.id, ctx.workspaceId)
+		),
+		...links.results.map((r) =>
+			ctx.db
+				.prepare("UPDATE wiki_links SET target_fold = ? WHERE id = ? AND workspace_id = ?")
+				.bind(foldWikiTitle(r.t), r.id, ctx.workspaceId)
+		),
+	];
+	if (statements.length > 0) await ctx.db.batch(statements);
 }
 
 // Resolves all title-kind targets in one query (rather than one round trip per link),
@@ -94,10 +136,7 @@ async function resolveTitleTargets(
 			.where(
 				and(
 					eq(schema.wikiPages.workspaceId, workspaceId),
-					sql`lower(${schema.wikiPages.title}) IN (${sql.join(
-						chunk.map((t) => sql`${t}`),
-						sql`, `
-					)})`,
+					inArray(schema.wikiPages.titleFold, chunk),
 					isNull(schema.wikiPages.deletedAt)
 				)
 			)
@@ -179,7 +218,7 @@ async function resolveSlugTargets(
 	return bySlug;
 }
 
-type ResolvedLink = { targetPageId: string | null; targetTitle: string };
+type ResolvedLink = { targetPageId: string | null; targetTitle: string; targetText: string };
 
 function isTitleTarget(t: ParsedLinkTarget): t is Extract<ParsedLinkTarget, { kind: "title" }> {
 	return t.kind === "title";
@@ -205,12 +244,17 @@ function resolveTargetsFromMaps(
 		if (isTitleTarget(t)) {
 			const targetPageId = titleMatches.get(foldWikiTitle(t.title)) ?? null;
 			const key = targetPageId ?? `title:${foldWikiTitle(t.title)}`;
-			if (!resolved.has(key)) resolved.set(key, { targetPageId, targetTitle: t.title });
+			if (!resolved.has(key))
+				resolved.set(key, { targetPageId, targetTitle: t.title, targetText: t.title });
 		} else if (isSlugTarget(t)) {
 			const page = slugMatches.get(t.slug);
 			const key = page?.id ?? `slug:${t.slug.toLowerCase()}`;
 			if (!resolved.has(key)) {
-				resolved.set(key, { targetPageId: page?.id ?? null, targetTitle: page?.title ?? t.slug });
+				resolved.set(key, {
+					targetPageId: page?.id ?? null,
+					targetTitle: page?.title ?? t.slug,
+					targetText: t.slug,
+				});
 			}
 		}
 	}
@@ -271,7 +315,7 @@ async function resolveLinkTargetsForPages(
 // targetPageId, targetTitle, createdAt) — 15 rows/insert stays comfortably under that
 // with headroom, unlike services/sql.ts#inChunks (calibrated for single-param-per-item
 // IN-list queries, not multi-column inserts).
-const LINK_INSERT_CHUNK_SIZE = 15;
+const LINK_INSERT_CHUNK_SIZE = 12; // 8 columns × 12 = 96 bound params (D1 cap: 100)
 
 /**
  * Builds (without executing) the DELETE + chunked re-INSERT statements that recompute a
@@ -289,6 +333,8 @@ export async function buildWikiLinksReindexStatements(
 	content: string
 ): Promise<D1PreparedStatement[]> {
 	const targets = parseWikiLinkTargets(content);
+	// PROJ-818: title matching reads the stored folds — heal any NULLs first.
+	await healTitleFolds(ctx);
 	const resolved =
 		targets.length > 0 ? await resolveLinkTargets(orm, ctx.workspaceId, targets) : [];
 	return buildLinkWriteStatements(ctx, sourcePageId, resolved);
@@ -309,6 +355,8 @@ function buildLinkWriteStatements(
 		sourcePageId,
 		targetPageId: r.targetPageId,
 		targetTitle: r.targetTitle,
+		targetFold: foldWikiTitle(r.targetTitle),
+		targetText: r.targetText,
 		createdAt: now,
 	}));
 
@@ -319,20 +367,22 @@ function buildLinkWriteStatements(
 	];
 	for (let i = 0; i < rows.length; i += LINK_INSERT_CHUNK_SIZE) {
 		const chunk = rows.slice(i, i + LINK_INSERT_CHUNK_SIZE);
-		const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+		const placeholders = chunk.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
 		const params = chunk.flatMap((r) => [
 			r.id,
 			r.workspaceId,
 			r.sourcePageId,
 			r.targetPageId,
 			r.targetTitle,
+			r.targetFold,
+			r.targetText,
 			r.createdAt,
 		]);
 		statements.push(
 			ctx.db
 				.prepare(
 					`INSERT INTO wiki_links (id, workspace_id, source_page_id, target_page_id, target_title,
-						created_at) VALUES ${placeholders}`
+						target_fold, target_text, created_at) VALUES ${placeholders}`
 				)
 				.bind(...params)
 		);
@@ -401,6 +451,7 @@ export async function backfillWikiLinks(
 	const parsed = BackfillWikiLinksInputSchema.safeParse(input ?? {});
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const { cursor, pageBudget, updatedSince } = parsed.data;
+	await healTitleFolds(ctx);
 
 	const orm = drizzle(ctx.db, { schema });
 	const conditions = [
@@ -505,7 +556,7 @@ export function buildResolveIncomingLinksStatement(
 		.prepare(
 			`UPDATE wiki_links SET target_page_id = ?
 			 WHERE workspace_id = ? AND target_page_id IS NULL
-			   AND (lower(target_title) = ? OR target_title = ?)`
+			   AND (target_fold = ? OR target_title = ?)`
 		)
 		.bind(page.id, ctx.workspaceId, foldWikiTitle(page.title), page.slug);
 }
@@ -526,8 +577,8 @@ export function buildUnresolveStaleIncomingLinksStatement(
 		.prepare(
 			`UPDATE wiki_links SET target_page_id = NULL
 			 WHERE workspace_id = ? AND target_page_id = ?
-			   AND (lower(target_title) = ? OR target_title = ?)
-			   AND NOT (lower(target_title) = ? OR target_title = ?)`
+			   AND (target_fold = ? OR target_title = ?)
+			   AND NOT (target_fold = ? OR target_title = ?)`
 		)
 		.bind(
 			ctx.workspaceId,
@@ -545,14 +596,19 @@ export function buildUnresolveStaleIncomingLinksStatement(
 export async function countBacklinkSources(ctx: ServiceCtx, pageIds: string[]): Promise<number> {
 	if (pageIds.length === 0) return 0;
 	const orm = drizzle(ctx.db, { schema });
+	// PROJ-818: only count linking pages the caller can see — the count must not reveal
+	// pages in projects hidden from them.
+	const visible = visibleProjectPredicate(ctx, schema.wikiPages.projectId);
 	const rows = await inChunks(pageIds, (chunk) =>
 		orm
 			.select({ sourcePageId: schema.wikiLinks.sourcePageId })
 			.from(schema.wikiLinks)
+			.innerJoin(schema.wikiPages, eq(schema.wikiPages.id, schema.wikiLinks.sourcePageId))
 			.where(
 				and(
 					eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
-					inArray(schema.wikiLinks.targetPageId, chunk)
+					inArray(schema.wikiLinks.targetPageId, chunk),
+					visible ? or(isNull(schema.wikiPages.projectId), visible) : undefined
 				)
 			)
 			.groupBy(schema.wikiLinks.sourcePageId)
@@ -680,6 +736,16 @@ export async function listBrokenWikiLinks(
 	const { projectId } = parsed.data;
 
 	const orm = drizzle(ctx.db, { schema });
+	// PROJ-818: a link whose target lives in a project the caller can't see is reported
+	// as broken, exactly as if no such page existed — otherwise "is this link broken?"
+	// answers "does a page with this title exist in a project hidden from me?".
+	// (Resolution itself is shared, stored data and stays visibility-agnostic; every read
+	// of it is filtered for the caller instead: here, backlinks, backlink counts.)
+	const targetVisible = visibleProjectPredicate(ctx, sql`tp.project_id`);
+	const targetHidden = targetVisible
+		? sql`EXISTS (SELECT 1 FROM wiki_pages tp WHERE tp.id = ${schema.wikiLinks.targetPageId}
+				AND tp.project_id IS NOT NULL AND NOT ${targetVisible})`
+		: sql`0`;
 	const conditions = [
 		eq(schema.wikiLinks.workspaceId, ctx.workspaceId),
 		// PROJ-496: a link is "broken" both when its target was hard-cleared (targetPageId
@@ -690,7 +756,8 @@ export async function listBrokenWikiLinks(
 		or(
 			isNull(schema.wikiLinks.targetPageId),
 			sql`EXISTS (SELECT 1 FROM wiki_pages tp WHERE tp.id = ${schema.wikiLinks.targetPageId}
-				AND tp.deleted_at IS NOT NULL)`
+				AND tp.deleted_at IS NOT NULL)`,
+			targetHidden
 		),
 		// PROJ-496: a trashed source page's broken links aren't a maintenance concern
 		// anymore — they'll be purged along with the page.
@@ -713,10 +780,17 @@ export async function listBrokenWikiLinks(
 			sourceSlug: schema.wikiPages.slug,
 			sourceTitle: schema.wikiPages.title,
 			targetTitle: schema.wikiLinks.targetTitle,
+			targetText: schema.wikiLinks.targetText,
+			hidden: sql<number>`${targetHidden}`,
 		})
 		.from(schema.wikiLinks)
 		.innerJoin(schema.wikiPages, eq(schema.wikiPages.id, schema.wikiLinks.sourcePageId))
 		.where(and(...conditions));
 
-	return rows;
+	// For a hidden target, show the link as written, never the hidden page's own title
+	// (a slug link's target_title is the resolved page's title).
+	return rows.map(({ targetText, hidden, ...r }) => ({
+		...r,
+		targetTitle: hidden ? (targetText ?? r.targetTitle) : r.targetTitle,
+	}));
 }
