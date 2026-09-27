@@ -341,21 +341,35 @@ export async function validateCustomFields(
 	return writes;
 }
 
-export async function writeCustomFieldValues(
+// PROJ-870: replaces writeCustomFieldValues' one-upsert-per-field loop. Builds (without
+// executing) multi-row upserts for every custom-field write on one issue, so the caller can
+// fold them into its own ctx.db.batch() alongside the issue write. Chunked for D1's
+// 100-bound-param cap: 3 params/row x 30 rows = 90, same headroom as services/sql.ts.
+const CUSTOM_FIELD_UPSERT_CHUNK_SIZE = 30; // 3 cols/row
+
+export function buildCustomFieldUpsertStatements(
 	db: D1Database,
 	issueId: string,
 	writes: ReadonlyArray<{ fieldId: string; value: string }>
-) {
+): D1PreparedStatement[] {
+	if (writes.length === 0) return [];
 	const orm = drizzle(db, { schema });
-	for (const { fieldId, value } of writes) {
-		await orm
+	const statements: D1PreparedStatement[] = [];
+	for (let i = 0; i < writes.length; i += CUSTOM_FIELD_UPSERT_CHUNK_SIZE) {
+		const rowChunk = writes
+			.slice(i, i + CUSTOM_FIELD_UPSERT_CHUNK_SIZE)
+			.map(({ fieldId, value }) => ({ issueId, fieldId, value }));
+		const query = orm
 			.insert(schema.customFieldValues)
-			.values({ issueId, fieldId, value })
+			.values(rowChunk)
 			.onConflictDoUpdate({
 				target: [schema.customFieldValues.issueId, schema.customFieldValues.fieldId],
 				set: { value: sql`excluded.value` },
-			});
+			})
+			.toSQL();
+		statements.push(db.prepare(query.sql).bind(...query.params));
 	}
+	return statements;
 }
 
 export async function batchLoadCustomFields(

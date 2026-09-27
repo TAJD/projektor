@@ -1,0 +1,750 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PROJ-866: bucket-rewrite fidelity (snapshot on a representative fixture) > produces the pinned output for a representative multi-stage fixture 1`] = `
+{
+  "agingWip": [],
+  "arrivalVsCompletionOverTime": [
+    {
+      "bucketStart": "2026-05-11",
+      "completed": 0,
+      "created": 1,
+      "net": 1,
+    },
+    {
+      "bucketStart": "2026-05-12",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-13",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-14",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-15",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-16",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-17",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-18",
+      "completed": 1,
+      "created": 0,
+      "net": -1,
+    },
+    {
+      "bucketStart": "2026-05-19",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-20",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-21",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-22",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-23",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-24",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-25",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-26",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-27",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-28",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-29",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-30",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-05-31",
+      "completed": 1,
+      "created": 1,
+      "net": 0,
+    },
+    {
+      "bucketStart": "2026-06-01",
+      "completed": 0,
+      "created": 0,
+      "net": 0,
+    },
+  ],
+  "autonomyRatio": {
+    "avg": 0,
+    "count": 2,
+    "p50": 0,
+    "p90": 0,
+  },
+  "bugShareOverTime": [
+    {
+      "bucketStart": "2026-05-11",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-12",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-13",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-14",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-15",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-16",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-17",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-18",
+      "bugCount": 1,
+      "bugSharePercent": 1,
+      "total": 1,
+    },
+    {
+      "bucketStart": "2026-05-19",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-20",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-21",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-22",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-23",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-24",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-25",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-26",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-27",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-28",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-29",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-30",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+    {
+      "bucketStart": "2026-05-31",
+      "bugCount": 0,
+      "bugSharePercent": 0,
+      "total": 1,
+    },
+    {
+      "bucketStart": "2026-06-01",
+      "bugCount": 0,
+      "bugSharePercent": null,
+      "total": 0,
+    },
+  ],
+  "bugTypeTracked": true,
+  "cfdOverTime": [
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-05-11",
+      "done": 2,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-05-12",
+      "done": 2,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-05-13",
+      "done": 2,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-05-14",
+      "done": 2,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-05-15",
+      "done": 2,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-05-16",
+      "done": 2,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-05-17",
+      "done": 2,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-18",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-19",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-20",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-21",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-22",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-23",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-24",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-25",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-26",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-27",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-28",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-29",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 1,
+      "bucketStart": "2026-05-30",
+      "done": 3,
+      "inProgress": 2,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-05-31",
+      "done": 4,
+      "inProgress": 1,
+      "inReview": 0,
+    },
+    {
+      "backlogTodo": 2,
+      "bucketStart": "2026-06-01",
+      "done": 4,
+      "inProgress": 1,
+      "inReview": 0,
+    },
+  ],
+  "cycleTime": {
+    "avg": 1207830,
+    "count": 2,
+    "p50": 1810770,
+    "p90": 1810770,
+  },
+  "factoryHealth": {
+    "abandonedClaims": 0,
+    "gateRejections": 0,
+    "leaseExpiries": 0,
+    "wipCapPressure": 0,
+  },
+  "flowEfficiency": {
+    "avg": 0,
+    "count": 2,
+    "p50": 0,
+    "p90": 0,
+  },
+  "humanInterventions": {
+    "avg": 0,
+    "count": 2,
+    "p50": 0,
+    "p90": 0,
+  },
+  "leadTime": {
+    "avg": 1251042.5,
+    "count": 2,
+    "p50": 1810785,
+    "p90": 1810785,
+  },
+  "reviewLatency": {
+    "avg": 100,
+    "count": 1,
+    "p50": 100,
+    "p90": 100,
+  },
+  "reviewLatencyOverTime": [
+    {
+      "bucketStart": "2026-05-11",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-12",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-13",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-14",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-15",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-16",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-17",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-18",
+      "p50": 100,
+    },
+    {
+      "bucketStart": "2026-05-19",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-20",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-21",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-22",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-23",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-24",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-25",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-26",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-27",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-28",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-29",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-30",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-05-31",
+      "p50": null,
+    },
+    {
+      "bucketStart": "2026-06-01",
+      "p50": null,
+    },
+  ],
+  "throughputOverTime": [
+    {
+      "bucketStart": "2026-05-11",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-12",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-13",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-14",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-15",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-16",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-17",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-18",
+      "count": 1,
+    },
+    {
+      "bucketStart": "2026-05-19",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-20",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-21",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-22",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-23",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-24",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-25",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-26",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-27",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-28",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-29",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-30",
+      "count": 0,
+    },
+    {
+      "bucketStart": "2026-05-31",
+      "count": 1,
+    },
+    {
+      "bucketStart": "2026-06-01",
+      "count": 0,
+    },
+  ],
+  "timeInProgress": {
+    "avg": 1207780,
+    "count": 2,
+    "p50": 1810770,
+    "p90": 1810770,
+  },
+  "wipOverTime": [
+    {
+      "count": 1,
+      "date": "2026-05-11",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-12",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-13",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-14",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-15",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-16",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-17",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-18",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-19",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-20",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-21",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-22",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-23",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-24",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-25",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-26",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-27",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-28",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-29",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-30",
+    },
+    {
+      "count": 2,
+      "date": "2026-05-31",
+    },
+    {
+      "count": 1,
+      "date": "2026-06-01",
+    },
+  ],
+}
+`;

@@ -81,17 +81,7 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 	const now = Math.floor(Date.now() / 1000);
 	const orm = drizzle(ctx.db, { schema });
 
-	await orm.insert(schema.issueComments).values({
-		id,
-		issueId,
-		authorId: ctx.userId,
-		body,
-		createdAt: now,
-		updatedAt: now,
-		// PROJ-328: stamped from the authenticated principal type, not a caller-supplied
-		// field — see ServiceCtx.authKind.
-		authorKind: ctx.authKind ?? null,
-	});
+	await buildAddCommentInsertStatement(ctx, orm, { id, issueId, body, now }).run();
 
 	await broadcastWorkspaceEvent(ctx, {
 		type: "comment.created",
@@ -100,6 +90,33 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 	});
 
 	return { id };
+}
+
+// PROJ-870: build (without executing) the comment INSERT, for a caller that has already
+// validated issue visibility/permissions itself (e.g. updateIssue, recording a completion
+// report) and wants to fold this insert into its own ctx.db.batch() instead of paying for
+// addComment's separate assertIssueVisible re-check and its own round trip. addComment
+// runs the same statement, so the row shape (incl. authorKind) has one source of truth.
+export function buildAddCommentInsertStatement(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	opts: Readonly<{ id: string; issueId: string; body: string; now: number }>
+) {
+	const query = orm
+		.insert(schema.issueComments)
+		.values({
+			id: opts.id,
+			issueId: opts.issueId,
+			authorId: ctx.userId,
+			body: opts.body,
+			createdAt: opts.now,
+			updatedAt: opts.now,
+			// PROJ-328: stamped from the authenticated principal type, not a caller-supplied
+			// field — see ServiceCtx.authKind.
+			authorKind: ctx.authKind ?? null,
+		})
+		.toSQL();
+	return ctx.db.prepare(query.sql).bind(...query.params);
 }
 
 export async function updateComment(ctx: ServiceCtx, input: unknown): Promise<{ ok: true }> {
