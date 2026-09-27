@@ -42,6 +42,16 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=8192
       - run: pnpm --filter @projektor/web build
+      - name: Bundle size budget (PROJ-841)
+        # A true inline PR comment needs a token with `pull-requests: write`, which this
+        # job intentionally doesn't request — the per-chunk delta table instead goes to
+        # the job's own step summary (no extra permissions needed).
+        # No label/env override here on purpose: this step also runs on `workflow_call`
+        # from release.yml, where there is no PR to carry a label, so a label-driven
+        # override would leave main permanently over budget the moment a labelled PR
+        # merged. The only way to accept a deliberate size increase is `--update` plus
+        # committing the new bundle-budget.json, which shows up in the PR diff for review.
+        run: pnpm bundle-budget
       - run: pnpm --filter @projektor/docs build
 # E2E tests: run manually with 'pnpm --filter @projektor/web test:e2e'
 # Long-running freeze regression tests (PROJ-310): 'pnpm --filter @projektor/web test:e2e:long'
