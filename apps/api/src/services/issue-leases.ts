@@ -103,6 +103,59 @@ async function assertAgentSessionLive(
 	}
 }
 
+// PROJ-929: a call that carries a live agentId implicitly refreshes that session's
+// heartbeat, so explicit heartbeat_agent calls become optional during a claim loop.
+// Safe to call unconditionally at its one call site below: that call only happens after
+// assertAgentSessionLive already confirmed this session is live, so this can't revive a
+// crashed agent's session the way an unconditional touch in claimFiles could (see
+// touchAgentHeartbeatIfLive there, which guards it explicitly for that reason).
+// Local rather than imported from services/agents.ts for the same reason
+// SESSION_TTL_SECONDS is duplicated below: agents.ts already imports from this file
+// (releaseLeasesForAgent), so importing back would cycle.
+async function touchAgentHeartbeat(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	agentId: string
+): Promise<void> {
+	await orm
+		.update(schema.agentSessions)
+		.set({ lastHeartbeatAt: Math.floor(Date.now() / 1000) })
+		.where(
+			and(
+				eq(schema.agentSessions.id, agentId),
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+				eq(schema.agentSessions.status, "active")
+			)
+		);
+}
+
+// PROJ-929: statement-builder twin of touchAgentHeartbeat above, for callers (e.g.
+// updateIssue) that need it folded into their own ctx.db.batch() rather than executed
+// on its own — same PROJ-870 convention as buildReleaseLeaseForClosedIssueStatement.
+// Gated on status='active' AND heartbeat > cutoff (not just active) so it's a no-op for
+// an already-stale session, same reasoning as touchAgentHeartbeatIfLive in
+// file-claims.ts: the caller here has NOT already confirmed liveness the way
+// claimIssue's touchAgentHeartbeat call site has, so the guard must be explicit.
+export function buildTouchAgentHeartbeatIfLiveStatement(
+	ctx: ServiceCtx,
+	agentSessionId: string
+): D1PreparedStatement {
+	const orm = drizzle(ctx.db, { schema });
+	const query = orm
+		.update(schema.agentSessions)
+		.set({ lastHeartbeatAt: Math.floor(Date.now() / 1000) })
+		.where(
+			and(
+				eq(schema.agentSessions.id, agentSessionId),
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+				eq(schema.agentSessions.status, "active"),
+				gt(schema.agentSessions.lastHeartbeatAt, liveCutoff())
+			)
+		)
+		.toSQL();
+	return ctx.db.prepare(query.sql).bind(...query.params);
+}
+
 // Is there already an active lease on this issue? Join the session to decide
 // whether it's a live conflict or a stale lease we can reclaim.
 async function reclaimStaleLeaseOrThrow(
@@ -165,6 +218,11 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const { projectId } = await assertIssueExists(orm, ctx, issueId);
 	await assertAgentSessionLive(orm, ctx, agentId, cutoff);
+	// PROJ-929: this call carries a live agentId, so it refreshes the session's heartbeat
+	// (see touchAgentHeartbeat) — done even if the claim itself is later rejected below,
+	// since the agent proved itself live regardless of whether this particular issue was
+	// available.
+	await touchAgentHeartbeat(orm, ctx, agentId);
 	const cap = await fetchAgentWipCap(orm, ctx, projectId);
 
 	const now = Math.floor(Date.now() / 1000);

@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**119 tools across 22 domains.**
+**121 tools across 22 domains.**
 
 ## Coordination
 
@@ -19,6 +19,8 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
+| `start_work` | Register an agent session and claim an issue (plus files, if given) in one call — replaces register_agent + claim_issue + claim_files + post_message. All-or-nothing with compensating cleanup: on any conflict (same errors as claim_issue/claim_files) the session is ended and nothing is left claimed. If the process crashes mid-call, the same claims become reclaimable once the session's heartbeat goes stale (120s). | write |
+| `finish_work` | Optionally transition an issue (completion-report rules apply, same as update_issue), then release every claim/lease the session holds and end it — replaces update_issue + release_issue + release_files + end_agent. | write |
 | `register_agent` | Register an agent session, optionally linked to an issue | write |
 | `heartbeat_agent` | Send a heartbeat to keep an agent session active | write |
 | `end_agent` | End an agent session | write |

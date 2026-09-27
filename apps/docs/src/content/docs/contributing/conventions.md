@@ -323,6 +323,34 @@ file.
 What *is* repo-specific and stays here: the mechanical call sequence agents use to
 avoid colliding in this particular repo's git worktree/file layout.
 
+### The two-call path (PROJ-929)
+
+`start_work` and `finish_work` collapse the sequence below into two calls:
+
+1. `start_work({ issue, paths, name })` at session start — registers the session, claims
+   the issue and files (if given), and posts the start message. All-or-nothing with
+   compensating cleanup, not a single atomic write (D1 has no cross-call interactive
+   transaction): on any conflict (the same `claim_issue`/`claim_files` errors as before)
+   the session is ended and nothing is left claimed. If the process crashes mid-call
+   (so that cleanup never runs), the claims it made become reclaimable once the
+   session's heartbeat goes stale after the 120s TTL, same as any other stale holder.
+   Save the returned `sessionId`.
+2. `finish_work({ sessionId, issue, completionReport?, status? })` when done — optionally
+   transitions the issue via the same path `update_issue` uses (completion-report rules
+   apply unchanged), then releases every claim/lease the session holds and ends it.
+
+`claim_issue`/`claim_files`/`update_issue`/`post_message` calls made with a live agent
+session id refresh that session's heartbeat as a side effect, and `finish_work` ends the
+session outright, so an explicit `heartbeat_agent` is optional on this path — call it
+anyway if a lot of work happens between `start_work` and `finish_work` with no other
+agent-scoped call in between.
+
+### The five-call path (still supported)
+
+The primitives above compose from these, which remain available for finer-grained
+control (e.g. claiming files separately from the issue, or checking `list_file_claims`
+before deciding whether to `force`):
+
 1. `register_agent` at session start, linking the issue you're implementing — save the returned `id`.
 2. `claim_files` before touching any file (check `list_file_claims` first; back off, don't `force`).
 3. `post_message` to `scope: "issue:<uuid>"` when you start/blocker/finish; `scope: "workspace"` for fleet-wide notices.
@@ -342,7 +370,7 @@ This repo is built out via parallel workers in separate git worktrees. To avoid 
 
 ### Spawn prompt requirement
 
-Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination (required)` section stating the 5-step sequence from "Fleet coordination protocol" above.
+Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination (required)` section stating the call sequence (either the two-call `start_work`/`finish_work` path or the five-call path) from "Fleet coordination protocol" above.
 
 A full spawn prompt also needs a **Finish** section (what "done" means for the task,
 and what to report back) alongside the Coordination section above.

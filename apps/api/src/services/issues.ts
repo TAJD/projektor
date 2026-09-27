@@ -34,6 +34,7 @@ import { isExternallyVerifiableEvidence } from "./evidence-classification";
 import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
 	buildReleaseLeaseForClosedIssueStatement,
+	buildTouchAgentHeartbeatIfLiveStatement,
 	isLiveAgentSessionId,
 	issueEverHadAgentLease,
 	issueHasLiveAgentLease,
@@ -1530,6 +1531,15 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 			buildReleaseLeaseForClosedIssueStatement(ctx, id),
 			buildReleaseClaimsForClosedIssueStatement(ctx, id)
 		);
+	}
+
+	// PROJ-929: a call that carries a live agentSessionId implicitly refreshes that
+	// session's heartbeat, same as claim_issue/claim_files/post_message. Folded into this
+	// same batch (PROJ-870 convention) rather than a separate round trip; the statement's
+	// own WHERE guard (status='active' AND heartbeat > cutoff) makes it a no-op if the
+	// session went stale between this check and the batch executing.
+	if (data.agentSessionId && (await isLiveAgentSessionId(ctx, data.agentSessionId))) {
+		statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, data.agentSessionId));
 	}
 
 	await ctx.db.batch(statements);

@@ -559,6 +559,34 @@ describe("File Claims API", () => {
 			expect(byPath.get("src/listed-live.ts")).toBe(true);
 		});
 
+		// PROJ-929: claim_files refreshes an already-live agent's heartbeat, but must never
+		// revive a crashed one — that would silently defeat the reclaim this block tests.
+		it("refreshes a live agent's heartbeat, but does not revive a dead one", async () => {
+			const live = await seedSession({ heartbeatAgeSecs: 5 });
+			await claimFiles({ issueId, agentId: live, paths: ["src/touch-live.ts"] });
+			const liveRow = await env.DB.prepare(
+				"SELECT last_heartbeat_at FROM agent_sessions WHERE id = ?"
+			)
+				.bind(live)
+				.first<{ last_heartbeat_at: number }>();
+			expect(liveRow?.last_heartbeat_at).toBeGreaterThan(Math.floor(Date.now() / 1000) - 5);
+
+			const dead = await seedSession({ heartbeatAgeSecs: 200 });
+			const deadBefore = await env.DB.prepare(
+				"SELECT last_heartbeat_at FROM agent_sessions WHERE id = ?"
+			)
+				.bind(dead)
+				.first<{ last_heartbeat_at: number }>();
+			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Dead claimer" });
+			await claimFiles({ issueId: issue2.id, agentId: dead, paths: ["src/touch-dead.ts"] });
+			const deadAfter = await env.DB.prepare(
+				"SELECT last_heartbeat_at FROM agent_sessions WHERE id = ?"
+			)
+				.bind(dead)
+				.first<{ last_heartbeat_at: number }>();
+			expect(deadAfter?.last_heartbeat_at).toBe(deadBefore?.last_heartbeat_at);
+		});
+
 		// PROJ-928: an agentless claim has no heartbeat to judge staleness by, so it is judged
 		// by claim age against a configurable TTL (FILE_CLAIM_TTL_SECONDS, default 24h) instead —
 		// same reclaim path as a claim whose agent session went stale.

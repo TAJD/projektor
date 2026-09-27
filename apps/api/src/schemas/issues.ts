@@ -19,8 +19,9 @@ export const CreateIssueSchema = z
 	.strict();
 
 // PROJ-254: completion report an agent (or human) submits when entering review /
-// before an issue can be marked done.
-const CompletionReportSchema = z.object({
+// before an issue can be marked done. Exported (PROJ-929) so finish_work's schema can
+// reuse it rather than duplicating the shape.
+export const CompletionReportSchema = z.object({
 	summary: z.string().min(1),
 	verification: z.string().min(1),
 	prLink: z

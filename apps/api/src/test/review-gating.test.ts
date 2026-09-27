@@ -311,4 +311,34 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 		expect(await completionReportAtOf(issue.id)).toBeNull();
 		expect((await commentBodies(issue.id)).some((b) => b.includes("Did the thing"))).toBe(false);
 	});
+
+	// --- Heartbeat refresh on a live agentSessionId (PROJ-929) ---
+
+	async function heartbeatOf(id: string): Promise<number> {
+		const row = await env.DB.prepare("SELECT last_heartbeat_at FROM agent_sessions WHERE id = ?")
+			.bind(id)
+			.first<{ last_heartbeat_at: number }>();
+		return row!.last_heartbeat_at;
+	}
+
+	it("update_issue refreshes a live agentSessionId's heartbeat, but never revives a stale one", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Heartbeat live" });
+		const { agentSessionId: live } = await seedAgentLease(workspaceId, issue.id);
+		const backdated = Math.floor(Date.now() / 1000) - 10;
+		await env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+			.bind(backdated, live)
+			.run();
+
+		const res = await patch(issue.id, { title: "Renamed by agent", agentSessionId: live });
+		expect(res.status).toBe(200);
+		expect(await heartbeatOf(live)).toBeGreaterThan(backdated);
+
+		const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Heartbeat dead" });
+		const { agentSessionId: dead } = await seedAgentLease(workspaceId, issue2.id, { live: false });
+		const deadBefore = await heartbeatOf(dead);
+
+		const res2 = await patch(issue2.id, { title: "Renamed anyway", agentSessionId: dead });
+		expect(res2.status).toBe(200);
+		expect(await heartbeatOf(dead)).toBe(deadBefore);
+	});
 });

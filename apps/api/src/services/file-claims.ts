@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { PostMessageSchema } from "../schemas/agent-messages";
 import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../schemas/file-claims";
 import { visibleProjectPredicate } from "./access";
@@ -36,6 +36,37 @@ async function assertAgentInWorkspace(
 		)
 		.get();
 	if (!agent) throw new NotFoundError("Agent session not found");
+}
+
+// PROJ-929: a call that carries an already-live agentId implicitly refreshes that
+// session's heartbeat, so explicit heartbeat_agent calls become optional during a claim
+// loop. Local rather than imported from services/agents.ts for the same reason
+// SESSION_TTL_SECONDS below is duplicated: agents.ts already imports from this file
+// (releaseClaimsForAgent), so importing back would cycle.
+//
+// Deliberately gated on the session being live ALREADY (status='active' AND heartbeat
+// > cutoff), not just active — otherwise this would revive a crashed agent's session
+// merely because some other issue's claim/release call happened to name its id, which
+// would silently defeat the PROJ-636 stale-holder reclaim this same file implements: a
+// dead session must stay reclaimable, not get its heartbeat bumped by a call that isn't
+// actually coming from it.
+async function touchAgentHeartbeatIfLive(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	agentId: string,
+	cutoff: number
+): Promise<void> {
+	await orm
+		.update(schema.agentSessions)
+		.set({ lastHeartbeatAt: Math.floor(Date.now() / 1000) })
+		.where(
+			and(
+				eq(schema.agentSessions.id, agentId),
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+				eq(schema.agentSessions.status, "active"),
+				gt(schema.agentSessions.lastHeartbeatAt, cutoff)
+			)
+		);
 }
 
 // PROJ-636: mirrors SESSION_TTL_SECONDS in services/issue-leases.ts, which in turn mirrors
@@ -232,6 +263,9 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	const projectId = await assertIssueInWorkspace(orm, ctx.workspaceId, issueId);
 	if (agentId) {
 		await assertAgentInWorkspace(orm, ctx.workspaceId, agentId);
+		// PROJ-929: refresh the acting session's heartbeat if it's already live (see
+		// touchAgentHeartbeatIfLive) — done even if the claim itself is later rejected below.
+		await touchAgentHeartbeatIfLive(orm, ctx, agentId, liveCutoff());
 	}
 
 	// Pre-check all paths for active claims — all-or-nothing on conflict.
