@@ -40,10 +40,14 @@ import {
 } from "./wiki-frontmatter";
 import {
 	backlinksForResolvedPage,
+	buildResolveIncomingLinksStatement,
+	buildUnresolveStaleIncomingLinksStatement,
 	buildWikiLinksReindexStatements,
-	clearIncomingLinkTargets,
 	countBacklinkSources,
 	deleteWikiLinksForPages,
+	foldWikiTitle,
+	healTitleFolds,
+	repointIncomingLinks,
 	type WikiBacklink,
 } from "./wiki-links";
 import { idFirst, idOrSlugMatch, isIdShapedSlug } from "./wiki-lookup";
@@ -362,7 +366,10 @@ function buildWikiPageUpdateSet(
 		updatedById,
 		version: sql`${schema.wikiPages.version} + 1`,
 	};
-	if (fields.title !== undefined) setData.title = fields.title;
+	if (fields.title !== undefined) {
+		setData.title = fields.title;
+		setData.titleFold = foldWikiTitle(fields.title); // PROJ-818
+	}
 	if (fields.content !== undefined) setData.content = fields.content;
 	if (fields.parentId !== undefined) setData.parentId = fields.parentId;
 	if (fields.slug !== undefined) setData.slug = fields.slug;
@@ -880,6 +887,7 @@ function buildCreateWikiPageInsertStatement(
 				projectId,
 				slug,
 				title,
+				titleFold: foldWikiTitle(title),
 				content,
 				parentId,
 				createdById: ctx.userId,
@@ -976,6 +984,10 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 	// statements exist, so by the time the batch below runs there's nothing left to throw
 	// mid-write — the content row, its FTS mirror, and its wiki_links all land atomically.
 	const linkStatements = await buildWikiLinksReindexStatements(ctx, orm, id, content);
+	// PROJ-814: other pages' links whose raw text names this page by its title/slug and
+	// are still unresolved (created before this page existed) become resolved to it now,
+	// without those pages needing to be re-saved.
+	const incomingLinkStatement = buildResolveIncomingLinksStatement(ctx, { id, title, slug });
 
 	await writeCreateWikiPageBatch(
 		ctx,
@@ -983,6 +995,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 			insertStatement,
 			buildFtsInsertStatement(ctx, id, title, content, meta.tags),
 			...linkStatements,
+			incomingLinkStatement,
 		],
 		slug
 	);
@@ -1599,6 +1612,24 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 		...(await buildUpdateWikiPageReindexStatements(ctx, orm, page, { title, content, meta }))
 	);
 
+	// PROJ-814: a title and/or slug change can make this page newly match (or stop
+	// matching) other pages' raw link text — re-resolve both directions in the same
+	// batch as the rename itself.
+	const titleChanged = title !== undefined && title !== page.title;
+	if (titleChanged || isRename) {
+		await healTitleFolds(ctx); // PROJ-818: link folds must be filled before matching
+		const finalTitle = title ?? page.title;
+		const finalSlug = slug ?? page.slug;
+		statements.push(
+			buildResolveIncomingLinksStatement(ctx, { id: page.id, title: finalTitle, slug: finalSlug }),
+			buildUnresolveStaleIncomingLinksStatement(
+				ctx,
+				{ id: page.id, title: finalTitle, slug: finalSlug },
+				{ title: page.title, slug: page.slug }
+			)
+		);
+	}
+
 	await writeUpdateWikiPageBatch(ctx, page, statements, isRename, slug);
 	await finalizeWikiPageUpdate(ctx, page, { title, content, parentId, slug, meta });
 
@@ -2205,6 +2236,7 @@ export async function seedDefaultWikiTemplates(
 		projectId: null,
 		slug: "page-templates",
 		title: "Templates",
+		titleFold: foldWikiTitle("Templates"),
 		content: "",
 		parentId: null,
 		createdById: userId,
@@ -2231,6 +2263,7 @@ export async function seedDefaultWikiTemplates(
 			projectId: null,
 			slug: t.slug,
 			title: t.title,
+			titleFold: foldWikiTitle(t.title),
 			content,
 			parentId,
 			createdById: userId,
@@ -2454,6 +2487,9 @@ export async function deleteWikiPage(ctx: ServiceCtx, idOrSlug: string, options?
 				.where(inArray(schema.wikiPages.id, chunk));
 			return [];
 		});
+		// PROJ-814: links keep pointing at a trashed page (reads already treat a trashed
+		// target as broken/hidden), so restore brings them back intact; a new page with the
+		// same title/slug may claim them meanwhile (buildResolveIncomingLinksStatement).
 		await recordActivity(ctx, {
 			entityType: "wiki_page",
 			entityId: page.id,
@@ -2615,6 +2651,16 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 		return [];
 	});
 
+	// PROJ-814: every restored page (root and cascade-restored descendants) can be the
+	// target other pages' still-unresolved links were waiting on — re-resolve for each.
+	await healTitleFolds(ctx); // PROJ-818
+	await ctx.db.batch([
+		buildResolveIncomingLinksStatement(ctx, { id: page.id, title: page.title, slug: page.slug }),
+		...descendantRows.map((d) =>
+			buildResolveIncomingLinksStatement(ctx, { id: d.id, title: d.title, slug: d.slug })
+		),
+	]);
+
 	// PROJ-496: recorded as "updated" (not a new activity/notification action) so it
 	// slots into the existing typed action union (recordActivity, WikiChangeEvent,
 	// notifyWikiWatchers) rather than widening it repo-wide for a single edge case — a
@@ -2769,6 +2815,10 @@ export async function purgeExpiredWikiPages(
 		await deleteWikiPageAttachments(ctx, orm, chunk);
 		return [];
 	});
+	// PROJ-814: re-point incoming links to another live match (else unresolve) BEFORE the
+	// pages are deleted — once they're gone, ON DELETE SET NULL (where enforced) would
+	// already have cleared target_page_id and there'd be nothing left to re-point.
+	await repointIncomingLinks(ctx, ids);
 	await inChunks(ids, async (chunk) => {
 		await orm.delete(schema.wikiRevisions).where(inArray(schema.wikiRevisions.pageId, chunk));
 		return [];
@@ -2779,7 +2829,6 @@ export async function purgeExpiredWikiPages(
 	});
 	await deleteWikiFtsEntries(ctx, ids);
 	await deleteWikiLinksForPages(ctx, ids);
-	await clearIncomingLinkTargets(ctx, ids);
 	await deleteWikiWatchersForPages(ctx, ids);
 	await deleteWikiDraftsForPages(ctx, ids);
 	// PROJ-407-style defensive cleanup, same rationale as every other per-table helper

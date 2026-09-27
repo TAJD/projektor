@@ -13,6 +13,8 @@ export const wikiPages = sqliteTable(
 		projectId: text("project_id").references(() => projects.id, { onDelete: "cascade" }),
 		slug: text("slug").notNull(),
 		title: text("title").notNull(),
+		// PROJ-818: foldWikiTitle(title), computed in JS (SQLite lower() is ASCII-only).
+		titleFold: text("title_fold"),
 		content: text("content").notNull().default(""),
 		parentId: text("parent_id"),
 		createdById: text("created_by_id")
@@ -152,6 +154,12 @@ export const wikiLinks = sqliteTable(
 			.references(() => wikiPages.id, { onDelete: "cascade" }),
 		targetPageId: text("target_page_id").references(() => wikiPages.id, { onDelete: "set null" }),
 		targetTitle: text("target_title").notNull(),
+		// PROJ-818: foldWikiTitle(target_title).
+		targetFold: text("target_fold"),
+		// PROJ-818: the target as written (title text or slug) — see migration 0063.
+		targetText: text("target_text"),
+		// PROJ-814/818: 'title' | 'slug' — how the link was written (NULL: legacy row).
+		targetKind: text("target_kind"),
 		createdAt: integer("created_at").notNull(),
 	},
 	(t) => ({

@@ -129,7 +129,8 @@ router.get("/templates", async (c) => {
 router.post("/backfill-links", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
-		return c.json(await wikiService.backfillWikiLinks(ctx));
+		const body = await jsonBody(c).catch(() => ({}));
+		return c.json(await wikiService.backfillWikiLinks(ctx, body));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

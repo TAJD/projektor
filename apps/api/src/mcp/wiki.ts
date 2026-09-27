@@ -381,8 +381,9 @@ export const wikiTools: MCPTool[] = [
 		description:
 			"List unresolved wiki links in the workspace — [[Target]]/URL links whose target " +
 			"title or slug didn't match any page at write time. Useful as a maintenance queue. " +
-			"Note: a broken link does not auto-re-resolve if the missing page is created later — " +
-			"only backfill_wiki_links (or re-saving the linking page) re-resolves it.",
+			"A broken link auto-resolves when a page matching its title/slug is created, " +
+			"renamed to match it, or restored from the trash (PROJ-814); backfill_wiki_links " +
+			"(or re-saving the linking page) also still re-resolves it.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -397,12 +398,36 @@ export const wikiTools: MCPTool[] = [
 	{
 		name: "backfill_wiki_links",
 		description:
-			"One-time (idempotent, safe to re-run) recompute of the wiki_links graph for every " +
-			"existing page in the workspace. Owner/admin only.",
-		inputSchema: { type: "object", properties: {} },
+			"Idempotent, safe-to-re-run recompute of the wiki_links graph for pages in the " +
+			"workspace, one page-budget-sized chunk per call (default 200, max 500) so it can run " +
+			"incrementally and resume after a timeout. Skips trashed pages. Pass back `nextCursor` " +
+			"as `cursor` to continue; call repeatedly until `nextCursor` is null. `updatedSince` " +
+			"(unix seconds) limits the scope to pages touched at/after that time. Owner/admin only.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				cursor: {
+					type: "object",
+					description: "Resume point from a previous call's nextCursor",
+					required: ["updatedAt", "id"],
+					properties: {
+						updatedAt: { type: "number" },
+						id: { type: "string" },
+					},
+				},
+				pageBudget: {
+					type: "number",
+					description: "Max pages to process in this call (1-500, default 200)",
+				},
+				updatedSince: {
+					type: "number",
+					description: "Only process pages updated at/after this unix-seconds timestamp",
+				},
+			},
+		},
 		annotations: PLAIN_WRITE,
-		async handler(_input, ctx) {
-			return wikiService.backfillWikiLinks(ctx);
+		async handler(input, ctx) {
+			return wikiService.backfillWikiLinks(ctx, input);
 		},
 	},
 	{
