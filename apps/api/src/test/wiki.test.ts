@@ -1,6 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { computeFreshness } from "../services/wiki-freshness";
+import { listWikiChanges } from "../services/wiki-watchers";
 import {
 	authHeaders,
 	type JsonRpcError,
@@ -14,6 +15,59 @@ import {
 	seedWorkspaceRoles,
 } from "./helpers";
 import { resetRateLimits } from "./rate-limit-reset";
+
+// PROJ-869: wraps a D1Database so every row a `.all()`/`.first()`/`.raw()` call resolves
+// with is pushed into `captured` — used to inspect what actually came back over the D1
+// binding from a service call, since a service's return value (here, WikiChangeEvent)
+// can hide a regression that already happened one layer down (the full row read out of
+// D1). drizzle-orm's D1 driver uses `.raw()` (not `.all()`) whenever a query selects a
+// custom field shape — which is exactly what listWikiChanges' select does — so all three
+// read methods need to be captured, not just `.all()`.
+function wrapD1CapturingReads(db: D1Database, captured: unknown[]): D1Database {
+	const READ_METHODS = new Set(["all", "first", "raw"]);
+	return new Proxy(db, {
+		get(dbTarget, dbProp, dbReceiver) {
+			if (dbProp === "prepare") {
+				return (sql: string) => {
+					const stmt = Reflect.get(dbTarget, "prepare", dbReceiver).call(dbTarget, sql);
+					return new Proxy(stmt, {
+						get(stmtTarget, stmtProp, stmtReceiver) {
+							if (stmtProp === "bind") {
+								return (...args: unknown[]) => {
+									const bound = Reflect.get(stmtTarget, "bind", stmtReceiver).call(
+										stmtTarget,
+										...args
+									);
+									return new Proxy(bound, {
+										get(boundTarget, boundProp, boundReceiver) {
+											const orig = Reflect.get(boundTarget, boundProp, boundReceiver);
+											if (typeof boundProp === "string" && READ_METHODS.has(boundProp)) {
+												return async (...a: unknown[]) => {
+													const result = await orig.apply(boundTarget, a);
+													captured.push(
+														boundProp === "all"
+															? (result as { results: unknown[] }).results
+															: result
+													);
+													return result;
+												};
+											}
+											return typeof orig === "function" ? orig.bind(boundTarget) : orig;
+										},
+									});
+								};
+							}
+							const orig = Reflect.get(stmtTarget, stmtProp, stmtReceiver);
+							return typeof orig === "function" ? orig.bind(stmtTarget) : orig;
+						},
+					});
+				};
+			}
+			const orig = Reflect.get(dbTarget, dbProp, dbReceiver);
+			return typeof orig === "function" ? orig.bind(dbTarget) : orig;
+		},
+	});
+}
 
 async function mcpCall<T>(
 	workspaceId: string,
@@ -808,6 +862,115 @@ describe("Wiki API", () => {
 		const body = (await res.json()) as { error: { formErrors: string[] } };
 		expect(body.error.formErrors[0]).toMatch(/Maximum wiki nesting depth/);
 	});
+
+	it("PUT /api/wiki/:slug rejects a reparent whose moved SUBTREE would exceed max depth (PROJ-820)", async () => {
+		// Build a 4-level chain: L0 -> L1 -> L2 -> L3 (L3 sits at depth 3).
+		let chainParentId: string | null = null;
+		let l3Id = "";
+		for (let i = 0; i < 4; i++) {
+			const body: Record<string, unknown> = { title: `Chain ${i}`, content: "" };
+			if (chainParentId) body.parentId = chainParentId;
+			const res = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify(body),
+			});
+			expect(res.status).toBe(201);
+			const created = (await res.json()) as { id: string };
+			chainParentId = created.id;
+			l3Id = created.id;
+		}
+
+		await resetRateLimits();
+
+		// Build a separate 3-level subtree: A -> A1 -> A2 (A has height 2).
+		const aRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Subtree Root A", content: "" }),
+		});
+		expect(aRes.status).toBe(201);
+		const a = (await aRes.json()) as { id: string; slug: string };
+
+		await resetRateLimits();
+		const a1Res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Subtree A1", content: "", parentId: a.id }),
+		});
+		expect(a1Res.status).toBe(201);
+		const a1 = (await a1Res.json()) as { id: string };
+
+		await resetRateLimits();
+		const a2Res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Subtree A2", content: "", parentId: a1.id }),
+		});
+		expect(a2Res.status).toBe(201);
+
+		await resetRateLimits();
+
+		// Moving A (height 2) under L3 (depth 3) would put A2 at depth 3+1+2 = 6, which
+		// exceeds the max nesting depth of 5 (indices 0..4) even though A's OWN new depth
+		// (4) is within range — the check must look at the whole subtree, not just A.
+		const moveRes = await SELF.fetch(`http://localhost/api/wiki/${a.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ parentId: l3Id }),
+		});
+		expect(moveRes.status).toBe(400);
+		const moveBody = (await moveRes.json()) as { error: { formErrors: string[] } };
+		expect(moveBody.error.formErrors[0]).toMatch(/Maximum wiki nesting depth/);
+	});
+
+	it("PUT /api/wiki/:slug doesn't hang when a legacy parent_id cycle exists in the subtree being moved (PROJ-820)", async () => {
+		// A cycle can't be created through the API (validateParentDepth's ancestor walk has
+		// its own `seen`-set cycle guard), but a legacy row or a direct DB write could leave
+		// one behind IN THE SUBTREE being moved. Seed X -> Y -> X directly via raw SQL (Y's
+		// parent is X, then X's parent is reset to Y), then move X itself somewhere else:
+		// getSubtreeHeight(db, X, ...) starts its recursive walk AT X and, joining into
+		// children by parent_id, finds Y then loops back to X — without the depth bound this
+		// never terminates.
+		const xRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Cycle X", content: "" }),
+		});
+		expect(xRes.status).toBe(201);
+		const x = (await xRes.json()) as { id: string; slug: string };
+
+		await resetRateLimits();
+		const yRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Cycle Y", content: "", parentId: x.id }),
+		});
+		expect(yRes.status).toBe(201);
+		const y = (await yRes.json()) as { id: string };
+
+		// Seed the cycle: X's parent is now Y (Y's parent is already X).
+		await env.DB.prepare("UPDATE wiki_pages SET parent_id = ? WHERE id = ?").bind(y.id, x.id).run();
+
+		await resetRateLimits();
+		const otherRes = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ title: "Cycle New Parent", content: "" }),
+		});
+		expect(otherRes.status).toBe(201);
+		const other = (await otherRes.json()) as { id: string };
+
+		await resetRateLimits();
+		// Moving X under `other` computes getSubtreeHeight(X), which walks into the X<->Y
+		// cycle. This must resolve promptly (reject or succeed), never hang.
+		const moveRes = await SELF.fetch(`http://localhost/api/wiki/${x.slug}`, {
+			method: "PUT",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ parentId: other.id }),
+		});
+		expect([200, 400]).toContain(moveRes.status);
+	}, 10_000);
 
 	it("GET /api/wiki/tree returns nested structure", async () => {
 		const rootRes = await SELF.fetch("http://localhost/api/wiki", {
@@ -5120,6 +5283,50 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 			})
 		).json()) as { changes: unknown[] };
 		expect(empty.changes).toEqual([]);
+	});
+
+	// PROJ-869: list_wiki_changes used to select the full activity `diff` for EVERY row
+	// (created/updated/deleted alike), even though only 'deleted' events read it — so a
+	// batch of up to 500 rows could pull the full new content of every changed page out of
+	// D1 into the Worker's memory. That never showed up in the HTTP response itself (a
+	// WikiChangeEvent never serializes `diff`), so the regression test has to look at what
+	// comes back from D1, not at the JSON sent to the client: it wraps ctx.db to record
+	// every row D1 hands back during a real listWikiChanges call and asserts a
+	// deliberately huge 'updated'-row diff never appears in any of them.
+	it("list_wiki_changes never pulls a non-deleted row's full diff out of D1 (PROJ-869)", async () => {
+		const page = await createPage("delta-size", "Delta Size", "seed");
+		const bigContent = "x".repeat(50_000);
+		const t0 = Math.floor(Date.now() / 1000) - 1;
+		// Simulate an 'updated' activity row still carrying a large diff (either legacy
+		// data predating the 0064 migration, or a future regression that reintroduces
+		// storing full content) — the row-fetch guard must exclude it regardless of how it
+		// got there.
+		await env.DB.prepare(
+			`INSERT INTO activity (id, workspace_id, entity_type, entity_id, actor_id, action, diff, created_at)
+			 VALUES (?, ?, 'wiki_page', ?, ?, 'updated', ?, ?)`
+		)
+			.bind(
+				crypto.randomUUID(),
+				workspaceId,
+				page.id,
+				userId,
+				JSON.stringify({ content: bigContent }),
+				Math.floor(Date.now() / 1000)
+			)
+			.run();
+
+		const captured: unknown[] = [];
+		const wrappedDb = wrapD1CapturingReads(env.DB, captured);
+
+		await listWikiChanges(
+			{ db: wrappedDb, kv: env.KV, r2: env.R2, workspaceId, userId, role: "admin" },
+			{ since: t0, limit: 50 }
+		);
+
+		const capturedText = JSON.stringify(captured);
+		expect(captured.length).toBeGreaterThan(0);
+		expect(capturedText.length).toBeGreaterThan(0);
+		expect(capturedText).not.toContain(bigContent);
 	});
 
 	it("list_wiki_changes reports a deleted page's slug/title even though the row is gone", async () => {

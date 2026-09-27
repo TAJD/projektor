@@ -50,7 +50,7 @@ import {
 	repointIncomingLinks,
 	type WikiBacklink,
 } from "./wiki-links";
-import { idFirst, idOrSlugMatch, isIdShapedSlug } from "./wiki-lookup";
+import { idFirst, idOrSlugMatch, isIdShapedSlug, WIKI_MAX_NESTING_DEPTH } from "./wiki-lookup";
 import {
 	deleteWikiWatchersForPages,
 	notifyCascadeDescendantWatchers,
@@ -130,7 +130,9 @@ export const RESERVED_WIKI_SLUGS: ReadonlySet<string> = new Set([
 
 // PROJ-496 (R14): 30-day trash retention — purgeExpiredWikiPages permanently removes a
 // page (and its R2 attachments) once it's been soft-deleted for at least this long.
-const WIKI_TRASH_RETENTION_SECONDS = 30 * 24 * 60 * 60;
+// PROJ-865: exported so index.ts's cron can find which workspaces have expired trash
+// with the same cutoff, without duplicating the constant.
+export const WIKI_TRASH_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 
 // PROJ-526: caps the deletedPageIds list written into a cascade delete's activity row —
 // an unbounded BFS result (collectDescendantIds has no depth/count limit) would otherwise
@@ -243,6 +245,42 @@ async function resolvePageByIdOrSlug(
 	throw new NotFoundError("Wiki page not found");
 }
 
+// PROJ-820: the height (in extra levels) of the subtree rooted at `pageId` — 0 for a
+// leaf, 1 if it has children, etc. Computed with a single workspace-scoped recursive
+// CTE rather than a per-level walk, since a move can carry an arbitrarily deep subtree
+// with it and we only need the max depth, not the shape.
+async function getSubtreeHeight(
+	db: D1Database,
+	pageId: string,
+	workspaceId: string
+): Promise<number> {
+	// PROJ-820 (post-review correction): a legacy row with a cyclic parent_id (pre-dating
+	// validateParentDepth, or written directly against D1) would otherwise make this
+	// recursive CTE never terminate — SQLite keeps joining back into the cycle forever.
+	// The depth bound below caps recursion at one level past what validateParentDepth would
+	// ever allow anyway, so a real (acyclic) subtree is never truncated, while a cycle stops
+	// after WIKI_MAX_NESTING_DEPTH + 1 steps instead of hanging until statement timeout.
+	const row = await db
+		.prepare(
+			`WITH RECURSIVE subtree(id, depth) AS (
+				SELECT id, 0 FROM wiki_pages WHERE id = ?1 AND workspace_id = ?2
+				UNION ALL
+				SELECT wp.id, subtree.depth + 1
+				FROM wiki_pages wp
+				JOIN subtree ON wp.parent_id = subtree.id
+				WHERE wp.workspace_id = ?2 AND subtree.depth < ?3
+			)
+			SELECT MAX(depth) AS maxDepth FROM subtree`
+		)
+		.bind(pageId, workspaceId, WIKI_MAX_NESTING_DEPTH + 1)
+		.first<{ maxDepth: number | null }>();
+	return row?.maxDepth ?? 0;
+}
+
+// PROJ-820: the check must account for the new parent's depth PLUS the height of the
+// subtree being moved — a page with 3 levels of children moved under a level-3 parent
+// would otherwise land at 7 levels deep even though this function only ever "saw" the
+// single hop from parent to moved page.
 async function validateParentDepth(
 	db: D1Database,
 	parentId: string,
@@ -252,7 +290,7 @@ async function validateParentDepth(
 	if (forbidPageId && parentId === forbidPageId) {
 		throw new ValidationError({ formErrors: ["A page cannot be its own parent"], fieldErrors: {} });
 	}
-	let depth = 0;
+	let parentDepth = 0;
 	let cur = parentId;
 	const seen = new Set<string>([parentId]);
 	for (;;) {
@@ -271,13 +309,22 @@ async function validateParentDepth(
 			});
 		}
 		cur = pid;
-		depth++;
-		if (depth >= 4) {
+		parentDepth++;
+		if (parentDepth >= WIKI_MAX_NESTING_DEPTH - 1) {
 			throw new ValidationError({
-				formErrors: ["Maximum wiki nesting depth (5) exceeded"],
+				formErrors: [`Maximum wiki nesting depth (${WIKI_MAX_NESTING_DEPTH}) exceeded`],
 				fieldErrors: {},
 			});
 		}
+	}
+	// forbidPageId is only passed when moving an existing page (validateUpdatedPageParent) —
+	// a brand-new page (validateNewPageParent) has no subtree yet, so height is 0.
+	const subtreeHeight = forbidPageId ? await getSubtreeHeight(db, forbidPageId, workspaceId) : 0;
+	if (parentDepth + 1 + subtreeHeight > WIKI_MAX_NESTING_DEPTH - 1) {
+		throw new ValidationError({
+			formErrors: [`Maximum wiki nesting depth (${WIKI_MAX_NESTING_DEPTH}) exceeded`],
+			fieldErrors: {},
+		});
 	}
 }
 
@@ -388,6 +435,12 @@ function buildWikiPageUpdateSet(
 	return setData;
 }
 
+// PROJ-869: content can be up to the wiki page size cap, and is already persisted in
+// wiki_pages, wiki_revisions and the FTS index — storing it a 4th time in `diff` (times
+// every workspace's `activity` retention window) is the dominant source of table growth,
+// and it's read back in full by list_wiki_changes for every row even though only
+// "deleted" events use `diff` at all (services/wiki-watchers.ts). Record just that
+// content changed; the actual before/after text lives in wiki_revisions.
 function buildWikiPageUpdateDiff(
 	fields: Readonly<{
 		title?: string;
@@ -396,7 +449,7 @@ function buildWikiPageUpdateDiff(
 ): Record<string, unknown> {
 	const diff: Record<string, unknown> = {};
 	if (fields.title !== undefined) diff.title = fields.title;
-	if (fields.content !== undefined) diff.content = fields.content;
+	if (fields.content !== undefined) diff.contentChanged = true;
 	return diff;
 }
 
@@ -883,6 +936,7 @@ function buildCreateWikiPageInsertStatement(
 			.insert(schema.wikiPages)
 			.values({
 				id,
+				searchRowid: newSearchRowid(), // PROJ-816
 				workspaceId: ctx.workspaceId,
 				projectId,
 				slug,
@@ -993,7 +1047,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		ctx,
 		[
 			insertStatement,
-			buildFtsInsertStatement(ctx, id, title, content, meta.tags),
+			...buildFtsInsertStatements(ctx, id, title, content, meta.tags),
 			...linkStatements,
 			incomingLinkStatement,
 		],
@@ -1284,25 +1338,47 @@ function toD1Statement(
 	return ctx.db.prepare(query.sql).bind(...query.params);
 }
 
+// PROJ-816: a new page's wiki_fts rowid. Random 52-bit (safe JS integer), offset past
+// the small rowids migration 0065 backfilled from wiki_pages.rowid; the unique index on
+// wiki_pages.search_rowid backs it.
+export function newSearchRowid(): number {
+	const [hi, lo] = crypto.getRandomValues(new Uint32Array(2));
+	// 20 + 32 = 52 random bits; + 2^40 stays below Number.MAX_SAFE_INTEGER (2^53).
+	return 2 ** 40 + ((hi & 0xfffff) * 2 ** 32 + lo);
+}
+
+// PROJ-816: wiki_fts rows are keyed by the page's search_rowid, so both the insert and
+// the delete below are rowid lookups instead of a scan over the UNINDEXED page_id column.
+const FTS_ROWID_OF_PAGE = "(SELECT search_rowid FROM wiki_pages WHERE id = ? AND workspace_id = ?)";
+
 // PROJ-486/PROJ-511: builds (without executing) the INSERT that mirrors a page into
 // wiki_fts. tags is passed in explicitly rather than re-read from the DB — callers
 // already know the post-write title/content/tags before any statement runs, since that's
 // what lets these statements sit alongside the content write in one atomic batch.
-function buildFtsInsertStatement(
+function buildFtsInsertStatements(
 	ctx: ServiceCtx,
 	id: string,
 	title: string,
 	content: string,
 	tags: readonly string[]
-): D1PreparedStatement {
+): D1PreparedStatement[] {
 	// PROJ-488: tags is space-joined — wiki_fts's default unicode61 tokenizer splits on
 	// non-alphanumeric, so a comma join would tokenize identically, but space matches how
 	// title/content are naturally tokenized.
-	return ctx.db
-		.prepare(
-			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
-		)
-		.bind(id, ctx.workspaceId, title, content, tags.join(" "));
+	return [
+		// A page written outside this module (or before 0065) may have no search_rowid yet.
+		ctx.db
+			.prepare(
+				"UPDATE wiki_pages SET search_rowid = ? WHERE id = ? AND workspace_id = ? AND search_rowid IS NULL"
+			)
+			.bind(newSearchRowid(), id, ctx.workspaceId),
+		ctx.db
+			.prepare(
+				`INSERT INTO wiki_fts (rowid, page_id, workspace_id, title, content, tags)
+				 VALUES (${FTS_ROWID_OF_PAGE}, ?, ?, ?, ?, ?)`
+			)
+			.bind(id, ctx.workspaceId, id, ctx.workspaceId, title, content, tags.join(" ")),
+	];
 }
 
 // PROJ-486/PROJ-511: mirrors issues.ts's reindexIssueFts — delete-then-reinsert the
@@ -1318,9 +1394,9 @@ function buildFtsReindexStatements(
 ): D1PreparedStatement[] {
 	return [
 		ctx.db
-			.prepare("DELETE FROM wiki_fts WHERE page_id = ? AND workspace_id = ?")
+			.prepare(`DELETE FROM wiki_fts WHERE rowid = ${FTS_ROWID_OF_PAGE}`)
 			.bind(id, ctx.workspaceId),
-		buildFtsInsertStatement(ctx, id, title, content, tags),
+		...buildFtsInsertStatements(ctx, id, title, content, tags),
 	];
 }
 
@@ -1342,13 +1418,18 @@ async function currentPageTags(
 	return row?.tags ?? [];
 }
 
+// PROJ-816: must run BEFORE the pages themselves are deleted (it finds the FTS rowids
+// through wiki_pages.search_rowid).
 // PROJ-486: chunked so a cascade delete of a large subtree stays under D1's 100-bound
 // parameter cap (services/sql.ts#inChunks).
 async function deleteWikiFtsEntries(ctx: ServiceCtx, pageIds: string[]): Promise<void> {
 	await inChunks(pageIds, async (chunk) => {
 		const placeholders = chunk.map(() => "?").join(",");
 		await ctx.db
-			.prepare(`DELETE FROM wiki_fts WHERE page_id IN (${placeholders}) AND workspace_id = ?`)
+			.prepare(
+				`DELETE FROM wiki_fts WHERE rowid IN (
+				   SELECT search_rowid FROM wiki_pages WHERE id IN (${placeholders}) AND workspace_id = ?)`
+			)
 			.bind(...chunk, ctx.workspaceId)
 			.run();
 		return [];
@@ -2232,6 +2313,7 @@ export async function seedDefaultWikiTemplates(
 	const parentId = crypto.randomUUID();
 	await orm.insert(schema.wikiPages).values({
 		id: parentId,
+		searchRowid: newSearchRowid(), // PROJ-816
 		workspaceId,
 		projectId: null,
 		slug: "page-templates",
@@ -2250,15 +2332,17 @@ export async function seedDefaultWikiTemplates(
 	// invisible to search_wiki until someone happens to edit it.
 	await db
 		.prepare(
-			"INSERT INTO wiki_fts (page_id, workspace_id, title, content, tags) VALUES (?, ?, ?, ?, ?)"
+			`INSERT INTO wiki_fts (rowid, page_id, workspace_id, title, content, tags)
+			 VALUES ((SELECT search_rowid FROM wiki_pages WHERE id = ?), ?, ?, ?, ?, ?)`
 		)
-		.bind(parentId, workspaceId, "Templates", "", "")
+		.bind(parentId, parentId, workspaceId, "Templates", "", "")
 		.run();
 
 	for (const t of DEFAULT_WIKI_TEMPLATES) {
 		const content = `---\ntype: ${t.type}\nstatus: draft\ntemplate: true\n---\n${t.body}`;
 		await orm.insert(schema.wikiPages).values({
 			id: crypto.randomUUID(),
+			searchRowid: newSearchRowid(), // PROJ-816
 			workspaceId,
 			projectId: null,
 			slug: t.slug,
@@ -2351,6 +2435,12 @@ async function collectCascadeTrashedDescendantIds(
 // entityId=pageId) aren't covered by the FK cascade on linkedWikiPageId — that column is
 // only set for wiki_ref pointer attachments elsewhere that link to this page. Delete the
 // R2 objects before dropping the rows, mirroring mcp/files.ts's delete_attachment handler.
+// PROJ-865: R2 accepts up to 1,000 keys per delete() call — batch into arrays instead
+// of one subrequest per file. `workspace_id` is included on both the select and the two
+// deletes below: `attachments` has no other index that narrows a purge-scale scan, so an
+// unscoped query here was effectively `SCAN attachments` across every tenant.
+const R2_DELETE_BATCH_SIZE = 1000;
+
 async function deleteWikiPageAttachments(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle<typeof schema>>,
@@ -2361,19 +2451,22 @@ async function deleteWikiPageAttachments(
 		.from(schema.attachments)
 		.where(
 			and(
+				eq(schema.attachments.workspaceId, ctx.workspaceId),
 				eq(schema.attachments.entityType, "wiki_page"),
 				inArray(schema.attachments.entityId, pageIds),
 				eq(schema.attachments.kind, "file")
 			)
 		);
-	for (const { r2Key } of fileAttachments) {
-		if (r2Key) await ctx.r2.delete(r2Key);
+	const r2Keys = fileAttachments.map((a) => a.r2Key).filter((key): key is string => Boolean(key));
+	for (let i = 0; i < r2Keys.length; i += R2_DELETE_BATCH_SIZE) {
+		await ctx.r2.delete(r2Keys.slice(i, i + R2_DELETE_BATCH_SIZE));
 	}
 
 	await orm
 		.delete(schema.attachments)
 		.where(
 			and(
+				eq(schema.attachments.workspaceId, ctx.workspaceId),
 				eq(schema.attachments.entityType, "wiki_page"),
 				inArray(schema.attachments.entityId, pageIds)
 			)
@@ -2382,7 +2475,14 @@ async function deleteWikiPageAttachments(
 	// PROJ-407: mirror the migration's ON DELETE CASCADE at the app level too, since
 	// D1 does not guarantee FK enforcement is on for every connection. wiki_ref pointer
 	// rows have no R2 object (r2Key is "").
-	await orm.delete(schema.attachments).where(inArray(schema.attachments.linkedWikiPageId, pageIds));
+	await orm
+		.delete(schema.attachments)
+		.where(
+			and(
+				eq(schema.attachments.workspaceId, ctx.workspaceId),
+				inArray(schema.attachments.linkedWikiPageId, pageIds)
+			)
+		);
 }
 
 // PROJ-311: workspace-level pages need a workspace admin/owner; a project-scoped
@@ -2767,14 +2867,27 @@ export async function listWikiTrash(ctx: ServiceCtx, input: unknown) {
 // project's grants. Also reachable via a daily Workers Cron Trigger (see the
 // `scheduled` handler in index.ts, which iterates every workspace) in addition to the
 // manual REST/MCP call.
+// PROJ-865: default per-invocation page cap. A workspace with thousands of expired pages
+// would otherwise run this whole function (attachments, FTS, revisions, links, redirects —
+// roughly a dozen D1/R2 calls per page once chunked) unbounded in one cron tick; ~200 pages
+// keeps a single call's cost predictable and lets the cron's KV cursor (index.ts) revisit
+// the same workspace on the next run for the remainder instead of moving on and starving it.
+export const WIKI_TRASH_PURGE_DEFAULT_PAGE_LIMIT = 200;
+
 export async function purgeExpiredWikiPages(
-	ctx: ServiceCtx
-): Promise<{ purgedCount: number; purgedIds: string[] }> {
+	ctx: ServiceCtx,
+	options: { limit?: number } = {}
+): Promise<{ purgedCount: number; purgedIds: string[]; moreExpired: boolean }> {
 	if (!isWorkspaceAdmin(ctx.role)) throw new ForbiddenError("Insufficient permissions");
 
+	const limit = options.limit ?? WIKI_TRASH_PURGE_DEFAULT_PAGE_LIMIT;
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = Math.floor(Date.now() / 1000) - WIKI_TRASH_RETENTION_SECONDS;
-	const expired = await orm
+	// PROJ-865: ORDER BY deleted_at (oldest-expired-first) + LIMIT bounds this call's work;
+	// fetching limit+1 tells us whether more expired pages remain without a second COUNT
+	// query. Oldest-first also means a workspace that's never been purged before works
+	// through its backlog in FIFO order across repeated runs.
+	const expiredPlusOne = await orm
 		.select({ id: schema.wikiPages.id, parentId: schema.wikiPages.parentId })
 		.from(schema.wikiPages)
 		.where(
@@ -2783,9 +2896,13 @@ export async function purgeExpiredWikiPages(
 				isNotNull(schema.wikiPages.deletedAt),
 				lte(schema.wikiPages.deletedAt, cutoff)
 			)
-		);
+		)
+		.orderBy(asc(schema.wikiPages.deletedAt))
+		.limit(limit + 1);
+	const moreExpired = expiredPlusOne.length > limit;
+	const expired = moreExpired ? expiredPlusOne.slice(0, limit) : expiredPlusOne;
 	const ids = expired.map((p) => p.id);
-	if (ids.length === 0) return { purgedCount: 0, purgedIds: [] };
+	if (ids.length === 0) return { purgedCount: 0, purgedIds: [], moreExpired: false };
 
 	// PROJ-238/PROJ-496: a live child can end up pointing at a page that's about to be
 	// purged — e.g. it was cascade-trashed alongside its parent, then undeleted on its
@@ -2804,11 +2921,25 @@ export async function purgeExpiredWikiPages(
 		}
 		return current;
 	};
+	// PROJ-865: one UPDATE per (target, chunk) instead of one per purged page — pages
+	// resolving to the same surviving ancestor (almost always the common case: most
+	// purged batches share few distinct reparent targets) share a single statement, and
+	// `inChunks` still caps each statement's bound `parent_id IN (...)` list at D1's limit.
+	const idsByTarget = new Map<string | null, string[]>();
 	for (const id of ids) {
-		await orm
-			.update(schema.wikiPages)
-			.set({ parentId: resolveReparentTarget(id), version: sql`${schema.wikiPages.version} + 1` })
-			.where(and(eq(schema.wikiPages.parentId, id), isNull(schema.wikiPages.deletedAt)));
+		const target = resolveReparentTarget(id);
+		const group = idsByTarget.get(target);
+		if (group) group.push(id);
+		else idsByTarget.set(target, [id]);
+	}
+	for (const [target, purgedIds] of idsByTarget) {
+		await inChunks(purgedIds, async (chunk) => {
+			await orm
+				.update(schema.wikiPages)
+				.set({ parentId: target, version: sql`${schema.wikiPages.version} + 1` })
+				.where(and(inArray(schema.wikiPages.parentId, chunk), isNull(schema.wikiPages.deletedAt)));
+			return [];
+		});
 	}
 
 	await inChunks(ids, async (chunk) => {
@@ -2819,6 +2950,7 @@ export async function purgeExpiredWikiPages(
 	// pages are deleted — once they're gone, ON DELETE SET NULL (where enforced) would
 	// already have cleared target_page_id and there'd be nothing left to re-point.
 	await repointIncomingLinks(ctx, ids);
+	await deleteWikiFtsEntries(ctx, ids); // PROJ-816: before the pages go
 	await inChunks(ids, async (chunk) => {
 		await orm.delete(schema.wikiRevisions).where(inArray(schema.wikiRevisions.pageId, chunk));
 		return [];
@@ -2827,7 +2959,6 @@ export async function purgeExpiredWikiPages(
 		await orm.delete(schema.wikiPages).where(inArray(schema.wikiPages.id, chunk));
 		return [];
 	});
-	await deleteWikiFtsEntries(ctx, ids);
 	await deleteWikiLinksForPages(ctx, ids);
 	await deleteWikiWatchersForPages(ctx, ids);
 	await deleteWikiDraftsForPages(ctx, ids);
@@ -2846,7 +2977,7 @@ export async function purgeExpiredWikiPages(
 		return [];
 	});
 
-	return { purgedCount: ids.length, purgedIds: ids };
+	return { purgedCount: ids.length, purgedIds: ids, moreExpired };
 }
 
 export async function getWikiTree(ctx: ServiceCtx, input: unknown = {}): Promise<TreeNode[]> {

@@ -295,6 +295,62 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 	return { ok: true };
 }
 
+// ?1 = project id, ?2 = workspace id in every statement below.
+const ISSUES_OF_PROJECT = "SELECT id FROM issues WHERE project_id = ?1 AND workspace_id = ?2";
+const PAGES_OF_PROJECT = "SELECT id FROM wiki_pages WHERE project_id = ?1 AND workspace_id = ?2";
+
+// PROJ-819: explicit cleanup for deleteProject, children before parents. Mirrors
+// deleteIssue's per-issue list (PROJ-922) and the wiki purge's per-page list.
+const PROJECT_CLEANUP_SQL: readonly string[] = [
+	// Issue dependents.
+	`DELETE FROM issues_fts WHERE workspace_id = ?2 AND issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM issue_comments WHERE issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM issue_links WHERE source_issue_id IN (${ISSUES_OF_PROJECT}) OR target_issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM custom_field_values WHERE issue_id IN (${ISSUES_OF_PROJECT})
+	   OR field_id IN (SELECT id FROM custom_field_definitions WHERE project_id = ?1 AND workspace_id = ?2)`,
+	`DELETE FROM issue_file_claims WHERE issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM issue_leases WHERE issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM claim_conflicts WHERE rejected_issue_id IN (${ISSUES_OF_PROJECT}) OR holding_issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM wip_cap_denials WHERE project_id = ?1 AND workspace_id = ?2`,
+	`DELETE FROM issue_gate_rejections WHERE issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM share_tokens WHERE workspace_id = ?2 AND issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM attachments WHERE workspace_id = ?2 AND entity_type = 'issue' AND entity_id IN (${ISSUES_OF_PROJECT})`,
+	`UPDATE agent_sessions SET issue_id = NULL WHERE workspace_id = ?2 AND issue_id IN (${ISSUES_OF_PROJECT})`,
+	`UPDATE feedback SET linked_issue_id = NULL WHERE workspace_id = ?2 AND linked_issue_id IN (${ISSUES_OF_PROJECT})`,
+	// Issues in other projects parented under one of these.
+	`UPDATE issues SET parent_id = NULL WHERE workspace_id = ?2 AND project_id <> ?1 AND parent_id IN (${ISSUES_OF_PROJECT})`,
+	// Wiki page dependents.
+	`DELETE FROM wiki_fts WHERE rowid IN (SELECT search_rowid FROM wiki_pages WHERE project_id = ?1 AND workspace_id = ?2)`,
+	`DELETE FROM wiki_revisions WHERE page_id IN (${PAGES_OF_PROJECT})`,
+	`DELETE FROM wiki_drafts WHERE page_id IN (${PAGES_OF_PROJECT})`,
+	`DELETE FROM wiki_watchers WHERE page_id IN (${PAGES_OF_PROJECT})`,
+	`DELETE FROM wiki_notifications WHERE page_id IN (${PAGES_OF_PROJECT})`,
+	`DELETE FROM wiki_redirects WHERE page_id IN (${PAGES_OF_PROJECT})`,
+	`DELETE FROM wiki_links WHERE source_page_id IN (${PAGES_OF_PROJECT})`,
+	// Links from other projects into this one: re-point to another live page they still
+	// match (outside this project), else unresolve — same rule as a wiki purge (PROJ-814).
+	`UPDATE wiki_links SET target_page_id = (
+	   SELECT p.id FROM wiki_pages p
+	   WHERE p.workspace_id = ?2 AND p.deleted_at IS NULL AND (p.project_id IS NULL OR p.project_id <> ?1)
+	     AND ((COALESCE(wiki_links.target_kind, 'title') = 'title' AND p.title_fold = wiki_links.target_fold)
+	       OR (wiki_links.target_kind = 'slug' AND p.slug = wiki_links.target_text))
+	   ORDER BY p.created_at, p.id LIMIT 1)
+	 WHERE workspace_id = ?2 AND target_page_id IN (${PAGES_OF_PROJECT})`,
+	`DELETE FROM attachments WHERE workspace_id = ?2 AND entity_type = 'wiki_page' AND entity_id IN (${PAGES_OF_PROJECT})`,
+	// wiki_ref attachments elsewhere pointing at this project's pages (the FK column).
+	`DELETE FROM attachments WHERE workspace_id = ?2 AND linked_wiki_page_id IN (${PAGES_OF_PROJECT})`,
+	// Project-level rows.
+	"DELETE FROM sprints WHERE project_id = ?1 AND workspace_id = ?2",
+	"DELETE FROM group_project_grants WHERE project_id = ?1",
+	"DELETE FROM feedback WHERE project_id = ?1 AND workspace_id = ?2",
+	"DELETE FROM feedback_sources WHERE project_id = ?1 AND workspace_id = ?2",
+	"DELETE FROM custom_field_definitions WHERE project_id = ?1 AND workspace_id = ?2",
+	// Then the parents.
+	"DELETE FROM issues WHERE project_id = ?1 AND workspace_id = ?2",
+	"DELETE FROM wiki_pages WHERE project_id = ?1 AND workspace_id = ?2",
+	"DELETE FROM projects WHERE id = ?1 AND workspace_id = ?2",
+];
+
 export async function deleteProject(ctx: ServiceCtx, id: string) {
 	const idCheck = IdSchema.safeParse(id);
 	if (!idCheck.success)
@@ -302,9 +358,46 @@ export async function deleteProject(ctx: ServiceCtx, id: string) {
 	if (ctx.role !== "owner") throw new ForbiddenError();
 
 	const orm = drizzle(ctx.db, { schema });
-	await orm
-		.delete(schema.projects)
-		.where(and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId)));
+	const project = await orm
+		.select({ id: schema.projects.id })
+		.from(schema.projects)
+		.where(and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!project) throw new NotFoundError("Project not found");
+
+	// PROJ-819/918: D1 doesn't guarantee the FK cascades the schema declares (PROJ-407),
+	// and several references have no FK at all (FTS mirrors, R2 objects, other projects'
+	// links into this one). Clean everything up explicitly. Every statement is set-based
+	// (subqueries keyed on the project), so the statement and bound-parameter counts stay
+	// constant however large the project is; the whole thing is one atomic batch. R2
+	// objects are listed first and deleted only after the batch commits.
+	const r2Keys = (
+		await ctx.db
+			.prepare(
+				`SELECT r2_key AS k FROM attachments
+				 WHERE workspace_id = ?2 AND kind = 'file' AND r2_key IS NOT NULL AND (
+				   (entity_type = 'issue' AND entity_id IN (${ISSUES_OF_PROJECT}))
+				   OR (entity_type = 'wiki_page' AND entity_id IN (${PAGES_OF_PROJECT})))`
+			)
+			.bind(id, ctx.workspaceId)
+			.all<{ k: string }>()
+	).results.map((r) => r.k);
+
+	await ctx.db.batch(
+		PROJECT_CLEANUP_SQL.map((sql) =>
+			sql.includes("?2")
+				? ctx.db.prepare(sql).bind(id, ctx.workspaceId)
+				: ctx.db.prepare(sql).bind(id)
+		)
+	);
+
+	for (let i = 0; i < r2Keys.length; i += 1000) {
+		try {
+			await ctx.r2.delete(r2Keys.slice(i, i + 1000));
+		} catch (err) {
+			console.error("deleteProject: R2 cleanup failed", { id, err: String(err) });
+		}
+	}
 
 	await recordActivity(ctx, { entityType: "project", entityId: id, action: "deleted" });
 	await invalidateProjectsCache(ctx);

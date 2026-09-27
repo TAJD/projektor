@@ -77,6 +77,12 @@ export interface Env {
 	BRAND_ACCENT?: string;
 	BRAND_ON_ACCENT?: string;
 	BRAND_LOGO_URL?: string;
+	// PROJ-869: retention windows for the daily cron's cross-table cleanup
+	// (apps/api/src/index.ts's scheduled -> purgeExpiredRetentionData). All optional;
+	// unset falls back to the documented default in that function.
+	WIKI_NOTIFICATION_RETENTION_DAYS?: string; // default 90
+	AGENT_SESSION_RETENTION_DAYS?: string; // ended agent_sessions with no referencing lease, default 90
+	ACTIVITY_RETENTION_DAYS?: string; // default 365
 }
 
 export interface RealtimeEvent<T = unknown> {

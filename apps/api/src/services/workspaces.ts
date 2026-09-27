@@ -263,14 +263,62 @@ export async function listTokens(ctx: ServiceCtx) {
 
 export async function revokeToken(ctx: ServiceCtx, tokenId: string) {
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
-	const orm = drizzle(ctx.db, { schema });
-	await orm
-		.delete(schema.apiTokens)
-		.where(
-			and(eq(schema.apiTokens.id, tokenId), eq(schema.apiTokens.workspaceId, ctx.workspaceId))
-		);
+	// PROJ-923: agent_sessions.token_id is ON DELETE SET NULL, which D1 doesn't
+	// guarantee (PROJ-407) — null it explicitly in the same batch.
+	await ctx.db.batch([
+		ctx.db
+			.prepare(
+				`UPDATE agent_sessions SET token_id = NULL WHERE token_id IN (
+				   SELECT id FROM api_tokens WHERE id = ? AND workspace_id = ?)`
+			)
+			.bind(tokenId, ctx.workspaceId),
+		ctx.db
+			.prepare("DELETE FROM api_tokens WHERE id = ? AND workspace_id = ?")
+			.bind(tokenId, ctx.workspaceId),
+	]);
 	return { ok: true };
 }
+
+// PROJ-923: ?1 = workspace id. Children before parents.
+const WS_PAGES = "SELECT id FROM wiki_pages WHERE workspace_id = ?1";
+const WS_GROUPS = "SELECT id FROM user_groups WHERE workspace_id = ?1";
+const WORKSPACE_CLEANUP_SQL: readonly string[] = [
+	"DELETE FROM wiki_fts WHERE workspace_id = ?1",
+	"DELETE FROM issues_fts WHERE workspace_id = ?1",
+	"DELETE FROM share_tokens WHERE workspace_id = ?1",
+	`DELETE FROM wiki_revisions WHERE page_id IN (${WS_PAGES})`,
+	"DELETE FROM wiki_drafts WHERE workspace_id = ?1",
+	"DELETE FROM wiki_watchers WHERE workspace_id = ?1",
+	"DELETE FROM wiki_notifications WHERE workspace_id = ?1",
+	"DELETE FROM wiki_redirects WHERE workspace_id = ?1",
+	"DELETE FROM wiki_links WHERE workspace_id = ?1",
+	"DELETE FROM attachments WHERE workspace_id = ?1",
+	"DELETE FROM wiki_pages WHERE workspace_id = ?1",
+	"DELETE FROM agent_messages WHERE workspace_id = ?1",
+	"DELETE FROM claim_conflicts WHERE workspace_id = ?1",
+	"DELETE FROM issue_file_claims WHERE workspace_id = ?1",
+	"DELETE FROM issue_leases WHERE workspace_id = ?1",
+	"DELETE FROM wip_cap_denials WHERE workspace_id = ?1",
+	"DELETE FROM issue_gate_rejections WHERE workspace_id = ?1",
+	"DELETE FROM issue_links WHERE workspace_id = ?1",
+	"DELETE FROM agent_sessions WHERE workspace_id = ?1",
+	"DELETE FROM custom_field_values WHERE field_id IN (SELECT id FROM custom_field_definitions WHERE workspace_id = ?1)",
+	"DELETE FROM custom_field_definitions WHERE workspace_id = ?1",
+	"DELETE FROM feedback WHERE workspace_id = ?1",
+	"DELETE FROM feedback_sources WHERE workspace_id = ?1",
+	"DELETE FROM sprints WHERE workspace_id = ?1",
+	`DELETE FROM user_group_members WHERE group_id IN (${WS_GROUPS})`,
+	`DELETE FROM group_project_grants WHERE group_id IN (${WS_GROUPS})`,
+	"DELETE FROM user_groups WHERE workspace_id = ?1",
+	"DELETE FROM task_statuses WHERE workspace_id = ?1",
+	"DELETE FROM task_types WHERE workspace_id = ?1",
+	"DELETE FROM enabled_plugins WHERE workspace_id = ?1",
+	"DELETE FROM activity WHERE workspace_id = ?1",
+	"DELETE FROM api_tokens WHERE workspace_id = ?1",
+	"DELETE FROM provisioning_removals WHERE workspace_id = ?1",
+	"DELETE FROM workspace_members WHERE workspace_id = ?1",
+	"DELETE FROM workspaces WHERE id = ?1",
+];
 
 export async function deleteWorkspace(
 	ctx: ServiceCtx,
@@ -314,7 +362,26 @@ export async function deleteWorkspace(
 	}
 
 	const brand = await readBrand(ctx);
-	await orm.delete(schema.workspaces).where(eq(schema.workspaces.id, ctx.workspaceId));
+	// PROJ-923: every table hanging off the workspace is cleaned up explicitly — D1
+	// doesn't guarantee the FK cascades (PROJ-407), and FTS mirrors / R2 objects have no
+	// FK at all. Projects are already gone (checked above), so this is workspace-level
+	// data only. Set-based, constant statement count, one atomic batch; R2 after commit.
+	const r2Keys = (
+		await ctx.db
+			.prepare(
+				"SELECT r2_key AS k FROM attachments WHERE workspace_id = ?1 AND kind = 'file' AND r2_key IS NOT NULL"
+			)
+			.bind(ctx.workspaceId)
+			.all<{ k: string }>()
+	).results.map((r) => r.k);
+	await ctx.db.batch(WORKSPACE_CLEANUP_SQL.map((sql) => ctx.db.prepare(sql).bind(ctx.workspaceId)));
+	for (let i = 0; i < r2Keys.length; i += 1000) {
+		try {
+			await ctx.r2.delete(r2Keys.slice(i, i + 1000));
+		} catch (err) {
+			console.error("deleteWorkspace: R2 cleanup failed", { err: String(err) });
+		}
+	}
 	if (brand.logoR2Key) {
 		try {
 			await ctx.r2.delete(brand.logoR2Key);

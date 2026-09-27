@@ -1,9 +1,9 @@
 // PROJ-922: deleteIssue must explicitly remove/null every row that references the
 // deleted issue via an FK with ON DELETE CASCADE/SET NULL, since D1 does not guarantee
-// FK enforcement (PROJ-407). Runs with `PRAGMA foreign_keys = OFF` so SQLite's own
-// cascade (present in the vitest/Miniflare SQLite backend but not on real D1) can't mask
-// missing app-level cleanup — every assertion below only passes if `services/issues.ts`
-// did the cleanup itself.
+// FK enforcement (PROJ-407). Note: `PRAGMA foreign_keys = OFF` is a no-op on
+// D1/Miniflare (it still reads 1), so FK-backed rows are also removed by the database's
+// cascade here — those assertions are end-state checks. The non-FK references (share
+// tokens, R2 objects, FTS) are what this proves; fk-cleanup.node.test.ts guards the rest.
 
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -33,7 +33,6 @@ describe("deleteIssue — dependent row cleanup (PROJ-922)", () => {
 	let userId: string;
 
 	beforeEach(async () => {
-		await env.DB.prepare("PRAGMA foreign_keys = OFF").run();
 		const fixture = await seedFixture({ role: "owner" });
 		token = fixture.token;
 		slug = fixture.workspace.slug;

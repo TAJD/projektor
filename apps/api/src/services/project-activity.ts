@@ -62,6 +62,12 @@ async function fetchActivityRows(
 			.all<ActivityEvent>(),
 
 		// issue_status_changed (via activity log)
+		// PROJ-869: this used to json_extract over a `diff` blob that could carry the
+		// issue's full new body text (services/issues.ts's buildUpdateDiffCore stored
+		// `diff.body` verbatim), so parsing it to check for `$.status` cost a full-body
+		// JSON parse on every row. Update diffs now only record a `bodyChanged` marker
+		// (not the text), so `diff` is always small and this json_extract stays cheap
+		// regardless of the issue's body size.
 		ctx.db
 			.prepare(
 				`SELECT 'issue_status_changed' AS type, a.actor_id AS actor,

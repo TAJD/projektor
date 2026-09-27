@@ -15,6 +15,8 @@ export const wikiPages = sqliteTable(
 		title: text("title").notNull(),
 		// PROJ-818: foldWikiTitle(title), computed in JS (SQLite lower() is ASCII-only).
 		titleFold: text("title_fold"),
+		// PROJ-816: this page's wiki_fts rowid (migration 0065).
+		searchRowid: integer("search_rowid"),
 		content: text("content").notNull().default(""),
 		parentId: text("parent_id"),
 		createdById: text("created_by_id")
