@@ -875,6 +875,8 @@ type ExistingIssue = {
 	completionReportAt: number | null;
 	inReviewAt: number | null;
 	reviewBounceCount: number;
+	// PROJ-749: whether the issue's current status is a designated review step.
+	statusIsReviewStep: boolean;
 };
 
 // biome-ignore lint/suspicious/noExplicitAny: Drizzle set() requires typed columns; setValues is safe
@@ -922,9 +924,10 @@ function buildCompletedAtTransition(
 // from the legacy `status` key instead: any status other than 'backlog'.
 function isClaimedState(
 	category: string | null | undefined,
-	key: string | null | undefined
+	key: string | null | undefined,
+	isReviewStep: boolean
 ): boolean {
-	return category === "in_progress" || key === "in_progress" || key === "in_review";
+	return category === "in_progress" || key === "in_progress" || isReviewStep;
 }
 
 function isDoneState(category: string | null | undefined, key: string | null | undefined): boolean {
@@ -934,7 +937,8 @@ function isDoneState(category: string | null | undefined, key: string | null | u
 function buildFlowTimestampTransitions(
 	existing: ExistingIssue,
 	resolvedStatusKey: string,
-	newStatusCategory: string | undefined
+	newStatusCategory: string | undefined,
+	newIsReviewStep: boolean
 ): SetValues {
 	const setValues: SetValues = {};
 
@@ -943,8 +947,12 @@ function buildFlowTimestampTransitions(
 		setValues.readyAt = now();
 	}
 
-	const wasClaimed = isClaimedState(existing.statusCategory, existing.status);
-	const isClaimed = isClaimedState(newStatusCategory, resolvedStatusKey);
+	const wasClaimed = isClaimedState(
+		existing.statusCategory,
+		existing.status,
+		existing.statusIsReviewStep
+	);
+	const isClaimed = isClaimedState(newStatusCategory, resolvedStatusKey, newIsReviewStep);
 	if (isClaimed && !wasClaimed && existing.claimedAt == null) setValues.claimedAt = now();
 
 	const wasDone = isDoneState(existing.statusCategory, existing.status);
@@ -972,17 +980,18 @@ function buildReviewTransitions(
 	transition: Readonly<{
 		resolvedStatusKey: string;
 		newStatusCategory: string | undefined;
+		newIsReviewStep: boolean;
 		enteringInReview: boolean;
 		enteringDone: boolean;
 	}>
 ): { setValues: SetValues; isGateRejection: boolean } {
-	const { resolvedStatusKey, newStatusCategory, enteringInReview, enteringDone } = transition;
+	const { resolvedStatusKey, newStatusCategory, newIsReviewStep, enteringInReview, enteringDone } =
+		transition;
 	const setValues: SetValues = {};
 	if (enteringInReview && existing.inReviewAt == null) setValues.inReviewAt = now();
 
-	const wasInReview = isReviewStatusKey(existing.status);
-	const leavingReviewNotDone =
-		wasInReview && !isReviewStatusKey(resolvedStatusKey) && !enteringDone;
+	const wasInReview = existing.statusIsReviewStep;
+	const leavingReviewNotDone = wasInReview && !newIsReviewStep && !enteringDone;
 	if (leavingReviewNotDone) setValues.reviewBounceCount = existing.reviewBounceCount + 1;
 
 	const isGateRejection =
@@ -1004,24 +1013,23 @@ function assertCompletionReportPresent(data: UpdateIssueData): void {
 	}
 }
 
-// PROJ-292: a review step is identified by its status key naming a review, NOT by a
-// dedicated category — there is no 'in_review' category (the default review status is
-// category 'in_progress'), and keying on the single literal "in_review" let a
-// workspace's custom review status (e.g. "code-review", "peer_review") slip the gate.
-function isReviewStatusKey(key: string | undefined): boolean {
-	return key != null && /review/i.test(key);
-}
-
 // Pure classification of what this status change is entering, shared by the gate
 // (what to enforce) and the completion-report stamp (PROJ-293 — stamp/post only on a
 // real transition, not on any update that happens to carry a completionReport).
+//
+// PROJ-749 (supersedes PROJ-292's /review/i key match): a review step is the status's
+// explicit task_statuses.is_review_step flag. Matching the key let any status merely
+// *named* like a review ("contract_review", "legal_review") acquire the completion-report
+// gate and pollute review flow metrics. Migration 0061 backfilled the flag from the old
+// rule, so existing custom review statuses ("code_review", "peer_review") keep the gate.
 function classifyStatusTransition(
 	existing: ExistingIssue,
 	resolvedStatusKey: string,
-	newStatusCategory: string | undefined
+	newStatusCategory: string | undefined,
+	newIsReviewStep: boolean
 ): { enteringInReview: boolean; enteringDone: boolean } {
-	const wasInReview = isReviewStatusKey(existing.status);
-	const enteringInReview = isReviewStatusKey(resolvedStatusKey) && !wasInReview;
+	const wasInReview = existing.statusIsReviewStep;
+	const enteringInReview = newIsReviewStep && !wasInReview;
 
 	const wasDone = existing.statusCategory === "done" || existing.status === "done";
 	const enteringDone = (newStatusCategory === "done" || resolvedStatusKey === "done") && !wasDone;
@@ -1101,7 +1109,13 @@ async function applyStatusFields(
 	const { id: resolvedStatusId, key: resolvedStatusKey } = resolved;
 	const newStatusCategory = resolved.category ?? undefined;
 
-	const transition = classifyStatusTransition(existing, resolvedStatusKey, newStatusCategory);
+	const newIsReviewStep = resolved.isReviewStep;
+	const transition = classifyStatusTransition(
+		existing,
+		resolvedStatusKey,
+		newStatusCategory,
+		newIsReviewStep
+	);
 	await assertReviewGate(ctx, data, existing, transition);
 
 	const setValues: SetValues = {
@@ -1119,11 +1133,12 @@ async function applyStatusFields(
 	);
 	Object.assign(
 		setValues,
-		buildFlowTimestampTransitions(existing, resolvedStatusKey, newStatusCategory)
+		buildFlowTimestampTransitions(existing, resolvedStatusKey, newStatusCategory, newIsReviewStep)
 	);
 	const { setValues: reviewSetValues, isGateRejection } = buildReviewTransitions(existing, {
 		resolvedStatusKey,
 		newStatusCategory,
+		newIsReviewStep,
 		enteringInReview: transition.enteringInReview,
 		enteringDone: transition.enteringDone,
 	});
@@ -1338,7 +1353,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	const orm = drizzle(ctx.db, { schema });
 
-	const existing = await orm
+	const existingRow = await orm
 		.select({
 			id: schema.issues.id,
 			projectId: schema.issues.projectId,
@@ -1354,11 +1369,26 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 			completionReportAt: schema.issues.completionReportAt,
 			inReviewAt: schema.issues.inReviewAt,
 			reviewBounceCount: schema.issues.reviewBounceCount,
+			statusReviewFlag: schema.taskStatuses.isReviewStep,
 		})
 		.from(schema.issues)
+		.leftJoin(
+			schema.taskStatuses,
+			and(
+				eq(schema.taskStatuses.id, schema.issues.statusId),
+				eq(schema.taskStatuses.workspaceId, ctx.workspaceId)
+			)
+		)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
-	if (!existing) throw new NotFoundError("Issue not found");
+	if (!existingRow) throw new NotFoundError("Issue not found");
+	// PROJ-749: a status row's flag decides; without one only the built-in "in_review" counts.
+	const { statusReviewFlag, ...existingFields } = existingRow;
+	const existing = {
+		...existingFields,
+		statusIsReviewStep:
+			statusReviewFlag == null ? existingRow.status === "in_review" : statusReviewFlag === 1,
+	};
 
 	// PROJ-311: gate the write on the effective project role (owner/admin bypass).
 	// No grant → invisible → 404; a viewer grant is read-only → 403.

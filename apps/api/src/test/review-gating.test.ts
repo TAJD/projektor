@@ -228,15 +228,16 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 		expect((await patch(issue.id, { status: "done", completionReport: report })).status).toBe(200);
 	});
 
-	// --- Custom review status keyed on the word, not the literal (PROJ-292) ---
+	// --- Custom review status designated as a review step (PROJ-292, PROJ-749) ---
 
-	it("gates a custom review status (category in_progress) the same as in_review", async () => {
+	it("gates a custom review-step status (category in_progress) the same as in_review", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Custom review" });
 		await seedAgentLease(workspaceId, issue.id);
 		const custom = await seedTaskStatus(workspaceId, {
 			key: "code-review",
 			name: "Code Review",
 			category: "in_progress",
+			isReviewStep: true,
 		});
 
 		expect((await patch(issue.id, { statusId: custom.id })).status).toBe(400);

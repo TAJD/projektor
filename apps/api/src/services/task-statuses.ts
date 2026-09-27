@@ -29,10 +29,11 @@ export async function listTaskStatuses(ctx: ServiceCtx) {
 		.from(schema.taskStatuses)
 		.where(eq(schema.taskStatuses.workspaceId, ctx.workspaceId))
 		.orderBy(asc(schema.taskStatuses.position), asc(schema.taskStatuses.name));
-	const result = rows.map(({ isDefault, workspaceId, ...rest }) => ({
+	const result = rows.map(({ isDefault, isReviewStep, workspaceId, ...rest }) => ({
 		...rest,
 		workspace_id: workspaceId,
 		is_default: isDefault,
+		is_review_step: isReviewStep,
 	}));
 
 	await cache.set(ctx.kv, cacheKey, result, WS_META_TTL);
@@ -50,7 +51,7 @@ export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 	const result = CreateTaskStatusSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { key, name, category, color, position, isDefault } = result.data;
+	const { key, name, category, color, position, isDefault, isReviewStep } = result.data;
 
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
@@ -79,6 +80,7 @@ export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
 		color: color ?? null,
 		position: position ?? 0,
 		isDefault: isDefault ? 1 : 0,
+		isReviewStep: isReviewStep ? 1 : 0,
 	});
 
 	await invalidateTaskStatusesCache(ctx);
@@ -94,6 +96,7 @@ function buildTaskStatusSetObj(data: TaskStatusUpdateData) {
 	if ("color" in data) setObj.color = data.color ?? null;
 	if (data.position !== undefined) setObj.position = data.position;
 	if (data.isDefault !== undefined) setObj.isDefault = data.isDefault ? 1 : 0;
+	if (data.isReviewStep !== undefined) setObj.isReviewStep = data.isReviewStep ? 1 : 0;
 	return setObj;
 }
 
@@ -169,12 +172,40 @@ export async function deleteTaskStatus(ctx: ServiceCtx, id: string) {
 
 export async function seedDefaultTaskStatuses(db: D1Database, workspaceId: string) {
 	const defaults = [
-		{ key: "backlog", name: "Backlog", category: "todo", position: 1, isDefault: 1 },
-		{ key: "todo", name: "Todo", category: "todo", position: 2, isDefault: 0 },
-		{ key: "in_progress", name: "In Progress", category: "in_progress", position: 3, isDefault: 0 },
-		{ key: "in_review", name: "In Review", category: "in_progress", position: 4, isDefault: 0 },
-		{ key: "done", name: "Done", category: "done", position: 5, isDefault: 0 },
-		{ key: "cancelled", name: "Cancelled", category: "cancelled", position: 6, isDefault: 0 },
+		{
+			key: "backlog",
+			name: "Backlog",
+			category: "todo",
+			position: 1,
+			isDefault: 1,
+			isReviewStep: 0,
+		},
+		{ key: "todo", name: "Todo", category: "todo", position: 2, isDefault: 0, isReviewStep: 0 },
+		{
+			key: "in_progress",
+			name: "In Progress",
+			category: "in_progress",
+			position: 3,
+			isDefault: 0,
+			isReviewStep: 0,
+		},
+		{
+			key: "in_review",
+			name: "In Review",
+			category: "in_progress",
+			position: 4,
+			isDefault: 0,
+			isReviewStep: 1,
+		},
+		{ key: "done", name: "Done", category: "done", position: 5, isDefault: 0, isReviewStep: 0 },
+		{
+			key: "cancelled",
+			name: "Cancelled",
+			category: "cancelled",
+			position: 6,
+			isDefault: 0,
+			isReviewStep: 0,
+		},
 	];
 	const orm = drizzle(db, { schema });
 	for (const s of defaults) {
@@ -189,6 +220,7 @@ export async function seedDefaultTaskStatuses(db: D1Database, workspaceId: strin
 				color: null,
 				position: s.position,
 				isDefault: s.isDefault,
+				isReviewStep: s.isReviewStep,
 			})
 			.onConflictDoNothing();
 	}
@@ -197,20 +229,32 @@ export async function seedDefaultTaskStatuses(db: D1Database, workspaceId: strin
 // PROJ-870: also returns the resolved status's category, read from the same row lookup —
 // the issue write paths previously re-queried task_statuses by id just to get it.
 // category is null when no task_statuses row backs the result (legacy key / fallback).
+// PROJ-749: isReviewStep is the status's explicit review-step flag (only the built-in
+// "in_review" key counts when there is no backing row).
 export async function resolveStatus(
 	ctx: ServiceCtx,
 	statusId: string | null | undefined,
 	legacyStatus?: string
-): Promise<{ id: string | null; key: string; category: string | null }> {
+): Promise<{ id: string | null; key: string; category: string | null; isReviewStep: boolean }> {
 	const orm = drizzle(ctx.db, { schema });
 	const cols = {
 		id: schema.taskStatuses.id,
 		key: schema.taskStatuses.key,
 		category: schema.taskStatuses.category,
+		isReviewStep: schema.taskStatuses.isReviewStep,
 	};
+	type Row = { id: string; key: string; category: string | null; isReviewStep: number };
+	const fromRow = (r: Row) => ({ ...r, isReviewStep: r.isReviewStep === 1 });
+	// No task_statuses row backs the key: only the built-in "in_review" is a review step.
+	const fromKey = (key: string) => ({
+		id: null,
+		key,
+		category: null,
+		isReviewStep: key === "in_review",
+	});
 
 	if (statusId === null) {
-		return { id: null, key: legacyStatus || "backlog", category: null };
+		return fromKey(legacyStatus || "backlog");
 	}
 	if (statusId) {
 		const found = await orm
@@ -228,7 +272,7 @@ export async function resolveStatus(
 				formErrors: ["Task status not found in this workspace"],
 				fieldErrors: {},
 			});
-		return found;
+		return fromRow(found);
 	}
 	if (legacyStatus) {
 		const found = await orm
@@ -241,7 +285,7 @@ export async function resolveStatus(
 				)
 			)
 			.get();
-		return found ?? { id: null, key: legacyStatus, category: null };
+		return found ? fromRow(found) : fromKey(legacyStatus);
 	}
 	const def = await orm
 		.select(cols)
@@ -253,5 +297,5 @@ export async function resolveStatus(
 			)
 		)
 		.get();
-	return def ?? { id: null, key: "backlog", category: null };
+	return def ? fromRow(def) : fromKey("backlog");
 }
