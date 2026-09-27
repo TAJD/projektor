@@ -53,7 +53,7 @@ import { listProjectsAcrossWorkspaces } from "./services/projects";
 import { seedDefaultTaskStatuses } from "./services/task-statuses";
 import { seedDefaultTaskTypes } from "./services/task-types";
 import type { ServiceCtx } from "./services/types";
-import { purgeExpiredWikiPages } from "./services/wiki";
+import { purgeExpiredWikiPages, WIKI_TRASH_RETENTION_SECONDS } from "./services/wiki";
 import { createWorkspace, listWorkspaces } from "./services/workspaces";
 
 const app = new Hono<HonoEnv>();
@@ -416,12 +416,55 @@ export async function scheduled(
 	ctx.waitUntil(purgeAllWorkspacesExpiredWikiPages(env));
 	ctx.waitUntil(purgeExpiredOAuthData(env));
 	ctx.waitUntil(purgeExpiredRetentionData(env));
+	ctx.waitUntil(runFtsDedupeOnce(env));
+}
+
+// PROJ-816 follow-up: migration 0065 rebuilt wiki_fts keyed by wiki_pages.search_rowid, but
+// worker instances still running the pre-0065 code during the deploy window kept inserting
+// FTS rows the old way (SQLite auto-assigned rowid, no search_rowid link) until they rolled
+// over. Those stray rows are never found by search_rowid-based lookups, so the ordinary
+// delete-before-insert path (deleteWikiFtsEntries) can't clean them up — a one-off sweep is
+// the only way to remove them. Guarded by a KV flag so it runs exactly once ever, not once
+// per cron fire: after 0065 has fully rolled out there's nothing left for it to find, and
+// running `DELETE ... NOT IN (SELECT ...)` against the whole wiki_fts table on every daily
+// fire forever would be pure waste.
+const FTS_DEDUPE_ONCE_KV_KEY = "maint:fts-dedupe-0065";
+
+export async function runFtsDedupeOnce(env: Env): Promise<void> {
+	try {
+		const alreadyRan = await env.KV.get(FTS_DEDUPE_ONCE_KV_KEY);
+		if (alreadyRan) return;
+		// Pages old code created during the deploy window have no search_rowid; adopt their
+		// existing FTS row's rowid first so the dedupe below doesn't drop them from search.
+		await env.DB.prepare(
+			`UPDATE OR IGNORE wiki_pages SET search_rowid = (
+			   SELECT MAX(rowid) FROM wiki_fts WHERE page_id = wiki_pages.id)
+			 WHERE search_rowid IS NULL`
+		).run();
+		const result = await env.DB.prepare(
+			"DELETE FROM wiki_fts WHERE rowid NOT IN (SELECT search_rowid FROM wiki_pages WHERE search_rowid IS NOT NULL)"
+		).run();
+		await env.KV.put(FTS_DEDUPE_ONCE_KV_KEY, "1");
+		console.log("one-off wiki_fts dedupe complete (PROJ-816)", {
+			deleted: result.meta.changes ?? 0,
+		});
+	} catch (err) {
+		console.error("one-off wiki_fts dedupe failed (PROJ-816)", {
+			err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+		});
+	}
 }
 
 // PROJ-869: retention for tables that grow forever and are never pruned otherwise —
-// wiki_notifications, released issue_leases, ended agent_sessions, and the activity log.
-// wiki_revisions is deliberately left untouched (page history is a product decision, not
-// covered by this ticket).
+// wiki_notifications, ended agent_sessions (that no issue_leases row references — see
+// below), and the activity log. wiki_revisions is deliberately left untouched (page
+// history is a product decision, not covered by this ticket).
+//
+// issue_leases is deliberately NEVER pruned by age (post-review correction to this
+// ticket): flow metrics (get_flow_metrics) read issue_leases for lease-held time and lease
+// expiries, so deleting a released lease after 90 days would silently zero out autonomy
+// ratio, flow efficiency and lease-expiry counts for any reporting window older than that.
+// There is no env var for this category — it isn't a knob, it's "never".
 //
 // Each category runs a small, independent `DELETE ... WHERE rowid IN (SELECT rowid ...
 // LIMIT chunkSize)` loop rather than one unbounded DELETE: a workspace that's never had
@@ -521,14 +564,37 @@ export async function purgeExpiredRetentionData(env: Env): Promise<void> {
 	console.log("scheduled retention purge complete", { deleted: counts, failed: failures });
 }
 
-// PROJ-659 review checkpoint: KV keeps a record per authorization code, access token and
-// refresh token. Codes are spent in seconds and tokens rotate roughly hourly, so without
-// this the namespace grows forever with material that is already dead. Runs on the same
-// schedule as the wiki trash purge and swallows its own failure — a housekeeping pass is
-// never a reason to fail the cron and skip the work after it.
+// PROJ-865 (post-review correction): @cloudflare/workers-oauth-provider 0.10.3's
+// purgeExpiredData has no cross-invocation cursor AND no cross-CALL cursor either — every
+// call re-lists KV from the start of the "grant:" prefix, and `done` is only true once
+// BOTH the grant phase and the token phase complete inside that one call (verified against
+// node_modules/@cloudflare/workers-oauth-provider's source). A workspace with more than
+// `batchSize` live grants therefore never finishes the grant phase in a single call, so
+// `done` is always false and the "token:" phase is never even reached — looping this call
+// in-process (the previous version of this function) just re-lists the same unpurged
+// grants from scratch every iteration, burning this invocation's shared subrequest budget
+// (see WIKI_TRASH_SUBREQUEST_BUDGET below, which shares the same cron fire) for no
+// additional progress. The correct mitigation at this layer is a single call per run with
+// a modest batchSize; `done:false` on a busy install is expected steady-state, not an
+// error. True cross-run resumability (finishing the token phase even when there are many
+// live grants) needs a purge we own — a persisted `kv.list` cursor plus the library's
+// revoke helper — which is out of scope here and tracked as a follow-up ticket. Swallows
+// its own failure — a housekeeping pass is never a reason to fail the cron and skip the
+// work after it.
+const OAUTH_PURGE_BATCH_SIZE = 200;
+
 export async function purgeExpiredOAuthData(env: Env): Promise<void> {
 	try {
-		await oauthProvider.purgeExpiredData(env);
+		const result = await oauthProvider.purgeExpiredData(env, {
+			batchSize: OAUTH_PURGE_BATCH_SIZE,
+		});
+		// done:false here just means more than a batch's worth of live grants exist — expected
+		// and fine, since the next scheduled run picks up the remaining purgeable rows.
+		console.log("scheduled OAuth purge complete", {
+			done: result.done,
+			grantsPurged: result.grantsPurged,
+			tokensPurged: result.tokensPurged,
+		});
 	} catch (err) {
 		console.error("scheduled OAuth purge failed", {
 			err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
@@ -536,26 +602,219 @@ export async function purgeExpiredOAuthData(env: Env): Promise<void> {
 	}
 }
 
+// PROJ-865: KV key holding the workspace ids still owed a trash-purge pass from a run
+// that hit its subrequest budget before finishing all of them — the next invocation
+// resumes from this list instead of re-running the "find expired trash" query (which
+// would just rediscover the same still-unpurged workspaces, at the cost of the query
+// itself, so this is an optimization more than a correctness requirement).
+const WIKI_TRASH_PURGE_CURSOR_KV_KEY = "cron:wiki-trash-purge:cursor";
+// Conservative budget, well under the Workers per-invocation subrequest ceiling (1,000)
+// — this cron shares the invocation with the OAuth and retention purges above. Counted
+// via wrapD1WithBudget/wrapR2WithBudget below, which count each real D1 statement
+// execution and each R2 call (batched or not) as one subrequest, matching how Cloudflare
+// bills them.
+const WIKI_TRASH_SUBREQUEST_BUDGET = 100;
+// Once fewer than this many are left in the budget, stop STARTING another purge call —
+// purgeExpiredWikiPages isn't internally preemptible, so this is sized to cover one
+// call at its default page limit (measured ~40 subrequests), keeping the run within
+// WIKI_TRASH_SUBREQUEST_BUDGET.
+const WIKI_TRASH_MIN_BUDGET_TO_START_WORKSPACE = 45;
+
+function createSubrequestBudget(limit: number) {
+	let used = 0;
+	return {
+		spend(n = 1): void {
+			used += n;
+		},
+		remaining(): number {
+			return limit - used;
+		},
+		used(): number {
+			return used;
+		},
+	};
+}
+type SubrequestBudget = ReturnType<typeof createSubrequestBudget>;
+
+// Counts one subrequest per real D1 round trip (`.all()`/`.first()`/`.raw()`/`.run()`,
+// and `.batch()` as one regardless of how many statements it carries, matching how D1
+// bills a batch). A Proxy rather than a wrapper object so every drizzle/raw-SQL call site
+// in the wrapped services keeps working unmodified.
+function wrapD1WithBudget(db: D1Database, budget: SubrequestBudget): D1Database {
+	const READ_METHODS = new Set(["all", "first", "raw", "run"]);
+	return new Proxy(db, {
+		get(dbTarget, dbProp, dbReceiver) {
+			if (dbProp === "prepare") {
+				return (sql: string) => {
+					const stmt = Reflect.get(dbTarget, "prepare", dbReceiver).call(dbTarget, sql);
+					return new Proxy(stmt, {
+						get(stmtTarget, stmtProp, stmtReceiver) {
+							if (stmtProp === "bind") {
+								return (...args: unknown[]) => {
+									const bound = Reflect.get(stmtTarget, "bind", stmtReceiver).call(
+										stmtTarget,
+										...args
+									);
+									return new Proxy(bound, {
+										get(boundTarget, boundProp, boundReceiver) {
+											const orig = Reflect.get(boundTarget, boundProp, boundReceiver);
+											if (typeof boundProp === "string" && READ_METHODS.has(boundProp)) {
+												return async (...a: unknown[]) => {
+													budget.spend(1);
+													return await orig.apply(boundTarget, a);
+												};
+											}
+											return typeof orig === "function" ? orig.bind(boundTarget) : orig;
+										},
+									});
+								};
+							}
+							const orig = Reflect.get(stmtTarget, stmtProp, stmtReceiver);
+							return typeof orig === "function" ? orig.bind(stmtTarget) : orig;
+						},
+					});
+				};
+			}
+			if (dbProp === "batch") {
+				return async (statements: D1PreparedStatement[]) => {
+					budget.spend(1);
+					return await Reflect.get(dbTarget, "batch", dbReceiver).call(dbTarget, statements);
+				};
+			}
+			const orig = Reflect.get(dbTarget, dbProp, dbReceiver);
+			return typeof orig === "function" ? orig.bind(dbTarget) : orig;
+		},
+	});
+}
+
+// Counts one subrequest per method call — used for both R2 (delete/put/get) and KV
+// (get/put/delete), which don't have D1's prepare/bind/execute split.
+function wrapCallsWithBudget<T extends object>(target: T, budget: SubrequestBudget): T {
+	return new Proxy(target, {
+		get(t, prop, receiver) {
+			const orig = Reflect.get(t, prop, receiver);
+			if (typeof orig !== "function") return orig;
+			return (...args: unknown[]) => {
+				budget.spend(1);
+				return orig.apply(t, args);
+			};
+		},
+	});
+}
+
+async function loadWikiTrashPurgeCursor(kv: KVNamespace): Promise<string[] | null> {
+	const raw = await kv.get(WIKI_TRASH_PURGE_CURSOR_KV_KEY);
+	if (!raw) return null;
+	try {
+		const parsed = JSON.parse(raw) as { workspaceIds?: unknown };
+		return Array.isArray(parsed.workspaceIds)
+			? parsed.workspaceIds.filter((id): id is string => typeof id === "string")
+			: null;
+	} catch {
+		return null;
+	}
+}
+
+async function saveWikiTrashPurgeCursor(
+	kv: KVNamespace,
+	remainingWorkspaceIds: string[]
+): Promise<void> {
+	if (remainingWorkspaceIds.length === 0) {
+		await kv.delete(WIKI_TRASH_PURGE_CURSOR_KV_KEY);
+	} else {
+		await kv.put(
+			WIKI_TRASH_PURGE_CURSOR_KV_KEY,
+			JSON.stringify({ workspaceIds: remainingWorkspaceIds })
+		);
+	}
+}
+
+// PROJ-865: single query for workspaces that actually have expired trash, instead of
+// iterating every workspace and running a per-workspace SELECT that finds nothing for
+// the (usually large) majority with none.
+async function findWorkspacesWithExpiredTrash(db: D1Database): Promise<string[]> {
+	const cutoff = Math.floor(Date.now() / 1000) - WIKI_TRASH_RETENTION_SECONDS;
+	const { results } = await db
+		.prepare(
+			"SELECT DISTINCT workspace_id AS id FROM wiki_pages WHERE deleted_at IS NOT NULL AND deleted_at < ?"
+		)
+		.bind(cutoff)
+		.all<{ id: string }>();
+	return (results ?? []).map((r) => r.id);
+}
+
+// PROJ-865: bounded per invocation via a subrequest budget (see WIKI_TRASH_SUBREQUEST_
+// BUDGET) and a KV-persisted cursor of remaining workspace ids — a run that can't get
+// through every workspace with expired trash stops cleanly and picks up where it left
+// off on the next scheduled fire, rather than either doing unbounded work or silently
+// dropping the workspaces it didn't get to (the pre-PROJ-865 behavior: iterate every
+// workspace unconditionally, `console.error` any failure, and never revisit skipped
+// ones). Failures are counted, not logged per workspace, and surfaced in the one summary
+// line at the end.
 export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void> {
-	const { results } = await env.DB.prepare("SELECT id FROM workspaces").all<{ id: string }>();
-	for (const { id } of results ?? []) {
+	// PROJ-865: the budget covers this function's own KV cursor read and the "find
+	// workspaces" query too, not just the per-workspace purge loop below — those are real
+	// subrequests against the same invocation's ceiling.
+	const budget = createSubrequestBudget(WIKI_TRASH_SUBREQUEST_BUDGET);
+	const budgetedKv = wrapCallsWithBudget(env.KV, budget);
+	const cursor = await loadWikiTrashPurgeCursor(budgetedKv);
+	// Always merge a fresh "who has expired trash" read into the saved cursor (cursor order
+	// first), so a workspace that keeps failing or draining can't stop new workspaces from
+	// ever being picked up.
+	const fresh = await findWorkspacesWithExpiredTrash(wrapD1WithBudget(env.DB, budget));
+	const remaining = [...new Set([...(cursor ?? []), ...fresh])];
+	let purged = 0;
+	let failed = 0;
+
+	// PROJ-865: round-robin while budget remains. A workspace that still has expired pages
+	// after one bounded call (moreExpired) goes to the back of the queue, so one huge
+	// workspace can't hold everyone else's trash hostage; it keeps draining on later turns
+	// and later runs. A workspace that fails goes to the back too and isn't retried again
+	// this invocation (it stays in the cursor for the next run).
+	const failedThisRun = new Set<string>();
+	while (remaining.length > 0 && budget.remaining() >= WIKI_TRASH_MIN_BUDGET_TO_START_WORKSPACE) {
+		const id = remaining[0] as string;
+		if (failedThisRun.has(id)) {
+			if (remaining.every((r) => failedThisRun.has(r))) break;
+			remaining.push(remaining.shift() as string);
+			continue;
+		}
+		const usedBefore = budget.used();
 		const serviceCtx: ServiceCtx = {
-			db: env.DB,
+			db: wrapD1WithBudget(env.DB, budget),
 			kv: env.KV,
-			r2: env.R2,
+			r2: wrapCallsWithBudget(env.R2, budget),
 			workspaceId: id,
 			userId: "cron",
 			role: "owner",
 		};
 		try {
-			await purgeExpiredWikiPages(serviceCtx);
+			const result = await purgeExpiredWikiPages(serviceCtx);
+			purged++;
+			if (result.moreExpired) remaining.push(remaining.shift() as string);
+			else remaining.shift();
 		} catch (err) {
-			console.error("scheduled wiki trash purge failed", {
+			failed++;
+			failedThisRun.add(id);
+			console.error("scheduled wiki trash purge failed for one workspace", {
 				workspaceId: id,
 				err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
 			});
+			remaining.push(remaining.shift() as string);
 		}
+		// Every purge call spends subrequests; if one somehow didn't, stop rather than spin.
+		if (budget.used() === usedBefore) break;
 	}
+
+	await saveWikiTrashPurgeCursor(budgetedKv, remaining);
+
+	// PROJ-865: one summary log line with counts, not per-workspace noise on the happy path.
+	console.log("scheduled wiki trash purge complete", {
+		purgedWorkspaces: purged,
+		failedWorkspaces: failed,
+		remainingWorkspaces: remaining.length,
+		subrequestsUsed: budget.used(),
+	});
 }
 
 // `satisfies ExportedHandler<Env>` is load-bearing, not decoration: without it the

@@ -130,7 +130,9 @@ export const RESERVED_WIKI_SLUGS: ReadonlySet<string> = new Set([
 
 // PROJ-496 (R14): 30-day trash retention — purgeExpiredWikiPages permanently removes a
 // page (and its R2 attachments) once it's been soft-deleted for at least this long.
-const WIKI_TRASH_RETENTION_SECONDS = 30 * 24 * 60 * 60;
+// PROJ-865: exported so index.ts's cron can find which workspaces have expired trash
+// with the same cutoff, without duplicating the constant.
+export const WIKI_TRASH_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 
 // PROJ-526: caps the deletedPageIds list written into a cascade delete's activity row —
 // an unbounded BFS result (collectDescendantIds has no depth/count limit) would otherwise
@@ -2402,6 +2404,12 @@ async function collectCascadeTrashedDescendantIds(
 // entityId=pageId) aren't covered by the FK cascade on linkedWikiPageId — that column is
 // only set for wiki_ref pointer attachments elsewhere that link to this page. Delete the
 // R2 objects before dropping the rows, mirroring mcp/files.ts's delete_attachment handler.
+// PROJ-865: R2 accepts up to 1,000 keys per delete() call — batch into arrays instead
+// of one subrequest per file. `workspace_id` is included on both the select and the two
+// deletes below: `attachments` has no other index that narrows a purge-scale scan, so an
+// unscoped query here was effectively `SCAN attachments` across every tenant.
+const R2_DELETE_BATCH_SIZE = 1000;
+
 async function deleteWikiPageAttachments(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle<typeof schema>>,
@@ -2412,19 +2420,22 @@ async function deleteWikiPageAttachments(
 		.from(schema.attachments)
 		.where(
 			and(
+				eq(schema.attachments.workspaceId, ctx.workspaceId),
 				eq(schema.attachments.entityType, "wiki_page"),
 				inArray(schema.attachments.entityId, pageIds),
 				eq(schema.attachments.kind, "file")
 			)
 		);
-	for (const { r2Key } of fileAttachments) {
-		if (r2Key) await ctx.r2.delete(r2Key);
+	const r2Keys = fileAttachments.map((a) => a.r2Key).filter((key): key is string => Boolean(key));
+	for (let i = 0; i < r2Keys.length; i += R2_DELETE_BATCH_SIZE) {
+		await ctx.r2.delete(r2Keys.slice(i, i + R2_DELETE_BATCH_SIZE));
 	}
 
 	await orm
 		.delete(schema.attachments)
 		.where(
 			and(
+				eq(schema.attachments.workspaceId, ctx.workspaceId),
 				eq(schema.attachments.entityType, "wiki_page"),
 				inArray(schema.attachments.entityId, pageIds)
 			)
@@ -2433,7 +2444,14 @@ async function deleteWikiPageAttachments(
 	// PROJ-407: mirror the migration's ON DELETE CASCADE at the app level too, since
 	// D1 does not guarantee FK enforcement is on for every connection. wiki_ref pointer
 	// rows have no R2 object (r2Key is "").
-	await orm.delete(schema.attachments).where(inArray(schema.attachments.linkedWikiPageId, pageIds));
+	await orm
+		.delete(schema.attachments)
+		.where(
+			and(
+				eq(schema.attachments.workspaceId, ctx.workspaceId),
+				inArray(schema.attachments.linkedWikiPageId, pageIds)
+			)
+		);
 }
 
 // PROJ-311: workspace-level pages need a workspace admin/owner; a project-scoped
@@ -2818,14 +2836,27 @@ export async function listWikiTrash(ctx: ServiceCtx, input: unknown) {
 // project's grants. Also reachable via a daily Workers Cron Trigger (see the
 // `scheduled` handler in index.ts, which iterates every workspace) in addition to the
 // manual REST/MCP call.
+// PROJ-865: default per-invocation page cap. A workspace with thousands of expired pages
+// would otherwise run this whole function (attachments, FTS, revisions, links, redirects —
+// roughly a dozen D1/R2 calls per page once chunked) unbounded in one cron tick; ~200 pages
+// keeps a single call's cost predictable and lets the cron's KV cursor (index.ts) revisit
+// the same workspace on the next run for the remainder instead of moving on and starving it.
+export const WIKI_TRASH_PURGE_DEFAULT_PAGE_LIMIT = 200;
+
 export async function purgeExpiredWikiPages(
-	ctx: ServiceCtx
-): Promise<{ purgedCount: number; purgedIds: string[] }> {
+	ctx: ServiceCtx,
+	options: { limit?: number } = {}
+): Promise<{ purgedCount: number; purgedIds: string[]; moreExpired: boolean }> {
 	if (!isWorkspaceAdmin(ctx.role)) throw new ForbiddenError("Insufficient permissions");
 
+	const limit = options.limit ?? WIKI_TRASH_PURGE_DEFAULT_PAGE_LIMIT;
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = Math.floor(Date.now() / 1000) - WIKI_TRASH_RETENTION_SECONDS;
-	const expired = await orm
+	// PROJ-865: ORDER BY deleted_at (oldest-expired-first) + LIMIT bounds this call's work;
+	// fetching limit+1 tells us whether more expired pages remain without a second COUNT
+	// query. Oldest-first also means a workspace that's never been purged before works
+	// through its backlog in FIFO order across repeated runs.
+	const expiredPlusOne = await orm
 		.select({ id: schema.wikiPages.id, parentId: schema.wikiPages.parentId })
 		.from(schema.wikiPages)
 		.where(
@@ -2834,9 +2865,13 @@ export async function purgeExpiredWikiPages(
 				isNotNull(schema.wikiPages.deletedAt),
 				lte(schema.wikiPages.deletedAt, cutoff)
 			)
-		);
+		)
+		.orderBy(asc(schema.wikiPages.deletedAt))
+		.limit(limit + 1);
+	const moreExpired = expiredPlusOne.length > limit;
+	const expired = moreExpired ? expiredPlusOne.slice(0, limit) : expiredPlusOne;
 	const ids = expired.map((p) => p.id);
-	if (ids.length === 0) return { purgedCount: 0, purgedIds: [] };
+	if (ids.length === 0) return { purgedCount: 0, purgedIds: [], moreExpired: false };
 
 	// PROJ-238/PROJ-496: a live child can end up pointing at a page that's about to be
 	// purged — e.g. it was cascade-trashed alongside its parent, then undeleted on its
@@ -2855,11 +2890,25 @@ export async function purgeExpiredWikiPages(
 		}
 		return current;
 	};
+	// PROJ-865: one UPDATE per (target, chunk) instead of one per purged page — pages
+	// resolving to the same surviving ancestor (almost always the common case: most
+	// purged batches share few distinct reparent targets) share a single statement, and
+	// `inChunks` still caps each statement's bound `parent_id IN (...)` list at D1's limit.
+	const idsByTarget = new Map<string | null, string[]>();
 	for (const id of ids) {
-		await orm
-			.update(schema.wikiPages)
-			.set({ parentId: resolveReparentTarget(id), version: sql`${schema.wikiPages.version} + 1` })
-			.where(and(eq(schema.wikiPages.parentId, id), isNull(schema.wikiPages.deletedAt)));
+		const target = resolveReparentTarget(id);
+		const group = idsByTarget.get(target);
+		if (group) group.push(id);
+		else idsByTarget.set(target, [id]);
+	}
+	for (const [target, purgedIds] of idsByTarget) {
+		await inChunks(purgedIds, async (chunk) => {
+			await orm
+				.update(schema.wikiPages)
+				.set({ parentId: target, version: sql`${schema.wikiPages.version} + 1` })
+				.where(and(inArray(schema.wikiPages.parentId, chunk), isNull(schema.wikiPages.deletedAt)));
+			return [];
+		});
 	}
 
 	await inChunks(ids, async (chunk) => {
@@ -2897,7 +2946,7 @@ export async function purgeExpiredWikiPages(
 		return [];
 	});
 
-	return { purgedCount: ids.length, purgedIds: ids };
+	return { purgedCount: ids.length, purgedIds: ids, moreExpired };
 }
 
 export async function getWikiTree(ctx: ServiceCtx, input: unknown = {}): Promise<TreeNode[]> {
