@@ -57,7 +57,12 @@ export const fileClaimsTools: MCPTool[] = [
 	},
 	{
 		name: "list_file_claims",
-		description: "List active file claims in the workspace, optionally filtered by issue or path",
+		description:
+			"List active file claims in the workspace, optionally filtered by issue, path or project. " +
+			"Live entries only by default — a claim whose holder has ended, stopped heartbeating, or " +
+			"(for an agentless claim) sat past its TTL is excluded; pass includeStale:true for all. " +
+			'Each entry carries the linked issue\'s ref (e.g. "PROJ-857") as issueRef, and a `live` ' +
+			"flag (false when the claim is reclaimable — only possible with includeStale:true).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -66,6 +71,16 @@ export const fileClaimsTools: MCPTool[] = [
 					type: "string",
 					description:
 						"Filter by exact file path — shows who holds this file across issues (optional)",
+				},
+				projectId: {
+					type: "string",
+					description:
+						"Filter to claims on issues in this project — UUID or project key (optional)",
+				},
+				includeStale: {
+					type: "boolean",
+					description:
+						"Include claims whose holder has ended, gone stale, or (agentless) passed its TTL (default: false — live entries only)",
 				},
 			},
 		},

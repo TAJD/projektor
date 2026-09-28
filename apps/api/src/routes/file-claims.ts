@@ -9,9 +9,9 @@ const router = new Hono<HonoEnv>();
 
 router.get("/", async (c) => {
 	const ctx = ctxFromHono(c);
-	const { issueId, path } = c.req.query();
+	const { issueId, path, projectId, includeStale } = c.req.query();
 	try {
-		return c.json(await listFileClaims(ctx, { issueId, path }));
+		return c.json(await listFileClaims(ctx, { issueId, path, projectId, includeStale }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

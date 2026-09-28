@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedIssueFixture } from "./helpers";
+import { authHeaders, seedFixture, seedIssue, seedIssueFixture, seedProject } from "./helpers";
 
 describe("File Claims API", () => {
 	let token: string;
@@ -552,7 +552,9 @@ describe("File Claims API", () => {
 			const issue2 = await seedIssue(workspaceId, projectId, userId, { title: "Live" });
 			await claimFiles({ issueId: issue2.id, agentId: live, paths: ["src/listed-live.ts"] });
 
-			const listRes = await listFileClaims();
+			// PROJ-932: the default listing excludes stale holders outright — pass
+			// includeStale to see both, still flagged via `live`.
+			const listRes = await listFileClaims({ includeStale: "true" });
 			const body = (await listRes.json()) as { items: Array<{ path: string; live: boolean }> };
 			const byPath = new Map(body.items.map((i) => [i.path, i.live]));
 			expect(byPath.get("src/listed-dead.ts")).toBe(false);
@@ -687,5 +689,156 @@ describe("File Claims API", () => {
 			const listBody = (await listRes.json()) as { items: Array<unknown> };
 			expect(listBody.items).toHaveLength(1);
 		});
+	});
+
+	// PROJ-932: list_file_claims defaults to live entries only; projectId scopes to one
+	// project (key or uuid); every item carries the linked issue's ref.
+	describe("PROJ-932: projectId filter and issueRef", () => {
+		const projectKey = "PROJ"; // seedProject's default key
+
+		it("every item carries the issue's issueRef", async () => {
+			await claimFiles({ issueId, paths: ["src/ref-check.ts"] });
+
+			const issueRow = await env.DB.prepare("SELECT number FROM issues WHERE id = ?")
+				.bind(issueId)
+				.first<{ number: number }>();
+
+			const listRes = await listFileClaims({ path: "src/ref-check.ts" });
+			const body = (await listRes.json()) as { items: Array<{ issueRef: string }> };
+			expect(body.items).toHaveLength(1);
+			expect(body.items[0].issueRef).toBe(`${projectKey}-${issueRow?.number}`);
+		});
+
+		// projectId must exclude a claim in a SECOND project in the SAME workspace, not just
+		// a claim that happens to live in another workspace (which the plain visibility
+		// filter would already have excluded, passing even with the filter absent).
+		it("projectId filters to the granted project's claim, excluding a second same-workspace project's (by key and uuid)", async () => {
+			const otherProject = await seedProject(workspaceId, "OTHR");
+			const otherIssue = await seedIssue(workspaceId, otherProject.id, userId, {
+				title: "Other project",
+			});
+
+			await claimFiles({ issueId, paths: ["src/in-project.ts"] });
+			await claimFiles({ issueId: otherIssue.id, paths: ["src/in-other.ts"] });
+
+			const byKey = await listFileClaims({ projectId: projectKey });
+			const byKeyPaths = ((await byKey.json()) as { items: Array<{ path: string }> }).items.map(
+				(i) => i.path
+			);
+			expect(byKeyPaths).toContain("src/in-project.ts");
+			expect(byKeyPaths).not.toContain("src/in-other.ts");
+
+			const byUuid = await listFileClaims({ projectId });
+			const byUuidPaths = ((await byUuid.json()) as { items: Array<{ path: string }> }).items.map(
+				(i) => i.path
+			);
+			expect(byUuidPaths).toContain("src/in-project.ts");
+			expect(byUuidPaths).not.toContain("src/in-other.ts");
+		});
+
+		it("REST parity: GET /api/file-claims accepts includeStale and projectId", async () => {
+			await claimFiles({ issueId, paths: ["src/rest-parity.ts"] });
+
+			const byKey = await listFileClaims({ projectId: projectKey });
+			const byKeyBody = (await byKey.json()) as { items: Array<{ path: string }> };
+			expect(byKeyBody.items.map((i) => i.path)).toContain("src/rest-parity.ts");
+
+			const stale = await listFileClaims({ includeStale: "true" });
+			expect(stale.status).toBe(200);
+		});
+	});
+
+	// PROJ-932: default listing excludes a stale-holder claim regardless of holder shape
+	// (agent-linked vs agentless); includeStale restores it. Both cases fail if the
+	// `if (!includeStale)` filter in listFileClaims is removed.
+	describe("PROJ-932: default excludes stale/expired claims; includeStale includes them", () => {
+		async function seedStaleAgentSession(): Promise<string> {
+			const id = crypto.randomUUID();
+			const now = Math.floor(Date.now() / 1000);
+			await env.DB.prepare(
+				`INSERT INTO agent_sessions
+				   (id, workspace_id, issue_id, token_id, name, kind, status, started_at, last_heartbeat_at, ended_at)
+				 VALUES (?, ?, NULL, NULL, ?, 'agent', 'active', ?, ?, NULL)`
+			)
+				.bind(id, workspaceId, "stale-session-932", now, now - 200) // 200s > the 120s TTL
+				.run();
+			return id;
+		}
+
+		it("excludes an agent-linked claim whose session heartbeat is stale; includeStale:true includes it, flagged live:false", async () => {
+			const dead = await seedStaleAgentSession();
+			expect(
+				(await claimFiles({ issueId, agentId: dead, paths: ["src/stale-agent-932.ts"] })).status
+			).toBe(201);
+
+			const withoutFlag = await listFileClaims({ path: "src/stale-agent-932.ts" });
+			expect(((await withoutFlag.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+			const withFlag = await listFileClaims({
+				path: "src/stale-agent-932.ts",
+				includeStale: "true",
+			});
+			const withBody = (await withFlag.json()) as { items: Array<{ live: boolean }> };
+			expect(withBody.items).toHaveLength(1);
+			expect(withBody.items[0].live).toBe(false);
+		});
+
+		it("excludes an agentless claim past the file-claim TTL; includeStale:true includes it, flagged live:false", async () => {
+			expect((await claimFiles({ issueId, paths: ["src/expired-agentless-932.ts"] })).status).toBe(
+				201
+			);
+			await env.DB.prepare(
+				"UPDATE issue_file_claims SET claimed_at = ? WHERE path = ? AND workspace_id = ?"
+			)
+				.bind(
+					Math.floor(Date.now() / 1000) - (24 * 60 * 60 + 1), // past the default 24h TTL
+					"src/expired-agentless-932.ts",
+					workspaceId
+				)
+				.run();
+
+			const withoutFlag = await listFileClaims({ path: "src/expired-agentless-932.ts" });
+			expect(((await withoutFlag.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+			const withFlag = await listFileClaims({
+				path: "src/expired-agentless-932.ts",
+				includeStale: "true",
+			});
+			const withBody = (await withFlag.json()) as { items: Array<{ live: boolean }> };
+			expect(withBody.items).toHaveLength(1);
+			expect(withBody.items[0].live).toBe(false);
+		});
+	});
+});
+
+// PROJ-932: a member without a group grant on a project must get an empty result for
+// that project's key or uuid — not just fewer results, none at all — proving the
+// projectId filter composes with (rather than bypasses) PROJ-316 visibility.
+describe("PROJ-932: list_file_claims projectId + visibility for a non-admin member", () => {
+	it("a hidden project's key or uuid returns no claims", async () => {
+		const { token, slug, workspaceId, userId } = await seedIssueFixture({ role: "member" });
+		const hidden = await seedProject(workspaceId, "HIDN");
+		// No group grant for `userId` on `hidden` — it stays invisible to them.
+		const hiddenIssue = await seedIssue(workspaceId, hidden.id, userId, { title: "Hidden" });
+
+		const claimRes = await SELF.fetch("http://localhost/api/file-claims", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ issueId: hiddenIssue.id, paths: ["hidden/secret.ts"] }),
+		});
+		expect(claimRes.status).toBe(201);
+
+		async function list(params: Record<string, string>) {
+			const qs = new URLSearchParams(params).toString();
+			return SELF.fetch(`http://localhost/api/file-claims?${qs}`, {
+				headers: authHeaders(token, slug),
+			});
+		}
+
+		const byKey = await list({ projectId: "HIDN" });
+		expect(((await byKey.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+		const byUuid = await list({ projectId: hidden.id });
+		expect(((await byUuid.json()) as { items: unknown[] }).items).toHaveLength(0);
 	});
 });

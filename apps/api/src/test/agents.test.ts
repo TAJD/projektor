@@ -2,7 +2,14 @@ import { env, SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startWork as startWorkDirect } from "../services/agents";
 import type { ServiceCtx } from "../services/types";
-import { authHeaders, seedFixture, seedIssue, seedProjectFixture } from "./helpers";
+import {
+	authHeaders,
+	seedFixture,
+	seedGroupGrant,
+	seedIssue,
+	seedProject,
+	seedProjectFixture,
+} from "./helpers";
 
 describe("Agents API", () => {
 	let token: string;
@@ -488,6 +495,131 @@ describe("Agents API", () => {
 				headers: authHeaders(token, slug),
 			});
 			expect(end.status).toBe(200);
+		});
+	});
+
+	// PROJ-932: list_active_agents defaults to live entries only; includeStale widens the
+	// heartbeat check but never returns an ended session; projectId scopes to one project
+	// (key or uuid) via the linked issue; every item carries `live`, and a linked item
+	// carries issueRef.
+	describe("PROJ-932: live-only default, includeStale, projectId, issueRef, live flag", () => {
+		const projectKey = "PROJ"; // seedProject's default key
+
+		function backdateHeartbeat(agentId: string, secondsAgo = 200) {
+			const stale = Math.floor(Date.now() / 1000) - secondsAgo;
+			return env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+				.bind(stale, agentId)
+				.run();
+		}
+
+		async function listAgents(params: Record<string, string> = {}) {
+			const qs = new URLSearchParams(params).toString();
+			return SELF.fetch(`http://localhost/api/agents${qs ? `?${qs}` : ""}`, {
+				headers: authHeaders(token, slug),
+			});
+		}
+
+		it("excludes a session with a stale heartbeat by default; includeStale:true includes it, flagged live:false", async () => {
+			const res = await registerAgent({ name: "stale-agent-932" });
+			const session = (await res.json()) as { id: string };
+			await backdateHeartbeat(session.id);
+
+			const withoutFlag = await listAgents();
+			const withoutBody = (await withoutFlag.json()) as { items: Array<{ id: string }> };
+			expect(withoutBody.items.some((s) => s.id === session.id)).toBe(false);
+
+			const withFlag = await listAgents({ includeStale: "true" });
+			const withBody = (await withFlag.json()) as { items: Array<{ id: string; live: boolean }> };
+			const item = withBody.items.find((s) => s.id === session.id);
+			expect(item).toBeDefined();
+			expect(item?.live).toBe(false);
+		});
+
+		// includeStale widens the heartbeat check on an *active* session; it must never reach
+		// into ended sessions, which end_agent explicitly moves out of the pool for good.
+		it("never returns an ended session, with or without includeStale", async () => {
+			const res = await registerAgent({ name: "ended-agent-932" });
+			const session = (await res.json()) as { id: string };
+			await SELF.fetch(`http://localhost/api/agents/${session.id}/end`, {
+				method: "POST",
+				headers: authHeaders(token, slug),
+			});
+
+			const withoutFlag = await listAgents();
+			const withoutBody = (await withoutFlag.json()) as { items: Array<{ id: string }> };
+			expect(withoutBody.items.some((s) => s.id === session.id)).toBe(false);
+
+			const withFlag = await listAgents({ includeStale: "true" });
+			const withBody = (await withFlag.json()) as { items: Array<{ id: string }> };
+			expect(withBody.items.some((s) => s.id === session.id)).toBe(false);
+		});
+
+		it("a fresh session is flagged live:true", async () => {
+			const res = await registerAgent({ name: "fresh-agent-932" });
+			const session = (await res.json()) as { id: string };
+
+			const listRes = await listAgents();
+			const body = (await listRes.json()) as { items: Array<{ id: string; live: boolean }> };
+			expect(body.items.find((s) => s.id === session.id)?.live).toBe(true);
+		});
+
+		it("carries the linked issue's issueRef; null when unlinked", async () => {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Linked" });
+			const linked = await registerAgent({ name: "linked-932", issueId: issue.id });
+			const linkedSession = (await linked.json()) as { id: string };
+			const unlinked = await registerAgent({ name: "unlinked-932" });
+			const unlinkedSession = (await unlinked.json()) as { id: string };
+
+			const res = await listAgents();
+			const body = (await res.json()) as {
+				items: Array<{ id: string; issueRef: string | null }>;
+			};
+			const byId = new Map(body.items.map((s) => [s.id, s.issueRef]));
+			expect(byId.get(linkedSession.id)).toBe(`${projectKey}-${issue.number}`);
+			expect(byId.get(unlinkedSession.id)).toBeNull();
+		});
+
+		// The fixture project is the only one the fixture user (role: member) has a grant
+		// on; a second project in the SAME workspace, also granted, proves the projectId
+		// filter itself excludes the other project's sessions — not merely visibility.
+		it("projectId filters to the granted project's sessions, excluding a second same-workspace project's (by key and uuid)", async () => {
+			const otherProject = await seedProject(workspaceId, "OTHR");
+			await seedGroupGrant(workspaceId, userId, otherProject.id, "member");
+
+			const issueA = await seedIssue(workspaceId, projectId, userId, { title: "In A" });
+			const linkedA = await registerAgent({ name: "linked-a-932", issueId: issueA.id });
+			const linkedASession = (await linkedA.json()) as { id: string };
+
+			const issueB = await seedIssue(workspaceId, otherProject.id, userId, { title: "In B" });
+			const linkedB = await registerAgent({ name: "linked-b-932", issueId: issueB.id });
+			const linkedBSession = (await linkedB.json()) as { id: string };
+
+			const byKey = await listAgents({ projectId: projectKey });
+			const byKeyIds = ((await byKey.json()) as { items: Array<{ id: string }> }).items.map(
+				(s) => s.id
+			);
+			expect(byKeyIds).toContain(linkedASession.id);
+			expect(byKeyIds).not.toContain(linkedBSession.id);
+
+			const byUuid = await listAgents({ projectId });
+			const byUuidIds = ((await byUuid.json()) as { items: Array<{ id: string }> }).items.map(
+				(s) => s.id
+			);
+			expect(byUuidIds).toContain(linkedASession.id);
+			expect(byUuidIds).not.toContain(linkedBSession.id);
+		});
+
+		it("a member with no grant on a project gets an empty result for that project's key or uuid", async () => {
+			const hidden = await seedProject(workspaceId, "HIDN");
+			// No seedGroupGrant for `userId` on `hidden` — it stays invisible to them.
+			const issue = await seedIssue(workspaceId, hidden.id, userId, { title: "Hidden" });
+			await registerAgent({ name: "hidden-agent-932", issueId: issue.id });
+
+			const byKey = await listAgents({ projectId: "HIDN" });
+			expect(((await byKey.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+			const byUuid = await listAgents({ projectId: hidden.id });
+			expect(((await byUuid.json()) as { items: unknown[] }).items).toHaveLength(0);
 		});
 	});
 });

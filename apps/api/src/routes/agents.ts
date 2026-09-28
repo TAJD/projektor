@@ -35,9 +35,9 @@ router.post("/finish-work", async (c) => {
 
 router.get("/", async (c) => {
 	const ctx = ctxFromHono(c);
-	const { issueId } = c.req.query();
+	const { issueId, projectId, includeStale } = c.req.query();
 	try {
-		return c.json(await listActiveAgents(ctx, { issueId }));
+		return c.json(await listActiveAgents(ctx, { issueId, projectId, includeStale }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import {
 	ClaimIssueSchema,
 	ListIssueLeasesSchema,
@@ -7,6 +7,7 @@ import {
 } from "../schemas/issue-leases";
 import { visibleProjectPredicate } from "./access";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import type { ServiceCtx } from "./types";
 
@@ -485,13 +486,22 @@ export async function isLiveAgentSessionId(
 
 /**
  * List active leases (released_at IS NULL) in the workspace, optionally scoped
- * to an issue or agent. Each row carries a `live` flag (false = the holder
- * stopped heartbeating and the lease is reclaimable).
+ * to an issue, agent or project. Each row carries a `live` flag (false = the
+ * holder stopped heartbeating and the lease is reclaimable) and the linked
+ * issue's display ref (issueRef, e.g. "PROJ-857").
+ *
+ * PROJ-932: defaults to live entries only — an unreleased lease whose agent
+ * session has gone stale (ended, or heartbeat past the TTL) is excluded unless
+ * `includeStale` is set, restoring the pre-PROJ-932 behaviour of returning
+ * every unreleased lease regardless of session health.
  */
 export async function listIssueLeases(ctx: ServiceCtx, raw: unknown) {
 	const result = ListIssueLeasesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, agentId } = result.data;
+	const { issueId, agentId, includeStale } = result.data;
+	const projectId = result.data.projectId
+		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
+		: undefined;
 
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = liveCutoff();
@@ -502,13 +512,17 @@ export async function listIssueLeases(ctx: ServiceCtx, raw: unknown) {
 	];
 	if (issueId) conditions.push(eq(schema.issueLeases.issueId, issueId));
 	if (agentId) conditions.push(eq(schema.issueLeases.agentSessionId, agentId));
+	if (projectId) conditions.push(eq(schema.issues.projectId, projectId));
+	if (!includeStale) {
+		conditions.push(eq(schema.agentSessions.status, "active"));
+		conditions.push(gt(schema.agentSessions.lastHeartbeatAt, cutoff));
+	}
 
 	// PROJ-316: a non-admin member only sees leases on issues whose project they
-	// can access; owner/admin (predicate undefined) see every lease.
-	const vis = visibleProjectPredicate(
-		ctx,
-		sql`(SELECT i.project_id FROM issues i WHERE i.id = ${schema.issueLeases.issueId})`
-	);
+	// can access; owner/admin (predicate undefined) see every lease. Every lease is
+	// joined to its issue below (issue_id is NOT NULL), so the predicate can take the
+	// joined project id column directly instead of a correlated subquery.
+	const vis = visibleProjectPredicate(ctx, schema.issues.projectId);
 	if (vis) conditions.push(vis);
 
 	const rows = await orm
@@ -520,15 +534,26 @@ export async function listIssueLeases(ctx: ServiceCtx, raw: unknown) {
 			claimedAt: schema.issueLeases.claimedAt,
 			sessionStatus: schema.agentSessions.status,
 			sessionHeartbeat: schema.agentSessions.lastHeartbeatAt,
+			projectKey: schema.projects.key,
+			issueNumber: schema.issues.number,
 		})
 		.from(schema.issueLeases)
 		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
+		.innerJoin(
+			schema.issues,
+			and(
+				eq(schema.issueLeases.issueId, schema.issues.id),
+				eq(schema.issues.workspaceId, ctx.workspaceId)
+			)
+		)
+		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 		.where(and(...conditions))
 		.orderBy(schema.issueLeases.claimedAt);
 
 	const items = rows.map((r) => ({
 		id: r.id,
 		issueId: r.issueId,
+		issueRef: `${r.projectKey}-${r.issueNumber}`,
 		agentSessionId: r.agentSessionId,
 		agentName: r.agentName,
 		claimedAt: r.claimedAt,

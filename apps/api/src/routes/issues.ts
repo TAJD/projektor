@@ -190,8 +190,9 @@ router.post("/:id/release", async (c) => {
 
 router.get("/:id/leases", async (c) => {
 	const ctx = ctxFromHono(c);
+	const { includeStale } = c.req.query();
 	try {
-		return c.json(await listIssueLeases(ctx, { issueId: c.req.param("id") }));
+		return c.json(await listIssueLeases(ctx, { issueId: c.req.param("id"), includeStale }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

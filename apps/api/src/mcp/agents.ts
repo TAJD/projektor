@@ -129,11 +129,27 @@ export const agentsTools: MCPTool[] = [
 	},
 	{
 		name: "list_active_agents",
-		description: "List active agent sessions in the workspace, optionally filtered by issue",
+		description:
+			"List agent sessions in the workspace, optionally filtered by issue or project. An ended " +
+			"session is never returned. Live entries only by default — a session that has stopped " +
+			"heartbeating is also excluded; pass includeStale:true to include those too. Each entry " +
+			"carries a `live` flag (false when its heartbeat has gone stale) and, when tied to an issue, " +
+			'that issue\'s ref (e.g. "PROJ-857") as issueRef.',
 		inputSchema: {
 			type: "object",
 			properties: {
 				issueId: { type: "string", description: "Filter by issue UUID (optional)" },
+				projectId: {
+					type: "string",
+					description:
+						"Filter to sessions linked to an issue in this project — UUID or project key. " +
+						"A session with no issue link is excluded when this is given (optional)",
+				},
+				includeStale: {
+					type: "boolean",
+					description:
+						"Include active sessions that have stopped heartbeating (default: false — live entries only). Never includes ended sessions.",
+				},
 			},
 		},
 		annotations: READ,

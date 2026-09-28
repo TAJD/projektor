@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
 import {
 	EndAgentSchema,
 	FinishWorkSchema,
@@ -14,6 +14,7 @@ import { NotFoundError, ValidationError } from "./errors";
 import { claimFiles, releaseClaimsForAgent } from "./file-claims";
 import { claimIssue, releaseLeasesForAgent } from "./issue-leases";
 import { updateIssue } from "./issues";
+import { resolveVisibleProjectIdParam } from "./projects";
 import type { ServiceCtx } from "./types";
 
 const ACTIVE_TTL = 120;
@@ -86,7 +87,7 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
  * always have, unchanged.
  *
  * All-or-nothing with compensating cleanup: D1 has no cross-call interactive
- * transaction (see AGENTS.md), so this is a compensating-action sequence rather than a
+ * transaction, so this is a compensating-action sequence rather than a
  * single atomic write. If claim_issue or claim_files fails after the session was
  * registered, the session is ended immediately (which also releases anything it did
  * manage to claim before the failure), so no live, unaccounted-for session/lease/claim
@@ -230,40 +231,79 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 	return endAgent(ctx, { id: sessionId });
 }
 
+/**
+ * PROJ-932: defaults to live entries only (status='active' AND heartbeat inside the
+ * TTL) — this list was already live-only before PROJ-932; what's new is `includeStale`,
+ * which surfaces a session that is still `active` but has stopped heartbeating (a
+ * crashed agent whose staleness the fleet might want to see). An `ended` session is
+ * never returned, with or without `includeStale` — that flag widens the heartbeat
+ * check, it doesn't reach into ended sessions. Each item carries a `live` boolean
+ * (true when its heartbeat is inside the TTL) and, when linked to an issue, that
+ * issue's display ref (issueRef, e.g. "PROJ-857").
+ */
 export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 	const result = ListActiveAgentsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId } = result.data;
+	const { issueId, includeStale } = result.data;
+	const projectId = result.data.projectId
+		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
+		: undefined;
 
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = Math.floor(Date.now() / 1000) - ACTIVE_TTL;
 
+	// `status='active'` is unconditional — an ended session is never returned, whether or
+	// not includeStale is set. includeStale only lifts the heartbeat-freshness check below.
 	const conditions = [
 		eq(schema.agentSessions.workspaceId, ctx.workspaceId),
 		eq(schema.agentSessions.status, "active"),
-		gt(schema.agentSessions.lastHeartbeatAt, cutoff),
 	];
+	if (!includeStale) {
+		conditions.push(gt(schema.agentSessions.lastHeartbeatAt, cutoff));
+	}
 
 	if (issueId) {
 		conditions.push(eq(schema.agentSessions.issueId, issueId));
 	}
+	// PROJ-932: a session with no issue link has no project to check, so it's excluded
+	// once a projectId filter is given (see the list_active_agents tool description).
+	if (projectId) {
+		conditions.push(eq(schema.issues.projectId, projectId));
+	}
 
 	// PROJ-316: a non-admin member only sees agents working an issue in a project
 	// they can access. Agents not tied to any issue carry no project, so they stay
-	// workspace-visible. Owner/admin (predicate undefined) see every agent.
-	const vis = visibleProjectPredicate(
-		ctx,
-		sql`(SELECT i.project_id FROM issues i WHERE i.id = ${schema.agentSessions.issueId})`
-	);
+	// workspace-visible. Owner/admin (predicate undefined) see every agent. The LEFT
+	// JOIN to issues below lets the predicate take the joined project id column
+	// directly instead of a correlated subquery.
+	const vis = visibleProjectPredicate(ctx, schema.issues.projectId);
 	if (vis) {
 		conditions.push(or(isNull(schema.agentSessions.issueId), vis) ?? vis);
 	}
 
-	const items = await orm
-		.select(AGENT_SESSION_COLUMNS)
+	const rows = await orm
+		.select({
+			...AGENT_SESSION_COLUMNS,
+			projectKey: schema.projects.key,
+			issueNumber: schema.issues.number,
+		})
 		.from(schema.agentSessions)
+		.leftJoin(
+			schema.issues,
+			and(
+				eq(schema.agentSessions.issueId, schema.issues.id),
+				eq(schema.issues.workspaceId, ctx.workspaceId)
+			)
+		)
+		.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 		.where(and(...conditions))
 		.orderBy(desc(schema.agentSessions.startedAt));
+
+	const items = rows.map(({ projectKey, issueNumber, ...session }) => ({
+		...session,
+		issueRef: session.issueId && projectKey ? `${projectKey}-${issueNumber}` : null,
+		live: session.lastHeartbeatAt > cutoff,
+	}));
 
 	return { items };
 }

@@ -47,13 +47,26 @@ export const issueLeasesTools: MCPTool[] = [
 	{
 		name: "list_issue_leases",
 		description:
-			"List active issue leases in the workspace, optionally filtered by issue or agent. Each entry's " +
-			"`live` flag is false when the holder stopped heartbeating (lease is reclaimable).",
+			"List active issue leases in the workspace, optionally filtered by issue, agent or project. " +
+			"Live entries only by default — a lease whose agent session has ended or stopped " +
+			"heartbeating is excluded; pass includeStale:true for all. Each entry carries the linked " +
+			'issue\'s ref (e.g. "PROJ-857") as issueRef, and a `live` flag (false when the holder ' +
+			"stopped heartbeating and the lease is reclaimable — only possible with includeStale:true).",
 		inputSchema: {
 			type: "object",
 			properties: {
 				issueId: { type: "string", description: "Filter to leases on this issue (optional)" },
 				agentId: { type: "string", description: "Filter to leases held by this agent (optional)" },
+				projectId: {
+					type: "string",
+					description:
+						"Filter to leases on issues in this project — UUID or project key (optional)",
+				},
+				includeStale: {
+					type: "boolean",
+					description:
+						"Include leases whose agent session has ended or gone stale (default: false — live entries only)",
+				},
 			},
 		},
 		annotations: READ,
