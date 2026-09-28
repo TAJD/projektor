@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { issuesTools } from "../mcp/issues";
 import { ListIssuesSchema } from "../schemas/issues";
 import {
 	authHeaders,
@@ -2788,6 +2789,15 @@ describe("PROJ-931 — compact MCP responses", () => {
 		};
 		expect(data.items.map((i) => i.id)).toEqual([a.id, b.id]);
 		expect(data.missing).toEqual([missingRef, missingId]);
+	});
+
+	it("every compacting tool's description states the omission contract", () => {
+		for (const name of ["get_issue", "list_issues", "get_issues"]) {
+			const tool = issuesTools.find((t) => t.name === name);
+			expect(tool?.description).toContain(
+				"Omitted keys are null/empty/false; pass verbose:true for the full shape."
+			);
+		}
 	});
 
 	it("verbose/fields wrong types are rejected with -32602 before reaching the service", async () => {
