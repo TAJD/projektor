@@ -1,4 +1,5 @@
 import type { MCPTool } from "@projektor/types";
+import { z } from "zod";
 import { ValidationError } from "../services/errors";
 import {
 	createIssue,
@@ -15,6 +16,10 @@ import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 // PROJ-931: MCP-only response shaping. Applied here (not in the service) so REST keeps
 // returning the full shape unconditionally — the service is the single source of truth
 // for the data, this is presentation for the token-metered MCP surface only.
+// PROJ-931 review: every compacting tool's description must say this verbatim so a
+// caller reading only the tool description (not the source) knows the contract.
+const OMISSION_NOTE = "Omitted keys are null/empty/false; pass verbose:true for the full shape.";
+
 const VERBOSE_FIELDS_PROPS = {
 	verbose: {
 		type: "boolean",
@@ -23,7 +28,9 @@ const VERBOSE_FIELDS_PROPS = {
 	fields: {
 		type: "array",
 		items: { type: "string" },
-		description: "Return only these fields per issue",
+		description:
+			"Return only these fields per issue. Every named field is always present " +
+			"(null if its value would otherwise be omitted) — never a smaller object.",
 	},
 } as const;
 
@@ -61,6 +68,20 @@ const NULLABLE_DEFAULT_KEYS = [
 	"author_kind",
 ] as const;
 
+// True when `value` (found under `key` on an issue) is the empty/default shape PROJ-931
+// omits by default — shared by the whole-object compaction below and by the `fields`
+// allowlist, which needs the same judgment call but must report `null` instead of
+// dropping the key (a caller who explicitly asked for a field must always get it back).
+function isOmittableValue(key: string, value: unknown): boolean {
+	if (value == null) return true;
+	if (key === "links" || key === "customFields") return isEmptyArray(value);
+	if (key === "rollup") return isZeroRollup(value);
+	if (key === "labels") return isEmptyLabels(value);
+	if (key === "status_category") return value === "";
+	if (key === "needs_audit") return value === false || value === 0;
+	return false;
+}
+
 // Strips empty/default noise unless verbose:true, then applies an optional `fields`
 // allowlist. Covers the fields named in PROJ-931's acceptance criteria (empty links,
 // zero rollup, empty customFields, null sprint/assignee/parent, empty labels) plus the
@@ -68,50 +89,64 @@ const NULLABLE_DEFAULT_KEYS = [
 // issue carries (unset type/status/sprint, no completion, needs_audit's false default,
 // author_kind for a human-authored issue) — omitting only the AC's four examples still
 // left get_issue short of the ticket's 40% byte-reduction bar on a typical issue.
+//
+// `fields` always returns every requested key (null in place of an omitted/empty value)
+// rather than dropping it — a caller that asked for `fields: ["assignee_id"]` must never
+// get back `{}` just because this issue happens to have no assignee.
 function shapeIssue(
 	issue: Record<string, unknown>,
 	opts: { verbose?: boolean; fields?: string[] }
 ): Record<string, unknown> {
-	let out = issue;
-	if (!opts.verbose) {
-		out = { ...issue };
-		if (isEmptyArray(out.links)) delete out.links;
-		if (isZeroRollup(out.rollup)) delete out.rollup;
-		if (isEmptyArray(out.customFields)) delete out.customFields;
-		if (out.assignee_id == null) {
-			delete out.assignee_id;
-			delete out.assignee_name;
-		}
-		if (isEmptyLabels(out.labels)) delete out.labels;
-		if (out.status_category === "") delete out.status_category;
-		if (out.needs_audit === false || out.needs_audit === 0) delete out.needs_audit;
-		for (const key of NULLABLE_DEFAULT_KEYS) {
-			if (out[key] == null) delete out[key];
-		}
-	}
 	if (opts.fields && opts.fields.length > 0) {
 		const picked: Record<string, unknown> = {};
 		for (const f of opts.fields) {
-			if (f in out) picked[f] = out[f];
+			const value = issue[f];
+			picked[f] = !opts.verbose && isOmittableValue(f, value) ? null : (value ?? null);
 		}
 		return picked;
+	}
+	if (opts.verbose) return issue;
+
+	const out = { ...issue };
+	if (isEmptyArray(out.links)) delete out.links;
+	if (isZeroRollup(out.rollup)) delete out.rollup;
+	if (isEmptyArray(out.customFields)) delete out.customFields;
+	if (out.assignee_id == null) {
+		delete out.assignee_id;
+		delete out.assignee_name;
+	}
+	if (isEmptyLabels(out.labels)) delete out.labels;
+	if (out.status_category === "") delete out.status_category;
+	if (out.needs_audit === false || out.needs_audit === 0) delete out.needs_audit;
+	for (const key of NULLABLE_DEFAULT_KEYS) {
+		if (out[key] == null) delete out[key];
 	}
 	return out;
 }
 
+// Validated separately from the (`.strict()`) service schemas, which know nothing about
+// these MCP-only options — a wrong type here must still produce a JSON-RPC -32602
+// (invalid params), not silently fall through or crash.
+const ShapeOptsSchema = z.object({
+	verbose: z.boolean().optional(),
+	fields: z.array(z.string()).optional(),
+});
+
 // Pulls the MCP-only verbose/fields options out of the raw tool input before it reaches
-// the (`.strict()`) service schema, which knows nothing about them.
+// the service schema, validating them first.
 function splitShapeOpts(input: unknown): {
 	rest: Record<string, unknown>;
 	verbose?: boolean;
 	fields?: string[];
 } {
 	const { verbose, fields, ...rest } = (input ?? {}) as {
-		verbose?: boolean;
-		fields?: string[];
+		verbose?: unknown;
+		fields?: unknown;
 		[k: string]: unknown;
 	};
-	return { rest, verbose, fields };
+	const result = ShapeOptsSchema.safeParse({ verbose, fields });
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	return { rest, verbose: result.data.verbose, fields: result.data.fields };
 }
 
 export const issuesTools: MCPTool[] = [
@@ -120,7 +155,8 @@ export const issuesTools: MCPTool[] = [
 		description:
 			"List issues in the workspace, optionally filtered by status, priority, project, or assignee. " +
 			"Items omit `body` by default — pass includeBody:true to include it. Pass includeRollups:true " +
-			"to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item.",
+			"to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item. " +
+			OMISSION_NOTE,
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -227,7 +263,7 @@ export const issuesTools: MCPTool[] = [
 	},
 	{
 		name: "get_issue",
-		description: 'Get a single issue by ID or project key + number (e.g. "PROJ-42")',
+		description: `Get a single issue by ID or project key + number (e.g. "PROJ-42"). ${OMISSION_NOTE}`,
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -248,7 +284,9 @@ export const issuesTools: MCPTool[] = [
 		description:
 			"Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than " +
 			"repeated get_issue calls for triage — items are shaped like list_issues (customFields, " +
-			"no rollup/links).",
+			"no rollup/links), returned in the order refs/ids were given. `missing` lists any " +
+			"requested ref/id that didn't resolve or isn't visible to you. " +
+			OMISSION_NOTE,
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -268,8 +306,14 @@ export const issuesTools: MCPTool[] = [
 		annotations: READ,
 		async handler(input, ctx) {
 			const { rest, verbose, fields } = splitShapeOpts(input);
-			const result = (await getIssuesBatch(ctx, rest)) as { items: Record<string, unknown>[] };
-			return { items: result.items.map((i) => shapeIssue(i, { verbose, fields })) };
+			const result = (await getIssuesBatch(ctx, rest)) as {
+				items: Record<string, unknown>[];
+				missing: string[];
+			};
+			return {
+				items: result.items.map((i) => shapeIssue(i, { verbose, fields })),
+				missing: result.missing,
+			};
 		},
 	},
 	{

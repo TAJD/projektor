@@ -2739,10 +2739,73 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(titles).toEqual(["Batch A", "Batch B"]);
 	});
 
+	it("fields:[...] returns null (not stripped) for an omitted/empty field", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Null fields test" });
+		const res = await mcpCall({
+			name: "get_issue",
+			arguments: { id, fields: ["id", "assignee_id", "sprint_id", "links", "rollup"] },
+		});
+		expect(res.error).toBeUndefined();
+		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
+		expect(Object.keys(issue).sort()).toEqual([
+			"assignee_id",
+			"id",
+			"links",
+			"rollup",
+			"sprint_id",
+		]);
+		expect(issue.assignee_id).toBeNull();
+		expect(issue.sprint_id).toBeNull();
+		expect(issue.links).toBeNull();
+		expect(issue.rollup).toBeNull();
+		expect(issue.id).toBe(id);
+	});
+
 	it("get_issues rejects more than 50 combined ids", async () => {
 		const ids = Array.from({ length: 51 }, () => crypto.randomUUID());
 		const res = await mcpCall({ name: "get_issues", arguments: { ids } });
 		expect(res.error).toBeDefined();
+	});
+
+	it("get_issues preserves request order and reports unresolved/invisible refs+ids as missing", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Order A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "Order B" });
+		const row = await env.DB.prepare("SELECT key FROM projects WHERE id = ?")
+			.bind(projectId)
+			.first<{ key: string }>();
+		const refA = `${row!.key}-${a.number}`;
+		const missingRef = `${row!.key}-999999`;
+		const missingId = crypto.randomUUID();
+
+		const res = await mcpCall({
+			name: "get_issues",
+			arguments: { refs: [missingRef, refA], ids: [missingId, b.id] },
+		});
+		expect(res.error).toBeUndefined();
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ id: string }>;
+			missing: string[];
+		};
+		expect(data.items.map((i) => i.id)).toEqual([a.id, b.id]);
+		expect(data.missing).toEqual([missingRef, missingId]);
+	});
+
+	it("verbose/fields wrong types are rejected with -32602 before reaching the service", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Bad opts" });
+		const errorCode = (res: { error?: { message: string } }) =>
+			(res.error as { code?: number } | undefined)?.code;
+
+		const badVerbose = await mcpCall({ name: "get_issue", arguments: { id, verbose: "yes" } });
+		expect(errorCode(badVerbose)).toBe(-32602);
+
+		const badFields = await mcpCall({ name: "get_issue", arguments: { id, fields: "title" } });
+		expect(errorCode(badFields)).toBe(-32602);
+
+		const badFieldsList = await mcpCall({
+			name: "list_issues",
+			arguments: { fields: [1, 2] },
+		});
+		expect(errorCode(badFieldsList)).toBe(-32602);
 	});
 
 	it("REST GET /api/issues/batch has parity with the MCP get_issues tool", async () => {

@@ -647,6 +647,12 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 
+	// PROJ-931 review: preserve the caller's request order (refs first, then ids, exactly
+	// as given) and remember which literal string ("PROJ-42" or a raw id) each resolved id
+	// came from, so an id that fails the visibility check below can still be reported back
+	// under the identifier the caller actually used.
+	const order: Array<{ requested: string; id: string | undefined }> = [];
+
 	const numbersByKey = new Map<string, number[]>();
 	for (const ref of refs) {
 		const m = ref.match(ISSUE_REF_PATTERN);
@@ -660,11 +666,12 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 		numbersByKey.set(m[1], nums);
 	}
 
-	const resolvedIds: string[] = [];
+	// ref -> resolved id, filled in per project key below.
+	const refToId = new Map<string, string>();
 	for (const [key, numbers] of numbersByKey) {
 		const rows = await inChunks(numbers, (chunk) =>
 			orm
-				.select({ id: schema.issues.id })
+				.select({ id: schema.issues.id, number: schema.issues.number })
 				.from(schema.issues)
 				.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 				.where(
@@ -675,38 +682,63 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 					)
 				)
 		);
-		resolvedIds.push(...rows.map((r) => r.id));
+		for (const row of rows) refToId.set(`${key}-${row.number}`, row.id);
+	}
+	for (const ref of refs) order.push({ requested: ref, id: refToId.get(ref) });
+	for (const id of ids) order.push({ requested: id, id });
+
+	const allIds = Array.from(new Set(order.map((o) => o.id).filter((id): id is string => !!id)));
+
+	let rowsById = new Map<string, Record<string, unknown>>();
+	if (allIds.length > 0) {
+		const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
+		const rows = await inChunks(allIds, (chunk) => {
+			const conditions = [
+				inArray(schema.issues.id, chunk),
+				eq(schema.issues.workspaceId, ctx.workspaceId),
+			];
+			if (visible) conditions.push(visible);
+			return orm
+				.select(issueColumns)
+				.from(schema.issues)
+				.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+				.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
+				.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
+				.where(and(...conditions));
+		});
+
+		const issueIds = (rows as Array<{ id: string }>).map((r) => r.id);
+		const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
+		rowsById = new Map(
+			(rows as Array<Record<string, unknown>>).map((r) => [
+				r.id as string,
+				{
+					...r,
+					customFields: customFieldsByIssue[r.id as string] ?? [],
+					url: buildIssueUrl(r),
+				},
+			])
+		);
 	}
 
-	const allIds = Array.from(new Set([...ids, ...resolvedIds]));
-	if (allIds.length === 0) return { items: [] };
+	// One item per distinct resolved+visible id, in first-requested order; every requested
+	// ref/id that didn't resolve to an issue or isn't visible goes to `missing` instead —
+	// under the identifier the caller used, never a resolved-but-invisible id.
+	const items: Record<string, unknown>[] = [];
+	const missing: string[] = [];
+	const seen = new Set<string>();
+	for (const entry of order) {
+		const row = entry.id ? rowsById.get(entry.id) : undefined;
+		if (!row) {
+			missing.push(entry.requested);
+			continue;
+		}
+		if (seen.has(entry.id as string)) continue;
+		seen.add(entry.id as string);
+		items.push(row);
+	}
 
-	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
-	const rows = await inChunks(allIds, (chunk) => {
-		const conditions = [
-			inArray(schema.issues.id, chunk),
-			eq(schema.issues.workspaceId, ctx.workspaceId),
-		];
-		if (visible) conditions.push(visible);
-		return orm
-			.select(issueColumns)
-			.from(schema.issues)
-			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
-			.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
-			.where(and(...conditions));
-	});
-
-	const issueIds = (rows as Array<{ id: string }>).map((r) => r.id);
-	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
-
-	const items = (rows as Array<Record<string, unknown>>).map((r) => ({
-		...r,
-		customFields: customFieldsByIssue[r.id as string] ?? [],
-		url: buildIssueUrl(r),
-	}));
-
-	return { items };
+	return { items, missing };
 }
 
 async function resolveTypeId(
