@@ -7,6 +7,7 @@ import { BooleanQueryParam, IdSchema } from "../schemas/common";
 import {
 	CreateIssueSchema,
 	GetIssueSchema,
+	GetIssuesBatchSchema,
 	ListIssuesSchema,
 	SearchIssuesInputSchema,
 	UpdateIssueSchema,
@@ -629,6 +630,127 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 		url: buildIssueUrl(issueRecord),
 	};
 	return full;
+}
+
+// PROJ-931: fetch up to 50 issues in one call, by ref (KEY-NUMBER) and/or id, for agents
+// triaging many issues at once. Refs are resolved to ids first — one query per distinct
+// project key (batching the numbers for that key via inChunks) since a tuple IN
+// (project_id, number) isn't expressible through drizzle's inArray. The resolved ids are
+// then merged with any explicit ids and fetched in one inChunks-batched query, scoped by
+// workspace and project visibility like every other issue read. Shape matches listIssues'
+// items (customFields, no rollup/links) rather than getIssue's full shape, since loading
+// rollup/links per issue here would be an N+1 the batch is meant to avoid.
+export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
+	const result = GetIssuesBatchSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { refs = [], ids = [], includeBody } = result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+
+	// PROJ-931 review: preserve the caller's request order (refs first, then ids, exactly
+	// as given) and remember which literal string ("PROJ-42" or a raw id) each resolved id
+	// came from, so an id that fails the visibility check below can still be reported back
+	// under the identifier the caller actually used.
+	const order: Array<{ requested: string; id: string | undefined }> = [];
+
+	const numbersByKey = new Map<string, number[]>();
+	for (const ref of refs) {
+		const m = ref.match(ISSUE_REF_PATTERN);
+		if (!m)
+			throw new ValidationError({
+				formErrors: [`Invalid ref: ${ref} (expected KEY-NUMBER)`],
+				fieldErrors: {},
+			});
+		const nums = numbersByKey.get(m[1]) ?? [];
+		nums.push(parseInt(m[2], 10));
+		numbersByKey.set(m[1], nums);
+	}
+	// Canonical lookup key for a ref, so a zero-padded "PROJ-042" matches the resolved
+	// "PROJ-42" the same way single get_issue does.
+	const canonicalRef = (ref: string) => {
+		const m = ref.match(ISSUE_REF_PATTERN) as RegExpMatchArray;
+		return `${m[1]}-${parseInt(m[2], 10)}`;
+	};
+
+	// ref -> resolved id, filled in per project key below.
+	const refToId = new Map<string, string>();
+	for (const [key, numbers] of numbersByKey) {
+		const rows = await inChunks(numbers, (chunk) =>
+			orm
+				.select({ id: schema.issues.id, number: schema.issues.number })
+				.from(schema.issues)
+				.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+				.where(
+					and(
+						eq(schema.projects.key, key),
+						eq(schema.issues.workspaceId, ctx.workspaceId),
+						inArray(schema.issues.number, chunk)
+					)
+				)
+		);
+		for (const row of rows) refToId.set(`${key}-${row.number}`, row.id);
+	}
+	for (const ref of refs) order.push({ requested: ref, id: refToId.get(canonicalRef(ref)) });
+	for (const id of ids) order.push({ requested: id, id });
+
+	const allIds = Array.from(new Set(order.map((o) => o.id).filter((id): id is string => !!id)));
+
+	let rowsById = new Map<string, Record<string, unknown>>();
+	if (allIds.length > 0) {
+		const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
+		const rows = await inChunks(allIds, (chunk) => {
+			const conditions = [
+				inArray(schema.issues.id, chunk),
+				eq(schema.issues.workspaceId, ctx.workspaceId),
+			];
+			if (visible) conditions.push(visible);
+			return orm
+				.select(issueColumns)
+				.from(schema.issues)
+				.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+				.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
+				.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
+				.where(and(...conditions));
+		});
+
+		const issueIds = (rows as Array<{ id: string }>).map((r) => r.id);
+		const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
+		rowsById = new Map(
+			(rows as Array<Record<string, unknown>>).map((r) => {
+				// Match list_issues: body only on request (PROJ-442) — 50 full bodies would
+				// defeat the point of a token-saving batch call.
+				const { body, ...withoutBody } = r;
+				const base = includeBody ? { ...withoutBody, body } : withoutBody;
+				return [
+					r.id as string,
+					{
+						...base,
+						customFields: customFieldsByIssue[r.id as string] ?? [],
+						url: buildIssueUrl(r),
+					},
+				];
+			})
+		);
+	}
+
+	// One item per distinct resolved+visible id, in first-requested order; every requested
+	// ref/id that didn't resolve to an issue or isn't visible goes to `missing` instead —
+	// under the identifier the caller used, never a resolved-but-invisible id.
+	const items: Record<string, unknown>[] = [];
+	const missing: string[] = [];
+	const seen = new Set<string>();
+	for (const entry of order) {
+		const row = entry.id ? rowsById.get(entry.id) : undefined;
+		if (!row) {
+			if (!missing.includes(entry.requested)) missing.push(entry.requested);
+			continue;
+		}
+		if (seen.has(entry.id as string)) continue;
+		seen.add(entry.id as string);
+		items.push(row);
+	}
+
+	return { items, missing };
 }
 
 async function resolveTypeId(

@@ -7,6 +7,7 @@ import {
 	createIssue,
 	deleteIssue,
 	getIssue,
+	getIssuesBatch,
 	getPrioritizedIssues,
 	ISSUE_REF_PATTERN,
 	listIssues,
@@ -106,6 +107,18 @@ router.get("/search", async (c) => {
 		return c.json(
 			await searchIssues(ctx, { query: q, projectId, limit: limit ? Number(limit) : undefined })
 		);
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+// PROJ-931: batch fetch for triage (MCP: get_issues). Registered before "/:id" so
+// "batch" is never captured as an issue id/ref.
+router.get("/batch", async (c) => {
+	const ctx = ctxFromHono(c);
+	const { refs, ids, includeBody } = c.req.query();
+	try {
+		return c.json(await getIssuesBatch(ctx, { refs, ids, includeBody }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

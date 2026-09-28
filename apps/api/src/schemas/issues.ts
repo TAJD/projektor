@@ -105,6 +105,26 @@ export const GetIssueSchema = z
 	.strict()
 	.refine((obj) => obj.id || obj.ref, { message: "Provide either id or ref" });
 
+// PROJ-931: accepts either a real array (MCP JSON) or a comma-separated string
+// (REST query param), same convention as the existing statusIds/excludeTypeIds filters.
+const CommaOrArraySchema = z
+	.union([z.string(), z.array(z.string())])
+	.transform((v) => (Array.isArray(v) ? v : v.split(",")).map((s) => s.trim()).filter(Boolean));
+
+export const GetIssuesBatchSchema = z
+	.object({
+		refs: CommaOrArraySchema.optional(),
+		ids: CommaOrArraySchema.optional(),
+		includeBody: BooleanQueryParam.optional(),
+	})
+	.strict()
+	.refine((obj) => (obj.refs?.length ?? 0) + (obj.ids?.length ?? 0) > 0, {
+		message: "Provide refs or ids",
+	})
+	.refine((obj) => (obj.refs?.length ?? 0) + (obj.ids?.length ?? 0) <= 50, {
+		message: "At most 50 issues per call (refs + ids combined)",
+	});
+
 export const SearchIssuesInputSchema = z
 	.object({
 		query: z.string().min(1),

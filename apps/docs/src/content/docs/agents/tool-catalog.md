@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**121 tools across 22 domains.**
+**122 tools across 22 domains.**
 
 ## Coordination
 
@@ -115,8 +115,9 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `list_issues` | List issues in the workspace, optionally filtered by status, priority, project, or assignee. Items omit `body` by default — pass includeBody:true to include it. Pass includeRollups:true to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item. | read-only |
-| `get_issue` | Get a single issue by ID or project key + number (e.g. "PROJ-42") | read-only |
+| `list_issues` | List issues in the workspace, optionally filtered by status, priority, project, or assignee. Items omit `body` by default — pass includeBody:true to include it. Pass includeRollups:true to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item (a zero rollup is omitted unless verbose:true). Omitted keys are null/empty/false; pass verbose:true for the full shape. | read-only |
+| `get_issue` | Get a single issue by ID or project key + number (e.g. "PROJ-42"). Omitted keys are null/empty/false; pass verbose:true for the full shape. | read-only |
+| `get_issues` | Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than repeated get_issue calls for triage. Items carry customFields but no rollup/links/assignee_name, and omit `body` unless includeBody:true. Returned in the order refs/ids were given; `missing` lists (once each) any requested ref/id that didn't resolve or isn't visible to you. Omitted keys are null/empty/false; pass verbose:true for the full shape. | read-only |
 | `create_issue` | Create a new issue in a project. For an issue an agent should be able to pick up autonomously, the body should state acceptance criteria and scope (files/components) — see get_workflow's definition of ready. get_prioritized_issues excludes issues missing these by default. Verification isn't part of the readiness bar (PROJ-738) — it's required later, in the completionReport when entering review/done. | write |
 | `update_issue` | Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. | write |
 | `search_issues` | Search issues by keyword in title or body | read-only |

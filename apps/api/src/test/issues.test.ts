@@ -1,5 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import { issuesTools } from "../mcp/issues";
 import { ListIssuesSchema } from "../schemas/issues";
 import {
 	authHeaders,
@@ -2594,5 +2595,395 @@ describe("Issues — assignee workspace membership (PROJ-785)", () => {
 		});
 		const issue = (await getRes.json()) as { assignee_id: string | null };
 		expect(issue.assignee_id).toBeNull();
+	});
+});
+
+describe("PROJ-931 — compact MCP responses", () => {
+	let token: string, slug: string, workspaceId: string, projectId: string, userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({
+			role: "owner",
+		}));
+	});
+
+	async function mcpCall(params: unknown) {
+		return callMcpTool(workspaceId, token, slug, params);
+	}
+
+	it("MCP tool result text is minified (no pretty-printing whitespace)", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "Minified check" });
+		const res = await mcpCall({ name: "list_issues", arguments: {} });
+		expect(res.error).toBeUndefined();
+		const text = res.result!.content[0].text;
+		expect(text).not.toContain("\n");
+		expect(text).not.toContain("  ");
+		expect(JSON.parse(text)).toBeTruthy();
+	});
+
+	it("REST get_issue is still pretty-shaped (unaffected) and keeps null/empty fields", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "REST unaffected" });
+		const res = await SELF.fetch(`http://localhost/api/issues/${id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const issue = (await res.json()) as Record<string, unknown>;
+		// REST keeps the full shape: empty/null fields are still present.
+		expect(issue.links).toEqual([]);
+		expect(issue.customFields).toEqual([]);
+		expect(issue).toHaveProperty("sprint_id", null);
+		expect(issue).toHaveProperty("assignee_id", null);
+		expect(issue).toHaveProperty("parent_id", null);
+	});
+
+	it("get_issue omits empty links/rollup/customFields and null sprint/assignee/parent/labels by default", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Compact me" });
+		const res = await mcpCall({ name: "get_issue", arguments: { id } });
+		expect(res.error).toBeUndefined();
+		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
+		expect(issue).not.toHaveProperty("links");
+		expect(issue).not.toHaveProperty("rollup");
+		expect(issue).not.toHaveProperty("customFields");
+		expect(issue).not.toHaveProperty("sprint_id");
+		expect(issue).not.toHaveProperty("assignee_id");
+		expect(issue).not.toHaveProperty("parent_id");
+		expect(issue).not.toHaveProperty("labels");
+		// Non-empty/non-default fields survive untouched.
+		expect(issue.title).toBe("Compact me");
+	});
+
+	it("get_issue with verbose:true restores the full shape", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Verbose me" });
+		const res = await mcpCall({ name: "get_issue", arguments: { id, verbose: true } });
+		expect(res.error).toBeUndefined();
+		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
+		expect(issue).toHaveProperty("links", []);
+		expect(issue).toHaveProperty("rollup");
+		expect(issue).toHaveProperty("customFields", []);
+		expect(issue).toHaveProperty("sprint_id", null);
+		expect(issue).toHaveProperty("assignee_id", null);
+		expect(issue).toHaveProperty("parent_id", null);
+	});
+
+	it("get_issue keeps non-empty links/customFields/rollup/assignee/parent/labels", async () => {
+		const assignee = await seedUser("proj931-assignee@example.com");
+		await seedMember(workspaceId, assignee.id);
+		const parent = await seedIssue(workspaceId, projectId, userId, { title: "Parent" });
+		const field = await seedCustomFieldDef(workspaceId, { key: "proj931_cf", type: "text" });
+		const { id: childId } = await seedIssue(workspaceId, projectId, userId, {
+			title: "Child with everything",
+			assigneeId: assignee.id,
+			parentId: parent.id,
+		});
+		await seedCustomFieldValue(childId, field.id, "hello");
+		await mcpCall({
+			name: "update_issue",
+			arguments: { id: childId, labels: ["bug"] },
+		});
+		await seedIssue(workspaceId, projectId, userId, { title: "Grandchild", parentId: parent.id });
+
+		const parentRes = await mcpCall({ name: "get_issue", arguments: { id: parent.id } });
+		const parentIssue = JSON.parse(parentRes.result!.content[0].text) as Record<string, unknown>;
+		expect(parentIssue.rollup).toEqual({
+			total: 2,
+			byStatus: { backlog: 2 },
+			done: 0,
+			remaining: 2,
+		});
+
+		const childRes = await mcpCall({ name: "get_issue", arguments: { id: childId } });
+		const child = JSON.parse(childRes.result!.content[0].text) as Record<string, unknown>;
+		expect(child.assignee_id).toBe(assignee.id);
+		expect(child.parent_id).toBe(parent.id);
+		expect(child.customFields).toEqual([
+			expect.objectContaining({ key: "proj931_cf", value: "hello" }),
+		]);
+		expect(JSON.parse(child.labels as string)).toEqual(["bug"]);
+	});
+
+	it("list_issues items are compacted the same way as get_issue", async () => {
+		await seedIssue(workspaceId, projectId, userId, { title: "Compact list item" });
+		const res = await mcpCall({ name: "list_issues", arguments: { includeRollups: true } });
+		expect(res.error).toBeUndefined();
+		const page = JSON.parse(res.result!.content[0].text) as { items: Record<string, unknown>[] };
+		expect(page.items[0]).not.toHaveProperty("rollup");
+		expect(page.items[0]).not.toHaveProperty("customFields");
+		expect(page.items[0]).not.toHaveProperty("assignee_id");
+	});
+
+	it("fields:[...] returns only the named fields", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, {
+			title: "Fields test",
+			priority: "high",
+		});
+		const res = await mcpCall({
+			name: "get_issue",
+			arguments: { id, fields: ["id", "title", "priority"] },
+		});
+		expect(res.error).toBeUndefined();
+		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
+		expect(Object.keys(issue).sort()).toEqual(["id", "priority", "title"]);
+		expect(issue.title).toBe("Fields test");
+	});
+
+	it("get_issues fetches up to 50 issues in one call by ref and id", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Batch A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "Batch B" });
+		const row = await env.DB.prepare("SELECT key FROM projects WHERE id = ?")
+			.bind(projectId)
+			.first<{ key: string }>();
+		const ref = `${row!.key}-${a.number}`;
+
+		const res = await mcpCall({ name: "get_issues", arguments: { refs: [ref], ids: [b.id] } });
+		expect(res.error).toBeUndefined();
+		const data = JSON.parse(res.result!.content[0].text) as { items: Array<{ title: string }> };
+		const titles = data.items.map((i) => i.title).sort();
+		expect(titles).toEqual(["Batch A", "Batch B"]);
+	});
+
+	it("fields:[...] always returns every named key: real value, or null when unset", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Null fields test" });
+		const res = await mcpCall({
+			name: "get_issue",
+			arguments: { id, fields: ["id", "assignee_id", "sprint_id", "links", "rollup"] },
+		});
+		expect(res.error).toBeUndefined();
+		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
+		expect(Object.keys(issue).sort()).toEqual([
+			"assignee_id",
+			"id",
+			"links",
+			"rollup",
+			"sprint_id",
+		]);
+		expect(issue.assignee_id).toBeNull();
+		expect(issue.sprint_id).toBeNull();
+		// Requested fields keep their real value — empty/zero is not the same as absent.
+		expect(issue.links).toEqual([]);
+		expect(issue.rollup).toMatchObject({ total: 0 });
+		expect(issue.id).toBe(id);
+	});
+
+	it("get_issues rejects more than 50 combined ids", async () => {
+		const ids = Array.from({ length: 51 }, () => crypto.randomUUID());
+		const res = await mcpCall({ name: "get_issues", arguments: { ids } });
+		expect(res.error).toBeDefined();
+	});
+
+	it("get_issues preserves request order and reports unresolved/invisible refs+ids as missing", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Order A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "Order B" });
+		const row = await env.DB.prepare("SELECT key FROM projects WHERE id = ?")
+			.bind(projectId)
+			.first<{ key: string }>();
+		const refA = `${row!.key}-${a.number}`;
+		const missingRef = `${row!.key}-999999`;
+		const missingId = crypto.randomUUID();
+
+		const res = await mcpCall({
+			name: "get_issues",
+			arguments: { refs: [missingRef, refA], ids: [missingId, b.id] },
+		});
+		expect(res.error).toBeUndefined();
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ id: string }>;
+			missing: string[];
+		};
+		expect(data.items.map((i) => i.id)).toEqual([a.id, b.id]);
+		expect(data.missing).toEqual([missingRef, missingId]);
+	});
+
+	it("every compacting tool's description states the omission contract", () => {
+		for (const name of ["get_issue", "list_issues", "get_issues"]) {
+			const tool = issuesTools.find((t) => t.name === name);
+			expect(tool?.description).toContain(
+				"Omitted keys are null/empty/false; pass verbose:true for the full shape."
+			);
+		}
+	});
+
+	it("verbose/fields wrong types are rejected with -32602 before reaching the service", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Bad opts" });
+		const errorCode = (res: { error?: { message: string } }) =>
+			(res.error as { code?: number } | undefined)?.code;
+
+		const badVerbose = await mcpCall({ name: "get_issue", arguments: { id, verbose: "yes" } });
+		expect(errorCode(badVerbose)).toBe(-32602);
+
+		const badFields = await mcpCall({ name: "get_issue", arguments: { id, fields: "title" } });
+		expect(errorCode(badFields)).toBe(-32602);
+
+		const badFieldsList = await mcpCall({
+			name: "list_issues",
+			arguments: { fields: [1, 2] },
+		});
+		expect(errorCode(badFieldsList)).toBe(-32602);
+	});
+
+	it("REST GET /api/issues/batch has parity with the MCP get_issues tool", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "REST Batch A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "REST Batch B" });
+		const res = await SELF.fetch(`http://localhost/api/issues/batch?ids=${a.id},${b.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as { items: Array<{ title: string }> };
+		expect(data.items.map((i) => i.title).sort()).toEqual(["REST Batch A", "REST Batch B"]);
+	});
+
+	it("PROJ-931: get_issue MCP bytes drop by at least 40% vs the full pretty shape", async () => {
+		// A "typical" seeded issue per the ticket: no assignee, no custom fields, no
+		// children/parent, no links — exactly the empty/default fields PROJ-931 targets.
+		const { id } = await seedIssue(workspaceId, projectId, userId, {
+			title: "A typical seeded issue for byte measurement",
+			priority: "high",
+		});
+
+		// "Before": the full shape, pretty-printed — what every MCP tool result looked like
+		// pre-PROJ-931 (REST returns exactly this shape and formatting is reproduced here).
+		const restRes = await SELF.fetch(`http://localhost/api/issues/${id}`, {
+			headers: authHeaders(token, slug),
+		});
+		const fullIssue = await restRes.json();
+		const beforeBytes = JSON.stringify(fullIssue, null, 2).length;
+
+		// "After": the actual MCP get_issue tool result (minified + compacted).
+		const mcpRes = await mcpCall({ name: "get_issue", arguments: { id } });
+		const afterBytes = mcpRes.result!.content[0].text.length;
+
+		const reduction = (beforeBytes - afterBytes) / beforeBytes;
+		console.log(`PROJ-931 get_issue bytes: before=${beforeBytes} after=${afterBytes}`);
+		expect(reduction).toBeGreaterThanOrEqual(0.4);
+		// Omission must pull its own weight, not hide behind minification alone.
+		expect(afterBytes).toBeLessThan(JSON.stringify(fullIssue).length * 0.8);
+	});
+
+	async function projectKey() {
+		const row = await env.DB.prepare("SELECT key FROM projects WHERE id = ?")
+			.bind(projectId)
+			.first<{ key: string }>();
+		return row!.key;
+	}
+
+	it("get_issues resolves zero-padded refs like get_issue does", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Padded" });
+		const padded = `${await projectKey()}-00${a.number}`;
+		const res = await mcpCall({ name: "get_issues", arguments: { refs: [padded] } });
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ id: string }>;
+			missing: string[];
+		};
+		expect(data.items.map((i) => i.id)).toEqual([a.id]);
+		expect(data.missing).toEqual([]);
+	});
+
+	it("get_issues lists a repeated missing ref once", async () => {
+		const ref = `${await projectKey()}-999999`;
+		const res = await mcpCall({ name: "get_issues", arguments: { refs: [ref, ref] } });
+		const data = JSON.parse(res.result!.content[0].text) as { missing: string[] };
+		expect(data.missing).toEqual([ref]);
+	});
+
+	it("get_issues omits body unless includeBody:true", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Bodied" });
+		await env.DB.prepare("UPDATE issues SET body = ? WHERE id = ?").bind("hello", a.id).run();
+		const without = await mcpCall({ name: "get_issues", arguments: { ids: [a.id] } });
+		const w = JSON.parse(without.result!.content[0].text) as { items: Record<string, unknown>[] };
+		expect(w.items[0]).not.toHaveProperty("body");
+		const withBody = await mcpCall({
+			name: "get_issues",
+			arguments: { ids: [a.id], includeBody: true },
+		});
+		const b = JSON.parse(withBody.result!.content[0].text) as { items: Record<string, unknown>[] };
+		expect(b.items[0].body).toBe("hello");
+	});
+
+	it("fields keeps false as false and rejects unknown field names", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Audit flag" });
+		const ok = await mcpCall({ name: "get_issue", arguments: { id, fields: ["needs_audit"] } });
+		const issue = JSON.parse(ok.result!.content[0].text) as Record<string, unknown>;
+		expect(issue.needs_audit).toBe(false);
+
+		const typo = await mcpCall({ name: "get_issue", arguments: { id, fields: ["titel"] } });
+		expect((typo.error as { code?: number } | undefined)?.code).toBe(-32602);
+		const proto = await mcpCall({ name: "get_issue", arguments: { id, fields: ["constructor"] } });
+		expect((proto.error as { code?: number } | undefined)?.code).toBe(-32602);
+	});
+
+	it("REST /api/issues/batch: refs with spaces, missing in request order, 400 over 50", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "REST ref A" });
+		const key = await projectKey();
+		const gone = `${key}-999999`;
+		const res = await SELF.fetch(
+			`http://localhost/api/issues/batch?refs=${encodeURIComponent(`${gone}, ${key}-${a.number}`)}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as { items: Array<{ id: string }>; missing: string[] };
+		expect(data.items.map((i) => i.id)).toEqual([a.id]);
+		expect(data.missing).toEqual([gone]);
+
+		const ids = Array.from({ length: 51 }, () => crypto.randomUUID()).join(",");
+		const tooMany = await SELF.fetch(`http://localhost/api/issues/batch?ids=${ids}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(tooMany.status).toBe(400);
+	});
+});
+
+describe("PROJ-931 — get_issues project visibility", () => {
+	it("a member without a grant gets refs and ids from a hidden project as missing (MCP + REST)", async () => {
+		const roles = await seedWorkspaceRoles();
+		const granted = await seedProject(roles.workspace.id, "SEEN");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, granted.id, "member");
+		const hiddenProject = await seedProject(roles.workspace.id, "HIDN");
+		const visible = await seedIssue(roles.workspace.id, granted.id, roles.owner.user.id, {
+			title: "Visible",
+		});
+		const hidden = await seedIssue(roles.workspace.id, hiddenProject.id, roles.owner.user.id, {
+			title: "Hidden",
+		});
+		const hiddenRef = `HIDN-${hidden.number}`;
+		const visibleRef = `SEEN-${visible.number}`;
+
+		const res = await callMcpTool(roles.workspace.id, roles.member.token, roles.workspace.slug, {
+			name: "get_issues",
+			arguments: { refs: [hiddenRef, visibleRef], ids: [hidden.id] },
+		});
+		expect(res.error).toBeUndefined();
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ id: string }>;
+			missing: string[];
+		};
+		expect(data.items.map((i) => i.id)).toEqual([visible.id]);
+		expect(data.missing).toEqual([hiddenRef, hidden.id]);
+
+		const rest = await SELF.fetch(
+			`http://localhost/api/issues/batch?refs=${hiddenRef},${visibleRef}&ids=${hidden.id}`,
+			{ headers: authHeaders(roles.member.token, roles.workspace.slug) }
+		);
+		const restData = (await rest.json()) as { items: Array<{ id: string }>; missing: string[] };
+		expect(restData.items.map((i) => i.id)).toEqual([visible.id]);
+		expect(restData.missing).toEqual([hiddenRef, hidden.id]);
+	});
+
+	it("a ref whose key also exists in another workspace never resolves across workspaces", async () => {
+		const mine = await seedWorkspaceRoles();
+		const theirs = await seedWorkspaceRoles();
+		await seedProject(mine.workspace.id, "DUPE");
+		const theirProject = await seedProject(theirs.workspace.id, "DUPE");
+		const theirIssue = await seedIssue(theirs.workspace.id, theirProject.id, theirs.owner.user.id, {
+			title: "Other tenant",
+		});
+		const ref = `DUPE-${theirIssue.number}`;
+		const res = await callMcpTool(mine.workspace.id, mine.owner.token, mine.workspace.slug, {
+			name: "get_issues",
+			arguments: { refs: [ref], ids: [theirIssue.id] },
+		});
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: unknown[];
+			missing: string[];
+		};
+		expect(data.items).toEqual([]);
+		expect(data.missing).toEqual([ref, theirIssue.id]);
 	});
 });
