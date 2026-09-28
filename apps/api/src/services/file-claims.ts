@@ -5,6 +5,7 @@ import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../s
 import { visibleProjectPredicate } from "./access";
 import { buildPostMessageStatements } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -500,12 +501,27 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	return { released, count: released.length };
 }
 
+/**
+ * PROJ-932: defaults to live entries only — an unreleased claim whose holder has gone
+ * stale (agent-linked: session ended or heartbeat past the TTL; agentless: past
+ * FILE_CLAIM_TTL_SECONDS since claimedAt) is excluded unless `includeStale` is set,
+ * restoring the pre-PROJ-932 behaviour of returning every unreleased claim regardless
+ * of holder health.
+ */
 export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	const result = ListFileClaimsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, path } = result.data;
+	const { issueId, path, includeStale } = result.data;
+	const projectId = result.data.projectId
+		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
+		: undefined;
 
 	const orm = drizzle(ctx.db, { schema });
+
+	const cutoff = liveCutoff();
+	const agentlessCutoff =
+		Math.floor(Date.now() / 1000) -
+		(ctx.config?.fileClaimTtlSeconds ?? DEFAULT_FILE_CLAIM_TTL_SECONDS);
 
 	const conditions = [
 		eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
@@ -518,13 +534,26 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	if (path) {
 		conditions.push(eq(schema.issueFileClaims.path, path));
 	}
+	if (projectId) {
+		conditions.push(eq(schema.issues.projectId, projectId));
+	}
+	if (!includeStale) {
+		// Live means: agent-linked and the session is active within the heartbeat TTL, OR
+		// agentless and still within FILE_CLAIM_TTL_SECONDS of being claimed. Expressed as a
+		// single SQL OR rather than filtered in JS, so the default listing stays index-backed.
+		conditions.push(
+			sql`(
+				(${schema.issueFileClaims.agentId} IS NULL AND ${schema.issueFileClaims.claimedAt} > ${agentlessCutoff})
+				OR (${schema.agentSessions.status} = 'active' AND ${schema.agentSessions.lastHeartbeatAt} > ${cutoff})
+			)`
+		);
+	}
 
-	// PROJ-316: a non-admin member only sees claims on issues whose project they
-	// can access; owner/admin (predicate undefined) see every claim.
-	const vis = visibleProjectPredicate(
-		ctx,
-		sql`(SELECT i.project_id FROM issues i WHERE i.id = ${schema.issueFileClaims.issueId})`
-	);
+	// PROJ-316: a non-admin member only sees claims on issues whose project they can
+	// access; owner/admin (predicate undefined) see every claim. Every claim is joined to
+	// its issue below (issue_id is NOT NULL), so the predicate can take the joined project
+	// id column directly instead of a correlated subquery.
+	const vis = visibleProjectPredicate(ctx, schema.issues.projectId);
 	if (vis) conditions.push(vis);
 
 	// PROJ-636/928: carries `live` for the same reason listIssueLeases does — false means
@@ -532,10 +561,6 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	// next claim on that path will reclaim it. Without it a reclaimable claim is
 	// indistinguishable from a held one, which would make the self-healing the docs now
 	// describe unobservable.
-	const cutoff = liveCutoff();
-	const agentlessCutoff =
-		Math.floor(Date.now() / 1000) -
-		(ctx.config?.fileClaimTtlSeconds ?? DEFAULT_FILE_CLAIM_TTL_SECONDS);
 	const rows = await orm
 		.select({
 			id: schema.issueFileClaims.id,
@@ -548,19 +573,26 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 			releaseReason: schema.issueFileClaims.releaseReason,
 			sessionStatus: schema.agentSessions.status,
 			sessionHeartbeat: schema.agentSessions.lastHeartbeatAt,
+			projectKey: schema.projects.key,
+			issueNumber: schema.issues.number,
 		})
 		.from(schema.issueFileClaims)
 		.leftJoin(schema.agentSessions, eq(schema.issueFileClaims.agentId, schema.agentSessions.id))
+		.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
+		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 		.where(and(...conditions))
 		.orderBy(schema.issueFileClaims.claimedAt);
 
-	const items = rows.map(({ sessionStatus, sessionHeartbeat, ...claim }) => ({
-		...claim,
-		live:
-			claim.agentId === null
-				? claim.claimedAt > agentlessCutoff
-				: sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff,
-	}));
+	const items = rows.map(
+		({ sessionStatus, sessionHeartbeat, projectKey, issueNumber, ...claim }) => ({
+			...claim,
+			issueRef: `${projectKey}-${issueNumber}`,
+			live:
+				claim.agentId === null
+					? claim.claimedAt > agentlessCutoff
+					: sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff,
+		})
+	);
 
 	return { items };
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { StatusEnum } from "./common";
+import { BooleanQueryParam, StatusEnum } from "./common";
 import { CompletionReportSchema } from "./issues";
 
 export const RegisterAgentSchema = z.object({
@@ -19,8 +19,13 @@ export const EndAgentSchema = z.object({
 	id: z.string().uuid(),
 });
 
+// PROJ-932: projectId accepts a UUID or a project key, resolved the same way list_issues
+// resolves its projectId filter. includeStale widens the default live-only filter to
+// every session in the workspace, including ended/stale ones.
 export const ListActiveAgentsSchema = z.object({
 	issueId: z.string().uuid().optional(),
+	projectId: z.string().optional(),
+	includeStale: BooleanQueryParam.optional(),
 });
 
 // PROJ-929: register + claim_issue + claim_files + post_message in one atomic call.

@@ -490,4 +490,93 @@ describe("Agents API", () => {
 			expect(end.status).toBe(200);
 		});
 	});
+
+	// PROJ-932: list_active_agents defaults to live entries only; includeStale restores
+	// the old unfiltered listing (ended and stale sessions included); projectId scopes to
+	// one project (key or uuid) via the linked issue; every linked item carries issueRef.
+	describe("PROJ-932: live-only default, includeStale, projectId, issueRef", () => {
+		const projectKey = "PROJ"; // seedProject's default key
+
+		function backdateHeartbeat(agentId: string, secondsAgo = 200) {
+			const stale = Math.floor(Date.now() / 1000) - secondsAgo;
+			return env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+				.bind(stale, agentId)
+				.run();
+		}
+
+		async function listAgents(params: Record<string, string> = {}) {
+			const qs = new URLSearchParams(params).toString();
+			return SELF.fetch(`http://localhost/api/agents${qs ? `?${qs}` : ""}`, {
+				headers: authHeaders(token, slug),
+			});
+		}
+
+		it("excludes a session with a stale heartbeat by default; includeStale:true includes it", async () => {
+			const res = await registerAgent({ name: "stale-agent-932" });
+			const session = (await res.json()) as { id: string };
+			await backdateHeartbeat(session.id);
+
+			const withoutFlag = await listAgents();
+			const withoutBody = (await withoutFlag.json()) as { items: Array<{ id: string }> };
+			expect(withoutBody.items.some((s) => s.id === session.id)).toBe(false);
+
+			const withFlag = await listAgents({ includeStale: "true" });
+			const withBody = (await withFlag.json()) as { items: Array<{ id: string }> };
+			expect(withBody.items.some((s) => s.id === session.id)).toBe(true);
+		});
+
+		it("excludes an ended session by default; includeStale:true includes it", async () => {
+			const res = await registerAgent({ name: "ended-agent-932" });
+			const session = (await res.json()) as { id: string };
+			await SELF.fetch(`http://localhost/api/agents/${session.id}/end`, {
+				method: "POST",
+				headers: authHeaders(token, slug),
+			});
+
+			const withoutFlag = await listAgents();
+			const withoutBody = (await withoutFlag.json()) as { items: Array<{ id: string }> };
+			expect(withoutBody.items.some((s) => s.id === session.id)).toBe(false);
+
+			const withFlag = await listAgents({ includeStale: "true" });
+			const withBody = (await withFlag.json()) as { items: Array<{ id: string }> };
+			expect(withBody.items.some((s) => s.id === session.id)).toBe(true);
+		});
+
+		it("carries the linked issue's issueRef; null when unlinked", async () => {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Linked" });
+			const linked = await registerAgent({ name: "linked-932", issueId: issue.id });
+			const linkedSession = (await linked.json()) as { id: string };
+			const unlinked = await registerAgent({ name: "unlinked-932" });
+			const unlinkedSession = (await unlinked.json()) as { id: string };
+
+			const res = await listAgents();
+			const body = (await res.json()) as {
+				items: Array<{ id: string; issueRef: string | null }>;
+			};
+			const byId = new Map(body.items.map((s) => [s.id, s.issueRef]));
+			expect(byId.get(linkedSession.id)).toBe(`${projectKey}-${issue.number}`);
+			expect(byId.get(unlinkedSession.id)).toBeNull();
+		});
+
+		it("projectId filters to sessions linked to an issue in that project (key or uuid); excludes unlinked sessions", async () => {
+			const otherFixture = await seedProjectFixture(); // separate workspace/project entirely
+			void otherFixture;
+
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "In project" });
+			const linked = await registerAgent({ name: "proj-linked-932", issueId: issue.id });
+			const linkedSession = (await linked.json()) as { id: string };
+			const unlinked = await registerAgent({ name: "proj-unlinked-932" });
+			const unlinkedSession = (await unlinked.json()) as { id: string };
+
+			const byKey = await listAgents({ projectId: projectKey });
+			const byKeyBody = (await byKey.json()) as { items: Array<{ id: string }> };
+			const byKeyIds = byKeyBody.items.map((s) => s.id);
+			expect(byKeyIds).toContain(linkedSession.id);
+			expect(byKeyIds).not.toContain(unlinkedSession.id);
+
+			const byUuid = await listAgents({ projectId });
+			const byUuidBody = (await byUuid.json()) as { items: Array<{ id: string }> };
+			expect(byUuidBody.items.map((s) => s.id)).toContain(linkedSession.id);
+		});
+	});
 });

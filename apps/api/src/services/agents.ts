@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
 import {
 	EndAgentSchema,
 	FinishWorkSchema,
@@ -14,6 +14,7 @@ import { NotFoundError, ValidationError } from "./errors";
 import { claimFiles, releaseClaimsForAgent } from "./file-claims";
 import { claimIssue, releaseLeasesForAgent } from "./issue-leases";
 import { updateIssue } from "./issues";
+import { resolveVisibleProjectIdParam } from "./projects";
 import type { ServiceCtx } from "./types";
 
 const ACTIVE_TTL = 120;
@@ -230,40 +231,65 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 	return endAgent(ctx, { id: sessionId });
 }
 
+/**
+ * PROJ-932: defaults to live entries only — an agent session that isn't `active` with a
+ * heartbeat inside the TTL is excluded unless `includeStale` is set, which restores the
+ * pre-PROJ-932 behaviour of returning every session in the workspace (ended and stale
+ * ones included). Rows carry the linked issue's display ref (issueRef, e.g. "PROJ-857")
+ * when the session is tied to one.
+ */
 export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 	const result = ListActiveAgentsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId } = result.data;
+	const { issueId, includeStale } = result.data;
+	const projectId = result.data.projectId
+		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
+		: undefined;
 
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = Math.floor(Date.now() / 1000) - ACTIVE_TTL;
 
-	const conditions = [
-		eq(schema.agentSessions.workspaceId, ctx.workspaceId),
-		eq(schema.agentSessions.status, "active"),
-		gt(schema.agentSessions.lastHeartbeatAt, cutoff),
-	];
+	const conditions = [eq(schema.agentSessions.workspaceId, ctx.workspaceId)];
+	if (!includeStale) {
+		conditions.push(eq(schema.agentSessions.status, "active"));
+		conditions.push(gt(schema.agentSessions.lastHeartbeatAt, cutoff));
+	}
 
 	if (issueId) {
 		conditions.push(eq(schema.agentSessions.issueId, issueId));
 	}
+	// PROJ-932: a session with no issue link has no project to check, so it's excluded
+	// once a projectId filter is given (see AGENTS.md/mcp tool description).
+	if (projectId) {
+		conditions.push(eq(schema.issues.projectId, projectId));
+	}
 
 	// PROJ-316: a non-admin member only sees agents working an issue in a project
 	// they can access. Agents not tied to any issue carry no project, so they stay
-	// workspace-visible. Owner/admin (predicate undefined) see every agent.
-	const vis = visibleProjectPredicate(
-		ctx,
-		sql`(SELECT i.project_id FROM issues i WHERE i.id = ${schema.agentSessions.issueId})`
-	);
+	// workspace-visible. Owner/admin (predicate undefined) see every agent. The LEFT
+	// JOIN to issues below lets the predicate take the joined project id column
+	// directly instead of a correlated subquery.
+	const vis = visibleProjectPredicate(ctx, schema.issues.projectId);
 	if (vis) {
 		conditions.push(or(isNull(schema.agentSessions.issueId), vis) ?? vis);
 	}
 
-	const items = await orm
-		.select(AGENT_SESSION_COLUMNS)
+	const rows = await orm
+		.select({
+			...AGENT_SESSION_COLUMNS,
+			projectKey: schema.projects.key,
+			issueNumber: schema.issues.number,
+		})
 		.from(schema.agentSessions)
+		.leftJoin(schema.issues, eq(schema.agentSessions.issueId, schema.issues.id))
+		.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 		.where(and(...conditions))
 		.orderBy(desc(schema.agentSessions.startedAt));
+
+	const items = rows.map(({ projectKey, issueNumber, ...session }) => ({
+		...session,
+		issueRef: session.issueId && projectKey ? `${projectKey}-${issueNumber}` : null,
+	}));
 
 	return { items };
 }

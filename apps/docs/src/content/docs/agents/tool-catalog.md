@@ -24,7 +24,7 @@ running server.
 | `register_agent` | Register an agent session, optionally linked to an issue | write |
 | `heartbeat_agent` | Send a heartbeat to keep an agent session active | write |
 | `end_agent` | End an agent session | write |
-| `list_active_agents` | List active agent sessions in the workspace, optionally filtered by issue | read-only |
+| `list_active_agents` | List agent sessions in the workspace, optionally filtered by issue or project. Live entries only by default — a session that has ended or stopped heartbeating is excluded; pass includeStale:true for all. Each entry carries the linked issue's ref (e.g. "PROJ-857") as issueRef when the session is tied to one. | read-only |
 
 ### File claims
 
@@ -32,7 +32,7 @@ running server.
 |------|-------------|------|
 | `claim_files` | Claim one or more repo file paths for an issue so the parallel fleet can see what is taken | write |
 | `release_files` | Release active file claims in the workspace, optionally scoped to an issue | destructive |
-| `list_file_claims` | List active file claims in the workspace, optionally filtered by issue or path | read-only |
+| `list_file_claims` | List active file claims in the workspace, optionally filtered by issue, path or project. Live entries only by default — a claim whose holder has ended, stopped heartbeating, or (for an agentless claim) sat past its TTL is excluded; pass includeStale:true for all. Each entry carries the linked issue's ref (e.g. "PROJ-857") as issueRef, and a `live` flag (false when the claim is reclaimable — only possible with includeStale:true). | read-only |
 
 ### Issue leases
 
@@ -40,7 +40,7 @@ running server.
 |------|-------------|------|
 | `claim_issue` | Atomically lease an issue to an agent session so the parallel fleet doesn't double-work it. Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating. | write |
 | `release_issue` | Release the active lease on an issue, optionally only if held by a given agent session | destructive |
-| `list_issue_leases` | List active issue leases in the workspace, optionally filtered by issue or agent. Each entry's `live` flag is false when the holder stopped heartbeating (lease is reclaimable). | read-only |
+| `list_issue_leases` | List active issue leases in the workspace, optionally filtered by issue, agent or project. Live entries only by default — a lease whose agent session has ended or stopped heartbeating is excluded; pass includeStale:true for all. Each entry carries the linked issue's ref (e.g. "PROJ-857") as issueRef, and a `live` flag (false when the holder stopped heartbeating and the lease is reclaimable — only possible with includeStale:true). | read-only |
 
 ### Agent messages
 

@@ -480,3 +480,143 @@ describe("claim_issue agent WIP limit (PROJ-253)", () => {
 		});
 	});
 });
+
+// PROJ-932: list_issue_leases defaults to live entries only (unreleased AND the holding
+// session is within the heartbeat TTL); includeStale restores the old unfiltered
+// behaviour; projectId scopes to one project (key or uuid); and every item carries
+// issueRef. Visibility (PROJ-316) is covered by coordination-access.test.ts, which
+// exercises this same query.
+describe("PROJ-932: list_issue_leases live-only default", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+	const projectKey = "PROJ"; // seedProject's default key
+	let userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({
+			role: "owner",
+		}));
+	});
+
+	async function registerAgent(name: string): Promise<string> {
+		const res = await SELF.fetch("http://localhost/api/agents", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ name }),
+		});
+		const session = (await res.json()) as { id: string };
+		return session.id;
+	}
+
+	function claim(issueId: string, agentId: string) {
+		return SELF.fetch(`http://localhost/api/issues/${issueId}/claim`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ agentId }),
+		});
+	}
+
+	function backdateHeartbeat(agentId: string, secondsAgo = 200) {
+		const stale = Math.floor(Date.now() / 1000) - secondsAgo;
+		return env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+			.bind(stale, agentId)
+			.run();
+	}
+
+	async function mcpLeases(args: Record<string, unknown>) {
+		const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "list_issue_leases", arguments: args },
+			}),
+		});
+		const json = (await res.json()) as { result?: { content: Array<{ text: string }> } };
+		const text = json.result?.content?.[0]?.text ?? "{}";
+		return JSON.parse(text) as {
+			items: Array<{ id: string; issueId: string; issueRef: string; live: boolean }>;
+		};
+	}
+
+	it("excludes a lease whose session has gone stale by default; includeStale:true includes it", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Stale by default" });
+		const agent = await registerAgent("stale-holder");
+		expect((await claim(issue.id, agent)).status).toBe(201);
+		await backdateHeartbeat(agent);
+
+		const withoutFlag = await mcpLeases({ issueId: issue.id });
+		expect(withoutFlag.items).toHaveLength(0);
+
+		const withFlag = await mcpLeases({ issueId: issue.id, includeStale: true });
+		expect(withFlag.items).toHaveLength(1);
+		expect(withFlag.items[0].live).toBe(false);
+	});
+
+	it("excludes a released lease regardless of includeStale", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Released" });
+		const agent = await registerAgent("releaser");
+		expect((await claim(issue.id, agent)).status).toBe(201);
+		expect(
+			(
+				await SELF.fetch(`http://localhost/api/issues/${issue.id}/release`, {
+					method: "POST",
+					headers: authHeaders(token, slug),
+					body: JSON.stringify({}),
+				})
+			).status
+		).toBe(200);
+
+		expect((await mcpLeases({ issueId: issue.id })).items).toHaveLength(0);
+		expect((await mcpLeases({ issueId: issue.id, includeStale: true })).items).toHaveLength(0);
+	});
+
+	it("every item carries the issue's issueRef", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Ref check" });
+		const agent = await registerAgent("ref-holder");
+		expect((await claim(issue.id, agent)).status).toBe(201);
+
+		const { items } = await mcpLeases({ issueId: issue.id });
+		expect(items).toHaveLength(1);
+		expect(items[0].issueRef).toBe(`${projectKey}-${issue.number}`);
+	});
+
+	it("projectId filters by project key and by uuid", async () => {
+		const otherProject = await seedProjectFixture({ role: "owner" });
+		void otherProject; // a distinct workspace, just proving the fixture project isn't the only project in existence
+
+		const issueA = await seedIssue(workspaceId, projectId, userId, { title: "In project" });
+		const agentA = await registerAgent("a");
+		expect((await claim(issueA.id, agentA)).status).toBe(201);
+
+		const byKey = await mcpLeases({ projectId: projectKey });
+		expect(byKey.items.map((i) => i.issueId)).toEqual([issueA.id]);
+
+		const byUuid = await mcpLeases({ projectId });
+		expect(byUuid.items.map((i) => i.issueId)).toEqual([issueA.id]);
+	});
+
+	it("REST parity: GET /api/issues/:id/leases accepts includeStale", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "REST parity" });
+		const agent = await registerAgent("rest-holder");
+		expect((await claim(issue.id, agent)).status).toBe(201);
+		await backdateHeartbeat(agent);
+
+		const defaultRes = await SELF.fetch(`http://localhost/api/issues/${issue.id}/leases`, {
+			headers: authHeaders(token, slug),
+		});
+		const defaultBody = (await defaultRes.json()) as { items: unknown[] };
+		expect(defaultBody.items).toHaveLength(0);
+
+		const staleRes = await SELF.fetch(
+			`http://localhost/api/issues/${issue.id}/leases?includeStale=true`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const staleBody = (await staleRes.json()) as { items: unknown[] };
+		expect(staleBody.items).toHaveLength(1);
+	});
+});
