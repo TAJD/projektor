@@ -10,6 +10,7 @@ import {
 	listIssues,
 	searchIssues,
 	updateIssue,
+	updateIssues,
 } from "../services/issues";
 import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "./annotations";
 
@@ -441,6 +442,67 @@ export const issuesTools: MCPTool[] = [
 				throw new ValidationError({ formErrors: ["id is required"], fieldErrors: {} });
 			}
 			return updateIssue(ctx, id, fields);
+		},
+	},
+	{
+		name: "update_issues",
+		description:
+			"Apply one status transition to up to 100 issues at once (e.g. closing every ticket in a " +
+			"release with one shared completion report), instead of one update_issue call per issue. " +
+			"Records the shared completionReport (PR/release links) once per issue; pass perIssue to " +
+			"override just the summary for specific issues. Same review gating and needsAudit " +
+			"classification as update_issue, applied to each issue individually — one issue failing " +
+			"(missing ref, forbidden, invalid transition, missing report) never aborts the others. " +
+			"Returns a per-issue result in request order, each under the id/ref you passed in `ids`.",
+		inputSchema: {
+			type: "object",
+			required: ["ids"],
+			properties: {
+				ids: {
+					type: "array",
+					items: { type: "string" },
+					description: "1-100 issue UUIDs and/or refs like PROJ-42",
+				},
+				status: {
+					type: "string",
+					enum: ["backlog", "todo", "in_progress", "in_review", "done", "cancelled"],
+				},
+				statusId: {
+					type: "string",
+					nullable: true,
+					description: "UUID of the task status (null to clear)",
+				},
+				completionReport: {
+					type: "object",
+					description:
+						"Shared completion report applied to every issue (required for an agent closing " +
+						"an agent-worked issue, same rule as update_issue)",
+					properties: {
+						summary: { type: "string" },
+						verification: { type: "string" },
+						prLink: { type: "string" },
+					},
+				},
+				perIssue: {
+					type: "object",
+					description:
+						"Per-issue override, keyed by the same id/ref used in `ids`. Only `summary` can be " +
+						"overridden; verification/prLink always come from the shared completionReport.",
+					additionalProperties: {
+						type: "object",
+						properties: { summary: { type: "string" } },
+					},
+				},
+				agentSessionId: {
+					type: "string",
+					description:
+						"Your agent session id (from register_agent) — identifies this update as agent-initiated",
+				},
+			},
+		},
+		annotations: IDEMPOTENT_WRITE,
+		handler(input, ctx) {
+			return updateIssues(ctx, input);
 		},
 	},
 	{

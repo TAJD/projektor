@@ -13,6 +13,7 @@ import {
 	listIssues,
 	searchIssues,
 	updateIssue,
+	updateIssues,
 } from "../services/issues";
 import { ctxFromHono } from "../services/types";
 
@@ -119,6 +120,17 @@ router.get("/batch", async (c) => {
 	const { refs, ids, includeBody } = c.req.query();
 	try {
 		return c.json(await getIssuesBatch(ctx, { refs, ids, includeBody }));
+	} catch (e) {
+		return serviceErrToResponse(c, e);
+	}
+});
+
+// PROJ-930: bulk close/transition (MCP: update_issues). Registered before "/:id" so
+// "bulk-update" is never captured as an issue id/ref (same convention as "/batch" above).
+router.post("/bulk-update", async (c) => {
+	const ctx = ctxFromHono(c);
+	try {
+		return c.json(await updateIssues(ctx, await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

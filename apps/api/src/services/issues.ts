@@ -11,6 +11,7 @@ import {
 	ListIssuesSchema,
 	SearchIssuesInputSchema,
 	UpdateIssueSchema,
+	UpdateIssuesSchema,
 } from "../schemas/issues";
 import {
 	canWriteProject,
@@ -30,7 +31,7 @@ import {
 	validateCustomFields,
 } from "./custom-fields";
 import { dorColumns } from "./definition-of-ready";
-import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { isExternallyVerifiableEvidence } from "./evidence-classification";
 import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
@@ -1684,6 +1685,70 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	});
 
 	return { ok: true };
+}
+
+// PROJ-930: one result entry per requested id/ref, in request order, under the
+// identifier the caller used (not the resolved id) — mirrors getIssuesBatch's `missing`
+// convention of always echoing back what the caller actually sent.
+type BulkIssueResult =
+	| { id: string; ok: true }
+	| { id: string; ok: false; error: { code: string; message: string } };
+
+// Maps a thrown service error to the bulk result's { code, message } shape. Only the
+// same client-facing ServiceError kinds the REST/MCP adapters surface are given a
+// meaningful message (PROJ-204); anything else is logged and reported generically so an
+// internal error never leaks and a single bad issue can't take the whole batch down.
+function describeIssueError(id: string, err: unknown): { code: string; message: string } {
+	if (err instanceof ValidationError) {
+		const parts = [
+			...err.issues.formErrors,
+			...Object.entries(err.issues.fieldErrors).flatMap(([field, messages]) =>
+				(messages ?? []).map((m) => `${field}: ${m}`)
+			),
+		];
+		return { code: "validation", message: parts.join("; ") || "Validation failed" };
+	}
+	if (err instanceof NotFoundError) return { code: "not_found", message: err.message };
+	if (err instanceof ForbiddenError) return { code: "forbidden", message: err.message };
+	if (err instanceof ConflictError) return { code: "conflict", message: err.message };
+	console.error(`[updateIssues] unexpected error for issue ${id}:`, err);
+	return { code: "internal", message: "Internal error" };
+}
+
+// PROJ-930: apply one status transition to up to 100 issues, recording a shared
+// completionReport (PR/release links) once per issue with an optional per-issue summary
+// override. Reuses updateIssue's own gates/needsAudit classification unchanged — each
+// issue is validated, scoped and gated exactly as a lone update_issue call would be, just
+// looped — so REST/MCP parity, review gating and needsAudit stay in one place. No
+// variable-length D1 IN query is built here (each iteration is updateIssue's own
+// single-row reads/writes), so there's nothing that needs inChunks: the D1 100-bound-
+// param cap that inChunks guards against only bites a query whose parameter count scales
+// with the input array, and this loop never builds one.
+export async function updateIssues(ctx: ServiceCtx, raw: unknown) {
+	const result = UpdateIssuesSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { ids, status, statusId, completionReport, perIssue, agentSessionId } = result.data;
+
+	const results: BulkIssueResult[] = [];
+	for (const requested of ids) {
+		try {
+			const fields: Record<string, unknown> = {};
+			if (status !== undefined) fields.status = status;
+			if (statusId !== undefined) fields.statusId = statusId;
+			if (agentSessionId !== undefined) fields.agentSessionId = agentSessionId;
+			if (completionReport) {
+				const overrideSummary = perIssue?.[requested]?.summary;
+				fields.completionReport = overrideSummary
+					? { ...completionReport, summary: overrideSummary }
+					: completionReport;
+			}
+			await updateIssue(ctx, requested, fields);
+			results.push({ id: requested, ok: true });
+		} catch (err) {
+			results.push({ id: requested, ok: false, error: describeIssueError(requested, err) });
+		}
+	}
+	return { results };
 }
 
 export async function deleteIssue(ctx: ServiceCtx, rawId: string) {

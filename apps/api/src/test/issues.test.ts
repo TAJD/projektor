@@ -4,6 +4,7 @@ import { issuesTools } from "../mcp/issues";
 import { ListIssuesSchema } from "../schemas/issues";
 import {
 	authHeaders,
+	seedAgentLease,
 	seedCustomFieldDef,
 	seedCustomFieldValue,
 	seedFixture,
@@ -2985,5 +2986,300 @@ describe("PROJ-931 — get_issues project visibility", () => {
 		};
 		expect(data.items).toEqual([]);
 		expect(data.missing).toEqual([ref, theirIssue.id]);
+	});
+});
+
+// ─── PROJ-930: bulk update_issues (close many issues with one shared report) ──────
+describe("PROJ-930 — bulk update_issues", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+	let userId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({ role: "owner" }));
+	});
+
+	async function mcpCall(params: unknown) {
+		return callMcpTool(workspaceId, token, slug, params);
+	}
+
+	async function bulkUpdateRest(body: Record<string, unknown>) {
+		return SELF.fetch("http://localhost/api/issues/bulk-update", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify(body),
+		});
+	}
+
+	async function statusOf(id: string): Promise<string> {
+		const row = await env.DB.prepare("SELECT status FROM issues WHERE id = ?")
+			.bind(id)
+			.first<{ status: string }>();
+		return row!.status;
+	}
+
+	async function needsAuditOf(id: string): Promise<boolean> {
+		const row = await env.DB.prepare("SELECT needs_audit FROM issues WHERE id = ?")
+			.bind(id)
+			.first<{ needs_audit: number }>();
+		return Boolean(row?.needs_audit);
+	}
+
+	async function commentBodies(id: string): Promise<string[]> {
+		const res = await SELF.fetch(`http://localhost/api/issues/${id}/comments`, {
+			headers: authHeaders(token, slug),
+		});
+		const comments = (await res.json()) as Array<{ body: string }>;
+		return comments.map((c) => c.body);
+	}
+
+	const report = { summary: "Shipped in release", verification: "https://github.com/x/y/pull/1" };
+
+	it("closes many issues with one shared completion report", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "B" });
+		const c = await seedIssue(workspaceId, projectId, userId, { title: "C" });
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: { ids: [a.id, b.id, c.id], status: "done", completionReport: report },
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean }>;
+		};
+		expect(results).toEqual([
+			{ id: a.id, ok: true },
+			{ id: b.id, ok: true },
+			{ id: c.id, ok: true },
+		]);
+
+		expect(await statusOf(a.id)).toBe("done");
+		expect(await statusOf(b.id)).toBe("done");
+		expect(await statusOf(c.id)).toBe("done");
+		for (const id of [a.id, b.id, c.id]) {
+			expect((await commentBodies(id)).some((body) => body.includes("Shipped in release"))).toBe(
+				true
+			);
+		}
+	});
+
+	it("accepts refs (PROJ-42 style) the same as update_issue's id", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Ref A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "Ref B" });
+		const project = await SELF.fetch(`http://localhost/api/projects/${projectId}`, {
+			headers: authHeaders(token, slug),
+		});
+		const { key } = (await project.json()) as { key: string };
+		const refA = `${key}-${a.number}`;
+		const refB = `${key}-${b.number}`;
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: { ids: [refA, refB], status: "done", completionReport: report },
+		});
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean }>;
+		};
+		expect(results).toEqual([
+			{ id: refA, ok: true },
+			{ id: refB, ok: true },
+		]);
+		expect(await statusOf(a.id)).toBe("done");
+		expect(await statusOf(b.id)).toBe("done");
+	});
+
+	it("one failure (missing ref) doesn't abort the others — mixed success/failure in request order", async () => {
+		const ok1 = await seedIssue(workspaceId, projectId, userId, { title: "OK1" });
+		const ok2 = await seedIssue(workspaceId, projectId, userId, { title: "OK2" });
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: {
+				ids: [ok1.id, "NOPE-999", ok2.id],
+				status: "done",
+				completionReport: report,
+			},
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string; message: string } }>;
+		};
+		expect(results[0]).toEqual({ id: ok1.id, ok: true });
+		expect(results[1].ok).toBe(false);
+		expect(results[1].id).toBe("NOPE-999");
+		expect(results[1].error?.code).toBe("not_found");
+		expect(results[2]).toEqual({ id: ok2.id, ok: true });
+
+		expect(await statusOf(ok1.id)).toBe("done");
+		expect(await statusOf(ok2.id)).toBe("done");
+	});
+
+	it("a forbidden (viewer-grant) issue fails individually while a writable one succeeds", async () => {
+		const roles = await seedWorkspaceRoles();
+		const project = await seedProject(roles.workspace.id);
+		// Grant the viewer a *viewer* project role (read-only) so their write is
+		// rejected as forbidden rather than the project being invisible outright
+		// (a group with no grant at all 404s instead — see updateIssue's own
+		// visibility-hides-existence rule).
+		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
+
+		const blocked = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, {
+			title: "Blocked",
+		});
+
+		const res = await callMcpTool(roles.workspace.id, roles.viewer.token, roles.workspace.slug, {
+			name: "update_issues",
+			arguments: {
+				ids: [blocked.id],
+				status: "done",
+				completionReport: report,
+			},
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string } }>;
+		};
+		expect(results).toEqual([
+			{
+				id: blocked.id,
+				ok: false,
+				error: { code: "forbidden", message: "Insufficient permissions" },
+			},
+		]);
+	});
+
+	it("rejects an agent (live lease) entering in_review without a completion report, per issue", async () => {
+		const withLease = await seedIssue(workspaceId, projectId, userId, { title: "Agent issue" });
+		const { agentSessionId } = await seedAgentLease(workspaceId, withLease.id);
+		const plain = await seedIssue(workspaceId, projectId, userId, { title: "Plain issue" });
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: {
+				ids: [withLease.id, plain.id],
+				status: "in_review",
+				agentSessionId,
+			},
+		});
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string } }>;
+		};
+		// The agentSessionId only reflects a live lease on the issue it's actually
+		// leasing — `plain` has no lease at all, so it isn't gated and succeeds.
+		expect(results[0]).toMatchObject({ id: withLease.id, ok: false });
+		expect(results[0].error?.code).toBe("validation");
+		expect(results[1]).toEqual({ id: plain.id, ok: true });
+	});
+
+	it("flags needsAudit when an agent's shared verification isn't externally checkable", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Freeform close" });
+		const { agentSessionId } = await seedAgentLease(workspaceId, issue.id);
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: {
+				ids: [issue.id],
+				status: "done",
+				agentSessionId,
+				completionReport: { summary: "Done", verification: "ran the tests locally" },
+			},
+		});
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean }>;
+		};
+		expect(results).toEqual([{ id: issue.id, ok: true }]);
+		expect(await needsAuditOf(issue.id)).toBe(true);
+	});
+
+	it("does not flag needsAudit when the shared verification has an externally-checkable link", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Verifiable close" });
+		const { agentSessionId } = await seedAgentLease(workspaceId, issue.id);
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: { ids: [issue.id], status: "done", agentSessionId, completionReport: report },
+		});
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean }>;
+		};
+		expect(results).toEqual([{ id: issue.id, ok: true }]);
+		expect(await needsAuditOf(issue.id)).toBe(false);
+	});
+
+	it("perIssue.summary overrides the shared completionReport summary for just that issue", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "B" });
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: {
+				ids: [a.id, b.id],
+				status: "done",
+				completionReport: report,
+				perIssue: { [a.id]: { summary: "Custom summary for A" } },
+			},
+		});
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean }>;
+		};
+		expect(results).toEqual([
+			{ id: a.id, ok: true },
+			{ id: b.id, ok: true },
+		]);
+
+		const aBodies = await commentBodies(a.id);
+		expect(aBodies.some((body) => body.includes("Custom summary for A"))).toBe(true);
+		expect(aBodies.some((body) => body.includes("Shipped in release"))).toBe(false);
+
+		const bBodies = await commentBodies(b.id);
+		expect(bBodies.some((body) => body.includes("Shipped in release"))).toBe(true);
+	});
+
+	it("REST parity: POST /api/issues/bulk-update behaves the same as the MCP tool", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "REST A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "REST B" });
+
+		const res = await bulkUpdateRest({
+			ids: [a.id, b.id],
+			status: "done",
+			completionReport: report,
+		});
+		expect(res.status).toBe(200);
+		const { results } = (await res.json()) as { results: Array<{ id: string; ok: boolean }> };
+		expect(results).toEqual([
+			{ id: a.id, ok: true },
+			{ id: b.id, ok: true },
+		]);
+		expect(await statusOf(a.id)).toBe("done");
+		expect(await statusOf(b.id)).toBe("done");
+	});
+
+	it("REST /api/issues/bulk-update is never captured by the /:id route", async () => {
+		// If bulk-update weren't registered before "/:id", this would 404/attempt to
+		// resolve "bulk-update" as an issue id/ref instead of hitting the bulk handler.
+		const res = await bulkUpdateRest({ ids: ["nonexistent-id"], status: "done" });
+		expect(res.status).toBe(200);
+		const { results } = (await res.json()) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string } }>;
+		};
+		expect(results).toEqual([
+			{ id: "nonexistent-id", ok: false, error: { code: "not_found", message: "Issue not found" } },
+		]);
+	});
+
+	it("rejects more than 100 ids", async () => {
+		const ids = Array.from({ length: 101 }, () => crypto.randomUUID());
+		const res = await mcpCall({ name: "update_issues", arguments: { ids, status: "done" } });
+		expect(res.error).toBeDefined();
+		expect(res.error?.message).toMatch(/Invalid params/);
+	});
+
+	it("rejects a call with neither status nor statusId", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "No transition" });
+		const res = await mcpCall({ name: "update_issues", arguments: { ids: [issue.id] } });
+		expect(res.error).toBeDefined();
 	});
 });

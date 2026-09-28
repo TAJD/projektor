@@ -11,7 +11,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**122 tools across 22 domains.**
+**123 tools across 22 domains.**
 
 ## Coordination
 
@@ -120,6 +120,7 @@ running server.
 | `get_issues` | Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than repeated get_issue calls for triage. Items carry customFields but no rollup/links/assignee_name, and omit `body` unless includeBody:true. Returned in the order refs/ids were given; `missing` lists (once each) any requested ref/id that didn't resolve or isn't visible to you. Omitted keys are null/empty/false; pass verbose:true for the full shape. | read-only |
 | `create_issue` | Create a new issue in a project. For an issue an agent should be able to pick up autonomously, the body should state acceptance criteria and scope (files/components) — see get_workflow's definition of ready. get_prioritized_issues excludes issues missing these by default. Verification isn't part of the readiness bar (PROJ-738) — it's required later, in the completionReport when entering review/done. | write |
 | `update_issue` | Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. | write |
+| `update_issues` | Apply one status transition to up to 100 issues at once (e.g. closing every ticket in a release with one shared completion report), instead of one update_issue call per issue. Records the shared completionReport (PR/release links) once per issue; pass perIssue to override just the summary for specific issues. Same review gating and needsAudit classification as update_issue, applied to each issue individually — one issue failing (missing ref, forbidden, invalid transition, missing report) never aborts the others. Returns a per-issue result in request order, each under the id/ref you passed in `ids`. | write |
 | `search_issues` | Search issues by keyword in title or body | read-only |
 | `delete_issue` | Delete an issue by ID or ref (e.g. PROJ-42) | destructive |
 | `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria or scope/files) are excluded. If none of the open issues pass, the ranked (not-ready) list is returned anyway with `degraded: true` on the response and `needsGrooming`/`missingCriteria` on each issue, rather than an empty array — empty otherwise means "no open work", which would be a lie. | read-only |

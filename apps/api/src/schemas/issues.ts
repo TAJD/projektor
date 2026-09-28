@@ -48,6 +48,26 @@ export const UpdateIssueSchema = z
 	.strict()
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 
+// PROJ-930: bulk close/transition — one shared completionReport (PR/release links) applied
+// to up to 100 issues in one call, with an optional per-issue summary override. `ids`
+// accepts UUIDs or refs (PROJ-42), same as update_issue's id — each is resolved and gated
+// individually by updateIssue itself, so this schema only validates the bulk envelope.
+export const UpdateIssuesSchema = z
+	.object({
+		ids: z.array(z.string().min(1)).min(1).max(100),
+		status: StatusEnum.optional(),
+		statusId: TaxonomyIdSchema.nullable().optional(),
+		completionReport: CompletionReportSchema.optional(),
+		// Keyed by the literal string the caller used in `ids` (a UUID or a ref like
+		// PROJ-42) — not the resolved id, since the caller may not know it.
+		perIssue: z.record(z.string(), z.object({ summary: z.string().min(1) })).optional(),
+		agentSessionId: z.string().uuid().optional(),
+	})
+	.strict()
+	.refine((obj) => obj.status !== undefined || obj.statusId !== undefined, {
+		message: "status or statusId is required",
+	});
+
 export const IssueListCursorSchema = z
 	.union([z.number().int().nonnegative(), z.string().regex(/^\d+(?::[A-Za-z0-9-]+)?$/)])
 	.transform((v) => {
