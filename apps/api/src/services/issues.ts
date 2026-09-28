@@ -1,10 +1,12 @@
 import { drizzle, schema } from "@projektor/db";
+import type { Role } from "@projektor/types";
 import { and, desc, eq, gte, inArray, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { issuePath } from "../lib/urls";
 import { AddCommentSchema } from "../schemas/comments";
 import { BooleanQueryParam, IdSchema } from "../schemas/common";
 import {
+	type CompletionReportSchema,
 	CreateIssueSchema,
 	GetIssueSchema,
 	GetIssuesBatchSchema,
@@ -40,6 +42,8 @@ import {
 	isLiveAgentSessionId,
 	issueEverHadAgentLease,
 	issueHasLiveAgentLease,
+	issuesEverHadAgentLease,
+	issuesWithLiveAgentLease,
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
@@ -1000,6 +1004,11 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 type UpdateIssueData = z.infer<typeof UpdateIssueSchema>;
 type ExistingIssue = {
 	id: string;
+	// PROJ-930: included so the bulk path (which loads many of these at once, keyed by
+	// id) can read it straight off the map entry — updateIssue's own single-row `existing`
+	// already carries it structurally (its select includes project_id), this just gives
+	// that field a name in the type both paths share.
+	projectId: string;
 	parentId: string | null;
 	typeId: string | null;
 	title: string;
@@ -1154,8 +1163,10 @@ function buildReviewTransitions(
 	return { setValues, isGateRejection };
 }
 
-function assertCompletionReportPresent(data: UpdateIssueData): void {
-	if (!data.completionReport) {
+type CompletionReportInput = z.infer<typeof CompletionReportSchema>;
+
+function assertCompletionReportPresent(completionReport: CompletionReportInput | undefined): void {
+	if (!completionReport) {
 		throw new ValidationError({
 			formErrors: [],
 			fieldErrors: {
@@ -1195,26 +1206,28 @@ function classifyStatusTransition(
 // to issues an agent has actually worked, so ordinary human closes (duplicates,
 // won't-fix, chores) aren't blocked. PROJ-375 removed the old hard block on an agent
 // (live lease) transitioning to done — agents can close freely now; see
-// computeNeedsAudit below for the audit-after-the-fact replacement.
-async function assertReviewGate(
-	ctx: ServiceCtx,
-	data: UpdateIssueData,
+// computeNeedsAuditFlag below for the audit-after-the-fact replacement.
+//
+// PROJ-930: pure/sync and fed precomputed lease facts, so it's the ONE place this rule
+// lives for both update_issue (which fetches hasLiveAgentLease/everAgentWorked one
+// issue at a time, right below) and the bulk update_issues path (which fetches them for
+// every issue in the call via two batched set queries, see issuesWithLiveAgentLease /
+// issuesEverHadAgentLease in issue-leases.ts) — neither path re-derives the rule itself.
+function assertReviewGate(
+	completionReport: CompletionReportInput | undefined,
 	existing: ExistingIssue,
-	transition: Readonly<{ enteringInReview: boolean; enteringDone: boolean }>
-): Promise<void> {
+	transition: Readonly<{ enteringInReview: boolean; enteringDone: boolean }>,
+	deps: Readonly<{ hasLiveAgentLease: boolean; everAgentWorked: boolean }>
+): void {
 	const { enteringInReview, enteringDone } = transition;
 	if (!enteringInReview && !enteringDone) return;
 
-	if (enteringInReview) {
-		const hasLiveAgentLease = await issueHasLiveAgentLease(ctx, existing.id);
-		if (hasLiveAgentLease) {
-			assertCompletionReportPresent(data);
-		}
+	if (enteringInReview && deps.hasLiveAgentLease) {
+		assertCompletionReportPresent(completionReport);
 	}
 
-	if (enteringDone) {
-		const everAgentWorked = await issueEverHadAgentLease(ctx, existing.id);
-		if (everAgentWorked && existing.completionReportAt == null && !data.completionReport) {
+	if (enteringDone && deps.everAgentWorked && existing.completionReportAt == null) {
+		if (!completionReport) {
 			throw new ValidationError({
 				formErrors: [
 					"A completion report is required before an agent-worked issue can be marked done (PROJ-254)",
@@ -1226,24 +1239,52 @@ async function assertReviewGate(
 }
 
 // PROJ-375: audit-after-the-fact replacement for the removed done-gate block. Only
-// flags a call that's actually agent-initiated — `isLiveAgentSessionId` checks the
-// session is real and live, not just a self-declared string, so a caller can't get
+// flags a call that's actually agent-initiated — `isLiveAgentSession` (computed by the
+// caller via isLiveAgentSessionId, once per call, not per issue) confirms the session
+// is real and live, not just a self-declared string, so a caller can't get
 // flagged/unflagged by lease state (the bug that started this ticket: an agent that
 // released its lease before closing slipped the old gate unintentionally). A caller
 // can still dodge the flag by omitting agentSessionId entirely — accepted limitation,
 // see the module doc on evidence-classification.ts.
-async function computeNeedsAudit(ctx: ServiceCtx, data: UpdateIssueData): Promise<boolean> {
-	if (!data.agentSessionId) return false;
-	if (!(await isLiveAgentSessionId(ctx, data.agentSessionId))) return false;
-	if (!data.completionReport) return true;
-	return !isExternallyVerifiableEvidence(data.completionReport.verification);
+//
+// PROJ-930: pure/sync twin of assertReviewGate above — same reuse rationale.
+function computeNeedsAuditFlag(
+	completionReport: CompletionReportInput | undefined,
+	isLiveAgentSession: boolean
+): boolean {
+	if (!isLiveAgentSession) return false;
+	if (!completionReport) return true;
+	return !isExternallyVerifiableEvidence(completionReport.verification);
 }
 
-async function applyStatusFields(
+type ResolvedStatus = {
+	id: string | null;
+	key: string;
+	category: string | undefined;
+	isReviewStep: boolean;
+};
+
+type StatusTransition = { enteringInReview: boolean; enteringDone: boolean };
+
+// PROJ-930: the pure core of a status-transition write — everything applyStatusFields
+// (update_issue, one issue) and updateIssues (bulk, many issues) both need, given a
+// status already resolved ONCE by the caller and the lease/session facts the caller
+// already looked up (individually for update_issue, batched for updateIssues). Holding
+// this in one function is what "share the same gate code, no duplicated rules" means:
+// every rule below — the review/done report gate, needsAudit, completed/flow/review
+// timestamps, the gate-rejection row, what counts as "closing" — is written once.
+function buildStatusTransitionPlan(
 	ctx: ServiceCtx,
-	data: UpdateIssueData,
-	existing: ExistingIssue
-): Promise<{
+	existing: ExistingIssue,
+	resolved: ResolvedStatus,
+	transition: StatusTransition,
+	deps: Readonly<{
+		completionReport: CompletionReportInput | undefined;
+		hasLiveAgentLease: boolean;
+		everAgentWorked: boolean;
+		isLiveAgentSession: boolean;
+	}>
+): {
 	setValues: SetValues;
 	reviewOrDoneTransition: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
@@ -1251,57 +1292,27 @@ async function applyStatusFields(
 	// no custom task_statuses row backing this key has category === null (see
 	// resolveStatus), so status_category alone would miss the legacy-key case.
 	closing: boolean;
-}> {
-	if (data.status === undefined && !("statusId" in data)) {
-		return {
-			setValues: {},
-			reviewOrDoneTransition: false,
-			gateRejectionStatement: null,
-			closing: false,
-		};
-	}
-
-	// PROJ-870: resolveStatus returns the category from the same row lookup that resolves
-	// the status id/key, replacing the separate fetchStatusCategory re-query of that id and
-	// the COALESCE((SELECT category ...)) subquery that used to sit in the UPDATE.
-	const resolved = await resolveStatus(
-		ctx,
-		"statusId" in data ? data.statusId : undefined,
-		data.status
-	);
-	const { id: resolvedStatusId, key: resolvedStatusKey } = resolved;
-	const newStatusCategory = resolved.category ?? undefined;
-
-	const newIsReviewStep = resolved.isReviewStep;
-	const transition = classifyStatusTransition(
-		existing,
-		resolvedStatusKey,
-		newStatusCategory,
-		newIsReviewStep
-	);
-	await assertReviewGate(ctx, data, existing, transition);
+} {
+	assertReviewGate(deps.completionReport, existing, transition, deps);
 
 	const setValues: SetValues = {
-		status: resolvedStatusKey,
-		statusId: resolvedStatusId,
+		status: resolved.key,
+		statusId: resolved.id,
 		statusCategory: resolved.category ?? "",
 	};
 	if (transition.enteringDone) {
-		setValues.needsAudit = await computeNeedsAudit(ctx, data);
+		setValues.needsAudit = computeNeedsAuditFlag(deps.completionReport, deps.isLiveAgentSession);
 	}
 
+	Object.assign(setValues, buildCompletedAtTransition(existing, resolved.key, resolved.category));
 	Object.assign(
 		setValues,
-		buildCompletedAtTransition(existing, resolvedStatusKey, newStatusCategory)
-	);
-	Object.assign(
-		setValues,
-		buildFlowTimestampTransitions(existing, resolvedStatusKey, newStatusCategory, newIsReviewStep)
+		buildFlowTimestampTransitions(existing, resolved.key, resolved.category, resolved.isReviewStep)
 	);
 	const { setValues: reviewSetValues, isGateRejection } = buildReviewTransitions(existing, {
-		resolvedStatusKey,
-		newStatusCategory,
-		newIsReviewStep,
+		resolvedStatusKey: resolved.key,
+		newStatusCategory: resolved.category,
+		newIsReviewStep: resolved.isReviewStep,
 		enteringInReview: transition.enteringInReview,
 		enteringDone: transition.enteringDone,
 	});
@@ -1326,9 +1337,71 @@ async function applyStatusFields(
 		reviewOrDoneTransition: transition.enteringInReview || transition.enteringDone,
 		gateRejectionStatement,
 		closing:
-			isDoneState(newStatusCategory, resolvedStatusKey) ||
-			isCancelledState(newStatusCategory, resolvedStatusKey),
+			isDoneState(resolved.category, resolved.key) ||
+			isCancelledState(resolved.category, resolved.key),
 	};
+}
+
+async function applyStatusFields(
+	ctx: ServiceCtx,
+	data: UpdateIssueData,
+	existing: ExistingIssue
+): Promise<{
+	setValues: SetValues;
+	reviewOrDoneTransition: boolean;
+	gateRejectionStatement: D1PreparedStatement | null;
+	closing: boolean;
+}> {
+	if (data.status === undefined && !("statusId" in data)) {
+		return {
+			setValues: {},
+			reviewOrDoneTransition: false,
+			gateRejectionStatement: null,
+			closing: false,
+		};
+	}
+
+	// PROJ-870: resolveStatus returns the category from the same row lookup that resolves
+	// the status id/key, replacing the separate fetchStatusCategory re-query of that id and
+	// the COALESCE((SELECT category ...)) subquery that used to sit in the UPDATE.
+	const resolved = await resolveStatus(
+		ctx,
+		"statusId" in data ? data.statusId : undefined,
+		data.status
+	);
+	const resolvedShape: ResolvedStatus = {
+		id: resolved.id,
+		key: resolved.key,
+		category: resolved.category ?? undefined,
+		isReviewStep: resolved.isReviewStep,
+	};
+	const transition = classifyStatusTransition(
+		existing,
+		resolvedShape.key,
+		resolvedShape.category,
+		resolvedShape.isReviewStep
+	);
+
+	// Same query pattern (and count) as before PROJ-930: one issue at a time, only the
+	// ones this transition actually needs — see issues-write-batching.test.ts's round-
+	// trip bounds, which this must not regress.
+	const hasLiveAgentLease = transition.enteringInReview
+		? await issueHasLiveAgentLease(ctx, existing.id)
+		: false;
+	const everAgentWorked = transition.enteringDone
+		? await issueEverHadAgentLease(ctx, existing.id)
+		: false;
+	const isLiveAgentSession =
+		transition.enteringDone && data.agentSessionId
+			? await isLiveAgentSessionId(ctx, data.agentSessionId)
+			: false;
+
+	return buildStatusTransitionPlan(ctx, existing, resolvedShape, transition, {
+		completionReport: data.completionReport,
+		hasLiveAgentLease,
+		everAgentWorked,
+		isLiveAgentSession,
+	});
 }
 
 function now(): number {
@@ -1694,11 +1767,17 @@ type BulkIssueResult =
 	| { id: string; ok: true }
 	| { id: string; ok: false; error: { code: string; message: string } };
 
-// Maps a thrown service error to the bulk result's { code, message } shape. Only the
-// same client-facing ServiceError kinds the REST/MCP adapters surface are given a
-// meaningful message (PROJ-204); anything else is logged and reported generically so an
-// internal error never leaks and a single bad issue can't take the whole batch down.
-function describeIssueError(id: string, err: unknown): { code: string; message: string } {
+// Maps a thrown gate error to the bulk result's { code, message } shape. Only the same
+// client-facing ServiceError kinds the REST/MCP adapters surface are given a meaningful
+// message (PROJ-204); anything else is logged (with the requestId that's also handed
+// back to the caller, so a report can be matched to server logs) and reported
+// generically so an internal error never leaks raw detail and a single bad issue can't
+// take the whole call down.
+function describeIssueError(
+	id: string,
+	requestId: string,
+	err: unknown
+): { code: string; message: string } {
 	if (err instanceof ValidationError) {
 		const parts = [
 			...err.issues.formErrors,
@@ -1711,43 +1790,424 @@ function describeIssueError(id: string, err: unknown): { code: string; message: 
 	if (err instanceof NotFoundError) return { code: "not_found", message: err.message };
 	if (err instanceof ForbiddenError) return { code: "forbidden", message: err.message };
 	if (err instanceof ConflictError) return { code: "conflict", message: err.message };
-	console.error(`[updateIssues] unexpected error for issue ${id}:`, err);
-	return { code: "internal", message: "Internal error" };
+	console.error(`[updateIssues] unexpected error for issue ${id} (request ${requestId}):`, err);
+	return { code: "internal", message: `Internal error (request: ${requestId})` };
 }
+
+// PROJ-930: resolve every entry of `ids` (UUID or ref) to an issue id, in one batched
+// query per distinct project key referenced — the same grouping getIssuesBatch uses for
+// get_issues, so a bulk call over N refs costs one query per project key involved, not
+// one per ref. Order and duplicate literal strings are preserved (the caller's own
+// literal string is what a failed entry is reported back under); resolving the SAME
+// literal twice is impossible here since the schema already rejects duplicate `ids`
+// entries — but two DIFFERENT literals (a UUID and a ref) can still resolve to the same
+// issue, which the caller checks for once ids are back in hand.
+async function resolveBulkIssueIds(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	ids: readonly string[]
+): Promise<Array<{ requested: string; id: string | undefined }>> {
+	const numbersByKey = new Map<string, number[]>();
+	for (const raw of ids) {
+		const m = raw.match(ISSUE_REF_PATTERN);
+		if (m) {
+			const nums = numbersByKey.get(m[1]) ?? [];
+			nums.push(parseInt(m[2], 10));
+			numbersByKey.set(m[1], nums);
+		}
+	}
+
+	const refToId = new Map<string, string>();
+	for (const [key, numbers] of numbersByKey) {
+		const rows = await inChunks(numbers, (chunk) =>
+			orm
+				.select({ id: schema.issues.id, number: schema.issues.number })
+				.from(schema.issues)
+				.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+				.where(
+					and(
+						eq(schema.projects.key, key),
+						eq(schema.issues.workspaceId, ctx.workspaceId),
+						inArray(schema.issues.number, chunk)
+					)
+				)
+		);
+		for (const row of rows) refToId.set(`${key}-${row.number}`, row.id);
+	}
+
+	return ids.map((raw) => {
+		const m = raw.match(ISSUE_REF_PATTERN);
+		if (!m) return { requested: raw, id: raw };
+		return { requested: raw, id: refToId.get(`${m[1]}-${parseInt(m[2], 10)}`) };
+	});
+}
+
+// PROJ-930: bulk twin of the row load at the top of updateIssue — same columns, same
+// join, same workspace scope — for every distinct resolved id in one inChunks-batched
+// query instead of one round trip per issue.
+async function loadExistingIssuesForBulk(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	ids: readonly string[]
+): Promise<Map<string, ExistingIssue>> {
+	if (ids.length === 0) return new Map();
+	const rows = await inChunks([...ids], (chunk) =>
+		orm
+			.select({
+				id: schema.issues.id,
+				projectId: schema.issues.projectId,
+				parentId: schema.issues.parentId,
+				typeId: schema.issues.typeId,
+				title: schema.issues.title,
+				body: schema.issues.body,
+				status: schema.issues.status,
+				statusCategory: schema.issues.statusCategory,
+				readyAt: schema.issues.readyAt,
+				claimedAt: schema.issues.claimedAt,
+				doneAt: schema.issues.doneAt,
+				completionReportAt: schema.issues.completionReportAt,
+				inReviewAt: schema.issues.inReviewAt,
+				reviewBounceCount: schema.issues.reviewBounceCount,
+				statusReviewFlag: schema.taskStatuses.isReviewStep,
+			})
+			.from(schema.issues)
+			.leftJoin(
+				schema.taskStatuses,
+				and(
+					eq(schema.taskStatuses.id, schema.issues.statusId),
+					eq(schema.taskStatuses.workspaceId, ctx.workspaceId)
+				)
+			)
+			.where(and(inArray(schema.issues.id, chunk), eq(schema.issues.workspaceId, ctx.workspaceId)))
+	);
+
+	const map = new Map<string, ExistingIssue>();
+	for (const r of rows) {
+		const { statusReviewFlag, ...rest } = r;
+		map.set(r.id, {
+			...rest,
+			statusIsReviewStep:
+				statusReviewFlag == null ? r.status === "in_review" : statusReviewFlag === 1,
+		});
+	}
+	return map;
+}
+
+// One issue's fully-planned write, ready to fold into a shared db.batch() chunk.
+interface BulkIssuePlan {
+	index: number;
+	requested: string;
+	id: string;
+	projectId: string;
+	statements: D1PreparedStatement[];
+	recordCompletionReport: boolean;
+	commentId: string | null;
+}
+
+// Issues per db.batch() call (blocker fix, PROJ-930): each issue contributes at most 5
+// statements (update, completion-report comment, gate rejection, activity, release
+// lease+claims), so 15 issues keeps a chunk's statement count comfortably inside D1's
+// per-batch ceiling while still turning a 100-issue call into single-digit-to-low-tens
+// D1 round trips instead of hundreds. See issues-bulk-round-trips.test.ts for the
+// measured bound.
+const BULK_WRITE_CHUNK_SIZE = 15;
 
 // PROJ-930: apply one status transition to up to 100 issues, recording a shared
 // completionReport (PR/release links) once per issue with an optional per-issue summary
-// override. Reuses updateIssue's own gates/needsAudit classification unchanged — each
-// issue is validated, scoped and gated exactly as a lone update_issue call would be, just
-// looped — so REST/MCP parity, review gating and needsAudit stay in one place. No
-// variable-length D1 IN query is built here (each iteration is updateIssue's own
-// single-row reads/writes), so there's nothing that needs inChunks: the D1 100-bound-
-// param cap that inChunks guards against only bites a query whose parameter count scales
-// with the input array, and this loop never builds one.
+// override. Every issue is validated, scoped and gated through the exact same rule
+// functions update_issue uses (buildStatusTransitionPlan/assertReviewGate/
+// computeNeedsAuditFlag — see their doc comments) — the difference from looping
+// update_issue itself is that every DB READ those rules need is loaded ONCE for the
+// whole call (refs, existing rows, the shared status resolution, the shared
+// agentSessionId's liveness, project roles, and the lease-fact sets), and every WRITE is
+// folded into a handful of chunked db.batch() calls instead of one per issue — the
+// blocker this ticket's review found: looping update_issue's own (single-issue) I/O 100×
+// is ~400-800 sequential D1 round trips, which can exceed a Worker's per-invocation
+// subrequest budget. One issue's gate failure (or a write-chunk failure — see below)
+// never aborts any other issue.
 export async function updateIssues(ctx: ServiceCtx, raw: unknown) {
 	const result = UpdateIssuesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { ids, status, statusId, completionReport, perIssue, agentSessionId } = result.data;
 
-	const results: BulkIssueResult[] = [];
-	for (const requested of ids) {
-		try {
-			const fields: Record<string, unknown> = {};
-			if (status !== undefined) fields.status = status;
-			if (statusId !== undefined) fields.statusId = statusId;
-			if (agentSessionId !== undefined) fields.agentSessionId = agentSessionId;
-			if (completionReport) {
-				const overrideSummary = perIssue?.[requested]?.summary;
-				fields.completionReport = overrideSummary
-					? { ...completionReport, summary: overrideSummary }
-					: completionReport;
-			}
-			await updateIssue(ctx, requested, fields);
-			results.push({ id: requested, ok: true });
-		} catch (err) {
-			results.push({ id: requested, ok: false, error: describeIssueError(requested, err) });
+	const requestId = crypto.randomUUID();
+	const orm = drizzle(ctx.db, { schema });
+
+	// 1. Resolve every ref/UUID to an issue id — batched per project key, not per ref.
+	const order = await resolveBulkIssueIds(ctx, orm, ids);
+	const distinctResolvedIds = Array.from(
+		new Set(order.map((o) => o.id).filter((id): id is string => !!id))
+	);
+
+	// 2. Load every distinct issue's row once — batched, not one SELECT per issue.
+	const existingById = await loadExistingIssuesForBulk(ctx, orm, distinctResolvedIds);
+
+	// 3. Resolve the shared status ONCE. A bad statusId throws here — a single up-front
+	// 400 for the whole call, not a validation failure repeated per issue.
+	const resolved = await resolveStatus(ctx, statusId, status);
+	const resolvedShape: ResolvedStatus = {
+		id: resolved.id,
+		key: resolved.key,
+		category: resolved.category ?? undefined,
+		isReviewStep: resolved.isReviewStep,
+	};
+
+	// 4. The shared agentSessionId's liveness, once for the whole call.
+	const isLiveAgentSession = agentSessionId
+		? await isLiveAgentSessionId(ctx, agentSessionId)
+		: false;
+
+	// 5. Classify each resolvable, not-yet-seen, existing issue in memory (pure — no I/O),
+	// catching not-found and same-issue-twice (a UUID and a ref aliasing one issue) before
+	// any further lookup. `seenResolvedIds` also means the schema's own duplicate-literal
+	// rejection and this runtime alias check together cover every way `ids` can repeat.
+	const failures = new Map<number, BulkIssueResult>();
+	const seenResolvedIds = new Set<string>();
+	const planned: Array<{
+		index: number;
+		requested: string;
+		id: string;
+		existing: ExistingIssue;
+		transition: StatusTransition;
+		effectiveReport: CompletionReportInput | undefined;
+	}> = [];
+
+	order.forEach((entry, index) => {
+		if (!entry.id) {
+			failures.set(index, {
+				id: entry.requested,
+				ok: false,
+				error: { code: "not_found", message: "Issue not found" },
+			});
+			return;
+		}
+		if (seenResolvedIds.has(entry.id)) {
+			failures.set(index, {
+				id: entry.requested,
+				ok: false,
+				error: { code: "duplicate", message: "Issue already included earlier in this call" },
+			});
+			return;
+		}
+		seenResolvedIds.add(entry.id);
+
+		const existing = existingById.get(entry.id);
+		if (!existing) {
+			failures.set(index, {
+				id: entry.requested,
+				ok: false,
+				error: { code: "not_found", message: "Issue not found" },
+			});
+			return;
+		}
+
+		const transition = classifyStatusTransition(
+			existing,
+			resolvedShape.key,
+			resolvedShape.category,
+			resolvedShape.isReviewStep
+		);
+		const overrideSummary = perIssue?.[entry.requested]?.summary;
+		const effectiveReport = completionReport
+			? overrideSummary
+				? { ...completionReport, summary: overrideSummary }
+				: completionReport
+			: undefined;
+
+		planned.push({
+			index,
+			requested: entry.requested,
+			id: entry.id,
+			existing,
+			transition,
+			effectiveReport,
+		});
+	});
+
+	// 6. Project write access — once per DISTINCT project, not once per issue.
+	const roleByProject = new Map<string, Role | null>();
+	for (const p of planned) {
+		const projectId = p.existing.projectId;
+		if (!roleByProject.has(projectId)) {
+			roleByProject.set(
+				projectId,
+				isWorkspaceAdmin(ctx.role) ? (ctx.role ?? null) : await effectiveProjectRole(ctx, projectId)
+			);
 		}
 	}
+
+	// 7. The two lease-fact sets, each ONE batched query (not one per issue) over only the
+	// issues that actually need that fact (entering review / entering done respectively).
+	const [liveLeaseSet, everLeaseSet] = await Promise.all([
+		issuesWithLiveAgentLease(
+			ctx,
+			planned.filter((p) => p.transition.enteringInReview).map((p) => p.id)
+		),
+		issuesEverHadAgentLease(
+			ctx,
+			planned.filter((p) => p.transition.enteringDone).map((p) => p.id)
+		),
+	]);
+
+	// 8. Run every remaining gate in memory and build each passing issue's statements.
+	// Nothing here does I/O, so a per-issue failure costs nothing beyond catching it.
+	const toWrite: BulkIssuePlan[] = [];
+	for (const p of planned) {
+		try {
+			if (!isWorkspaceAdmin(ctx.role)) {
+				const role = roleByProject.get(p.existing.projectId) ?? null;
+				if (role === null) throw new NotFoundError("Issue not found");
+				if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+			}
+
+			const plan = buildStatusTransitionPlan(ctx, p.existing, resolvedShape, p.transition, {
+				completionReport: p.effectiveReport,
+				hasLiveAgentLease: p.transition.enteringInReview && liveLeaseSet.has(p.id),
+				everAgentWorked: p.transition.enteringDone && everLeaseSet.has(p.id),
+				isLiveAgentSession: p.transition.enteringDone && isLiveAgentSession,
+			});
+
+			const setValues: SetValues = { updatedAt: now(), ...plan.setValues };
+			const recordCompletionReport = Boolean(p.effectiveReport) && plan.reviewOrDoneTransition;
+			if (recordCompletionReport) setValues.completionReportAt = now();
+
+			const statements: D1PreparedStatement[] = [
+				toD1Statement(
+					ctx,
+					orm
+						.update(schema.issues)
+						.set(setValues)
+						.where(and(eq(schema.issues.id, p.id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+						.toSQL()
+				),
+			];
+
+			let commentId: string | null = null;
+			if (recordCompletionReport && p.effectiveReport) {
+				commentId = crypto.randomUUID();
+				statements.push(
+					buildAddCommentInsertStatement(ctx, orm, {
+						id: commentId,
+						issueId: p.id,
+						body: completionReportCommentBody(p.effectiveReport),
+						now: now(),
+					})
+				);
+			}
+
+			if (plan.gateRejectionStatement) statements.push(plan.gateRejectionStatement);
+
+			statements.push(
+				buildActivityInsertStatement(ctx, orm, {
+					entityType: "issue",
+					entityId: p.id,
+					action: "updated",
+					diff: { status, statusId: statusId ?? null },
+				})
+			);
+
+			// PROJ-928: same as updateIssue — an issue closing releases its lease/file claims
+			// so it stops blocking the fleet.
+			if (plan.closing) {
+				statements.push(
+					buildReleaseLeaseForClosedIssueStatement(ctx, p.id),
+					buildReleaseClaimsForClosedIssueStatement(ctx, p.id)
+				);
+			}
+
+			toWrite.push({
+				index: p.index,
+				requested: p.requested,
+				id: p.id,
+				projectId: p.existing.projectId,
+				statements,
+				recordCompletionReport,
+				commentId,
+			});
+		} catch (err) {
+			failures.set(p.index, {
+				id: p.requested,
+				ok: false,
+				error: describeIssueError(p.id, requestId, err),
+			});
+		}
+	}
+
+	// 9. Write only the issues that passed every gate, chunked so each db.batch() call
+	// carries a bounded number of issues' statements — this is the fix for the blocker:
+	// a 100-issue call costs a handful of batch round trips, not one per issue. A failure
+	// INSIDE a batch (e.g. a genuine D1 error, not a gate failure — those were already
+	// filtered out above) fails only that chunk's issues, reported as "internal", so it
+	// can't silently roll back or block chunks that already committed.
+	const committed: BulkIssuePlan[] = [];
+	for (let i = 0; i < toWrite.length; i += BULK_WRITE_CHUNK_SIZE) {
+		const chunk = toWrite.slice(i, i + BULK_WRITE_CHUNK_SIZE);
+		try {
+			await ctx.db.batch(chunk.flatMap((c) => c.statements));
+			committed.push(...chunk);
+		} catch (err) {
+			console.error(
+				`[updateIssues] batch write failed for issues [${chunk.map((c) => c.id).join(", ")}] (request ${requestId}):`,
+				err
+			);
+			for (const c of chunk) {
+				failures.set(c.index, {
+					id: c.requested,
+					ok: false,
+					error: { code: "internal", message: `Internal error (request: ${requestId})` },
+				});
+			}
+		}
+	}
+
+	// 10. Heartbeat touch — once for the whole call (not once per issue), same PROJ-929
+	// no-op-if-stale semantics as updateIssue's own touch.
+	if (agentSessionId && isLiveAgentSession) {
+		await ctx.db.batch([buildTouchAgentHeartbeatIfLiveStatement(ctx, agentSessionId)]);
+	}
+
+	// 11. Cache invalidation and realtime broadcasts for every issue that actually
+	// committed, run concurrently rather than one sequential await per issue.
+	await Promise.all(
+		committed.map((c) => cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${c.id}`))
+	);
+	await Promise.all(
+		committed.flatMap((c) => {
+			const events = [
+				broadcastWorkspaceEvent(ctx, {
+					type: "issue.status_changed",
+					projectId: c.projectId,
+					data: { id: c.id, updates: { status, statusId } },
+				}),
+			];
+			if (c.recordCompletionReport && c.commentId) {
+				events.push(
+					broadcastWorkspaceEvent(ctx, {
+						type: "comment.created",
+						projectId: c.projectId,
+						data: { id: c.commentId, issueId: c.id, authorId: ctx.userId },
+					})
+				);
+			}
+			return events;
+		})
+	);
+
+	// 12. Assemble the final per-issue results, in request order.
+	const committedIds = new Set(committed.map((c) => c.id));
+	const results: BulkIssueResult[] = order.map((entry, index) => {
+		const failure = failures.get(index);
+		if (failure) return failure;
+		if (entry.id && committedIds.has(entry.id)) return { id: entry.requested, ok: true };
+		// Every non-failure entry either committed or is in `failures` — this is
+		// unreachable in practice, but fail closed rather than silently drop the entry.
+		return {
+			id: entry.requested,
+			ok: false,
+			error: { code: "internal", message: `Internal error (request: ${requestId})` },
+		};
+	});
+
 	return { results };
 }
 

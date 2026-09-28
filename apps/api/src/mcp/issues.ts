@@ -461,6 +461,8 @@ export const issuesTools: MCPTool[] = [
 				ids: {
 					type: "array",
 					items: { type: "string" },
+					minItems: 1,
+					maxItems: 100,
 					description: "1-100 issue UUIDs and/or refs like PROJ-42",
 				},
 				status: {

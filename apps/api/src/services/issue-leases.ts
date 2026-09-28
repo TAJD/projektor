@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import {
 	ClaimIssueSchema,
 	ListIssueLeasesSchema,
@@ -8,6 +8,7 @@ import {
 import { visibleProjectPredicate } from "./access";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { broadcastWorkspaceEvent } from "./realtime";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 // Mirrors ACTIVE_TTL in services/agents.ts: a session (and therefore its leases)
@@ -481,6 +482,65 @@ export async function isLiveAgentSessionId(
 		)
 		.get();
 	return row != null;
+}
+
+/**
+ * PROJ-930: batched twin of issueHasLiveAgentLease, for a bulk caller (updateIssues) that
+ * needs the same fact for many issues at once — one or two `inArray`-via-inChunks queries
+ * instead of one `issueHasLiveAgentLease` round trip per issue. Same liveness definition
+ * (active session, heartbeat within the TTL), same reason kind is ignored (see that
+ * function's docstring).
+ */
+export async function issuesWithLiveAgentLease(
+	ctx: ServiceCtx,
+	issueIds: readonly string[]
+): Promise<Set<string>> {
+	if (issueIds.length === 0) return new Set();
+	const orm = drizzle(ctx.db, { schema });
+	const cutoff = liveCutoff();
+	const rows = await inChunks([...issueIds], (chunk) =>
+		orm
+			.select({ issueId: schema.issueLeases.issueId })
+			.from(schema.issueLeases)
+			.innerJoin(
+				schema.agentSessions,
+				eq(schema.issueLeases.agentSessionId, schema.agentSessions.id)
+			)
+			.where(
+				and(
+					eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+					inArray(schema.issueLeases.issueId, chunk),
+					isNull(schema.issueLeases.releasedAt),
+					eq(schema.agentSessions.status, "active"),
+					gt(schema.agentSessions.lastHeartbeatAt, cutoff)
+				)
+			)
+	);
+	return new Set(rows.map((r) => r.issueId));
+}
+
+/**
+ * PROJ-930: batched twin of issueEverHadAgentLease — see issuesWithLiveAgentLease above
+ * for why a bulk caller needs the set form instead of one query per issue.
+ */
+export async function issuesEverHadAgentLease(
+	ctx: ServiceCtx,
+	issueIds: readonly string[]
+): Promise<Set<string>> {
+	if (issueIds.length === 0) return new Set();
+	const orm = drizzle(ctx.db, { schema });
+	const rows = await inChunks([...issueIds], (chunk) =>
+		orm
+			.select({ issueId: schema.issueLeases.issueId })
+			.from(schema.issueLeases)
+			.where(
+				and(
+					eq(schema.issueLeases.workspaceId, ctx.workspaceId),
+					inArray(schema.issueLeases.issueId, chunk)
+				)
+			)
+	);
+	return new Set(rows.map((r) => r.issueId));
 }
 
 /**

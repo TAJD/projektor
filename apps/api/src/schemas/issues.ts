@@ -51,7 +51,10 @@ export const UpdateIssueSchema = z
 // PROJ-930: bulk close/transition — one shared completionReport (PR/release links) applied
 // to up to 100 issues in one call, with an optional per-issue summary override. `ids`
 // accepts UUIDs or refs (PROJ-42), same as update_issue's id — each is resolved and gated
-// individually by updateIssue itself, so this schema only validates the bulk envelope.
+// individually (reusing update_issue's own gate code), so this schema only validates the
+// bulk envelope: the transition is present, ids aren't duplicated, and `perIssue` only
+// overrides issues that are actually in `ids` and only when there's a shared report to
+// override in the first place.
 export const UpdateIssuesSchema = z
 	.object({
 		ids: z.array(z.string().min(1)).min(1).max(100),
@@ -64,8 +67,46 @@ export const UpdateIssuesSchema = z
 		agentSessionId: z.string().uuid().optional(),
 	})
 	.strict()
-	.refine((obj) => obj.status !== undefined || obj.statusId !== undefined, {
-		message: "status or statusId is required",
+	.superRefine((obj, ctx) => {
+		if (obj.status === undefined && obj.statusId === undefined) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				path: ["status"],
+				message: "status or statusId is required",
+			});
+		}
+
+		const seen = new Set<string>();
+		for (let i = 0; i < obj.ids.length; i++) {
+			if (seen.has(obj.ids[i])) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["ids", i],
+					message: `Duplicate id/ref: ${obj.ids[i]}`,
+				});
+			}
+			seen.add(obj.ids[i]);
+		}
+
+		if (obj.perIssue) {
+			if (!obj.completionReport) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["perIssue"],
+					message: "perIssue requires a shared completionReport to override",
+				});
+			}
+			const idSet = new Set(obj.ids);
+			for (const key of Object.keys(obj.perIssue)) {
+				if (!idSet.has(key)) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						path: ["perIssue", key],
+						message: `perIssue key "${key}" is not one of the ids in this call`,
+					});
+				}
+			}
+		}
 	});
 
 export const IssueListCursorSchema = z

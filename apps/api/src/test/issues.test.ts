@@ -1,7 +1,9 @@
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { issuesTools } from "../mcp/issues";
 import { ListIssuesSchema } from "../schemas/issues";
+import { updateIssues } from "../services/issues";
+import type { ServiceCtx } from "../services/types";
 import {
 	authHeaders,
 	seedAgentLease,
@@ -24,7 +26,10 @@ async function callMcpTool(
 	token: string,
 	slug: string,
 	params: unknown
-): Promise<{ result?: { content: Array<{ text: string }> }; error?: { message: string } }> {
+): Promise<{
+	result?: { content: Array<{ text: string }> };
+	error?: { code: number; message: string };
+}> {
 	const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
 		method: "POST",
 		headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
@@ -3117,13 +3122,53 @@ describe("PROJ-930 — bulk update_issues", () => {
 		expect(await statusOf(ok2.id)).toBe("done");
 	});
 
+	it("a real mix of forbidden, not-found and success in one call, each gated individually", async () => {
+		const roles = await seedWorkspaceRoles();
+		const writableProject = await seedProject(roles.workspace.id, "OPEN");
+		const lockedProject = await seedProject(roles.workspace.id, "LOCK");
+		// The member has a write grant on `writableProject` only; `lockedProject` gets a
+		// viewer-only grant, so writes there are forbidden (not invisible — see the
+		// invisible-project case below for the 404 side of this distinction).
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, writableProject.id, "member");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, lockedProject.id, "viewer");
+
+		const writable = await seedIssue(roles.workspace.id, writableProject.id, roles.owner.user.id, {
+			title: "Writable",
+		});
+		const locked = await seedIssue(roles.workspace.id, lockedProject.id, roles.owner.user.id, {
+			title: "Locked",
+		});
+
+		const res = await callMcpTool(roles.workspace.id, roles.member.token, roles.workspace.slug, {
+			name: "update_issues",
+			arguments: {
+				ids: [writable.id, locked.id, "NOPE-1"],
+				status: "done",
+				completionReport: report,
+			},
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string } }>;
+		};
+		expect(results).toEqual([
+			{ id: writable.id, ok: true },
+			{
+				id: locked.id,
+				ok: false,
+				error: { code: "forbidden", message: "Insufficient permissions" },
+			},
+			{ id: "NOPE-1", ok: false, error: { code: "not_found", message: "Issue not found" } },
+		]);
+	});
+
 	it("a forbidden (viewer-grant) issue fails individually while a writable one succeeds", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);
 		// Grant the viewer a *viewer* project role (read-only) so their write is
 		// rejected as forbidden rather than the project being invisible outright
 		// (a group with no grant at all 404s instead — see updateIssue's own
-		// visibility-hides-existence rule).
+		// visibility-hides-existence rule, and the invisible-project case below).
 		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, project.id, "viewer");
 
 		const blocked = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, {
@@ -3149,6 +3194,60 @@ describe("PROJ-930 — bulk update_issues", () => {
 				error: { code: "forbidden", message: "Insufficient permissions" },
 			},
 		]);
+	});
+
+	it("an invisible (no-grant) project's issue and another workspace's id both 404 with the same message as a missing id", async () => {
+		const roles = await seedWorkspaceRoles();
+		// No group grant at all on this project for the member — invisible, not merely
+		// read-only, so this is a 404 (existence hidden), not the 403 case above.
+		const hiddenProject = await seedProject(roles.workspace.id, "HID");
+		const hidden = await seedIssue(roles.workspace.id, hiddenProject.id, roles.owner.user.id, {
+			title: "Hidden",
+		});
+
+		const other = await seedProjectFixture({ role: "owner" });
+		const foreign = await seedIssue(other.workspaceId, other.projectId, other.userId, {
+			title: "Foreign",
+		});
+
+		const res = await callMcpTool(roles.workspace.id, roles.member.token, roles.workspace.slug, {
+			name: "update_issues",
+			arguments: {
+				ids: [hidden.id, foreign.id, "NOPE-1"],
+				status: "done",
+				completionReport: report,
+			},
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string; message: string } }>;
+		};
+		const notFound = { code: "not_found", message: "Issue not found" };
+		expect(results).toEqual([
+			{ id: hidden.id, ok: false, error: notFound },
+			{ id: foreign.id, ok: false, error: notFound },
+			{ id: "NOPE-1", ok: false, error: notFound },
+		]);
+	});
+
+	it("bulk done-gate: an agent-worked issue closed without a report fails validation while others succeed", async () => {
+		const agentWorked = await seedIssue(workspaceId, projectId, userId, { title: "Agent worked" });
+		await seedAgentLease(workspaceId, agentWorked.id, { live: false });
+		const plain = await seedIssue(workspaceId, projectId, userId, { title: "Plain human close" });
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: { ids: [agentWorked.id, plain.id], status: "done" },
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string } }>;
+		};
+		expect(results[0]).toMatchObject({ id: agentWorked.id, ok: false });
+		expect(results[0].error?.code).toBe("validation");
+		expect(results[1]).toEqual({ id: plain.id, ok: true });
+		expect(await statusOf(plain.id)).toBe("done");
+		expect(await statusOf(agentWorked.id)).not.toBe("done");
 	});
 
 	it("rejects an agent (live lease) entering in_review without a completion report, per issue", async () => {
@@ -3238,6 +3337,125 @@ describe("PROJ-930 — bulk update_issues", () => {
 		expect(bBodies.some((body) => body.includes("Shipped in release"))).toBe(true);
 	});
 
+	it("rejects a perIssue key that isn't one of the ids in the call", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "A" });
+		const other = await seedIssue(workspaceId, projectId, userId, { title: "Other" });
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: {
+				ids: [a.id],
+				status: "done",
+				completionReport: report,
+				perIssue: { [other.id]: { summary: "Not in ids" } },
+			},
+		});
+		expect(res.error).toBeDefined();
+		expect(res.error?.code).toBe(-32602);
+
+		// Nothing was written — a schema-level rejection is all-or-nothing for the call.
+		expect(await statusOf(a.id)).not.toBe("done");
+	});
+
+	it("rejects perIssue given without a shared completionReport to override", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "A" });
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: { ids: [a.id], status: "done", perIssue: { [a.id]: { summary: "x" } } },
+		});
+		expect(res.error).toBeDefined();
+		expect(res.error?.code).toBe(-32602);
+	});
+
+	it("rejects a call whose ids contains the same literal string twice", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "A" });
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: { ids: [a.id, a.id], status: "done" },
+		});
+		expect(res.error).toBeDefined();
+		expect(res.error?.code).toBe(-32602);
+	});
+
+	it("a UUID and a ref aliasing the same issue: the second entry fails as a duplicate, the first succeeds", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Aliased" });
+		const project = await SELF.fetch(`http://localhost/api/projects/${projectId}`, {
+			headers: authHeaders(token, slug),
+		});
+		const { key } = (await project.json()) as { key: string };
+		const refA = `${key}-${a.number}`;
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: { ids: [a.id, refA], status: "done", completionReport: report },
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string } }>;
+		};
+		expect(results[0]).toEqual({ id: a.id, ok: true });
+		expect(results[1].ok).toBe(false);
+		expect(results[1].id).toBe(refA);
+		expect(results[1].error?.code).toBe("duplicate");
+		expect(await statusOf(a.id)).toBe("done");
+	});
+
+	it("bulk close releases each closed issue's lease and file claims", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Leased A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "Leased B" });
+		const { agentSessionId: agentA } = await seedAgentLease(workspaceId, a.id);
+		const { agentSessionId: agentB } = await seedAgentLease(workspaceId, b.id);
+
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, released_at, release_reason) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)"
+		)
+			.bind(crypto.randomUUID(), workspaceId, a.id, agentA, "src/a.ts", now)
+			.run();
+		await env.DB.prepare(
+			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, released_at, release_reason) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)"
+		)
+			.bind(crypto.randomUUID(), workspaceId, b.id, agentB, "src/b.ts", now)
+			.run();
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: {
+				ids: [a.id, b.id],
+				status: "done",
+				agentSessionId: agentA,
+				completionReport: report,
+			},
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean }>;
+		};
+		expect(results).toEqual([
+			{ id: a.id, ok: true },
+			{ id: b.id, ok: true },
+		]);
+
+		for (const issue of [a, b]) {
+			const lease = await env.DB.prepare(
+				"SELECT released_at, release_reason FROM issue_leases WHERE issue_id = ?"
+			)
+				.bind(issue.id)
+				.first<{ released_at: number | null; release_reason: string | null }>();
+			expect(lease?.released_at).not.toBeNull();
+			expect(lease?.release_reason).toBe("issue_closed");
+
+			const claim = await env.DB.prepare(
+				"SELECT released_at FROM issue_file_claims WHERE issue_id = ?"
+			)
+				.bind(issue.id)
+				.first<{ released_at: number | null }>();
+			expect(claim?.released_at).not.toBeNull();
+		}
+	});
+
 	it("REST parity: POST /api/issues/bulk-update behaves the same as the MCP tool", async () => {
 		const a = await seedIssue(workspaceId, projectId, userId, { title: "REST A" });
 		const b = await seedIssue(workspaceId, projectId, userId, { title: "REST B" });
@@ -3257,29 +3475,166 @@ describe("PROJ-930 — bulk update_issues", () => {
 		expect(await statusOf(b.id)).toBe("done");
 	});
 
-	it("REST /api/issues/bulk-update is never captured by the /:id route", async () => {
-		// If bulk-update weren't registered before "/:id", this would 404/attempt to
-		// resolve "bulk-update" as an issue id/ref instead of hitting the bulk handler.
-		const res = await bulkUpdateRest({ ids: ["nonexistent-id"], status: "done" });
-		expect(res.status).toBe(200);
-		const { results } = (await res.json()) as {
-			results: Array<{ id: string; ok: boolean; error?: { code: string } }>;
+	it("exactly 100 ids all succeed", async () => {
+		const issues = await Promise.all(
+			Array.from({ length: 100 }, (_, i) =>
+				seedIssue(workspaceId, projectId, userId, { title: `Bulk ${i}` })
+			)
+		);
+		const ids = issues.map((i) => i.id);
+
+		const res = await mcpCall({
+			name: "update_issues",
+			arguments: { ids, status: "done", completionReport: report },
+		});
+		expect(res.error).toBeUndefined();
+		const { results } = JSON.parse(res.result!.content[0].text) as {
+			results: Array<{ id: string; ok: boolean }>;
 		};
-		expect(results).toEqual([
-			{ id: "nonexistent-id", ok: false, error: { code: "not_found", message: "Issue not found" } },
-		]);
+		expect(results).toHaveLength(100);
+		expect(results.every((r) => r.ok)).toBe(true);
 	});
 
-	it("rejects more than 100 ids", async () => {
+	it("rejects more than 100 ids: MCP -32602, REST 400", async () => {
 		const ids = Array.from({ length: 101 }, () => crypto.randomUUID());
-		const res = await mcpCall({ name: "update_issues", arguments: { ids, status: "done" } });
-		expect(res.error).toBeDefined();
-		expect(res.error?.message).toMatch(/Invalid params/);
+
+		const mcpRes = await mcpCall({ name: "update_issues", arguments: { ids, status: "done" } });
+		expect(mcpRes.error).toBeDefined();
+		expect(mcpRes.error?.code).toBe(-32602);
+		expect(mcpRes.error?.message).toMatch(/Invalid params/);
+
+		const restRes = await bulkUpdateRest({ ids, status: "done" });
+		expect(restRes.status).toBe(400);
 	});
 
 	it("rejects a call with neither status nor statusId", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "No transition" });
 		const res = await mcpCall({ name: "update_issues", arguments: { ids: [issue.id] } });
 		expect(res.error).toBeDefined();
+	});
+});
+
+// ─── PROJ-930: batched writes — round trips and internal-error handling ──────────────
+// Calls the service directly (bypassing HTTP/rate-limit) so counts reflect only
+// updateIssues' own D1 usage, same convention as issues-write-batching.test.ts.
+describe("PROJ-930 — bulk update_issues: batched D1 writes", () => {
+	type Fixture = Awaited<ReturnType<typeof seedProjectFixture>>;
+
+	function ownerCtx(f: Fixture): ServiceCtx {
+		return {
+			db: env.DB,
+			kv: env.KV,
+			r2: env.R2,
+			workspaceId: f.workspaceId,
+			userId: f.userId,
+			role: "owner",
+		};
+	}
+
+	function trackD1RoundTrips() {
+		let count = 0;
+		const origPrepare = env.DB.prepare.bind(env.DB);
+		const origBatch = env.DB.batch.bind(env.DB);
+		const EXEC_METHODS = new Set(["run", "all", "get", "first", "raw"]);
+
+		const wrapStmt = (stmt: D1PreparedStatement): D1PreparedStatement =>
+			new Proxy(stmt, {
+				get(target, prop, receiver) {
+					const value = Reflect.get(target, prop, receiver);
+					if (typeof value !== "function") return value;
+					if (prop === "bind") {
+						return (...args: unknown[]) =>
+							wrapStmt((value as (...a: unknown[]) => D1PreparedStatement).apply(target, args));
+					}
+					if (typeof prop === "string" && EXEC_METHODS.has(prop)) {
+						return (...args: unknown[]) => {
+							count++;
+							return (value as (...a: unknown[]) => unknown).apply(target, args);
+						};
+					}
+					return value.bind(target);
+				},
+			});
+
+		vi.spyOn(env.DB, "prepare").mockImplementation(
+			(q: string) => wrapStmt(origPrepare(q)) as D1PreparedStatement
+		);
+		vi.spyOn(env.DB, "batch").mockImplementation((stmts: D1PreparedStatement[]) => {
+			count++;
+			return origBatch(stmts);
+		});
+
+		return { count: () => count };
+	}
+
+	afterEach(() => vi.restoreAllMocks());
+
+	it("closing 100 issues with a shared report costs a small, bounded number of D1 round trips (not one loop per issue)", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const ctx = ownerCtx(f);
+		const issues = await Promise.all(
+			Array.from({ length: 100 }, (_, i) =>
+				seedIssue(f.workspaceId, f.projectId, f.userId, { title: `RT ${i}` })
+			)
+		);
+		const ids = issues.map((i) => i.id);
+
+		const tracker = trackD1RoundTrips();
+		const { results } = (await updateIssues(ctx, {
+			ids,
+			status: "done",
+			completionReport: { summary: "Release", verification: "https://github.com/x/y/pull/1" },
+		})) as { results: Array<{ id: string; ok: boolean }> };
+		const roundTrips = tracker.count();
+		vi.restoreAllMocks();
+
+		expect(results.every((r) => r.ok)).toBe(true);
+		// Looping update_issue's own per-issue I/O 100x would be ~400-800 round trips
+		// (the blocker this ticket's review found); batched, it should be well under 30.
+		expect(roundTrips).toBeLessThanOrEqual(30);
+
+		const doneCount = await env.DB.prepare(
+			`SELECT COUNT(*) AS n FROM issues WHERE status = 'done' AND id IN (${ids.map(() => "?").join(",")})`
+		)
+			.bind(...ids)
+			.first<{ n: number }>();
+		expect(doneCount?.n).toBe(100);
+	});
+
+	it("a write-chunk failure reports only that chunk's issues as a generic internal error, never the raw error text", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const ctx = ownerCtx(f);
+		const issues = await Promise.all(
+			Array.from({ length: 20 }, (_, i) =>
+				seedIssue(f.workspaceId, f.projectId, f.userId, { title: `Chunk ${i}` })
+			)
+		);
+		const ids = issues.map((i) => i.id);
+
+		const origBatch = env.DB.batch.bind(env.DB);
+		let call = 0;
+		const spy = vi.spyOn(env.DB, "batch").mockImplementation((stmts: D1PreparedStatement[]) => {
+			call++;
+			if (call === 1) {
+				return Promise.reject(new Error("SQLITE_SECRET_INTERNAL_DETAIL: disk full at /var/lib/x"));
+			}
+			return origBatch(stmts);
+		});
+
+		const { results } = (await updateIssues(ctx, { ids, status: "done" })) as {
+			results: Array<{ id: string; ok: boolean; error?: { code: string; message: string } }>;
+		};
+		spy.mockRestore();
+
+		const failed = results.filter((r) => !r.ok);
+		expect(failed.length).toBeGreaterThan(0);
+		for (const r of failed) {
+			expect(r.error?.code).toBe("internal");
+			expect(r.error?.message).toMatch(/^Internal error \(request: .+\)$/);
+			expect(r.error?.message).not.toMatch(/SQLITE_SECRET_INTERNAL_DETAIL|disk full/);
+		}
+		// The chunks that didn't fail still committed — one bad chunk doesn't take the
+		// whole call down.
+		expect(results.some((r) => r.ok)).toBe(true);
 	});
 });

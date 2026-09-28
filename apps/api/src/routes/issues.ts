@@ -125,8 +125,8 @@ router.get("/batch", async (c) => {
 	}
 });
 
-// PROJ-930: bulk close/transition (MCP: update_issues). Registered before "/:id" so
-// "bulk-update" is never captured as an issue id/ref (same convention as "/batch" above).
+// PROJ-930: bulk close/transition (MCP: update_issues). POST, unlike "/:id" (GET), so
+// there's no route-ordering concern the way "/batch" above has against GET "/:id".
 router.post("/bulk-update", async (c) => {
 	const ctx = ctxFromHono(c);
 	try {
