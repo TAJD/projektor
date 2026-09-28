@@ -16,6 +16,7 @@ export const workflowTools: MCPTool[] = [
 			properties: {
 				ifVersion: {
 					type: "string",
+					maxLength: 64,
 					description:
 						"A version previously returned by get_workflow. If it matches the current version, " +
 						"the response is `{ unchanged: true, version }` instead of the full spec.",

@@ -172,6 +172,30 @@ describe("Workflow spec", () => {
 		expect(a1).not.toBe(b);
 	});
 
+	it("version is the hash of the whole returned payload (title, description, content)", async () => {
+		const res = await SELF.fetch("http://localhost/api/workflow", {
+			headers: authHeaders(token, slug),
+		});
+		const body = (await res.json()) as {
+			title: string;
+			description: string;
+			content: string;
+			version: string;
+		};
+		expect(body.version).toBe(
+			await hashWorkflowContent(
+				JSON.stringify({ title: body.title, description: body.description, content: body.content })
+			)
+		);
+	});
+
+	it("ifVersion longer than 64 chars is rejected", async () => {
+		const res = await SELF.fetch(`http://localhost/api/workflow?ifVersion=${"a".repeat(65)}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(400);
+	});
+
 	it("initialize instructions contain the current workflow version", async () => {
 		const workflowRes = await SELF.fetch("http://localhost/api/workflow", {
 			headers: authHeaders(token, slug),

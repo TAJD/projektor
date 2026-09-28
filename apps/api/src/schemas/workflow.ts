@@ -4,5 +4,5 @@ import { z } from "zod";
 // already hold the current content hash. Optional — an absent/mismatched value just
 // returns the full spec (see services/workflow.ts).
 export const GetWorkflowSchema = z.object({
-	ifVersion: z.string().optional(),
+	ifVersion: z.string().max(64).optional(),
 });

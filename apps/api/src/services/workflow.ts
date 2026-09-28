@@ -3,7 +3,8 @@ import { ValidationError } from "./errors";
 import { WORKFLOW_SPEC } from "./workflow-content";
 
 // PROJ-933: agents re-fetch the ~1k token workflow spec every session even though it
-// rarely changes. `version` is a stable content hash of the spec body; a caller that
+// rarely changes. `version` is a stable content hash of everything get_workflow returns (title,
+// description and body); a caller that
 // already holds it can pass it back as `ifVersion` and get `{ unchanged: true, version }`
 // instead of the full spec.
 
@@ -19,14 +20,26 @@ export async function hashWorkflowContent(content: string): Promise<string> {
 	return hex.slice(0, VERSION_HASH_LENGTH);
 }
 
-// The spec body is a static compile-time constant, so its hash never changes within a
-// process. Computed once, lazily, on first use and cached at module level rather than
-// re-hashed on every request. Not exported directly — callers (including routes/mcp.ts's
+// The full returned payload, built once: the spec is a compile-time constant. The version
+// hashes exactly this object, so a change to the title or description bumps it too.
+const WORKFLOW_PAYLOAD = {
+	title: WORKFLOW_SPEC.title,
+	description: WORKFLOW_SPEC.description,
+	content: WORKFLOW_SPEC.body.trim(),
+};
+
+// Hashed lazily once per isolate. Not exported directly — callers (including routes/mcp.ts's
 // `initialize` instructions) go through getWorkflow() below, the one service entry point.
+// A rejected hash is not cached, so a transient failure doesn't stick for the isolate.
 let cachedVersion: Promise<string> | undefined;
 
 function getWorkflowVersion(): Promise<string> {
-	if (!cachedVersion) cachedVersion = hashWorkflowContent(WORKFLOW_SPEC.body.trim());
+	if (!cachedVersion) {
+		cachedVersion = hashWorkflowContent(JSON.stringify(WORKFLOW_PAYLOAD)).catch((e) => {
+			cachedVersion = undefined;
+			throw e;
+		});
+	}
 	return cachedVersion;
 }
 
@@ -36,14 +49,9 @@ export async function getWorkflow(raw: unknown = {}) {
 	const { ifVersion } = result.data;
 
 	const version = await getWorkflowVersion();
-	if (ifVersion !== undefined && ifVersion === version) {
+	if (ifVersion === version) {
 		return { unchanged: true, version };
 	}
 
-	return {
-		title: WORKFLOW_SPEC.title,
-		description: WORKFLOW_SPEC.description,
-		content: WORKFLOW_SPEC.body.trim(),
-		version,
-	};
+	return { ...WORKFLOW_PAYLOAD, version };
 }
