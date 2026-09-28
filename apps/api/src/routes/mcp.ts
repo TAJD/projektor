@@ -31,6 +31,7 @@ import { workspacesTools } from "../mcp/workspaces";
 import { pluginRegistry } from "../plugins/registry";
 import { ValidationError } from "../services/errors";
 import { ctxFromHono } from "../services/types";
+import { getWorkflow } from "../services/workflow";
 
 // __PROJEKTOR_VERSION__ is injected by esbuild --define at release-build time
 // (scripts/build-release.sh); it's absent in local `wrangler dev` and tests.
@@ -58,13 +59,20 @@ const TOOLS_LIST_CACHE_SCOPE = "private";
 // the workflow spec (definition of ready, state machine, human gates, WIP limits,
 // fleet coordination) has exactly one home: call `get_workflow` (or see
 // apps/docs/src/content/docs/agents/workflow-spec.md).
-const SERVER_INSTRUCTIONS =
-	"Projektor is an MCP-native issue tracker + wiki. Every project-management action a browser user can do " +
-	'is available here as a tool. Handy entry points: get_issue accepts a ref like "PROJ-42"; ' +
-	'get_prioritized_issues answers "what should I work on next?"; search_issues / search_wiki ground you in ' +
-	"existing context. Call get_workflow before claiming work — it returns the definition of ready, the state " +
-	"machine, human review gates, and fleet coordination rules. Working an epic end-to-end? Call " +
-	'get_playbook("epic-goal") (or compose_playbook to have it filled in with the epic\'s live data).';
+// PROJ-933: takes the current workflow-spec version so agents know they can pass it
+// back as `get_workflow`'s `ifVersion` to skip re-reading an unchanged spec.
+function buildServerInstructions(workflowVersion: string): string {
+	return (
+		"Projektor is an MCP-native issue tracker + wiki. Every project-management action a browser user can do " +
+		'is available here as a tool. Handy entry points: get_issue accepts a ref like "PROJ-42"; ' +
+		'get_prioritized_issues answers "what should I work on next?"; search_issues / search_wiki ground you in ' +
+		"existing context. Call get_workflow before claiming work — it returns the definition of ready, the state " +
+		"machine, human review gates, and fleet coordination rules. Its current version is " +
+		`"${workflowVersion}" — pass that as get_workflow's \`ifVersion\` to skip re-reading an unchanged spec. ` +
+		"Working an epic end-to-end? Call " +
+		'get_playbook("epic-goal") (or compose_playbook to have it filled in with the epic\'s live data).'
+	);
+}
 
 const router = new Hono<HonoEnv>();
 
@@ -120,7 +128,7 @@ router.post("/:workspaceId", async (c) => {
 					protocolVersion: "2025-11-25",
 					capabilities: { tools: {}, prompts: {} },
 					serverInfo: { name: "projektor", version: SERVER_VERSION },
-					instructions: SERVER_INSTRUCTIONS,
+					instructions: buildServerInstructions((await getWorkflow()).version),
 				})
 			);
 
