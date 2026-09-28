@@ -643,7 +643,7 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 	const result = GetIssuesBatchSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { refs = [], ids = [] } = result.data;
+	const { refs = [], ids = [], includeBody } = result.data;
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -665,6 +665,12 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 		nums.push(parseInt(m[2], 10));
 		numbersByKey.set(m[1], nums);
 	}
+	// Canonical lookup key for a ref, so a zero-padded "PROJ-042" matches the resolved
+	// "PROJ-42" the same way single get_issue does.
+	const canonicalRef = (ref: string) => {
+		const m = ref.match(ISSUE_REF_PATTERN) as RegExpMatchArray;
+		return `${m[1]}-${parseInt(m[2], 10)}`;
+	};
 
 	// ref -> resolved id, filled in per project key below.
 	const refToId = new Map<string, string>();
@@ -684,7 +690,7 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 		);
 		for (const row of rows) refToId.set(`${key}-${row.number}`, row.id);
 	}
-	for (const ref of refs) order.push({ requested: ref, id: refToId.get(ref) });
+	for (const ref of refs) order.push({ requested: ref, id: refToId.get(canonicalRef(ref)) });
 	for (const id of ids) order.push({ requested: id, id });
 
 	const allIds = Array.from(new Set(order.map((o) => o.id).filter((id): id is string => !!id)));
@@ -710,14 +716,20 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 		const issueIds = (rows as Array<{ id: string }>).map((r) => r.id);
 		const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
 		rowsById = new Map(
-			(rows as Array<Record<string, unknown>>).map((r) => [
-				r.id as string,
-				{
-					...r,
-					customFields: customFieldsByIssue[r.id as string] ?? [],
-					url: buildIssueUrl(r),
-				},
-			])
+			(rows as Array<Record<string, unknown>>).map((r) => {
+				// Match list_issues: body only on request (PROJ-442) — 50 full bodies would
+				// defeat the point of a token-saving batch call.
+				const { body, ...withoutBody } = r;
+				const base = includeBody ? { ...withoutBody, body } : withoutBody;
+				return [
+					r.id as string,
+					{
+						...base,
+						customFields: customFieldsByIssue[r.id as string] ?? [],
+						url: buildIssueUrl(r),
+					},
+				];
+			})
 		);
 	}
 
@@ -730,7 +742,7 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 	for (const entry of order) {
 		const row = entry.id ? rowsById.get(entry.id) : undefined;
 		if (!row) {
-			missing.push(entry.requested);
+			if (!missing.includes(entry.requested)) missing.push(entry.requested);
 			continue;
 		}
 		if (seen.has(entry.id as string)) continue;

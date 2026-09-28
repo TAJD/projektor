@@ -29,8 +29,8 @@ const VERBOSE_FIELDS_PROPS = {
 		type: "array",
 		items: { type: "string" },
 		description:
-			"Return only these fields per issue. Every named field is always present " +
-			"(null if its value would otherwise be omitted) — never a smaller object.",
+			"Return only these fields per issue, with their real values (null if the issue " +
+			"has no such value). Every named field is always present. Unknown names are rejected.",
 	},
 } as const;
 
@@ -68,20 +68,6 @@ const NULLABLE_DEFAULT_KEYS = [
 	"author_kind",
 ] as const;
 
-// True when `value` (found under `key` on an issue) is the empty/default shape PROJ-931
-// omits by default — shared by the whole-object compaction below and by the `fields`
-// allowlist, which needs the same judgment call but must report `null` instead of
-// dropping the key (a caller who explicitly asked for a field must always get it back).
-function isOmittableValue(key: string, value: unknown): boolean {
-	if (value == null) return true;
-	if (key === "links" || key === "customFields") return isEmptyArray(value);
-	if (key === "rollup") return isZeroRollup(value);
-	if (key === "labels") return isEmptyLabels(value);
-	if (key === "status_category") return value === "";
-	if (key === "needs_audit") return value === false || value === 0;
-	return false;
-}
-
 // Strips empty/default noise unless verbose:true, then applies an optional `fields`
 // allowlist. Covers the fields named in PROJ-931's acceptance criteria (empty links,
 // zero rollup, empty customFields, null sprint/assignee/parent, empty labels) plus the
@@ -90,18 +76,19 @@ function isOmittableValue(key: string, value: unknown): boolean {
 // author_kind for a human-authored issue) — omitting only the AC's four examples still
 // left get_issue short of the ticket's 40% byte-reduction bar on a typical issue.
 //
-// `fields` always returns every requested key (null in place of an omitted/empty value)
-// rather than dropping it — a caller that asked for `fields: ["assignee_id"]` must never
-// get back `{}` just because this issue happens to have no assignee.
+// `fields` always returns every requested key with its real value (null only when the
+// issue has no such key/value) — a caller that asked for `fields: ["assignee_id"]` must
+// never get back `{}` just because this issue happens to have no assignee.
 function shapeIssue(
 	issue: Record<string, unknown>,
 	opts: { verbose?: boolean; fields?: string[] }
 ): Record<string, unknown> {
 	if (opts.fields && opts.fields.length > 0) {
+		// A requested field is always returned with its real value — `false`, `[]` or a
+		// zero rollup stay as they are so the caller can tell them from "absent" (null).
 		const picked: Record<string, unknown> = {};
 		for (const f of opts.fields) {
-			const value = issue[f];
-			picked[f] = !opts.verbose && isOmittableValue(f, value) ? null : (value ?? null);
+			picked[f] = Object.hasOwn(issue, f) ? (issue[f] ?? null) : null;
 		}
 		return picked;
 	}
@@ -127,9 +114,46 @@ function shapeIssue(
 // Validated separately from the (`.strict()`) service schemas, which know nothing about
 // these MCP-only options — a wrong type here must still produce a JSON-RPC -32602
 // (invalid params), not silently fall through or crash.
+// Every key any issue-returning tool can emit (get_issue's full shape ∪ list items).
+// `fields` is checked against this so a typo is a -32602, not a silent `null`.
+export const ISSUE_FIELD_NAMES = [
+	"id",
+	"workspace_id",
+	"project_id",
+	"number",
+	"title",
+	"body",
+	"status",
+	"priority",
+	"assignee_id",
+	"assignee_name",
+	"labels",
+	"parent_id",
+	"type_id",
+	"status_id",
+	"status_category",
+	"sprint_id",
+	"created_by_id",
+	"author_kind",
+	"created_at",
+	"updated_at",
+	"completed_at",
+	"needs_audit",
+	"project_key",
+	"project_name",
+	"type_key",
+	"type_name",
+	"status_key",
+	"status_name",
+	"rollup",
+	"links",
+	"customFields",
+	"url",
+] as const;
+
 const ShapeOptsSchema = z.object({
 	verbose: z.boolean().optional(),
-	fields: z.array(z.string()).optional(),
+	fields: z.array(z.enum(ISSUE_FIELD_NAMES)).max(ISSUE_FIELD_NAMES.length).optional(),
 });
 
 // Pulls the MCP-only verbose/fields options out of the raw tool input before it reaches
@@ -155,7 +179,8 @@ export const issuesTools: MCPTool[] = [
 		description:
 			"List issues in the workspace, optionally filtered by status, priority, project, or assignee. " +
 			"Items omit `body` by default — pass includeBody:true to include it. Pass includeRollups:true " +
-			"to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item. " +
+			"to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item " +
+			"(a zero rollup is omitted unless verbose:true). " +
 			OMISSION_NOTE,
 		inputSchema: {
 			type: "object",
@@ -283,9 +308,10 @@ export const issuesTools: MCPTool[] = [
 		name: "get_issues",
 		description:
 			"Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than " +
-			"repeated get_issue calls for triage — items are shaped like list_issues (customFields, " +
-			"no rollup/links), returned in the order refs/ids were given. `missing` lists any " +
-			"requested ref/id that didn't resolve or isn't visible to you. " +
+			"repeated get_issue calls for triage. Items carry customFields but no rollup/links/" +
+			"assignee_name, and omit `body` unless includeBody:true. Returned in the order refs/ids " +
+			"were given; `missing` lists (once each) any requested ref/id that didn't resolve or " +
+			"isn't visible to you. " +
 			OMISSION_NOTE,
 		inputSchema: {
 			type: "object",
@@ -299,6 +325,10 @@ export const issuesTools: MCPTool[] = [
 					type: "array",
 					items: { type: "string" },
 					description: "Issue UUIDs (max 50 combined with refs)",
+				},
+				includeBody: {
+					type: "boolean",
+					description: "Include each issue's `body` (omitted by default)",
 				},
 				...VERBOSE_FIELDS_PROPS,
 			},

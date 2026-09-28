@@ -109,12 +109,13 @@ export const GetIssueSchema = z
 // (REST query param), same convention as the existing statusIds/excludeTypeIds filters.
 const CommaOrArraySchema = z
 	.union([z.string(), z.array(z.string())])
-	.transform((v) => (Array.isArray(v) ? v : v.split(",").filter(Boolean)));
+	.transform((v) => (Array.isArray(v) ? v : v.split(",")).map((s) => s.trim()).filter(Boolean));
 
 export const GetIssuesBatchSchema = z
 	.object({
 		refs: CommaOrArraySchema.optional(),
 		ids: CommaOrArraySchema.optional(),
+		includeBody: BooleanQueryParam.optional(),
 	})
 	.strict()
 	.refine((obj) => (obj.refs?.length ?? 0) + (obj.ids?.length ?? 0) > 0, {

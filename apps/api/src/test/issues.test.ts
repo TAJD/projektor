@@ -2740,7 +2740,7 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(titles).toEqual(["Batch A", "Batch B"]);
 	});
 
-	it("fields:[...] returns null (not stripped) for an omitted/empty field", async () => {
+	it("fields:[...] always returns every named key: real value, or null when unset", async () => {
 		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Null fields test" });
 		const res = await mcpCall({
 			name: "get_issue",
@@ -2757,8 +2757,9 @@ describe("PROJ-931 — compact MCP responses", () => {
 		]);
 		expect(issue.assignee_id).toBeNull();
 		expect(issue.sprint_id).toBeNull();
-		expect(issue.links).toBeNull();
-		expect(issue.rollup).toBeNull();
+		// Requested fields keep their real value — empty/zero is not the same as absent.
+		expect(issue.links).toEqual([]);
+		expect(issue.rollup).toMatchObject({ total: 0 });
 		expect(issue.id).toBe(id);
 	});
 
@@ -2852,5 +2853,137 @@ describe("PROJ-931 — compact MCP responses", () => {
 		const reduction = (beforeBytes - afterBytes) / beforeBytes;
 		console.log(`PROJ-931 get_issue bytes: before=${beforeBytes} after=${afterBytes}`);
 		expect(reduction).toBeGreaterThanOrEqual(0.4);
+		// Omission must pull its own weight, not hide behind minification alone.
+		expect(afterBytes).toBeLessThan(JSON.stringify(fullIssue).length * 0.8);
+	});
+
+	async function projectKey() {
+		const row = await env.DB.prepare("SELECT key FROM projects WHERE id = ?")
+			.bind(projectId)
+			.first<{ key: string }>();
+		return row!.key;
+	}
+
+	it("get_issues resolves zero-padded refs like get_issue does", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Padded" });
+		const padded = `${await projectKey()}-00${a.number}`;
+		const res = await mcpCall({ name: "get_issues", arguments: { refs: [padded] } });
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ id: string }>;
+			missing: string[];
+		};
+		expect(data.items.map((i) => i.id)).toEqual([a.id]);
+		expect(data.missing).toEqual([]);
+	});
+
+	it("get_issues lists a repeated missing ref once", async () => {
+		const ref = `${await projectKey()}-999999`;
+		const res = await mcpCall({ name: "get_issues", arguments: { refs: [ref, ref] } });
+		const data = JSON.parse(res.result!.content[0].text) as { missing: string[] };
+		expect(data.missing).toEqual([ref]);
+	});
+
+	it("get_issues omits body unless includeBody:true", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Bodied" });
+		await env.DB.prepare("UPDATE issues SET body = ? WHERE id = ?").bind("hello", a.id).run();
+		const without = await mcpCall({ name: "get_issues", arguments: { ids: [a.id] } });
+		const w = JSON.parse(without.result!.content[0].text) as { items: Record<string, unknown>[] };
+		expect(w.items[0]).not.toHaveProperty("body");
+		const withBody = await mcpCall({
+			name: "get_issues",
+			arguments: { ids: [a.id], includeBody: true },
+		});
+		const b = JSON.parse(withBody.result!.content[0].text) as { items: Record<string, unknown>[] };
+		expect(b.items[0].body).toBe("hello");
+	});
+
+	it("fields keeps false as false and rejects unknown field names", async () => {
+		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Audit flag" });
+		const ok = await mcpCall({ name: "get_issue", arguments: { id, fields: ["needs_audit"] } });
+		const issue = JSON.parse(ok.result!.content[0].text) as Record<string, unknown>;
+		expect(issue.needs_audit).toBe(false);
+
+		const typo = await mcpCall({ name: "get_issue", arguments: { id, fields: ["titel"] } });
+		expect((typo.error as { code?: number } | undefined)?.code).toBe(-32602);
+		const proto = await mcpCall({ name: "get_issue", arguments: { id, fields: ["constructor"] } });
+		expect((proto.error as { code?: number } | undefined)?.code).toBe(-32602);
+	});
+
+	it("REST /api/issues/batch: refs with spaces, missing in request order, 400 over 50", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "REST ref A" });
+		const key = await projectKey();
+		const gone = `${key}-999999`;
+		const res = await SELF.fetch(
+			`http://localhost/api/issues/batch?refs=${encodeURIComponent(`${gone}, ${key}-${a.number}`)}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const data = (await res.json()) as { items: Array<{ id: string }>; missing: string[] };
+		expect(data.items.map((i) => i.id)).toEqual([a.id]);
+		expect(data.missing).toEqual([gone]);
+
+		const ids = Array.from({ length: 51 }, () => crypto.randomUUID()).join(",");
+		const tooMany = await SELF.fetch(`http://localhost/api/issues/batch?ids=${ids}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(tooMany.status).toBe(400);
+	});
+});
+
+describe("PROJ-931 — get_issues project visibility", () => {
+	it("a member without a grant gets refs and ids from a hidden project as missing (MCP + REST)", async () => {
+		const roles = await seedWorkspaceRoles();
+		const granted = await seedProject(roles.workspace.id, "SEEN");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, granted.id, "member");
+		const hiddenProject = await seedProject(roles.workspace.id, "HIDN");
+		const visible = await seedIssue(roles.workspace.id, granted.id, roles.owner.user.id, {
+			title: "Visible",
+		});
+		const hidden = await seedIssue(roles.workspace.id, hiddenProject.id, roles.owner.user.id, {
+			title: "Hidden",
+		});
+		const hiddenRef = `HIDN-${hidden.number}`;
+		const visibleRef = `SEEN-${visible.number}`;
+
+		const res = await callMcpTool(roles.workspace.id, roles.member.token, roles.workspace.slug, {
+			name: "get_issues",
+			arguments: { refs: [hiddenRef, visibleRef], ids: [hidden.id] },
+		});
+		expect(res.error).toBeUndefined();
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ id: string }>;
+			missing: string[];
+		};
+		expect(data.items.map((i) => i.id)).toEqual([visible.id]);
+		expect(data.missing).toEqual([hiddenRef, hidden.id]);
+
+		const rest = await SELF.fetch(
+			`http://localhost/api/issues/batch?refs=${hiddenRef},${visibleRef}&ids=${hidden.id}`,
+			{ headers: authHeaders(roles.member.token, roles.workspace.slug) }
+		);
+		const restData = (await rest.json()) as { items: Array<{ id: string }>; missing: string[] };
+		expect(restData.items.map((i) => i.id)).toEqual([visible.id]);
+		expect(restData.missing).toEqual([hiddenRef, hidden.id]);
+	});
+
+	it("a ref whose key also exists in another workspace never resolves across workspaces", async () => {
+		const mine = await seedWorkspaceRoles();
+		const theirs = await seedWorkspaceRoles();
+		await seedProject(mine.workspace.id, "DUPE");
+		const theirProject = await seedProject(theirs.workspace.id, "DUPE");
+		const theirIssue = await seedIssue(theirs.workspace.id, theirProject.id, theirs.owner.user.id, {
+			title: "Other tenant",
+		});
+		const ref = `DUPE-${theirIssue.number}`;
+		const res = await callMcpTool(mine.workspace.id, mine.owner.token, mine.workspace.slug, {
+			name: "get_issues",
+			arguments: { refs: [ref], ids: [theirIssue.id] },
+		});
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: unknown[];
+			missing: string[];
+		};
+		expect(data.items).toEqual([]);
+		expect(data.missing).toEqual([ref, theirIssue.id]);
 	});
 });

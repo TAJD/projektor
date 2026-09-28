@@ -116,9 +116,9 @@ router.get("/search", async (c) => {
 // "batch" is never captured as an issue id/ref.
 router.get("/batch", async (c) => {
 	const ctx = ctxFromHono(c);
-	const { refs, ids } = c.req.query();
+	const { refs, ids, includeBody } = c.req.query();
 	try {
-		return c.json(await getIssuesBatch(ctx, { refs, ids }));
+		return c.json(await getIssuesBatch(ctx, { refs, ids, includeBody }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
