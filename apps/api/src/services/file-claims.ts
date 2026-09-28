@@ -95,6 +95,27 @@ export function parseFileClaimTtlSeconds(raw: string | undefined): number {
 	return Number.isFinite(n) && n > 0 ? n : DEFAULT_FILE_CLAIM_TTL_SECONDS;
 }
 
+// The cutoff before which an agentless claim (no session to judge staleness by) counts as
+// stale — see DEFAULT_FILE_CLAIM_TTL_SECONDS/parseFileClaimTtlSeconds above. Shared by
+// claimFiles (stale-holder reclaim) and listFileClaims (default live-only filter and the
+// `live` flag) so the two definitions of "stale" can't drift apart.
+function fileClaimAgentlessCutoff(ctx: ServiceCtx, now: number): number {
+	return now - (ctx.config?.fileClaimTtlSeconds ?? DEFAULT_FILE_CLAIM_TTL_SECONDS);
+}
+
+// PROJ-932 fix-up: one SQL expression for "is this claim live", used both to filter
+// listFileClaims' default listing and to populate the `live` flag on every row it
+// returns — a single rule kept in one place so the filter and the flag can't silently
+// disagree. Evaluates to 1/0: an agentless claim is judged by claimedAt against the TTL
+// cutoff; an agent-linked claim by the session's status/heartbeat. Requires the query to
+// LEFT JOIN agent_sessions on issue_file_claims.agent_id, as listFileClaims does.
+function fileClaimLiveExpr(cutoff: number, agentlessCutoff: number) {
+	return sql<number>`(CASE
+		WHEN ${schema.issueFileClaims.agentId} IS NULL THEN (${schema.issueFileClaims.claimedAt} > ${agentlessCutoff})
+		ELSE (${schema.agentSessions.status} = 'active' AND ${schema.agentSessions.lastHeartbeatAt} > ${cutoff})
+	END)`;
+}
+
 type ActiveClaim = typeof schema.issueFileClaims.$inferSelect & { live: boolean };
 
 // inChunks keeps each query under D1's 100-bound-parameter cap. See services/sql.ts.
@@ -271,13 +292,12 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 
 	// Pre-check all paths for active claims — all-or-nothing on conflict.
 	const now = Math.floor(Date.now() / 1000);
-	const agentlessTtl = ctx.config?.fileClaimTtlSeconds ?? DEFAULT_FILE_CLAIM_TTL_SECONDS;
 	const claimsByPath = await loadActiveClaimsByPath(
 		orm,
 		ctx.workspaceId,
 		paths,
 		liveCutoff(),
-		now - agentlessTtl
+		fileClaimAgentlessCutoff(ctx, now)
 	);
 
 	// PROJ-636: split stale holders out before conflict evaluation — a dead holder neither
@@ -519,9 +539,14 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	const orm = drizzle(ctx.db, { schema });
 
 	const cutoff = liveCutoff();
-	const agentlessCutoff =
-		Math.floor(Date.now() / 1000) -
-		(ctx.config?.fileClaimTtlSeconds ?? DEFAULT_FILE_CLAIM_TTL_SECONDS);
+	const now = Math.floor(Date.now() / 1000);
+	const agentlessCutoff = fileClaimAgentlessCutoff(ctx, now);
+	// PROJ-636/928: one rule for "is this claim live" (see fileClaimLiveExpr), reused below
+	// for both the default listing's filter and every row's `live` flag — false means the
+	// holder stopped heartbeating (or, for an agentless claim, its TTL elapsed) and the next
+	// claim on that path will reclaim it. Without it a reclaimable claim is indistinguishable
+	// from a held one, which would make the self-healing the docs now describe unobservable.
+	const liveExpr = fileClaimLiveExpr(cutoff, agentlessCutoff);
 
 	const conditions = [
 		eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
@@ -538,15 +563,7 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 		conditions.push(eq(schema.issues.projectId, projectId));
 	}
 	if (!includeStale) {
-		// Live means: agent-linked and the session is active within the heartbeat TTL, OR
-		// agentless and still within FILE_CLAIM_TTL_SECONDS of being claimed. Expressed as a
-		// single SQL OR rather than filtered in JS, so the default listing stays index-backed.
-		conditions.push(
-			sql`(
-				(${schema.issueFileClaims.agentId} IS NULL AND ${schema.issueFileClaims.claimedAt} > ${agentlessCutoff})
-				OR (${schema.agentSessions.status} = 'active' AND ${schema.agentSessions.lastHeartbeatAt} > ${cutoff})
-			)`
-		);
+		conditions.push(eq(liveExpr, 1));
 	}
 
 	// PROJ-316: a non-admin member only sees claims on issues whose project they can
@@ -556,11 +573,6 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	const vis = visibleProjectPredicate(ctx, schema.issues.projectId);
 	if (vis) conditions.push(vis);
 
-	// PROJ-636/928: carries `live` for the same reason listIssueLeases does — false means
-	// the holder stopped heartbeating (or, for an agentless claim, its TTL elapsed) and the
-	// next claim on that path will reclaim it. Without it a reclaimable claim is
-	// indistinguishable from a held one, which would make the self-healing the docs now
-	// describe unobservable.
 	const rows = await orm
 		.select({
 			id: schema.issueFileClaims.id,
@@ -571,28 +583,28 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 			claimedAt: schema.issueFileClaims.claimedAt,
 			releasedAt: schema.issueFileClaims.releasedAt,
 			releaseReason: schema.issueFileClaims.releaseReason,
-			sessionStatus: schema.agentSessions.status,
-			sessionHeartbeat: schema.agentSessions.lastHeartbeatAt,
 			projectKey: schema.projects.key,
 			issueNumber: schema.issues.number,
+			live: liveExpr,
 		})
 		.from(schema.issueFileClaims)
 		.leftJoin(schema.agentSessions, eq(schema.issueFileClaims.agentId, schema.agentSessions.id))
-		.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
+		.innerJoin(
+			schema.issues,
+			and(
+				eq(schema.issueFileClaims.issueId, schema.issues.id),
+				eq(schema.issues.workspaceId, ctx.workspaceId)
+			)
+		)
 		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 		.where(and(...conditions))
 		.orderBy(schema.issueFileClaims.claimedAt);
 
-	const items = rows.map(
-		({ sessionStatus, sessionHeartbeat, projectKey, issueNumber, ...claim }) => ({
-			...claim,
-			issueRef: `${projectKey}-${issueNumber}`,
-			live:
-				claim.agentId === null
-					? claim.claimedAt > agentlessCutoff
-					: sessionStatus === "active" && (sessionHeartbeat ?? 0) > cutoff,
-		})
-	);
+	const items = rows.map(({ projectKey, issueNumber, live, ...claim }) => ({
+		...claim,
+		issueRef: `${projectKey}-${issueNumber}`,
+		live: Boolean(live),
+	}));
 
 	return { items };
 }

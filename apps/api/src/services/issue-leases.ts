@@ -539,7 +539,13 @@ export async function listIssueLeases(ctx: ServiceCtx, raw: unknown) {
 		})
 		.from(schema.issueLeases)
 		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
-		.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
+		.innerJoin(
+			schema.issues,
+			and(
+				eq(schema.issueLeases.issueId, schema.issues.id),
+				eq(schema.issues.workspaceId, ctx.workspaceId)
+			)
+		)
 		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 		.where(and(...conditions))
 		.orderBy(schema.issueLeases.claimedAt);

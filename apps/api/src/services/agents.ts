@@ -87,7 +87,7 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
  * always have, unchanged.
  *
  * All-or-nothing with compensating cleanup: D1 has no cross-call interactive
- * transaction (see AGENTS.md), so this is a compensating-action sequence rather than a
+ * transaction, so this is a compensating-action sequence rather than a
  * single atomic write. If claim_issue or claim_files fails after the session was
  * registered, the session is ended immediately (which also releases anything it did
  * manage to claim before the failure), so no live, unaccounted-for session/lease/claim
@@ -232,11 +232,14 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 }
 
 /**
- * PROJ-932: defaults to live entries only — an agent session that isn't `active` with a
- * heartbeat inside the TTL is excluded unless `includeStale` is set, which restores the
- * pre-PROJ-932 behaviour of returning every session in the workspace (ended and stale
- * ones included). Rows carry the linked issue's display ref (issueRef, e.g. "PROJ-857")
- * when the session is tied to one.
+ * PROJ-932: defaults to live entries only (status='active' AND heartbeat inside the
+ * TTL) — this list was already live-only before PROJ-932; what's new is `includeStale`,
+ * which surfaces a session that is still `active` but has stopped heartbeating (a
+ * crashed agent whose staleness the fleet might want to see). An `ended` session is
+ * never returned, with or without `includeStale` — that flag widens the heartbeat
+ * check, it doesn't reach into ended sessions. Each item carries a `live` boolean
+ * (true when its heartbeat is inside the TTL) and, when linked to an issue, that
+ * issue's display ref (issueRef, e.g. "PROJ-857").
  */
 export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 	const result = ListActiveAgentsSchema.safeParse(raw);
@@ -249,9 +252,13 @@ export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = Math.floor(Date.now() / 1000) - ACTIVE_TTL;
 
-	const conditions = [eq(schema.agentSessions.workspaceId, ctx.workspaceId)];
+	// `status='active'` is unconditional — an ended session is never returned, whether or
+	// not includeStale is set. includeStale only lifts the heartbeat-freshness check below.
+	const conditions = [
+		eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+		eq(schema.agentSessions.status, "active"),
+	];
 	if (!includeStale) {
-		conditions.push(eq(schema.agentSessions.status, "active"));
 		conditions.push(gt(schema.agentSessions.lastHeartbeatAt, cutoff));
 	}
 
@@ -259,7 +266,7 @@ export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 		conditions.push(eq(schema.agentSessions.issueId, issueId));
 	}
 	// PROJ-932: a session with no issue link has no project to check, so it's excluded
-	// once a projectId filter is given (see AGENTS.md/mcp tool description).
+	// once a projectId filter is given (see the list_active_agents tool description).
 	if (projectId) {
 		conditions.push(eq(schema.issues.projectId, projectId));
 	}
@@ -281,7 +288,13 @@ export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 			issueNumber: schema.issues.number,
 		})
 		.from(schema.agentSessions)
-		.leftJoin(schema.issues, eq(schema.agentSessions.issueId, schema.issues.id))
+		.leftJoin(
+			schema.issues,
+			and(
+				eq(schema.agentSessions.issueId, schema.issues.id),
+				eq(schema.issues.workspaceId, ctx.workspaceId)
+			)
+		)
 		.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 		.where(and(...conditions))
 		.orderBy(desc(schema.agentSessions.startedAt));
@@ -289,6 +302,7 @@ export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 	const items = rows.map(({ projectKey, issueNumber, ...session }) => ({
 		...session,
 		issueRef: session.issueId && projectKey ? `${projectKey}-${issueNumber}` : null,
+		live: session.lastHeartbeatAt > cutoff,
 	}));
 
 	return { items };

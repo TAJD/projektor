@@ -130,10 +130,11 @@ export const agentsTools: MCPTool[] = [
 	{
 		name: "list_active_agents",
 		description:
-			"List agent sessions in the workspace, optionally filtered by issue or project. Live entries " +
-			"only by default — a session that has ended or stopped heartbeating is excluded; pass " +
-			'includeStale:true for all. Each entry carries the linked issue\'s ref (e.g. "PROJ-857") as ' +
-			"issueRef when the session is tied to one.",
+			"List agent sessions in the workspace, optionally filtered by issue or project. An ended " +
+			"session is never returned. Live entries only by default — a session that has stopped " +
+			"heartbeating is also excluded; pass includeStale:true to include those too. Each entry " +
+			"carries a `live` flag (false when its heartbeat has gone stale) and, when tied to an issue, " +
+			'that issue\'s ref (e.g. "PROJ-857") as issueRef.',
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -147,7 +148,7 @@ export const agentsTools: MCPTool[] = [
 				includeStale: {
 					type: "boolean",
 					description:
-						"Include sessions that have ended or gone stale (default: false — live entries only)",
+						"Include active sessions that have stopped heartbeating (default: false — live entries only). Never includes ended sessions.",
 				},
 			},
 		},

@@ -3,7 +3,14 @@ import { drizzle, schema } from "@projektor/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { fetchAgentWipCap } from "../services/issue-leases";
 import type { ServiceCtx } from "../services/types";
-import { authHeaders, seedFixture, seedIssue, seedProjectFixture } from "./helpers";
+import {
+	authHeaders,
+	seedAgentLease,
+	seedFixture,
+	seedIssue,
+	seedProject,
+	seedProjectFixture,
+} from "./helpers";
 
 describe("Issue leases API (PROJ-184)", () => {
 	let token: string;
@@ -585,13 +592,19 @@ describe("PROJ-932: list_issue_leases live-only default", () => {
 		expect(items[0].issueRef).toBe(`${projectKey}-${issue.number}`);
 	});
 
-	it("projectId filters by project key and by uuid", async () => {
-		const otherProject = await seedProjectFixture({ role: "owner" });
-		void otherProject; // a distinct workspace, just proving the fixture project isn't the only project in existence
+	// projectId must exclude a lease in a SECOND project in the SAME workspace, not just a
+	// lease that happens to live in another workspace (which the plain visibility filter
+	// would already have excluded, passing even with the filter absent). Leases are seeded
+	// directly (bypassing the register/claim API calls) to stay well under the test
+	// environment's per-token rate limit (RATE_LIMIT_API_MAX=5).
+	it("projectId filters to the granted project's lease, excluding a second same-workspace project's (by key and uuid)", async () => {
+		const otherProject = await seedProject(workspaceId, "OTHR");
 
 		const issueA = await seedIssue(workspaceId, projectId, userId, { title: "In project" });
-		const agentA = await registerAgent("a");
-		expect((await claim(issueA.id, agentA)).status).toBe(201);
+		await seedAgentLease(workspaceId, issueA.id, { name: "a" });
+
+		const issueB = await seedIssue(workspaceId, otherProject.id, userId, { title: "In other" });
+		await seedAgentLease(workspaceId, issueB.id, { name: "b" });
 
 		const byKey = await mcpLeases({ projectId: projectKey });
 		expect(byKey.items.map((i) => i.issueId)).toEqual([issueA.id]);
@@ -618,5 +631,107 @@ describe("PROJ-932: list_issue_leases live-only default", () => {
 		);
 		const staleBody = (await staleRes.json()) as { items: unknown[] };
 		expect(staleBody.items).toHaveLength(1);
+	});
+
+	// PROJ-932: GET /api/issue-leases is the workspace-wide REST twin of MCP's
+	// list_issue_leases (matching /api/file-claims and /api/agents), distinct from the
+	// single-issue GET /api/issues/:id/leases tested above. The lease is seeded directly
+	// (bypassing register/claim API calls) so the five GET calls below stay within the
+	// test environment's per-token rate limit (RATE_LIMIT_API_MAX=5).
+	it("REST parity: GET /api/issue-leases accepts issueId, agentId, projectId and includeStale", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Workspace-wide REST" });
+		const { agentSessionId: agent } = await seedAgentLease(workspaceId, issue.id, {
+			name: "workspace-rest-holder",
+		});
+
+		const byIssue = await SELF.fetch(`http://localhost/api/issue-leases?issueId=${issue.id}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(byIssue.status).toBe(200);
+		const byIssueBody = (await byIssue.json()) as {
+			items: Array<{ id: string; issueId: string; agentSessionId: string; issueRef: string }>;
+		};
+		expect(byIssueBody.items).toHaveLength(1);
+		expect(byIssueBody.items[0].issueId).toBe(issue.id);
+		expect(byIssueBody.items[0].issueRef).toBe(`${projectKey}-${issue.number}`);
+
+		const byAgent = await SELF.fetch(`http://localhost/api/issue-leases?agentId=${agent}`, {
+			headers: authHeaders(token, slug),
+		});
+		const byAgentBody = (await byAgent.json()) as { items: Array<{ agentSessionId: string }> };
+		expect(byAgentBody.items.some((i) => i.agentSessionId === agent)).toBe(true);
+
+		const byProjectKey = await SELF.fetch(
+			`http://localhost/api/issue-leases?projectId=${projectKey}`,
+			{ headers: authHeaders(token, slug) }
+		);
+		const byProjectKeyBody = (await byProjectKey.json()) as { items: Array<{ issueId: string }> };
+		expect(byProjectKeyBody.items.some((i) => i.issueId === issue.id)).toBe(true);
+
+		await backdateHeartbeat(agent);
+		const defaultRes = await SELF.fetch("http://localhost/api/issue-leases", {
+			headers: authHeaders(token, slug),
+		});
+		const defaultBody = (await defaultRes.json()) as { items: Array<{ issueId: string }> };
+		expect(defaultBody.items.some((i) => i.issueId === issue.id)).toBe(false);
+
+		const staleRes = await SELF.fetch("http://localhost/api/issue-leases?includeStale=true", {
+			headers: authHeaders(token, slug),
+		});
+		const staleBody = (await staleRes.json()) as {
+			items: Array<{ issueId: string; live: boolean }>;
+		};
+		const staleItem = staleBody.items.find((i) => i.issueId === issue.id);
+		expect(staleItem).toBeDefined();
+		expect(staleItem?.live).toBe(false);
+	});
+});
+
+// PROJ-932: a member without a group grant on a project must get an empty result for
+// that project's key or uuid — not just fewer results, none at all — proving the
+// projectId filter composes with (rather than bypasses) PROJ-316 visibility.
+describe("PROJ-932: list_issue_leases projectId + visibility for a non-admin member", () => {
+	it("a hidden project's key or uuid returns no leases", async () => {
+		const { token, slug, workspaceId, userId } = await seedProjectFixture({
+			role: "member",
+		});
+		const hidden = await seedProject(workspaceId, "HIDN");
+		// No seedGroupGrant for `userId` on `hidden` — it stays invisible to them.
+		const hiddenIssue = await seedIssue(workspaceId, hidden.id, userId, { title: "Hidden" });
+
+		const agentRes = await SELF.fetch("http://localhost/api/agents", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ name: "hidden-holder" }),
+		});
+		const agent = (await agentRes.json()) as { id: string };
+		// Claiming from an owner-equivalent path isn't needed — seed the lease directly so
+		// this test isn't gated on claim_issue's own access rules.
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare(
+			`INSERT INTO issue_leases (id, workspace_id, issue_id, agent_session_id, claimed_at, released_at, release_reason)
+			 VALUES (?, ?, ?, ?, ?, NULL, NULL)`
+		)
+			.bind(crypto.randomUUID(), workspaceId, hiddenIssue.id, agent.id, now)
+			.run();
+
+		async function mcpLeases(args: Record<string, unknown>) {
+			const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "tools/call",
+					params: { name: "list_issue_leases", arguments: args },
+				}),
+			});
+			const json = (await res.json()) as { result?: { content: Array<{ text: string }> } };
+			const text = json.result?.content?.[0]?.text ?? "{}";
+			return JSON.parse(text) as { items: unknown[] };
+		}
+
+		expect((await mcpLeases({ projectId: "HIDN" })).items).toHaveLength(0);
+		expect((await mcpLeases({ projectId: hidden.id })).items).toHaveLength(0);
 	});
 });

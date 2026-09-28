@@ -1,6 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedIssueFixture } from "./helpers";
+import { authHeaders, seedFixture, seedIssue, seedIssueFixture, seedProject } from "./helpers";
 
 describe("File Claims API", () => {
 	let token: string;
@@ -709,19 +709,31 @@ describe("File Claims API", () => {
 			expect(body.items[0].issueRef).toBe(`${projectKey}-${issueRow?.number}`);
 		});
 
-		it("projectId filters by project key and by uuid", async () => {
-			const otherFixture = await seedIssueFixture(); // separate workspace/project entirely
-			void otherFixture;
+		// projectId must exclude a claim in a SECOND project in the SAME workspace, not just
+		// a claim that happens to live in another workspace (which the plain visibility
+		// filter would already have excluded, passing even with the filter absent).
+		it("projectId filters to the granted project's claim, excluding a second same-workspace project's (by key and uuid)", async () => {
+			const otherProject = await seedProject(workspaceId, "OTHR");
+			const otherIssue = await seedIssue(workspaceId, otherProject.id, userId, {
+				title: "Other project",
+			});
 
 			await claimFiles({ issueId, paths: ["src/in-project.ts"] });
+			await claimFiles({ issueId: otherIssue.id, paths: ["src/in-other.ts"] });
 
 			const byKey = await listFileClaims({ projectId: projectKey });
-			const byKeyBody = (await byKey.json()) as { items: Array<{ path: string }> };
-			expect(byKeyBody.items.map((i) => i.path)).toContain("src/in-project.ts");
+			const byKeyPaths = ((await byKey.json()) as { items: Array<{ path: string }> }).items.map(
+				(i) => i.path
+			);
+			expect(byKeyPaths).toContain("src/in-project.ts");
+			expect(byKeyPaths).not.toContain("src/in-other.ts");
 
 			const byUuid = await listFileClaims({ projectId });
-			const byUuidBody = (await byUuid.json()) as { items: Array<{ path: string }> };
-			expect(byUuidBody.items.map((i) => i.path)).toContain("src/in-project.ts");
+			const byUuidPaths = ((await byUuid.json()) as { items: Array<{ path: string }> }).items.map(
+				(i) => i.path
+			);
+			expect(byUuidPaths).toContain("src/in-project.ts");
+			expect(byUuidPaths).not.toContain("src/in-other.ts");
 		});
 
 		it("REST parity: GET /api/file-claims accepts includeStale and projectId", async () => {
@@ -734,5 +746,99 @@ describe("File Claims API", () => {
 			const stale = await listFileClaims({ includeStale: "true" });
 			expect(stale.status).toBe(200);
 		});
+	});
+
+	// PROJ-932: default listing excludes a stale-holder claim regardless of holder shape
+	// (agent-linked vs agentless); includeStale restores it. Both cases fail if the
+	// `if (!includeStale)` filter in listFileClaims is removed.
+	describe("PROJ-932: default excludes stale/expired claims; includeStale includes them", () => {
+		async function seedStaleAgentSession(): Promise<string> {
+			const id = crypto.randomUUID();
+			const now = Math.floor(Date.now() / 1000);
+			await env.DB.prepare(
+				`INSERT INTO agent_sessions
+				   (id, workspace_id, issue_id, token_id, name, kind, status, started_at, last_heartbeat_at, ended_at)
+				 VALUES (?, ?, NULL, NULL, ?, 'agent', 'active', ?, ?, NULL)`
+			)
+				.bind(id, workspaceId, "stale-session-932", now, now - 200) // 200s > the 120s TTL
+				.run();
+			return id;
+		}
+
+		it("excludes an agent-linked claim whose session heartbeat is stale; includeStale:true includes it, flagged live:false", async () => {
+			const dead = await seedStaleAgentSession();
+			expect(
+				(await claimFiles({ issueId, agentId: dead, paths: ["src/stale-agent-932.ts"] })).status
+			).toBe(201);
+
+			const withoutFlag = await listFileClaims({ path: "src/stale-agent-932.ts" });
+			expect(((await withoutFlag.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+			const withFlag = await listFileClaims({
+				path: "src/stale-agent-932.ts",
+				includeStale: "true",
+			});
+			const withBody = (await withFlag.json()) as { items: Array<{ live: boolean }> };
+			expect(withBody.items).toHaveLength(1);
+			expect(withBody.items[0].live).toBe(false);
+		});
+
+		it("excludes an agentless claim past the file-claim TTL; includeStale:true includes it, flagged live:false", async () => {
+			expect((await claimFiles({ issueId, paths: ["src/expired-agentless-932.ts"] })).status).toBe(
+				201
+			);
+			await env.DB.prepare(
+				"UPDATE issue_file_claims SET claimed_at = ? WHERE path = ? AND workspace_id = ?"
+			)
+				.bind(
+					Math.floor(Date.now() / 1000) - (24 * 60 * 60 + 1), // past the default 24h TTL
+					"src/expired-agentless-932.ts",
+					workspaceId
+				)
+				.run();
+
+			const withoutFlag = await listFileClaims({ path: "src/expired-agentless-932.ts" });
+			expect(((await withoutFlag.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+			const withFlag = await listFileClaims({
+				path: "src/expired-agentless-932.ts",
+				includeStale: "true",
+			});
+			const withBody = (await withFlag.json()) as { items: Array<{ live: boolean }> };
+			expect(withBody.items).toHaveLength(1);
+			expect(withBody.items[0].live).toBe(false);
+		});
+	});
+});
+
+// PROJ-932: a member without a group grant on a project must get an empty result for
+// that project's key or uuid — not just fewer results, none at all — proving the
+// projectId filter composes with (rather than bypasses) PROJ-316 visibility.
+describe("PROJ-932: list_file_claims projectId + visibility for a non-admin member", () => {
+	it("a hidden project's key or uuid returns no claims", async () => {
+		const { token, slug, workspaceId, userId } = await seedIssueFixture({ role: "member" });
+		const hidden = await seedProject(workspaceId, "HIDN");
+		// No group grant for `userId` on `hidden` — it stays invisible to them.
+		const hiddenIssue = await seedIssue(workspaceId, hidden.id, userId, { title: "Hidden" });
+
+		const claimRes = await SELF.fetch("http://localhost/api/file-claims", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ issueId: hiddenIssue.id, paths: ["hidden/secret.ts"] }),
+		});
+		expect(claimRes.status).toBe(201);
+
+		async function list(params: Record<string, string>) {
+			const qs = new URLSearchParams(params).toString();
+			return SELF.fetch(`http://localhost/api/file-claims?${qs}`, {
+				headers: authHeaders(token, slug),
+			});
+		}
+
+		const byKey = await list({ projectId: "HIDN" });
+		expect(((await byKey.json()) as { items: unknown[] }).items).toHaveLength(0);
+
+		const byUuid = await list({ projectId: hidden.id });
+		expect(((await byUuid.json()) as { items: unknown[] }).items).toHaveLength(0);
 	});
 });

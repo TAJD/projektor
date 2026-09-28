@@ -24,7 +24,7 @@ running server.
 | `register_agent` | Register an agent session, optionally linked to an issue | write |
 | `heartbeat_agent` | Send a heartbeat to keep an agent session active | write |
 | `end_agent` | End an agent session | write |
-| `list_active_agents` | List agent sessions in the workspace, optionally filtered by issue or project. Live entries only by default — a session that has ended or stopped heartbeating is excluded; pass includeStale:true for all. Each entry carries the linked issue's ref (e.g. "PROJ-857") as issueRef when the session is tied to one. | read-only |
+| `list_active_agents` | List agent sessions in the workspace, optionally filtered by issue or project. An ended session is never returned. Live entries only by default — a session that has stopped heartbeating is also excluded; pass includeStale:true to include those too. Each entry carries a `live` flag (false when its heartbeat has gone stale) and, when tied to an issue, that issue's ref (e.g. "PROJ-857") as issueRef. | read-only |
 
 ### File claims
 
