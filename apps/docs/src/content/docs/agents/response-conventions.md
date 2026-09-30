@@ -87,3 +87,15 @@ Long text is read in windows so one call never returns an unbounded blob.
 Cursors are character offsets and always fall on whole characters, so a window never splits an emoji.
 
 Tip: call `get_wiki_page` once, read the `outline`, then fetch only the `section` you need.
+
+## Upgrading from 0.7.5
+
+No stored data changes: migration 0067 only adds two nullable columns to `agent_sessions`
+(apply it before deploying the new build). REST and the web app are unchanged. MCP clients
+need these manual changes:
+
+- **Lists**: read `{items, next}` and pass `next` back as `cursor`. The old bare arrays, `nextCursor` and `{changes, nextSince}` are gone on MCP.
+- **Errors**: a failed tool call is a result with `isError:true` and a JSON body `{error:{code, message, hint, …}}`, not a JSON-RPC error.
+- **Issues**: `project_id`, `workspace_id`, `type_id`, `status_id` and `created_by_id` are dropped and `labels` is an array. Use `ref`, or pass `verbose:true` for the raw row.
+- **Wiki**: `get_wiki_page` returns at most `maxChars` (default 8,000) of `content`. Do not send a windowed `content` back to `update_wiki_page`; use `patch_wiki_page`, or read with `maxChars:20000` and check `contentTruncated` is absent.
+- **Sessions**: `heartbeat_agent` and `end_agent` accept `agentId` as an alias for `id`. Sessions registered before the upgrade have no recorded credential, so id-less calls work only after re-registering.
