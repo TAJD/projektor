@@ -70,7 +70,8 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 		// PROJ-894: the credential is recorded so an omitted agentId can later resolve to
 		// this session. token_id keeps its FK meaning (api_tokens.id), so it is only set
 		// for pk/pat credentials; an OAuth grant id lives in credential_id alone.
-		tokenId: ctx.auth?.credentialId && isApiTokenMethod(ctx.auth.method) ? ctx.auth.credentialId : null,
+		tokenId:
+			ctx.auth?.credentialId && isApiTokenMethod(ctx.auth.method) ? ctx.auth.credentialId : null,
 		authMethod: ctx.auth?.method ?? null,
 		credentialId: ctx.auth?.credentialId ?? null,
 		name,

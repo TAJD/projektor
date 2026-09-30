@@ -35,7 +35,9 @@ export async function resolveAgentSessionId(
 	if (!credentialId) {
 		throw new ValidationError({
 			formErrors: [],
-			fieldErrors: { agentId: ["no session on this credential — pass agentId from register_agent"] },
+			fieldErrors: {
+				agentId: ["no session on this credential — pass agentId from register_agent"],
+			},
 		});
 	}
 

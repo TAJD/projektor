@@ -48,7 +48,8 @@ describe("PROJ-894: stateless agent identity", () => {
 		const body = (await res.json()) as RpcBody;
 		// A failure is either a JSON-RPC error or (PROJ-893) an isError tool result;
 		// this suite is about identity resolution, not the error envelope.
-		if (body.error) return { ok: false, value: {}, message: body.error.message ?? JSON.stringify(body) };
+		if (body.error)
+			return { ok: false, value: {}, message: body.error.message ?? JSON.stringify(body) };
 		const text = body.result?.content?.[0]?.text ?? "";
 		if (body.result?.isError) return { ok: false, value: {}, message: text };
 		return { ok: true, value: JSON.parse(text) as Record<string, unknown>, message: "" };
@@ -77,7 +78,11 @@ describe("PROJ-894: stateless agent identity", () => {
 			.first<{ auth_method: string; credential_id: string; token_id: string }>();
 		const credentialId = await credentialIdOf(token);
 		// seedToken mints a `tok_` token, which the auth middleware classifies as a PAT.
-		expect(row).toEqual({ auth_method: "pat", credential_id: credentialId, token_id: credentialId });
+		expect(row).toEqual({
+			auth_method: "pat",
+			credential_id: credentialId,
+			token_id: credentialId,
+		});
 	});
 
 	it("one live session: claim_issue, heartbeat_agent and end_agent work without an agent id", async () => {
