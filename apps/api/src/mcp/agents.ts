@@ -7,7 +7,6 @@ import {
 	registerAgent,
 	startWork,
 } from "../services/agents";
-import { ValidationError } from "../services/errors";
 import { PLAIN_WRITE, READ } from "./annotations";
 
 export const agentsTools: MCPTool[] = [
@@ -94,18 +93,17 @@ export const agentsTools: MCPTool[] = [
 		description: "Send a heartbeat to keep an agent session active",
 		inputSchema: {
 			type: "object",
-			required: ["id"],
 			properties: {
-				id: { type: "string", description: "Agent session UUID" },
+				id: {
+					type: "string",
+					description:
+						"Agent session UUID. Optional when this credential has exactly one agent session; fleets sharing a credential must pass it",
+				},
 			},
 		},
 		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
-			const { id } = input as { id?: string };
-			if (!id || typeof id !== "string") {
-				throw new ValidationError({ formErrors: ["id is required"], fieldErrors: {} });
-			}
-			return heartbeatAgent(ctx, { id });
+			return heartbeatAgent(ctx, input);
 		},
 	},
 	{
@@ -113,18 +111,17 @@ export const agentsTools: MCPTool[] = [
 		description: "End an agent session",
 		inputSchema: {
 			type: "object",
-			required: ["id"],
 			properties: {
-				id: { type: "string", description: "Agent session UUID" },
+				id: {
+					type: "string",
+					description:
+						"Agent session UUID. Optional when this credential has exactly one agent session; fleets sharing a credential must pass it",
+				},
 			},
 		},
 		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
-			const { id } = input as { id?: string };
-			if (!id || typeof id !== "string") {
-				throw new ValidationError({ formErrors: ["id is required"], fieldErrors: {} });
-			}
-			return endAgent(ctx, { id });
+			return endAgent(ctx, input);
 		},
 	},
 	{

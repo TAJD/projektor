@@ -11,12 +11,14 @@ export const RegisterAgentSchema = z.object({
 	kind: z.enum(["agent", "human"]).optional(),
 });
 
+// PROJ-894: `id` may be omitted when the calling credential owns exactly one agent
+// session — see services/agent-identity.ts. Fleets sharing a credential must pass it.
 export const HeartbeatAgentSchema = z.object({
-	id: z.string().uuid(),
+	id: z.string().uuid().optional(),
 });
 
 export const EndAgentSchema = z.object({
-	id: z.string().uuid(),
+	id: z.string().uuid().optional(),
 });
 
 // PROJ-932: projectId accepts a UUID or a project key, resolved the same way list_issues

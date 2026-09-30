@@ -100,7 +100,9 @@ backed by MCP tools:
 
 - **Agent sessions** — `register_agent` / `heartbeat_agent` / `end_agent` / `list_active_agents`.
   Register on start (linking the issue you're implementing), heartbeat ~every 60 s (sessions
-  time out after 120 s of silence), end on finish.
+  time out after 120 s of silence), end on finish. A single agent per credential may omit the
+  session id on `claim_issue` / `heartbeat_agent` / `end_agent`; fleets sharing one credential
+  must pass the id from `register_agent`.
 - **File claims** — `claim_files` / `release_files` / `list_file_claims`. Claim the paths you're
   about to edit; check who else holds a file before you start; release on completion.
 - **Coordination messages** — `post_message` / `list_messages`. Post to an *issue channel* when

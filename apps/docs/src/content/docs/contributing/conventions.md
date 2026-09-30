@@ -323,6 +323,16 @@ file.
 What *is* repo-specific and stays here: the mechanical call sequence agents use to
 avoid colliding in this particular repo's git worktree/file layout.
 
+### Session identity (PROJ-894)
+
+`register_agent` (and `start_work`) records the credential the call authenticated with on
+the session (`agent_sessions.credential_id` + `auth_method`). A lone agent on its own
+credential may then omit the agent id on `claim_issue`, `heartbeat_agent` and `end_agent`.
+**Fleets that share one credential (one `pk_` token for every worker) should still pass
+`agentId` explicitly**: with several live sessions on the credential an omitted id is
+ambiguous and is rejected. No per-connection state exists; the session is looked up from the
+credential on every call (PROJ-452 statelessness holds).
+
 ### The two-call path (PROJ-929)
 
 `start_work` and `finish_work` collapse the sequence below into two calls:

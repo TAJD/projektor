@@ -101,3 +101,7 @@ as a comment on the epic and give each worker the ticket URL as its entry point.
 hands out the tickets: each worker takes its own through `claim_issue`, and the lease
 keeps the others off it. That is why the composed directive reports the project's agent
 WIP limit, the cap on how many tickets one worker may hold at a time.
+
+Workers that share one credential (one token for the whole fleet) must pass the `agentId`
+from `register_agent` to `claim_issue`, `heartbeat_agent` and `end_agent`. A lone agent on its
+own credential may omit it.
