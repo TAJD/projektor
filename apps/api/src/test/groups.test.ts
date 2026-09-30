@@ -7,6 +7,7 @@ import {
 	seedProject,
 	seedUser,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 
 async function mcpCall<T>(
@@ -34,6 +35,8 @@ function isMcpError(r: JsonRpcResult | JsonRpcError): r is JsonRpcError {
 
 function mcpData<T>(r: JsonRpcResult<{ content: Array<{ text: string }> }> | JsonRpcError): T {
 	if (isMcpError(r)) throw new Error(`MCP error: ${r.error.message}`);
+	const te = toolError(r);
+	if (te) throw new Error(`MCP tool error (${te.code}): ${te.message}`);
 	return JSON.parse(r.result.content[0].text) as T;
 }
 
@@ -271,8 +274,7 @@ describe("Groups MCP parity", () => {
 
 	it("create_group rejects member (forbidden)", async () => {
 		const res = await mcpCall(workspaceId, "create_group", { name: "Nope" }, memberHeaders);
-		expect(isMcpError(res)).toBe(true);
-		expect((res as JsonRpcError).error.code).toBe(-32000);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("list_groups via MCP: member sees only their own groups; owner sees all (PROJ-319)", async () => {

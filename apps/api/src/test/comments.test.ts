@@ -11,6 +11,7 @@ import {
 	seedProject,
 	seedProjectFixture,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 
 async function mcpCall<T>(
@@ -217,8 +218,8 @@ describe("Comments MCP cross-workspace security", () => {
 			authHeaders(wsA.token, wsA.workspace.slug)
 		)) as JsonRpcError;
 
-		expect(res.error).toBeDefined();
-		expect(res.error.code).toBe(-32000);
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("not_found");
 	});
 
 	it("MCP list_comments rejects issueId belonging to another workspace", async () => {
@@ -248,8 +249,8 @@ describe("Comments MCP cross-workspace security", () => {
 			authHeaders(wsA.token, wsA.workspace.slug)
 		)) as JsonRpcError;
 
-		expect(res.error).toBeDefined();
-		expect(res.error.code).toBe(-32000);
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("not_found");
 	});
 });
 

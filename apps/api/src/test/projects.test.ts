@@ -1,6 +1,12 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, type JsonRpcError, type JsonRpcResult, seedWorkspaceRoles } from "./helpers";
+import {
+	authHeaders,
+	type JsonRpcError,
+	type JsonRpcResult,
+	seedWorkspaceRoles,
+	toolError,
+} from "./helpers";
 import { resetRateLimits } from "./rate-limit-reset";
 
 async function mcpCall<T>(
@@ -319,6 +325,7 @@ describe("Projects MCP", () => {
 			ownerHeaders
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		expect(isMcpError(res)).toBe(false);
+		expect(toolError(res)).toBeUndefined();
 		const data = JSON.parse(res.result.content[0].text) as unknown[];
 		expect(Array.isArray(data)).toBe(true);
 		expect(data).toHaveLength(0);
@@ -332,6 +339,7 @@ describe("Projects MCP", () => {
 			ownerHeaders
 		);
 		expect(isMcpError(res)).toBe(false);
+		expect(toolError(res)).toBeUndefined();
 		const result = res as JsonRpcResult<{ content: Array<{ text: string }> }>;
 		const data = JSON.parse(result.result.content[0].text) as { id: string; key: string };
 		expect(data.id).toBeTruthy();
@@ -356,8 +364,7 @@ describe("Projects MCP", () => {
 			{ name: "Blocked", key: "BLKD" },
 			memberHeaders
 		);
-		expect(isMcpError(res)).toBe(true);
-		expect((res as JsonRpcError).error.code).toBe(-32000);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("create_project rejects viewer role", async () => {
@@ -367,8 +374,7 @@ describe("Projects MCP", () => {
 			{ name: "Blocked", key: "BLKD" },
 			viewerHeaders
 		);
-		expect(isMcpError(res)).toBe(true);
-		expect((res as JsonRpcError).error.code).toBe(-32000);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("create_project rejects duplicate key", async () => {
@@ -379,8 +385,7 @@ describe("Projects MCP", () => {
 			{ name: "Second", key: "DUPL" },
 			ownerHeaders
 		);
-		expect(isMcpError(res)).toBe(true);
-		expect((res as JsonRpcError).error.code).toBe(-32000);
+		expect(toolError(res)?.code).toBe("conflict");
 	});
 
 	it("create_project rejects invalid key format", async () => {
@@ -390,7 +395,7 @@ describe("Projects MCP", () => {
 			{ name: "Bad", key: "BAD KEY!" },
 			ownerHeaders
 		);
-		expect(isMcpError(res)).toBe(true);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("create_project rejects name too long", async () => {
@@ -400,7 +405,7 @@ describe("Projects MCP", () => {
 			{ name: "x".repeat(101), key: "TOOLNG" },
 			ownerHeaders
 		);
-		expect(isMcpError(res)).toBe(true);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("create_project stores NULL description by default", async () => {
@@ -485,6 +490,7 @@ describe("Projects MCP", () => {
 			ownerHeaders
 		);
 		expect(isMcpError(updateRes)).toBe(false);
+		expect(toolError(updateRes)).toBeUndefined();
 
 		const listRes = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
@@ -524,7 +530,7 @@ describe("Projects MCP", () => {
 
 		// Both must reject member
 		expect(restRes.status).toBe(403);
-		expect(isMcpError(mcpRes)).toBe(true);
+		expect(toolError(mcpRes)?.code).toBe("forbidden");
 	});
 });
 

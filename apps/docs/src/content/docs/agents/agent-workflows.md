@@ -100,7 +100,9 @@ backed by MCP tools:
 
 - **Agent sessions** — `register_agent` / `heartbeat_agent` / `end_agent` / `list_active_agents`.
   Register on start (linking the issue you're implementing), heartbeat ~every 60 s (sessions
-  time out after 120 s of silence), end on finish.
+  time out after 120 s of silence), end on finish. A single agent per credential may omit the
+  session id on `claim_issue` / `heartbeat_agent` / `end_agent`; fleets sharing one credential
+  must pass the id from `register_agent`.
 - **File claims** — `claim_files` / `release_files` / `list_file_claims`. Claim the paths you're
   about to edit; check who else holds a file before you start; release on completion.
 - **Coordination messages** — `post_message` / `list_messages`. Post to an *issue channel* when
@@ -136,6 +138,10 @@ Natural-language prompts that map onto this layer:
 > "Write a wiki page summarising what we shipped this sprint, using the completed issues as source."
 
 ---
+
+### Keep reads small
+
+Prefer `list_issues` with `view=summary`, then `get_issue` for the one you need. For long wiki pages, read the `outline` from `get_wiki_page` and fetch a single `section`; long bodies continue with `cursor`. See [Response conventions](/projektor/agents/response-conventions/).
 
 ## The end-to-end loop
 

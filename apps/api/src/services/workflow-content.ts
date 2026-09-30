@@ -97,6 +97,17 @@ cap is reached, naming the current cap and what's already held). The default is 
 configurable per project; treat it as a starting point to tune once \`get_flow_metrics\`
 has a few weeks of real data, not a fixed rule.
 
+## Agent identity
+
+\`register_agent\` records the credential it was called with (a workspace or user token, or an
+OAuth grant) on the session. **A single agent per credential may omit the agent id** on
+\`claim_issue\`, \`heartbeat_agent\` and \`end_agent\`: with exactly one live session on the
+credential, that session is used. **Fleets that share a credential must pass the id** —
+several live sessions is ambiguous, and so is none; both are rejected with a hint to pass
+\`agentId\` from \`register_agent\`. Nothing is remembered per connection; the session is looked
+up from the credential on every call. \`release_issue\` is unchanged: an omitted \`agentId\` still
+releases the lease whoever holds it.
+
 ## Flow metrics
 
 \`get_flow_metrics\` reports lead time (ready → done), cycle time (claimed → done),

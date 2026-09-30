@@ -9,6 +9,7 @@ import {
 	seedProject,
 	seedProjectFixture,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 import { seedRateLimitCounter } from "./rate-limit-reset";
 
@@ -522,16 +523,15 @@ describe("Feedback source MCP tools", () => {
 		expect(out.token).toBeTruthy();
 	});
 
-	it("create_feedback_source is forbidden for a member (-32000)", async () => {
+	it("create_feedback_source is forbidden for a member (forbidden)", async () => {
 		const f = await seedProjectFixture({ role: "member" });
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			f.workspaceId,
 			"create_feedback_source",
 			{ projectId: f.projectId, name: "X" },
 			authHeaders(f.token, f.slug)
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.code).toBe(-32000);
+		);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("list_feedback_sources never leaks a raw token", async () => {
@@ -1019,7 +1019,7 @@ describe("Feedback read/triage MCP tools", () => {
 		expect(row?.status).toBe("reviewed");
 	});
 
-	it("update_feedback_status is forbidden for a viewer (-32000)", async () => {
+	it("update_feedback_status is forbidden for a viewer (forbidden)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const proj = await seedProject(roles.workspace.id, "UFV");
 		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, proj.id, "viewer");
@@ -1031,14 +1031,13 @@ describe("Feedback read/triage MCP tools", () => {
 		const { id: sourceId } = (await create.json()) as { id: string };
 		const fbId = await seedFeedbackRow(sourceId, roles.workspace.id, proj.id);
 
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			roles.workspace.id,
 			"update_feedback_status",
 			{ feedbackId: fbId, status: "reviewed" },
 			authHeaders(roles.viewer.token, roles.workspace.slug)
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.code).toBe(-32000);
+		);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("convert_feedback_to_issue creates and links an issue without a projectId argument (member+)", async () => {
@@ -1081,16 +1080,16 @@ describe("Feedback read/triage MCP tools", () => {
 			{ feedbackId: fbId },
 			authHeaders(f.token, f.slug)
 		);
-		const second = (await mcpCall(
+		const second = await mcpCall(
 			f.workspaceId,
 			"convert_feedback_to_issue",
 			{ feedbackId: fbId },
 			authHeaders(f.token, f.slug)
-		)) as JsonRpcError;
-		expect(second.error).toBeDefined();
+		);
+		expect(toolError(second)?.code).toBe("conflict");
 	});
 
-	it("convert_feedback_to_issue is forbidden for a viewer (-32000)", async () => {
+	it("convert_feedback_to_issue is forbidden for a viewer (forbidden)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const proj = await seedProject(roles.workspace.id, "CFV");
 		await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, proj.id, "viewer");
@@ -1102,13 +1101,12 @@ describe("Feedback read/triage MCP tools", () => {
 		const { id: sourceId } = (await create.json()) as { id: string };
 		const fbId = await seedFeedbackRow(sourceId, roles.workspace.id, proj.id, { body: "x" });
 
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			roles.workspace.id,
 			"convert_feedback_to_issue",
 			{ feedbackId: fbId },
 			authHeaders(roles.viewer.token, roles.workspace.slug)
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.code).toBe(-32000);
+		);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 });

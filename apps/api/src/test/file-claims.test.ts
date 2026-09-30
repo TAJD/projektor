@@ -1,6 +1,13 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedFixture, seedIssue, seedIssueFixture, seedProject } from "./helpers";
+import {
+	authHeaders,
+	seedFixture,
+	seedIssue,
+	seedIssueFixture,
+	seedProject,
+	toolError,
+} from "./helpers";
 
 describe("File Claims API", () => {
 	let token: string;
@@ -114,12 +121,13 @@ describe("File Claims API", () => {
 		const listBody = (await listRes.json()) as { items: Array<{ path: string }> };
 		expect(listBody.items).toHaveLength(0);
 
-		// Verify via MCP — should also return -32000 with holder info
+		// Verify via MCP — should also return a conflict tool error with holder info
 		const mcpRes = await mcpCall("claim_files", { issueId: issue2.id, paths: ["src/held.ts"] });
 		expect(mcpRes.status).toBe(200);
-		const mcpBody = (await mcpRes.json()) as { error?: { code: number; message: string } };
-		expect(mcpBody.error?.code).toBe(-32000);
-		expect(mcpBody.error?.message).toContain(issueId);
+		const mcpBody = (await mcpRes.json()) as { error?: unknown };
+		expect(mcpBody.error).toBeUndefined();
+		expect(toolError(mcpBody)?.code).toBe("conflict");
+		expect(toolError(mcpBody)?.message).toContain(issueId);
 	});
 
 	// B3: force:true steals — prior released, new active, overridden list non-empty

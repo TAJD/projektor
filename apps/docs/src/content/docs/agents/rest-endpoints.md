@@ -20,6 +20,13 @@ All `/api/*` endpoints below require the same bearer-token auth as MCP
 `/auth/*` endpoints are the exception — they authenticate the *user*, not a workspace,
 so they take a Cloudflare Access session (or no auth at all) instead.
 
+## List shapes differ from MCP
+
+REST list endpoints keep their existing shapes (`{items, nextCursor, total}` for issues,
+`{changes, nextSince}` for wiki changes, bare arrays for most others) and always return the
+full row. MCP lists return `{items, next}` with shaped items and a ~20,000-character cap;
+see [Response conventions](/projektor/agents/response-conventions/).
+
 ## File attachments
 
 Binary upload/download doesn't fit JSON-RPC, so attachments are REST-only.

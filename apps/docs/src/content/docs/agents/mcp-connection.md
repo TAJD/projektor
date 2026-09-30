@@ -328,22 +328,61 @@ serve across different callers either).
 }
 ```
 
-Error codes: `-32600` invalid request, `-32601` method/tool not found, `-32602` validation error, `-32003` token lacks required scope, `-32000` other (not found, forbidden, conflict).
+#### Tool failures are results, not protocol errors
+
+When a tool call fails (bad arguments, something not found, not allowed, a conflict), the
+response is an ordinary JSON-RPC **result** with `isError: true`, so the model sees the
+failure and can correct itself. The single text content item is JSON:
+
+```json
+{
+  "jsonrpc": "2.0", "id": 3,
+  "result": {
+    "isError": true,
+    "content": [{ "type": "text", "text": "{\"error\":{\"code\":\"not_found\",\"message\":\"Issue not found\",\"hint\":\"Refs look like PROJ-42 (project key + number). Use search_issues to find one.\"}}" }]
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `code` | One of `validation`, `not_found`, `forbidden`, `conflict`, `payload_too_large`, `rate_limited` |
+| `message` | What went wrong, in plain words |
+| `fields` | `validation` only: the offending argument names, each with its problems |
+| `hint` | A concrete next step (which tool finds the thing, which role is needed, how to recover from a conflict) |
+| `details` | Structured extras a tool attaches, e.g. a wiki conflict's `currentRevisionId` and `diff`, or `patch_wiki_page`'s `currentHeadings` |
+
+Each hint is a next step, not a restatement of the message: a `not_found` on an issue ref
+names the ref format and `search_issues`; on a wiki page it names `search_wiki`; a
+`validation` failure names the fields to fix; a `conflict` on a wiki save says to re-read
+with `get_wiki_page` and apply the change with `patch_wiki_page`; `forbidden` says which
+role is missing. `fields`, `hint` and `details` are omitted when they don't apply.
+
+A call whose arguments fail the tool's input schema (a missing required argument, a wrong
+type, an unknown parameter) is a `validation` tool error, checked before the tool runs.
+
+#### JSON-RPC errors (protocol faults only)
+
+A JSON-RPC `error` member is reserved for problems with the request itself, or an
+unexpected internal failure:
 
 | Code | Meaning |
 |------|---------|
+| `-32700` | Parse error (the body is not valid JSON) |
 | `-32600` | Invalid Request (bad JSON-RPC envelope) |
 | `-32601` | Method or tool not found |
-| `-32602` | Validation error (invalid params) |
-| `-32003` | Token lacks the required scope |
-| `-32000` | Other (not found, forbidden, conflict) |
+| `-32602` | Invalid params on the envelope itself (a `tools/call` with no tool name, or `arguments` that is not an object) |
+| `-32003` | Token lacks the required scope. This is an HTTP 403 with a `WWW-Authenticate` challenge, which lets an OAuth client offer a step-up; it is unchanged |
+| `-32000` | Unexpected internal error, with only a request id in the message |
 
-Errors carrying structured detail beyond the message also set the JSON-RPC 2.0
-`error.data` member — e.g. a `-32602` from a validation failure sets `data` to the
-Zod-flattened issues (`formErrors`/`fieldErrors`), and a `-32000` conflict or
-not-found error sets `data` to its detail payload (e.g. `currentRevisionId`/`diff`,
-or `currentHeadings`). `data` is omitted entirely when an error has no structured
-detail beyond its message.
+A client that treated every `error` as "the call failed" must also check `result.isError`.
+
+### List results and the result cap
+
+Every list tool returns `{"items": [...], "next": "…"}`; pass `next` back as `cursor` for
+the next page. Long results from `list_issues`, `search_wiki`, `list_wiki_changes` and
+`list_project_activity` are cut on an item boundary and flagged `truncated:true`. Issue tools take `view=summary|full` and `fields=`. See
+[Response conventions](/projektor/agents/response-conventions/).
 
 ### Stable API contracts
 

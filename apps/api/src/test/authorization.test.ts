@@ -31,6 +31,7 @@ import {
 	seedUser,
 	seedWorkspace,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -331,17 +332,14 @@ describe("PROJ-78: MCP tools – viewer role → error", () => {
 		viewerHeaders = authHeaders(roles.viewer.token, slug);
 	});
 
-	it("viewer cannot call create_project via MCP (gets JSON-RPC error)", async () => {
+	it("viewer cannot call create_project via MCP (gets a forbidden tool error)", async () => {
 		const res = await mcpCall(
 			workspaceId,
 			"create_project",
 			{ name: "Blocked", key: "BLK" },
 			viewerHeaders
 		);
-		expect(isMcpError(res)).toBe(true);
-		if (isMcpError(res)) {
-			expect(res.error.code).toBe(-32000);
-		}
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("owner CAN call create_project via MCP", async () => {
@@ -354,17 +352,14 @@ describe("PROJ-78: MCP tools – viewer role → error", () => {
 		expect(isMcpError(res)).toBe(false);
 	});
 
-	it("viewer cannot call create_task_type via MCP (gets JSON-RPC error)", async () => {
+	it("viewer cannot call create_task_type via MCP (gets a forbidden tool error)", async () => {
 		const res = await mcpCall(
 			workspaceId,
 			"create_task_type",
 			{ key: "epic", name: "Epic" },
 			viewerHeaders
 		);
-		expect(isMcpError(res)).toBe(true);
-		if (isMcpError(res)) {
-			expect(res.error.code).toBe(-32000);
-		}
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("owner CAN call create_task_type via MCP", async () => {
@@ -384,7 +379,7 @@ describe("PROJ-78: MCP tools – viewer role → error", () => {
 			{ key: "triage", name: "Triage", category: "todo" },
 			viewerHeaders
 		);
-		expect(isMcpError(res)).toBe(true);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("viewer cannot call create_custom_field via MCP", async () => {

@@ -8,6 +8,7 @@ import {
 	seedIssue,
 	seedProject,
 	seedProjectFixture,
+	toolError,
 } from "./helpers";
 
 type McpContent = { content: Array<{ text: string }> };
@@ -36,7 +37,7 @@ function parseEvents(res: JsonRpcResult<McpContent> | JsonRpcError): unknown[] {
 		throw new Error(`MCP error: ${res.error.message}`);
 	}
 	const r = res as JsonRpcResult<McpContent>;
-	return JSON.parse(r.result.content[0].text) as unknown[];
+	return (JSON.parse(r.result.content[0].text) as { items: unknown[] }).items;
 }
 
 async function seedSprint(
@@ -130,7 +131,7 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
 			type: string;
 			summary: string;
 			entity_type: string;
@@ -156,7 +157,7 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
 			type: string;
 			actor: string | null;
 		}>;
@@ -175,7 +176,7 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
 			type: string;
 			entity_type: string;
 			summary: string;
@@ -201,7 +202,9 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{ type: string }>;
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
+			type: string;
+		}>;
 
 		const edited = events.filter((e) => e.type === "wiki_page_edited");
 		expect(edited).toHaveLength(1);
@@ -216,7 +219,9 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{ type: string }>;
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
+			type: string;
+		}>;
 
 		const edited = events.filter((e) => e.type === "wiki_page_edited");
 		expect(edited).toHaveLength(0);
@@ -235,7 +240,9 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{ type: string }>;
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
+			type: string;
+		}>;
 
 		expect(events.some((e) => e.type === "wiki_page_created")).toBe(false);
 		expect(events.some((e) => e.type === "wiki_page_edited")).toBe(false);
@@ -255,7 +262,7 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
 			type: string;
 			summary: string;
 			entity_type: string;
@@ -282,7 +289,7 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
 			type: string;
 			summary: string;
 		}>;
@@ -306,7 +313,8 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId, limit: 2 },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as unknown[];
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown })
+			.items as unknown[];
 		expect(events).toHaveLength(2);
 	});
 
@@ -321,7 +329,9 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId, since: past },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{ summary: string }>;
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
+			summary: string;
+		}>;
 
 		const titles = events.map((e) => e.summary);
 		expect(titles).toContain("New issue");
@@ -339,7 +349,7 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
 			summary: string;
 			created_at: number;
 		}>;
@@ -360,7 +370,9 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<{ summary: string }>;
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<{
+			summary: string;
+		}>;
 
 		const summaries = events.map((e) => e.summary);
 		expect(summaries).toContain("This project issue");
@@ -368,19 +380,20 @@ describe("list_project_activity MCP tool", () => {
 	});
 
 	it("returns error for unknown project", async () => {
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			workspaceId,
 			"list_project_activity",
 			{ projectId: crypto.randomUUID() },
 			headers
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.message).toMatch(/not found/i);
+		);
+		const err = toolError(res);
+		expect(err?.code).toBe("not_found");
+		expect(err?.message).toMatch(/not found/i);
 	});
 
 	it("returns error when projectId is missing", async () => {
-		const res = (await mcpCall(workspaceId, "list_project_activity", {}, headers)) as JsonRpcError;
-		expect(res.error).toBeDefined();
+		const res = await mcpCall(workspaceId, "list_project_activity", {}, headers);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("response shape is flat (no nested objects)", async () => {
@@ -392,7 +405,9 @@ describe("list_project_activity MCP tool", () => {
 			{ projectId },
 			headers
 		)) as JsonRpcResult<McpContent>;
-		const events = JSON.parse(res.result.content[0].text) as Array<Record<string, unknown>>;
+		const events = (JSON.parse(res.result.content[0].text) as { items: unknown }).items as Array<
+			Record<string, unknown>
+		>;
 
 		for (const event of events) {
 			for (const val of Object.values(event)) {

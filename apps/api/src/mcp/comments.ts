@@ -1,11 +1,13 @@
 import type { MCPTool } from "@projektor/types";
 import { addComment, deleteComment, listComments, updateComment } from "../services/comments";
 import { DESTRUCTIVE, IDEMPOTENT_WRITE, PLAIN_WRITE, READ } from "./annotations";
+import { toPage } from "./serialize";
 
 export const commentsTools: MCPTool[] = [
 	{
 		name: "list_comments",
-		description: "List comments on an issue",
+		description:
+			"List comments on an issue. Returns `{items}` (see /projektor/agents/response-conventions/).",
 		inputSchema: {
 			type: "object",
 			required: ["issueId"],
@@ -13,7 +15,7 @@ export const commentsTools: MCPTool[] = [
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			return listComments(ctx, input);
+			return toPage(await listComments(ctx, input));
 		},
 	},
 	{

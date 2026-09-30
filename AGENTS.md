@@ -84,7 +84,7 @@ mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live h
 3. **Validation happens inside the service** via a shared Zod schema in `schemas/<domain>.ts` — so REST and MCP are validated identically. Never trust raw `unknown` input in a wrapper.
 4. **Services throw typed errors** from `services/errors.ts` (`ValidationError`, `NotFoundError`, `ForbiddenError`, `ConflictError`). The wrappers translate them:
    - REST: `http/error-adapter.ts` → HTTP status (400/404/403/409)
-   - MCP: `mcp/error-adapter.ts` → JSON-RPC code (`-32602` for validation, `-32000` otherwise). Never return raw `String(err)` to clients.
+   - MCP: `mcp/error-adapter.ts` → a tool result with `isError: true` and `{error: {code, message, fields?, hint?, details?}}` (PROJ-893; `code` is the service error kind). JSON-RPC `error` is only for protocol faults and unexpected internal errors. Never return raw `String(err)` to clients.
 5. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role? }`. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
 
 ### Deliberate REST↔MCP parity exceptions
@@ -314,6 +314,16 @@ file.
 
 What *is* repo-specific and stays here: the mechanical call sequence agents use to
 avoid colliding in this particular repo's git worktree/file layout.
+
+### Session identity (PROJ-894)
+
+`register_agent` (and `start_work`) records the credential the call authenticated with on
+the session (`agent_sessions.credential_id` + `auth_method`). A lone agent on its own
+credential may then omit the agent id on `claim_issue`, `heartbeat_agent` and `end_agent`.
+**Fleets that share one credential (one `pk_` token for every worker) should still pass
+`agentId` explicitly**: with several live sessions on the credential an omitted id is
+ambiguous and is rejected. No per-connection state exists; the session is looked up from the
+credential on every call (PROJ-452 statelessness holds).
 
 ### The two-call path (PROJ-929)
 

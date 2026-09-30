@@ -10,12 +10,13 @@ export const issueLeasesTools: MCPTool[] = [
 			"Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating.",
 		inputSchema: {
 			type: "object",
-			required: ["issueId", "agentId"],
+			required: ["issueId"],
 			properties: {
 				issueId: { type: "string", description: "Issue UUID to lease" },
 				agentId: {
 					type: "string",
-					description: "Agent session UUID acquiring the lease (must be live)",
+					description:
+						"Agent session UUID acquiring the lease (must be live). Optional when this credential has exactly one live session; fleets sharing a credential must pass it",
 				},
 			},
 		},

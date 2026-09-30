@@ -9,6 +9,7 @@ import {
 	StartWorkSchema,
 } from "../schemas/agents";
 import { visibleProjectPredicate } from "./access";
+import { resolveAgentSessionId } from "./agent-identity";
 import { postMessage } from "./agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
 import { claimFiles, releaseClaimsForAgent } from "./file-claims";
@@ -36,6 +37,10 @@ const AGENT_SESSION_COLUMNS = {
 	endedAt: schema.agentSessions.endedAt,
 };
 
+function isApiTokenMethod(method: string): boolean {
+	return method === "pk" || method === "pat";
+}
+
 export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 	const result = RegisterAgentSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -62,7 +67,13 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 		id,
 		workspaceId: ctx.workspaceId,
 		issueId: issueId ?? null,
-		tokenId: null,
+		// PROJ-894: the credential is recorded so an omitted agentId can later resolve to
+		// this session. token_id keeps its FK meaning (api_tokens.id), so it is only set
+		// for pk/pat credentials; an OAuth grant id lives in credential_id alone.
+		tokenId:
+			ctx.auth?.credentialId && isApiTokenMethod(ctx.auth.method) ? ctx.auth.credentialId : null,
+		authMethod: ctx.auth?.method ?? null,
+		credentialId: ctx.auth?.credentialId ?? null,
 		name,
 		status: "active",
 		startedAt: now,
@@ -135,7 +146,9 @@ export async function startWork(ctx: ServiceCtx, raw: unknown) {
 export async function heartbeatAgent(ctx: ServiceCtx, raw: unknown) {
 	const result = HeartbeatAgentSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { id } = result.data;
+	// PROJ-894: heartbeat resolves against still-active sessions (not only live ones) —
+	// this call is what revives a session that just went stale.
+	const id = await resolveAgentSessionId(ctx, result.data.id, { includeStale: true });
 
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
@@ -172,7 +185,7 @@ export async function heartbeatAgent(ctx: ServiceCtx, raw: unknown) {
 export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 	const result = EndAgentSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { id } = result.data;
+	const id = await resolveAgentSessionId(ctx, result.data.id, { includeStale: true });
 
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm

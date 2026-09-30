@@ -1,7 +1,13 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { hashWorkflowContent } from "../services/workflow";
-import { authHeaders, type JsonRpcError, type JsonRpcResult, seedFixture } from "./helpers";
+import {
+	authHeaders,
+	type JsonRpcError,
+	type JsonRpcResult,
+	seedFixture,
+	toolError,
+} from "./helpers";
 
 async function mcpCall<T>(
 	workspaceId: string,
@@ -213,15 +219,15 @@ describe("Workflow spec", () => {
 		expect(initRes.result.instructions).toContain("ifVersion");
 	});
 
-	it("an invalid ifVersion type over MCP is a -32602 validation error", async () => {
-		const res = (await mcpCall(
+	it("an invalid ifVersion type over MCP returns a validation tool error", async () => {
+		const res = await mcpCall(
 			workspaceId,
 			"tools/call",
 			{ name: "get_workflow", arguments: { ifVersion: 42 } },
 			authHeaders(token, slug)
-		)) as JsonRpcError;
+		);
 
-		expect(res.error.code).toBe(-32602);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("an invalid ifVersion type over REST (repeated query param) is a 400 validation error", async () => {

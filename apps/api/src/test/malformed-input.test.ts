@@ -3,7 +3,7 @@
 
 import { SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authHeaders, seedIssueFixture } from "./helpers";
+import { authHeaders, seedIssueFixture, toolError } from "./helpers";
 
 let f: Awaited<ReturnType<typeof seedIssueFixture>>;
 let unhandled: ReturnType<typeof vi.spyOn>;
@@ -75,7 +75,7 @@ describe("MCP: parse and envelope errors", () => {
 		expect(await errorCode(res)).toBe(-32602);
 	});
 
-	it("tools/call get_project with no arguments → -32602 naming the field", async () => {
+	it("tools/call get_project with no arguments → validation tool error naming the field", async () => {
 		const res = await mcp(
 			JSON.stringify({
 				jsonrpc: "2.0",
@@ -84,8 +84,9 @@ describe("MCP: parse and envelope errors", () => {
 				params: { name: "get_project" },
 			})
 		);
-		const body = (await res.json()) as { error: { code: number; message: string } };
-		expect(body.error.code).toBe(-32602);
-		expect(body.error.message).toMatch(/Missing required argument/);
+		const body = await res.json();
+		const err = toolError(body);
+		expect(err?.code).toBe("validation");
+		expect(err?.message).toMatch(/Missing required argument/);
 	});
 });

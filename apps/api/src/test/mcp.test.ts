@@ -12,6 +12,7 @@ import {
 	seedMember,
 	seedProject,
 	seedUser,
+	toolError,
 } from "./helpers";
 
 async function mcpFetch(
@@ -39,7 +40,11 @@ async function mcpCall<T>(
 	return res.json();
 }
 
-type IssuePage = { items: Array<Record<string, unknown>>; nextCursor: number | null };
+type IssuePage = {
+	items: Array<Record<string, unknown>>;
+	next?: string;
+	nextCursor?: number | null;
+};
 
 describe("MCP endpoint", () => {
 	let token: string;
@@ -155,7 +160,7 @@ describe("MCP endpoint", () => {
 		const data = JSON.parse(res.result.content[0].text) as IssuePage;
 		expect(Array.isArray(data.items)).toBe(true);
 		expect(data.items).toHaveLength(0);
-		expect(data.nextCursor).toBeNull();
+		expect(data.next).toBeUndefined();
 	});
 
 	it("tools/call create_issue then list_issues returns it", async () => {
@@ -194,7 +199,8 @@ describe("MCP endpoint", () => {
 			{ name: "search_wiki", arguments: { query: "MCP endpoint" } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
-		const results = JSON.parse(res.result.content[0].text) as Array<{ title: string }>;
+		const results = (JSON.parse(res.result.content[0].text) as { items: Array<{ title: string }> })
+			.items;
 		expect(results.length).toBeGreaterThan(0);
 		expect(results[0].title).toBe("MCP Docs");
 	});
@@ -233,34 +239,34 @@ describe("MCP endpoint", () => {
 		expect(res.error.message).toContain("does_not_exist");
 	});
 
-	// PROJ-508: a ValidationError's Zod issues now travel in the JSON-RPC 2.0
-	// `error.data` member instead of being dropped behind the bare "Invalid params"
-	// message.
-	it("tools/call ValidationError carries Zod issues in error.data", async () => {
-		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+	// PROJ-893: a ValidationError's per-field messages travel in the tool error's
+	// `fields` member of a successful JSON-RPC response.
+	it("tools/call ValidationError carries Zod issues in the tool error fields", async () => {
+		const res = await mcpCall(
 			workspaceId,
 			"tools/call",
 			{ name: "create_issue", arguments: { projectId, title: 123 } },
 			headers
-		)) as JsonRpcError;
-		expect(res.error.code).toBe(-32602);
-		expect(res.error.message).toContain("Invalid params");
-		const data = res.error.data as { formErrors: string[]; fieldErrors: Record<string, string[]> };
-		expect(data.fieldErrors.title).toBeTruthy();
-		expect(res.error.message).toContain("title");
+		);
+		const err = toolError(res);
+		expect(err?.code).toBe("validation");
+		expect(err?.message).toBeTruthy();
+		expect(err?.fields?.title).toBeTruthy();
+		expect(err?.hint).toContain("title");
 	});
 
-	// A ServiceError with no structured `details` (e.g. a plain ValidationError-less
-	// not-found) still omits `data` entirely rather than sending it as null.
-	it("tools/call error without structured details omits error.data", async () => {
-		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+	// A ServiceError with no structured `details` (e.g. a plain not-found)
+	// still omits `details` entirely rather than sending it as null.
+	it("tools/call error without structured details omits details", async () => {
+		const res = await mcpCall(
 			workspaceId,
 			"tools/call",
 			{ name: "get_issue", arguments: { id: crypto.randomUUID() } },
 			headers
-		)) as JsonRpcError;
-		expect(res.error.code).toBe(-32000);
-		expect("data" in res.error).toBe(false);
+		);
+		const err = toolError(res);
+		expect(err?.code).toBe("not_found");
+		expect(err && "details" in err).toBe(false);
 	});
 
 	// --- Issues: REST/MCP parity tests ---
@@ -364,7 +370,7 @@ describe("MCP endpoint", () => {
 		expect((restData.items[0] as { title: string }).title).toBe("Assigned");
 	});
 
-	it("MCP and REST list_issues return identical structure { items, nextCursor }", async () => {
+	it("MCP list_issues returns { items, next } (PROJ-891); REST keeps { items, nextCursor }", async () => {
 		const mcpRes = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
@@ -377,7 +383,7 @@ describe("MCP endpoint", () => {
 		const restData = (await restRes.json()) as IssuePage;
 
 		expect(Array.isArray(mcpData.items)).toBe(true);
-		expect("nextCursor" in mcpData).toBe(true);
+		expect("nextCursor" in mcpData).toBe(false);
 		expect(Array.isArray(restData.items)).toBe(true);
 		expect("nextCursor" in restData).toBe(true);
 	});
@@ -405,14 +411,15 @@ describe("MCP endpoint", () => {
 	});
 
 	it("MCP get_issue for unknown id returns error", async () => {
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			workspaceId,
 			"tools/call",
 			{ name: "get_issue", arguments: { id: crypto.randomUUID() } },
 			headers
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.message).toMatch(/not found/i);
+		);
+		const err = toolError(res);
+		expect(err?.code).toBe("not_found");
+		expect(err?.message).toMatch(/not found/i);
 	});
 
 	// --- wiki parity tests ---
@@ -454,8 +461,8 @@ describe("MCP endpoint", () => {
 			{ name: "search_wiki", arguments: { query: "" } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
-		const results = JSON.parse(res.result.content[0].text) as unknown[];
-		expect(results).toEqual([]);
+		const results = JSON.parse(res.result.content[0].text) as { items: unknown[] };
+		expect(results).toEqual({ items: [] });
 	});
 
 	it("MCP search_wiki excerpt is at most 250 chars", async () => {
@@ -472,7 +479,9 @@ describe("MCP endpoint", () => {
 			{ name: "search_wiki", arguments: { query: "Verbose" } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
-		const results = JSON.parse(res.result.content[0].text) as Array<{ excerpt: string }>;
+		const results = (
+			JSON.parse(res.result.content[0].text) as { items: Array<{ excerpt: string }> }
+		).items;
 		expect(results).toHaveLength(1);
 		expect(results[0].excerpt.length).toBeLessThanOrEqual(250);
 	});
@@ -562,15 +571,15 @@ describe("MCP endpoint", () => {
 		expect(page.content).toBe("updated");
 	});
 
-	it("MCP create_wiki_page with invalid title returns a JSON-RPC error", async () => {
-		const res = (await mcpCall(
+	it("MCP create_wiki_page with invalid title returns a validation tool error", async () => {
+		const res = await mcpCall(
 			workspaceId,
 			"tools/call",
 			{ name: "create_wiki_page", arguments: { title: "" } },
 			headers
-		)) as JsonRpcError;
-		expect("error" in res).toBe(true);
-		expect(res.error).toBeDefined();
+		);
+		expect("error" in (res as object)).toBe(false);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("MCP delete_wiki_page cascade=true removes the page and its subtree (PROJ-238)", async () => {

@@ -6,6 +6,7 @@ import {
 	ReleaseIssueSchema,
 } from "../schemas/issue-leases";
 import { visibleProjectPredicate } from "./access";
+import { resolveAgentSessionId } from "./agent-identity";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
@@ -212,7 +213,9 @@ async function reclaimStaleLeaseOrThrow(
 export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = ClaimIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, agentId } = result.data;
+	const { issueId } = result.data;
+	// PROJ-894: an omitted agentId resolves to the credential's single live session.
+	const agentId = await resolveAgentSessionId(ctx, result.data.agentId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const cutoff = liveCutoff();

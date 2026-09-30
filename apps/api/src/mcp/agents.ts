@@ -10,6 +10,20 @@ import {
 import { ValidationError } from "../services/errors";
 import { PLAIN_WRITE, READ } from "./annotations";
 
+/** claim_issue names the session `agentId`; heartbeat/end call it `id`. Accept both. */
+function withIdAlias(input: unknown): unknown {
+	const { agentId, ...rest } = (input ?? {}) as { agentId?: unknown; id?: unknown };
+	if (agentId === undefined || agentId === null) return rest;
+	if (rest.id === undefined || rest.id === null) return { ...rest, id: agentId };
+	if (rest.id !== agentId) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { agentId: ["conflicts with id — pass one of them"] },
+		});
+	}
+	return rest;
+}
+
 export const agentsTools: MCPTool[] = [
 	{
 		name: "start_work",
@@ -94,18 +108,18 @@ export const agentsTools: MCPTool[] = [
 		description: "Send a heartbeat to keep an agent session active",
 		inputSchema: {
 			type: "object",
-			required: ["id"],
 			properties: {
-				id: { type: "string", description: "Agent session UUID" },
+				id: {
+					type: "string",
+					description:
+						"Agent session UUID. Optional when this credential has exactly one agent session; fleets sharing a credential must pass it",
+				},
+				agentId: { type: "string", description: "Alias for `id` (the name claim_issue uses)" },
 			},
 		},
 		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
-			const { id } = input as { id?: string };
-			if (!id || typeof id !== "string") {
-				throw new ValidationError({ formErrors: ["id is required"], fieldErrors: {} });
-			}
-			return heartbeatAgent(ctx, { id });
+			return heartbeatAgent(ctx, withIdAlias(input));
 		},
 	},
 	{
@@ -113,18 +127,18 @@ export const agentsTools: MCPTool[] = [
 		description: "End an agent session",
 		inputSchema: {
 			type: "object",
-			required: ["id"],
 			properties: {
-				id: { type: "string", description: "Agent session UUID" },
+				id: {
+					type: "string",
+					description:
+						"Agent session UUID. Optional when this credential has exactly one agent session; fleets sharing a credential must pass it",
+				},
+				agentId: { type: "string", description: "Alias for `id` (the name claim_issue uses)" },
 			},
 		},
 		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
-			const { id } = input as { id?: string };
-			if (!id || typeof id !== "string") {
-				throw new ValidationError({ formErrors: ["id is required"], fieldErrors: {} });
-			}
-			return endAgent(ctx, { id });
+			return endAgent(ctx, withIdAlias(input));
 		},
 	},
 	{

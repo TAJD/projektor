@@ -1,11 +1,11 @@
 import { env, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validateToolArgs } from "../mcp/validate-args";
-import { authHeaders, type JsonRpcError, seedFixture } from "./helpers";
+import { authHeaders, seedFixture, toolError } from "./helpers";
 
 // PROJ-920: MCP arguments are validated against each tool's inputSchema (types, enums,
-// lengths, required) before the handler runs, so a wrongly-typed argument is a -32602
-// naming the field — never a handler crash surfacing as -32000.
+// lengths, required) before the handler runs, so a wrongly-typed argument is a validation
+// tool error naming the field — never a handler crash surfacing as an internal error.
 
 type Schema = Record<string, unknown>;
 
@@ -60,9 +60,9 @@ async function rpc(
 		headers,
 		body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
 	});
-	return res.json() as Promise<
-		{ result?: { tools: Array<{ name: string; inputSchema: Schema }> } } & Partial<JsonRpcError>
-	>;
+	return res.json() as Promise<{
+		result?: { tools: Array<{ name: string; inputSchema: Schema }> };
+	}>;
 }
 
 describe("PROJ-920: MCP tool arguments are type-checked before the handler runs", () => {
@@ -74,7 +74,7 @@ describe("PROJ-920: MCP tool arguments are type-checked before the handler runs"
 		env.RATE_LIMIT_API_MAX = prevMax;
 	});
 
-	it("every tool rejects a wrongly-typed required argument with -32602 naming it", async () => {
+	it("every tool rejects a wrongly-typed required argument with a validation tool error naming it", async () => {
 		const f = await seedFixture({ role: "owner" });
 		const headers = authHeaders(f.token, f.workspace.slug);
 		const list = await rpc(f.workspace.id, headers, "tools/list", {});
@@ -97,26 +97,25 @@ describe("PROJ-920: MCP tool arguments are type-checked before the handler runs"
 				arguments: args,
 			});
 			checked++;
-			if (res.error?.code !== -32602 || !res.error.message.includes(target)) {
-				failures.push(
-					`${tool.name}.${target}: ${res.error?.code ?? "ok"} ${res.error?.message ?? ""}`
-				);
+			const err = toolError(res);
+			if (err?.code !== "validation" || !err.fields || !(target in err.fields)) {
+				failures.push(`${tool.name}.${target}: ${err?.code ?? "ok"} ${err?.message ?? ""}`);
 			}
 		}
 		expect(checked).toBeGreaterThan(50);
 		expect(failures).toEqual([]);
 	});
 
-	it("puts the failing field in error.data like a service ValidationError", async () => {
+	it("puts the failing field in fields like a service ValidationError", async () => {
 		const f = await seedFixture({ role: "owner" });
 		const headers = authHeaders(f.token, f.workspace.slug);
 		const res = await rpc(f.workspace.id, headers, "tools/call", {
 			name: "get_issue",
 			arguments: { id: 42 },
 		});
-		expect(res.error?.code).toBe(-32602);
-		const data = res.error?.data as { fieldErrors: Record<string, string[]> };
-		expect(data.fieldErrors.id?.[0]).toMatch(/must be string/);
+		const err = toolError(res);
+		expect(err?.code).toBe("validation");
+		expect(err?.fields?.id?.[0]).toMatch(/must be string/);
 	});
 
 	it("still reports missing required arguments by name (PROJ-877)", async () => {
@@ -126,8 +125,11 @@ describe("PROJ-920: MCP tool arguments are type-checked before the handler runs"
 			name: "create_issue",
 			arguments: {},
 		});
-		expect(res.error?.code).toBe(-32602);
-		expect(res.error?.message).toContain("Missing required argument(s)");
+		const err = toolError(res);
+		expect(err?.code).toBe("validation");
+		expect(err?.message).toContain("Missing required argument(s)");
+		expect(err?.fields).toBeDefined();
+		expect(Object.keys(err?.fields ?? {})).toContain("title");
 	});
 });
 
