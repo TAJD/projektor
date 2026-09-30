@@ -139,6 +139,10 @@ Natural-language prompts that map onto this layer:
 
 ---
 
+### Keep reads small
+
+Prefer `list_issues` with `view=summary`, then `get_issue` for the one you need. For long wiki pages, read the `outline` from `get_wiki_page` and fetch a single `section`; long bodies continue with `cursor`. See [Response conventions](/projektor/agents/response-conventions/).
+
 ## The end-to-end loop
 
 Put the layers together and a parallel coding fleet looks like this:

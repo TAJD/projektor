@@ -29,6 +29,7 @@ export const ISSUE_FIELD_NAMES = [
 	"number",
 	"title",
 	"body",
+	"bodyTruncated",
 	"status",
 	"priority",
 	"assignee_id",
@@ -179,6 +180,9 @@ function summarize(issue: Record<string, unknown>): Record<string, unknown> {
 	const assignee = issue.assignee_name ?? issue.assignee_id;
 	if (assignee != null) out.assignee = assignee;
 	out.updated = issue.updated_at;
+	// PROJ-892: present only when the caller asked for a body preview (bodyChars).
+	if (typeof issue.body === "string") out.body = issue.body;
+	if (issue.bodyTruncated) out.bodyTruncated = true;
 	return out;
 }
 

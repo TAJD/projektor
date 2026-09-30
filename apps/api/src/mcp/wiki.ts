@@ -6,6 +6,13 @@ import * as wikiDraftsService from "../services/wiki-drafts";
 import * as wikiWatchersService from "../services/wiki-watchers";
 import { CREATE, DESTRUCTIVE, PLAIN_WRITE, READ } from "./annotations";
 import { toPage } from "./serialize";
+import {
+	outlineOf,
+	sectionOf,
+	WIKI_DEFAULT_MAX_CHARS,
+	WIKI_MAX_CHARS,
+	windowText,
+} from "./windowing";
 
 // PROJ-513: `type` is freeform — these are advertised as hints, never as an
 // inputSchema `enum` (which clients treat as the only legal values).
@@ -130,16 +137,70 @@ export const wikiTools: MCPTool[] = [
 	{
 		name: "get_wiki_page",
 		description:
-			"Get a wiki page by slug, including full content. Pass the returned `revisionId` as `baseRevisionId` when you update or patch the page.",
+			"Get a wiki page by slug. Long pages are windowed: `content` is at most `maxChars` " +
+			"(default 8000, max 20000) and `totalChars` is the full length; when `next` is present pass it " +
+			"back as `cursor` for the following window. `outline` lists the page's headings — pass " +
+			"`section` (a heading's text or slug) to read just that section. Pass the returned " +
+			"`revisionId` as `baseRevisionId` when you update or patch the page. " +
+			"See /projektor/agents/response-conventions/.",
 		inputSchema: {
 			type: "object",
 			required: ["slug"],
-			properties: { slug: { type: "string" } },
+			properties: {
+				slug: { type: "string" },
+				maxChars: {
+					type: "number",
+					default: WIKI_DEFAULT_MAX_CHARS,
+					description: `Max characters of content per call (1-${WIKI_MAX_CHARS})`,
+				},
+				cursor: { type: "string", description: "Pass the previous window's `next` unchanged" },
+				section: {
+					type: "string",
+					description: "Return only this section (a heading's text or slug, from `outline`)",
+				},
+			},
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			const { slug } = input as { slug: string };
-			return wikiService.getWikiPage(ctx, slug);
+			const { slug, maxChars, cursor, section } = input as {
+				slug: string;
+				maxChars?: number;
+				cursor?: string;
+				section?: string;
+			};
+			const max = maxChars ?? WIKI_DEFAULT_MAX_CHARS;
+			if (!Number.isInteger(max) || max < 1 || max > WIKI_MAX_CHARS) {
+				throw new ValidationError({
+					formErrors: [],
+					fieldErrors: { maxChars: [`must be an integer from 1 to ${WIKI_MAX_CHARS}`] },
+				});
+			}
+			const page = await wikiService.getWikiPage(ctx, slug);
+			const full = page.content ?? "";
+			const outline = outlineOf(full);
+			const { content: _full, ...rest } = page;
+			if (section !== undefined) {
+				const body = sectionOf(full, section);
+				// A miss is not an error: the outline says what sections exist.
+				if (body === undefined) return { ...rest, outline, section, sectionFound: false };
+				const w = windowText(body, { max, cursor });
+				return {
+					...rest,
+					outline,
+					section,
+					content: w.text,
+					totalChars: w.totalChars,
+					...(w.next ? { next: w.next } : {}),
+				};
+			}
+			const w = windowText(full, { max, cursor });
+			return {
+				...rest,
+				outline,
+				content: w.text,
+				totalChars: w.totalChars,
+				...(w.next ? { next: w.next } : {}),
+			};
 		},
 	},
 	{

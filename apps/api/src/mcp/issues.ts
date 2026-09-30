@@ -19,13 +19,54 @@ import {
 	toPage,
 	VIEW_FIELDS_PROPS,
 } from "./serialize";
+import { bodyPreview, ISSUE_BODY_MAX_CHARS, LIST_BODY_MAX_CHARS, windowText } from "./windowing";
+
+const BODY_CHARS_PROP = {
+	bodyChars: {
+		type: "number",
+		default: 0,
+		description:
+			`Include the first N characters of each item's body (0-${LIST_BODY_MAX_CHARS}, default 0 = ` +
+			"no body); a cut body carries `bodyTruncated:true`. Read the rest with get_issue. " +
+			"`includeBody:true` still returns whole bodies.",
+	},
+} as const;
+
+/** Splits MCP-only `bodyChars` off the input; asks the service for bodies when it's set. */
+function splitBodyChars(rest: Record<string, unknown>): {
+	rest: Record<string, unknown>;
+	bodyChars: number;
+} {
+	const { bodyChars, ...others } = rest;
+	if (bodyChars === undefined) return { rest: others, bodyChars: 0 };
+	if (
+		!Number.isInteger(bodyChars) ||
+		(bodyChars as number) < 0 ||
+		(bodyChars as number) > LIST_BODY_MAX_CHARS
+	) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { bodyChars: [`must be an integer from 0 to ${LIST_BODY_MAX_CHARS}`] },
+		});
+	}
+	const n = bodyChars as number;
+	return { rest: n > 0 ? { ...others, includeBody: true } : others, bodyChars: n };
+}
+
+function withBodyPreview(
+	item: Record<string, unknown>,
+	bodyChars: number
+): Record<string, unknown> {
+	if (bodyChars <= 0) return item;
+	return { ...item, ...bodyPreview(item.body, bodyChars) };
+}
 
 export const issuesTools: MCPTool[] = [
 	{
 		name: "list_issues",
 		description:
 			"List issues in the workspace, optionally filtered by status, priority, project, or assignee. " +
-			"Items omit `body` by default — pass includeBody:true to include it. Pass includeRollups:true " +
+			"Items omit `body` by default — pass bodyChars:N (max 1000) for a preview, or includeBody:true for whole bodies. Pass includeRollups:true " +
 			"to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item " +
 			"(a zero rollup is omitted unless verbose:true). " +
 			OMISSION_NOTE,
@@ -120,12 +161,14 @@ export const issuesTools: MCPTool[] = [
 					description: "Pagination cursor: pass the previous page's `next` unchanged",
 				},
 				limit: { type: "number", default: 50, description: "Max 100" },
+				...BODY_CHARS_PROP,
 				...VIEW_FIELDS_PROPS,
 			},
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			const { rest, ...shape } = splitShapeOpts(input);
+			const { rest: shapeRest, ...shape } = splitShapeOpts(input);
+			const { rest, bodyChars } = splitBodyChars(shapeRest);
 			const result = (await listIssues(ctx, rest)) as {
 				items: Record<string, unknown>[];
 				nextCursor: string | null;
@@ -135,7 +178,7 @@ export const issuesTools: MCPTool[] = [
 			// after its last kept item (PROJ-857's (created_at,id) compound cursor).
 			const raw = result.items;
 			const page = toPage(
-				raw.map((i) => shapeIssue(i, shape)),
+				raw.map((i) => shapeIssue(withBodyPreview(i, bodyChars), shape)),
 				result.nextCursor,
 				result.total === undefined ? {} : { total: result.total }
 			);
@@ -146,20 +189,38 @@ export const issuesTools: MCPTool[] = [
 	},
 	{
 		name: "get_issue",
-		description: `Get a single issue by ID or project key + number (e.g. "PROJ-42"). ${OMISSION_NOTE}`,
+		description:
+			`Get a single issue by ID or project key + number (e.g. "PROJ-42"). \`body\` is returned ` +
+			`up to ${ISSUE_BODY_MAX_CHARS} chars; if it is longer the result has \`bodyTruncated:true\`, ` +
+			`\`bodyTotalChars\` and \`next\` — pass \`next\` back as \`cursor\` for the rest. ${OMISSION_NOTE}`,
 		inputSchema: {
 			type: "object",
 			properties: {
 				id: { type: "string" },
 				ref: { type: "string", description: "Project key and number, e.g. PROJ-42" },
+				cursor: {
+					type: "string",
+					description: "Continue a long body: pass the previous result's `next` unchanged",
+				},
 				...VIEW_FIELDS_PROPS,
 			},
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			const { rest, ...shape } = splitShapeOpts(input);
+			const { rest: shapeRest, ...shape } = splitShapeOpts(input);
+			const { cursor, ...rest } = shapeRest as { cursor?: string } & Record<string, unknown>;
 			const issue = (await getIssue(ctx, rest)) as Record<string, unknown>;
-			return shapeIssue(issue, shape);
+			const shaped = shapeIssue(issue, shape);
+			if (typeof shaped.body !== "string") return shaped;
+			// PROJ-892: a long body is windowed; \`next\` continues it.
+			const w = windowText(shaped.body, { max: ISSUE_BODY_MAX_CHARS, cursor });
+			if (!w.next && cursor === undefined) return shaped;
+			return {
+				...shaped,
+				body: w.text,
+				bodyTotalChars: w.totalChars,
+				...(w.next ? { bodyTruncated: true, next: w.next } : {}),
+			};
 		},
 	},
 	{
@@ -188,18 +249,20 @@ export const issuesTools: MCPTool[] = [
 					type: "boolean",
 					description: "Include each issue's `body` (omitted by default)",
 				},
+				...BODY_CHARS_PROP,
 				...VIEW_FIELDS_PROPS,
 			},
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			const { rest, ...shape } = splitShapeOpts(input);
+			const { rest: shapeRest, ...shape } = splitShapeOpts(input);
+			const { rest, bodyChars } = splitBodyChars(shapeRest);
 			const result = (await getIssuesBatch(ctx, rest)) as {
 				items: Record<string, unknown>[];
 				missing: string[];
 			};
 			return {
-				items: result.items.map((i) => shapeIssue(i, shape)),
+				items: result.items.map((i) => shapeIssue(withBodyPreview(i, bodyChars), shape)),
 				missing: result.missing,
 			};
 		},
