@@ -73,6 +73,12 @@ describe("PROJ-893: MCP tool failures are isError results", () => {
 		expect(e.hint).toContain("search_wiki");
 	});
 
+	it("not_found on an unknown agent session hints at register_agent, not at issue refs", async () => {
+		const e = await failure("heartbeat_agent", { id: crypto.randomUUID() });
+		expect(e.code).toBe("not_found");
+		expect(e.hint).toContain("register_agent");
+	});
+
 	it("validation: the offending fields are named in `fields` and in the hint", async () => {
 		const e = await failure("create_wiki_page", { title: "", content: "x" });
 		expect(e.code).toBe("validation");

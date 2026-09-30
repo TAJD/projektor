@@ -130,6 +130,34 @@ describe("PROJ-891: serializer (unit)", () => {
 	});
 });
 
+describe("PROJ-891 review fixes (unit)", () => {
+	it("capPage backs off to a cut the tool allows (no splitting a shared timestamp)", () => {
+		const ts = [1, 1, 2, 2, 2, 3, 3, 4];
+		const items = ts.map((t) => ({ t, pad: "x".repeat(100) }));
+		const out = capPage(toPage(items, "orig"), {
+			max: 600,
+			cursorOf: (i) => String(items[i].t),
+			canCutAt: (kept) => items[kept - 1].t !== items[kept]?.t,
+		});
+		expect(out.truncated).toBe(true);
+		const last = out.items[out.items.length - 1].t;
+		// nothing sharing the cursor's second was left behind
+		expect(items.slice(out.items.length).every((i) => i.t > last)).toBe(true);
+		expect(out.next).toBe(String(last));
+	});
+
+	it("capPage leaves an empty page alone", () => {
+		const empty = toPage([]);
+		expect(capPage(empty)).toBe(empty);
+	});
+
+	it("full view keeps a custom status_key that differs from the legacy status", () => {
+		const base = { title: "T", status: "in_progress", project_key: "P", number: 1 };
+		expect(shapeIssue({ ...base, status_key: "qa" }, {}).status_key).toBe("qa");
+		expect(shapeIssue({ ...base, status_key: "in_progress" }, {})).not.toHaveProperty("status_key");
+	});
+});
+
 describe("PROJ-891: MCP tools", () => {
 	const prevApiMax = env.RATE_LIMIT_API_MAX;
 	beforeAll(() => {
@@ -284,5 +312,32 @@ describe("PROJ-891: MCP tools", () => {
 		await tool("create_wiki_page", { title: "Root", content: "x" });
 		const tree = await tool<{ items: unknown[] }>("wiki_tree", {});
 		expect(tree.items.length).toBeGreaterThan(0);
+	});
+	it("list_comments is never cut: every comment is returned", async () => {
+		const issue = await seedIssue(f.workspaceId, f.projectId, f.userId, { title: "Chatty" });
+		for (let i = 0; i < 30; i++) {
+			await tool("add_comment", { issueId: issue.id, body: `${i} ${"c".repeat(1000)}` });
+		}
+		const res = await tool<{ items: unknown[]; truncated?: boolean }>("list_comments", {
+			issueId: issue.id,
+		});
+		expect(res.items).toHaveLength(30);
+		expect(res.truncated).toBeUndefined();
+	});
+
+	it("list_wiki_changes: no changes means no `next`; an empty cursor does not replay from the epoch", async () => {
+		await tool("create_wiki_page", { title: "Some Page", content: "x" });
+		const future = Math.floor(Date.now() / 1000) + 3600;
+		const none = await tool<{ items: unknown[]; next?: string }>("list_wiki_changes", {
+			since: future,
+		});
+		expect(none.items).toEqual([]);
+		expect(none).not.toHaveProperty("next");
+
+		const empty = await tool<{ items: unknown[] }>("list_wiki_changes", {
+			since: future,
+			cursor: "",
+		});
+		expect(empty.items).toEqual([]);
 	});
 });

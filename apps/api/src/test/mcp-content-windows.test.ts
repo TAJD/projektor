@@ -25,6 +25,14 @@ describe("PROJ-892: windowing (unit)", () => {
 		expect(first.totalChars).toBe(text.length);
 	});
 
+	it("a window smaller than one code point still makes progress (max:1 on an emoji)", () => {
+		const text = "😀abc";
+		const first = windowText(text, { max: 1 });
+		expect(first.text).toBe("😀");
+		expect(first.next).toBe("2");
+		expect(windowText(text, { max: 1, cursor: first.next }).text).toBe("a");
+	});
+
 	it("rejects a bad cursor", () => {
 		expect(() => windowText("abc", { max: 2, cursor: "x" })).toThrow();
 		expect(() => windowText("abc", { max: 2, cursor: "99" })).toThrow();
@@ -169,6 +177,17 @@ describe("PROJ-892: MCP tools", () => {
 			next = w.next;
 		}
 		expect(text).toBe(content);
+	});
+
+	it("get_wiki_page: contentTruncated is set on a partial window and absent on a whole page", async () => {
+		const slug = await makeWiki(`# T\n${"q".repeat(200)}`);
+		const part = await tool<{ contentTruncated?: boolean }>("get_wiki_page", {
+			slug,
+			maxChars: 50,
+		});
+		expect(part.contentTruncated).toBe(true);
+		const whole = await tool<Record<string, unknown>>("get_wiki_page", { slug });
+		expect(whole).not.toHaveProperty("contentTruncated");
 	});
 
 	it("get_wiki_page: default window returns a small page whole", async () => {

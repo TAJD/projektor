@@ -195,9 +195,22 @@ function definedFields(
 }
 
 function notFoundHint(message: string, toolName: string | undefined): string {
-	const subject = `${message} ${toolName ?? ""}`.toLowerCase();
+	// The message says what was missing; the tool name is only a fallback (claim_issue's
+	// "Agent session not found" must not be read as an issue miss).
+	const fromMessage = pickNotFoundHint(message.toLowerCase());
+	if (fromMessage) return fromMessage;
+	return (
+		pickNotFoundHint((toolName ?? "").toLowerCase()) ??
+		"Check the id or ref. Use the matching search_ or list_ tool to look it up."
+	);
+}
+
+function pickNotFoundHint(subject: string): string | undefined {
 	if (subject.includes("wiki") || subject.includes("page")) {
 		return "Wiki pages are addressed by slug. Use search_wiki or wiki_tree to find one.";
+	}
+	if (subject.includes("agent session") || subject.includes("session")) {
+		return "Sessions come from register_agent; an ended session no longer exists to call.";
 	}
 	if (subject.includes("issue")) {
 		return "Refs look like PROJ-42 (project key + number). Use search_issues to find one.";
@@ -205,10 +218,7 @@ function notFoundHint(message: string, toolName: string | undefined): string {
 	if (subject.includes("project")) {
 		return "Projects are addressed by UUID or key (e.g. PROJ). Use list_projects to see them.";
 	}
-	if (subject.includes("agent session")) {
-		return "Sessions come from register_agent; an ended session no longer exists to call.";
-	}
-	return "Check the id or ref. Use the matching search_ or list_ tool to look it up.";
+	return undefined;
 }
 
 function conflictHint(message: string, details: Record<string, unknown> | undefined): string {
@@ -255,7 +265,7 @@ export function toToolError(err: unknown, ctx: ToolErrorContext = {}): ToolError
 				code: "forbidden",
 				message: err.message,
 				hint: ctx.role
-					? `Your role here is ${ctx.role}; this needs a higher one (members write, admins and owners manage).`
+					? `Your workspace role is ${ctx.role}; this may need a higher workspace or project role (members write, admins and owners manage).`
 					: "Your role does not allow this; members write, admins and owners manage.",
 			});
 		case "conflict": {

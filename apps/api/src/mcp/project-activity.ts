@@ -1,7 +1,7 @@
 import type { MCPTool } from "@projektor/types";
 import { listProjectActivity } from "../services/project-activity";
 import { READ } from "./annotations";
-import { toPage } from "./serialize";
+import { capPage, toPage } from "./serialize";
 
 export const projectActivityTools: MCPTool[] = [
 	{
@@ -28,7 +28,7 @@ export const projectActivityTools: MCPTool[] = [
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			return toPage(await listProjectActivity(ctx, input));
+			return capPage(toPage(await listProjectActivity(ctx, input)));
 		},
 	},
 ];

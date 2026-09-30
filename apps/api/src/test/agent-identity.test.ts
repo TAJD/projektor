@@ -170,4 +170,24 @@ describe("PROJ-894: stateless agent identity", () => {
 		expect(beat.ok).toBe(true);
 		expect(beat.value.id).toBe(sessionId);
 	});
+
+	it("heartbeat_agent and end_agent accept agentId as an alias for id", async () => {
+		const sessionId = await register();
+		const beat = await call(token, "heartbeat_agent", { agentId: sessionId });
+		expect(beat.ok).toBe(true);
+		expect(beat.value.id).toBe(sessionId);
+		expect((await call(token, "end_agent", { agentId: sessionId })).ok).toBe(true);
+	});
+
+	it("an abandoned stale session does not make a lone live agent's id-less heartbeat ambiguous", async () => {
+		const abandoned = await register(token, "crashed");
+		await env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+			.bind(Math.floor(Date.now() / 1000) - 3600, abandoned)
+			.run();
+		const live = await register(token, "restarted");
+
+		const beat = await call(token, "heartbeat_agent", {});
+		expect(beat.ok).toBe(true);
+		expect(beat.value.id).toBe(live);
+	});
 });

@@ -33,7 +33,10 @@ export function windowText(text: string, opts: { max: number; cursor?: string })
 			throw new ValidationError({ formErrors: [], fieldErrors: { cursor: ["invalid cursor"] } });
 		}
 	}
-	const end = safeEnd(text, Math.min(text.length, start + opts.max));
+	let end = safeEnd(text, Math.min(text.length, start + opts.max));
+	// A window smaller than one code point (max:1 on an emoji) must still make progress.
+	if (end <= start && start < text.length)
+		end = start + (isHighSurrogate(text.charCodeAt(start)) ? 2 : 1);
 	return {
 		text: text.slice(start, end),
 		totalChars: text.length,

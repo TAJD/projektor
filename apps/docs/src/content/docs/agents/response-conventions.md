@@ -15,7 +15,7 @@ Unless you pass `verbose:true`, a result omits:
 - Internal ids: `workspace_id`, `project_id`, `type_id`, `status_id`, `created_by_id`.
 - Duplicated name/key pairs: `project_key`, `project_name`, `type_key`, `type_name`, `status_key`, `status_name`. The kept equivalents are `ref` (`PROJ-42`), `type`, `status` and `priority`.
 
-`labels` is a real array (`["mcp","api"]`), not a JSON string. `verbose:true` returns the raw row.
+`labels` is a real array (`["mcp","api"]`), not a JSON string. A custom workflow status is kept as `status_key` when it differs from the legacy `status`. `verbose:true` returns the raw row.
 
 ## `view=summary|full`
 
@@ -43,9 +43,10 @@ back unchanged as `cursor` to get the following page. When it is absent there ar
 | Tool | Continue with |
 | --- | --- |
 | `list_issues` | `cursor` (a `(created_at,id)` compound cursor); `total` is included |
-| `search_wiki` | `cursor` |
-| `list_wiki_changes` | `cursor` (in place of `since`) |
-| `list_project_activity`, `list_comments`, `search_issues`, `wiki_tree` | `{items}` only; use `limit`/`since` |
+| `search_wiki` | `cursor` (the next offset) |
+| `list_wiki_changes` | `cursor` (in place of `since`); `next` is absent when there were no changes |
+| `list_project_activity`, `search_issues` | `{items}` only; use `limit`/`since` |
+| `list_comments`, `wiki_tree` | `{items}` only, never cut |
 
 Before and after for `list_issues` (50 issues): ~54 KB before; with `view=summary`, ~7 KB.
 
@@ -65,12 +66,14 @@ Before and after for `list_issues` (50 issues): ~54 KB before; with `view=summar
 
 ## The 20,000-character cap
 
-A single tool result is capped at about 20,000 characters, cut on an item boundary so it
-is always valid JSON. When it fires the result carries `truncated:true`:
+`list_issues`, `search_wiki`, `list_wiki_changes` and `list_project_activity` cap a single
+result at about 20,000 characters, cut on an item boundary so it is always valid JSON. When
+it fires the result carries `truncated:true`:
 
-- If the tool has a cursor (`list_issues`), `next` resumes right after the last item returned. Nothing is skipped.
-- Otherwise there is no `next`, and a `hint` says to lower `limit` or narrow the filters.
+- `list_issues`, `search_wiki` and `list_wiki_changes` set `next` to resume right after the last item returned, so nothing is skipped. (`list_wiki_changes` never cuts in the middle of one second, because `since` is exclusive.)
+- `list_project_activity` has no cursor: a `hint` says to lower `limit` or raise `since`.
 
+`list_comments` and `wiki_tree` are not cut, because a dropped tail could not be recovered.
 A result is never a partial JSON document.
 
 ## Reading long content
@@ -79,7 +82,7 @@ Long text is read in windows so one call never returns an unbounded blob.
 
 - **Lists**: `bodyChars=N` (0–1000, default 0) adds the first N characters of each item's `body`, with `bodyTruncated:true` when it was cut. `includeBody:true` still returns whole bodies. Read the rest with `get_issue`.
 - **`get_issue`**: `body` is returned up to 16,000 characters. If it is longer, the result has `bodyTruncated:true`, `bodyTotalChars` and `next`; pass `next` back as `cursor` for the rest.
-- **`get_wiki_page`**: `content` is at most `maxChars` (default 8,000, max 20,000). `totalChars` is the full length and `outline` lists the page's headings. When `next` is present, pass it back as `cursor`. `section=<heading text or slug>` returns just that section (through the next heading of the same or higher level). An unknown section returns `sectionFound:false` and the `outline`, not an error. Frontmatter fields (`type`, `tags`, `status`, …) are still returned parsed.
+- **`get_wiki_page`**: `content` is at most `maxChars` (default 8,000, max 20,000). `totalChars` is the full length and `outline` lists the page's headings. When `next` is present, pass it back as `cursor`. `section=<heading text or slug>` returns just that section (through the next heading of the same or higher level). An unknown section returns `sectionFound:false` and the `outline`, not an error. Frontmatter fields (`type`, `tags`, `status`, …) are still returned parsed. `contentTruncated:true` means `content` is only part of the page: never send it back to `update_wiki_page`, which would overwrite the page with the fragment; use `patch_wiki_page`.
 
 Cursors are character offsets and always fall on whole characters, so a window never splits an emoji.
 

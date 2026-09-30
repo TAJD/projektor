@@ -232,6 +232,11 @@ export function shapeIssue(
 	for (const key of NULLABLE_DEFAULT_KEYS) if (out[key] == null || out[key] === "") delete out[key];
 	for (const key of INTERNAL_ID_KEYS) delete out[key];
 	for (const key of DUPLICATE_KEYS) delete out[key];
+	// `status` is the legacy enum; a custom workflow status (e.g. "qa" within in_progress)
+	// is only distinguishable by its key, so keep it whenever it adds information.
+	if (typeof issue.status_key === "string" && issue.status_key !== issue.status) {
+		out.status_key = issue.status_key;
+	}
 	return out;
 }
 
@@ -254,10 +259,15 @@ export function toPage<T>(
  */
 export function capPage<P extends { items: unknown[]; next?: string }>(
 	page: P,
-	opts: { max?: number; cursorOf?: (index: number) => string | undefined } = {}
+	opts: {
+		max?: number;
+		cursorOf?: (index: number) => string | undefined;
+		/** Whether the page may end after `kept` items (e.g. not mid-way through one timestamp). */
+		canCutAt?: (kept: number) => boolean;
+	} = {}
 ): P & { truncated?: true; hint?: string } {
 	const max = opts.max ?? MAX_RESULT_CHARS;
-	if (JSON.stringify(page).length <= max) return page;
+	if (page.items.length === 0 || JSON.stringify(page).length <= max) return page;
 
 	const build = (k: number) => {
 		const { next: _drop, ...rest } = page;
@@ -281,5 +291,8 @@ export function capPage<P extends { items: unknown[]; next?: string }>(
 		if (JSON.stringify(build(mid)).length <= max) lo = mid;
 		else hi = mid - 1;
 	}
-	return build(lo);
+	// Back off to a cut the tool says is resumable, if there is one.
+	let k = lo;
+	while (k > 1 && opts.canCutAt && !opts.canCutAt(k)) k--;
+	return build(opts.canCutAt && !opts.canCutAt(k) ? lo : k);
 }

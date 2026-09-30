@@ -9,6 +9,12 @@ import {
 } from "../services/agents";
 import { PLAIN_WRITE, READ } from "./annotations";
 
+/** claim_issue names the session `agentId`; heartbeat/end call it `id`. Accept both. */
+function withIdAlias(input: unknown): unknown {
+	const { agentId, ...rest } = (input ?? {}) as { agentId?: unknown; id?: unknown };
+	return rest.id === undefined && agentId !== undefined ? { ...rest, id: agentId } : rest;
+}
+
 export const agentsTools: MCPTool[] = [
 	{
 		name: "start_work",
@@ -99,11 +105,12 @@ export const agentsTools: MCPTool[] = [
 					description:
 						"Agent session UUID. Optional when this credential has exactly one agent session; fleets sharing a credential must pass it",
 				},
+				agentId: { type: "string", description: "Alias for `id` (the name claim_issue uses)" },
 			},
 		},
 		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
-			return heartbeatAgent(ctx, input);
+			return heartbeatAgent(ctx, withIdAlias(input));
 		},
 	},
 	{
@@ -117,11 +124,12 @@ export const agentsTools: MCPTool[] = [
 					description:
 						"Agent session UUID. Optional when this credential has exactly one agent session; fleets sharing a credential must pass it",
 				},
+				agentId: { type: "string", description: "Alias for `id` (the name claim_issue uses)" },
 			},
 		},
 		annotations: PLAIN_WRITE,
 		handler(input, ctx) {
-			return endAgent(ctx, input);
+			return endAgent(ctx, withIdAlias(input));
 		},
 	},
 	{

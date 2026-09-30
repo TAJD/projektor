@@ -5,7 +5,7 @@ import * as wikiService from "../services/wiki";
 import * as wikiDraftsService from "../services/wiki-drafts";
 import * as wikiWatchersService from "../services/wiki-watchers";
 import { CREATE, DESTRUCTIVE, PLAIN_WRITE, READ } from "./annotations";
-import { toPage } from "./serialize";
+import { capPage, toPage } from "./serialize";
 import {
 	outlineOf,
 	sectionOf,
@@ -131,7 +131,9 @@ export const wikiTools: MCPTool[] = [
 			// A full page means there may be more: the cursor is the next offset.
 			const limit = typeof rest.limit === "number" ? rest.limit : 10;
 			const offset = typeof rest.offset === "number" ? rest.offset : 0;
-			return toPage(items, items.length >= limit ? offset + limit : null);
+			const page = toPage(items, items.length >= limit ? offset + limit : null);
+			// A cut page resumes at the first dropped result.
+			return capPage(page, { cursorOf: (i) => String(offset + i + 1) });
 		},
 	},
 	{
@@ -142,6 +144,8 @@ export const wikiTools: MCPTool[] = [
 			"back as `cursor` for the following window. `outline` lists the page's headings — pass " +
 			"`section` (a heading's text or slug) to read just that section. Pass the returned " +
 			"`revisionId` as `baseRevisionId` when you update or patch the page. " +
+			"`contentTruncated:true` means `content` is only part of the page: NEVER pass it back to " +
+			"update_wiki_page (that would overwrite the page with the fragment) — use patch_wiki_page. " +
 			"See /projektor/agents/response-conventions/.",
 		inputSchema: {
 			type: "object",
@@ -190,6 +194,7 @@ export const wikiTools: MCPTool[] = [
 					section,
 					content: w.text,
 					totalChars: w.totalChars,
+					...(w.next || cursor !== undefined ? { contentTruncated: true } : {}),
 					...(w.next ? { next: w.next } : {}),
 				};
 			}
@@ -199,6 +204,7 @@ export const wikiTools: MCPTool[] = [
 				outline,
 				content: w.text,
 				totalChars: w.totalChars,
+				...(w.next || cursor !== undefined ? { contentTruncated: true } : {}),
 				...(w.next ? { next: w.next } : {}),
 			};
 		},
@@ -772,7 +778,8 @@ export const wikiTools: MCPTool[] = [
 		annotations: READ,
 		async handler(input, ctx) {
 			const { cursor, ...rest } = (input ?? {}) as Record<string, unknown>;
-			if (cursor !== undefined) rest.since = Number(cursor);
+			// null / "" mean "no cursor", not "since the epoch".
+			if (cursor !== undefined && cursor !== null && cursor !== "") rest.since = Number(cursor);
 			if (rest.since === undefined || Number.isNaN(rest.since)) {
 				throw new ValidationError({
 					formErrors: [],
@@ -780,7 +787,14 @@ export const wikiTools: MCPTool[] = [
 				});
 			}
 			const result = await wikiWatchersService.listWikiChanges(ctx, rest);
-			return toPage(result.changes, result.nextSince);
+			// `next` is only present when there were changes; the feed is drained when it is absent.
+			const events = result.changes as Array<{ createdAt: number }>;
+			const page = toPage(events, events.length > 0 ? result.nextSince : null);
+			// `since` is exclusive, so a cut must not split events sharing one second.
+			return capPage(page, {
+				cursorOf: (i) => String(events[i].createdAt),
+				canCutAt: (kept) => events[kept - 1].createdAt !== events[kept]?.createdAt,
+			});
 		},
 	},
 	{
