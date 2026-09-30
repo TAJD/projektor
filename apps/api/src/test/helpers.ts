@@ -421,3 +421,36 @@ export async function seedWorkspaceRoles() {
 		viewer: { user: viewerUser, token: viewerToken },
 	};
 }
+
+// PROJ-893: a failed tools/call is a *result* with `isError: true`, whose single text
+// content item is `{"error": {code, message, fields?, hint?, details?}}` — not a JSON-RPC
+// `error`. JSON-RPC errors remain only for protocol faults (parse error, invalid request,
+// method not found, unknown tool) and unexpected internal failures.
+export type ToolErrorBody = {
+	code:
+		| "not_found"
+		| "forbidden"
+		| "conflict"
+		| "validation"
+		| "payload_too_large"
+		| "rate_limited";
+	message: string;
+	fields?: Record<string, string[]>;
+	hint?: string;
+	details?: Record<string, unknown>;
+};
+
+/**
+ * The `{error}` body of a failed tools/call, given the parsed JSON-RPC response, or
+ * `undefined` when the call succeeded or failed as a JSON-RPC protocol error (check
+ * `.error` on the response for that).
+ */
+export function toolError(response: unknown): ToolErrorBody | undefined {
+	const result = (
+		response as { result?: { isError?: boolean; content?: Array<{ type: string; text: string }> } }
+	)?.result;
+	if (!result?.isError) return undefined;
+	const text = result.content?.[0]?.text;
+	if (typeof text !== "string") return undefined;
+	return (JSON.parse(text) as { error: ToolErrorBody }).error;
+}

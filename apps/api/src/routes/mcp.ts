@@ -8,7 +8,7 @@ import { TOOL_DOMAIN_SLUGS, toolNamesForDomains } from "../mcp/catalog";
 import { codeHeatmapTools } from "../mcp/code-heatmap";
 import { commentsTools } from "../mcp/comments";
 import { customFieldsTools } from "../mcp/custom-fields";
-import { toMcpError } from "../mcp/error-adapter";
+import { toMcpError, toToolError } from "../mcp/error-adapter";
 import { feedbackTools } from "../mcp/feedback";
 import { fileClaimsTools } from "../mcp/file-claims";
 import { filesTools } from "../mcp/files";
@@ -201,25 +201,27 @@ router.post("/:workspaceId", async (c) => {
 			const tool = getAllTools(workspace.id).find((t) => t.name === name);
 			if (!tool) return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
 			// PROJ-877/920: required presence AND types/enums/lengths against the tool's
-			// inputSchema, before the handler runs — a bad argument is -32602 naming the field.
+			// inputSchema, before the handler runs. PROJ-893: a bad argument is a tool
+			// execution failure, so it comes back as an isError result naming each field
+			// (the model can fix and retry), not as a JSON-RPC protocol error.
 			const argIssues = validateToolArgs(tool.inputSchema, args);
 			if (argIssues.length > 0) {
-				const missing = argIssues.filter((i) => i.message === "is required").map((i) => i.path);
-				if (missing.length === argIssues.length) {
-					return c.json(
-						jsonRpcError(body.id, -32602, `Missing required argument(s): ${missing.join(", ")}`)
-					);
-				}
-				// Same shape as a service ValidationError: message summary + Zod-style data.
 				const fieldErrors: Record<string, string[]> = {};
 				for (const i of argIssues) {
 					fieldErrors[i.path] = [...(fieldErrors[i.path] ?? []), i.message];
 				}
-				const { code, message, data } = toMcpError(
-					new ValidationError({ formErrors: [], fieldErrors }),
-					crypto.randomUUID()
+				const missing = argIssues.filter((i) => i.message === "is required").map((i) => i.path);
+				const toolError = toToolError(
+					new ValidationError({
+						formErrors:
+							missing.length === argIssues.length
+								? [`Missing required argument(s): ${missing.join(", ")}`]
+								: [],
+						fieldErrors,
+					})
 				);
-				return c.json(jsonRpcError(body.id, code, message, data));
+				// biome-ignore lint/style/noNonNullAssertion: a ValidationError always maps
+				return c.json(jsonRpcResult(body.id, toolError!));
 			}
 
 			// PROJ-17: enforce token scope per-tool. tokenScopes is undefined when
@@ -243,6 +245,11 @@ router.post("/:workspaceId", async (c) => {
 					})
 				);
 			} catch (err) {
+				// PROJ-893: service errors (validation, not_found, forbidden, conflict, …) are
+				// tool results the model can act on. Only an unexpected internal failure stays a
+				// JSON-RPC error, carrying just a request id.
+				const toolError = toToolError(err, { toolName: name, role: ctx.role });
+				if (toolError) return c.json(jsonRpcResult(body.id, toolError));
 				const { code, message, data } = toMcpError(err, crypto.randomUUID());
 				return c.json(jsonRpcError(body.id, code, message, data));
 			}

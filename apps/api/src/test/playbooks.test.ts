@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, type JsonRpcResult, seedFixture } from "./helpers";
+import { authHeaders, type JsonRpcResult, seedFixture, toolError } from "./helpers";
 
 describe("Playbooks", () => {
 	let token: string;
@@ -127,10 +127,10 @@ describe("Playbooks", () => {
 				params: { name: "get_playbook", arguments: { name: "does-not-exist" } },
 			}),
 		});
-		const json = (await res.json()) as {
-			error: { message: string; data?: { validNames: string[] } };
-		};
-		expect(json.error.message).toContain("does-not-exist");
-		expect(json.error.data?.validNames).toContain("epic-goal");
+		const json = await res.json();
+		const err = toolError(json);
+		expect(err?.code).toBe("not_found");
+		expect(err?.message).toContain("does-not-exist");
+		expect(err?.details?.validNames).toContain("epic-goal");
 	});
 });

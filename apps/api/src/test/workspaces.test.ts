@@ -10,6 +10,7 @@ import {
 	seedToken,
 	seedUser,
 	seedWorkspace,
+	toolError,
 } from "./helpers";
 
 async function mcpCall<T>(
@@ -177,24 +178,19 @@ describe("Workspaces MCP", () => {
 			{ slug: "dup-slug", name: "First" },
 			userHeaders
 		);
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			workspaceId,
 			"create_workspace",
 			{ slug: "dup-slug", name: "Second" },
 			userHeaders
-		)) as JsonRpcError;
-		expect(isMcpError(res)).toBe(true);
-		expect(res.error.message).toMatch(/slug already taken/i);
+		);
+		expect(toolError(res)?.code).toBe("conflict");
+		expect(toolError(res)?.message).toMatch(/slug already taken/i);
 	});
 
 	it("create_workspace returns error when required fields missing", async () => {
-		const res = (await mcpCall(
-			workspaceId,
-			"create_workspace",
-			{ name: "No Slug" },
-			userHeaders
-		)) as JsonRpcError;
-		expect(isMcpError(res)).toBe(true);
+		const res = await mcpCall(workspaceId, "create_workspace", { name: "No Slug" }, userHeaders);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("delete_workspace removes the workspace and returns ok: true", async () => {
@@ -220,14 +216,14 @@ describe("Workspaces MCP", () => {
 		const extraHeaders = authHeaders(extra.token, extra.workspace.slug);
 		await seedProject(extra.workspace.id, `P${crypto.randomUUID().slice(0, 6).toUpperCase()}`);
 
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			extra.workspace.id,
 			"delete_workspace",
 			{ workspaceSlug: extra.workspace.slug },
 			extraHeaders
-		)) as JsonRpcError;
+		);
 
-		expect(isMcpError(res)).toBe(true);
+		expect(toolError(res)?.code).toBe("conflict");
 	});
 
 	describe("PROJ-884: delete_workspace cannot cross tenants", () => {
@@ -240,15 +236,15 @@ describe("Workspaces MCP", () => {
 			const a = await seedFixture({ role: "owner" });
 			const victim = await seedWorkspace(`victim-${crypto.randomUUID().slice(0, 8)}`);
 
-			const res = (await mcpCall(
+			const res = await mcpCall(
 				a.workspace.id,
 				"delete_workspace",
 				{ workspaceSlug: victim.slug },
 				authHeaders(a.token, a.workspace.slug)
-			)) as JsonRpcError;
+			);
 
-			expect(isMcpError(res)).toBe(true);
-			expect(res.error.message).toMatch(/not found/i);
+			expect(toolError(res)?.code).toBe("not_found");
+			expect(toolError(res)?.message).toMatch(/not found/i);
 			expect(await workspaceExists(victim.id)).toBe(true);
 			expect(await workspaceExists(a.workspace.id)).toBe(true);
 		});
@@ -258,14 +254,14 @@ describe("Workspaces MCP", () => {
 			const b = await seedWorkspace(`both-${crypto.randomUUID().slice(0, 8)}`);
 			await seedMember(b.id, a.user.id, "owner");
 
-			const res = (await mcpCall(
+			const res = await mcpCall(
 				a.workspace.id,
 				"delete_workspace",
 				{ workspaceSlug: b.slug },
 				authHeaders(a.token, a.workspace.slug)
-			)) as JsonRpcError;
+			);
 
-			expect(isMcpError(res)).toBe(true);
+			expect(toolError(res)?.code).toBe("not_found");
 			expect(await workspaceExists(b.id)).toBe(true);
 		});
 	});
@@ -279,13 +275,8 @@ describe("Workspaces MCP", () => {
 		const memberToken = await seedToken(ws.id, memberUser.id);
 		const memberHeaders = authHeaders(memberToken, ws.slug);
 
-		const res = (await mcpCall(
-			ws.id,
-			"delete_workspace",
-			{ workspaceSlug: ws.slug },
-			memberHeaders
-		)) as JsonRpcError;
-		expect(isMcpError(res)).toBe(true);
+		const res = await mcpCall(ws.id, "delete_workspace", { workspaceSlug: ws.slug }, memberHeaders);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("delete_workspace returns error when workspace has projects", async () => {
@@ -293,14 +284,14 @@ describe("Workspaces MCP", () => {
 		await seedProject(extra.workspace.id);
 		const extraHeaders = authHeaders(extra.token, extra.workspace.slug);
 
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			extra.workspace.id,
 			"delete_workspace",
 			{ workspaceSlug: extra.workspace.slug },
 			extraHeaders
-		)) as JsonRpcError;
-		expect(isMcpError(res)).toBe(true);
-		expect(res.error.message).toMatch(/delete all projects/i);
+		);
+		expect(toolError(res)?.code).toBe("conflict");
+		expect(toolError(res)?.message).toMatch(/delete all projects/i);
 	});
 
 	it("update_workspace renames the workspace (PROJ-246)", async () => {
@@ -331,18 +322,13 @@ describe("Workspaces MCP", () => {
 		const memberToken = await seedToken(ws.id, memberUser.id);
 		const memberHeaders = authHeaders(memberToken, ws.slug);
 
-		const res = (await mcpCall(
-			ws.id,
-			"update_workspace",
-			{ name: "Should Fail" },
-			memberHeaders
-		)) as JsonRpcError;
-		expect(isMcpError(res)).toBe(true);
+		const res = await mcpCall(ws.id, "update_workspace", { name: "Should Fail" }, memberHeaders);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
 	it("update_workspace returns error when name missing (PROJ-246)", async () => {
-		const res = (await mcpCall(workspaceId, "update_workspace", {}, userHeaders)) as JsonRpcError;
-		expect(isMcpError(res)).toBe(true);
+		const res = await mcpCall(workspaceId, "update_workspace", {}, userHeaders);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 });
 

@@ -19,6 +19,7 @@ import {
 	seedToken,
 	seedWorkspace,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -1134,7 +1135,7 @@ describe("PROJ-79: DELETE /auth/tokens/:id", () => {
 // PROJ-79 §4: MCP error contract
 // ---------------------------------------------------------------------------
 
-describe("PROJ-79: MCP error contract — serviceErr → JSON-RPC error codes", () => {
+describe("PROJ-79: MCP error contract — serviceErr → tool error codes", () => {
 	let workspaceId: string;
 	let slug: string;
 	let ownerHeaders: Record<string, string>;
@@ -1146,8 +1147,8 @@ describe("PROJ-79: MCP error contract — serviceErr → JSON-RPC error codes", 
 		ownerHeaders = authHeaders(fixture.token, slug);
 	});
 
-	async function mcp(name: string, args: unknown, headers = ownerHeaders) {
-		const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+	async function mcp(name: string, args: unknown, headers = ownerHeaders, wsId = workspaceId) {
+		const res = await SELF.fetch(`http://localhost/mcp/${wsId}`, {
 			method: "POST",
 			headers,
 			body: JSON.stringify({
@@ -1160,55 +1161,52 @@ describe("PROJ-79: MCP error contract — serviceErr → JSON-RPC error codes", 
 		return res.json() as Promise<{
 			jsonrpc: string;
 			id: unknown;
-			result?: unknown;
+			result?: { isError?: boolean };
 			error?: { code: number; message: string };
 		}>;
 	}
 
-	// ValidationError → -32602
-	it("ValidationError (e.g. empty wiki title) maps to JSON-RPC -32602", async () => {
+	// A service failure is a successful JSON-RPC response whose result is a tool error.
+	function expectToolError(resp: Awaited<ReturnType<typeof mcp>>, code: string) {
+		expect("error" in resp).toBe(false);
+		expect(resp.result?.isError).toBe(true);
+		const err = toolError(resp);
+		expect(err?.code).toBe(code);
+		return err;
+	}
+
+	it("ValidationError (e.g. empty wiki title) maps to a validation tool error", async () => {
 		const resp = await mcp("create_wiki_page", { title: "", content: "body" });
-		expect(resp.error).toBeDefined();
-		expect(resp.error?.code).toBe(-32602);
+		expectToolError(resp, "validation");
 	});
 
-	// NotFoundError → -32000
-	it("NotFoundError (unknown issue id) maps to JSON-RPC -32000", async () => {
+	it("NotFoundError (unknown issue id) maps to a not_found tool error", async () => {
 		const resp = await mcp("get_issue", { id: crypto.randomUUID() });
-		expect(resp.error).toBeDefined();
-		expect(resp.error?.code).toBe(-32000);
-		expect(resp.error?.message).toMatch(/not found/i);
+		const err = expectToolError(resp, "not_found");
+		expect(err?.message).toMatch(/not found/i);
 	});
 
-	// ForbiddenError → -32000 (triggered by viewer calling a restricted tool)
-	it("ForbiddenError maps to JSON-RPC -32000", async () => {
+	// ForbiddenError (triggered by viewer calling a restricted tool)
+	it("ForbiddenError maps to a forbidden tool error", async () => {
 		const roles = await seedWorkspaceRoles();
 		const viewerHeaders = authHeaders(roles.viewer.token, roles.workspace.slug);
-
-		const res = await SELF.fetch(`http://localhost/mcp/${roles.workspace.id}`, {
-			method: "POST",
-			headers: viewerHeaders,
-			body: JSON.stringify({
-				jsonrpc: "2.0",
-				id: 1,
-				method: "tools/call",
-				params: { name: "create_task_type", arguments: { key: "epic", name: "Epic" } },
-			}),
-		});
-		const resp = (await res.json()) as { error?: { code: number } };
-		expect(resp.error).toBeDefined();
-		expect(resp.error?.code).toBe(-32000);
+		const resp = await mcp(
+			"create_task_type",
+			{ key: "epic", name: "Epic" },
+			viewerHeaders,
+			roles.workspace.id
+		);
+		expectToolError(resp, "forbidden");
 	});
 
-	// ConflictError → -32000 (duplicate workspace slug)
-	it("ConflictError (duplicate workspace slug) maps to JSON-RPC -32000", async () => {
+	// ConflictError (duplicate workspace slug)
+	it("ConflictError (duplicate workspace slug) maps to a conflict tool error", async () => {
 		// Create workspace with a slug
 		await mcp("create_workspace", { slug: "conflict-slug", name: "First" });
 		// Create again with same slug → ConflictError
 		const resp = await mcp("create_workspace", { slug: "conflict-slug", name: "Second" });
-		expect(resp.error).toBeDefined();
-		expect(resp.error?.code).toBe(-32000);
-		expect(resp.error?.message).toMatch(/slug already taken/i);
+		const err = expectToolError(resp, "conflict");
+		expect(err?.message).toMatch(/slug already taken/i);
 	});
 });
 

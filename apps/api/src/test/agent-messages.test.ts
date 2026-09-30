@@ -8,6 +8,7 @@ import {
 	seedIssueFixture,
 	seedProject,
 	seedToken,
+	toolError,
 } from "./helpers";
 
 describe("Agent Messages API", () => {
@@ -215,10 +216,9 @@ describe("Agent Messages API", () => {
 			force: false,
 		});
 		expect(conflictRes.status).toBe(200);
-		const conflictBody = (await conflictRes.json()) as {
-			error?: { code: number; message: string };
-		};
-		expect(conflictBody.error?.code).toBe(-32000);
+		const conflictBody = (await conflictRes.json()) as { error?: unknown };
+		expect(conflictBody.error).toBeUndefined();
+		expect(toolError(conflictBody)?.code).toBe("conflict");
 
 		// agent2 posts a message to the issue channel
 		const postMsgRes = await mcpCall("post_message", {

@@ -8,6 +8,7 @@ import {
 	seedIssue,
 	seedProject,
 	seedProjectFixture,
+	toolError,
 } from "./helpers";
 
 type McpContent = { content: Array<{ text: string }> };
@@ -368,19 +369,20 @@ describe("list_project_activity MCP tool", () => {
 	});
 
 	it("returns error for unknown project", async () => {
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			workspaceId,
 			"list_project_activity",
 			{ projectId: crypto.randomUUID() },
 			headers
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.message).toMatch(/not found/i);
+		);
+		const err = toolError(res);
+		expect(err?.code).toBe("not_found");
+		expect(err?.message).toMatch(/not found/i);
 	});
 
 	it("returns error when projectId is missing", async () => {
-		const res = (await mcpCall(workspaceId, "list_project_activity", {}, headers)) as JsonRpcError;
-		expect(res.error).toBeDefined();
+		const res = await mcpCall(workspaceId, "list_project_activity", {}, headers);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("response shape is flat (no nested objects)", async () => {

@@ -2,11 +2,11 @@ import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
-	type JsonRpcError,
 	type JsonRpcResult,
 	seedIssue,
 	seedIssueFixture,
 	seedProject,
+	toolError,
 } from "./helpers";
 
 describe("compose_playbook", () => {
@@ -139,35 +139,32 @@ describe("compose_playbook", () => {
 		});
 
 		const res = await compose({ epicRef: `SECRET-${otherEpic.number}` });
-		const json = (await res.json()) as JsonRpcError;
-		expect(json.error.code).toBe(-32000);
-		expect(json.error.message).toContain("not found");
-		expect(json.error.message).not.toContain("Confidential epic");
+		const err = toolError(await res.json());
+		expect(err?.code).toBe("not_found");
+		expect(err?.message).toContain("not found");
+		expect(err?.message).not.toContain("Confidential epic");
 	});
 
 	it("errors on an unresolvable epicRef", async () => {
 		const res = await compose({ epicRef: "PROJ-999999" });
-		const json = (await res.json()) as JsonRpcError;
-		expect(json.error.code).toBe(-32000);
-		expect(json.error.message).toContain("not found");
+		const err = toolError(await res.json());
+		expect(err?.code).toBe("not_found");
+		expect(err?.message).toContain("not found");
 	});
 
 	it("errors on a missing epicRef", async () => {
 		const res = await compose({});
-		const json = (await res.json()) as JsonRpcError;
-		expect(json.error.code).toBe(-32602);
+		expect(toolError(await res.json())?.code).toBe("validation");
 	});
 
 	it("errors on an invalid cadence", async () => {
 		const res = await compose({ epicRef: `PROJ-${epicNumber}`, cadence: -1 });
-		const json = (await res.json()) as JsonRpcError;
-		expect(json.error.code).toBe(-32602);
+		expect(toolError(await res.json())?.code).toBe("validation");
 	});
 
 	it("errors on an invalid checkpointInterval", async () => {
 		const res = await compose({ epicRef: `PROJ-${epicNumber}`, checkpointInterval: -1 });
-		const json = (await res.json()) as JsonRpcError;
-		expect(json.error.code).toBe(-32602);
+		expect(toolError(await res.json())?.code).toBe("validation");
 	});
 
 	it("errors on an unknown playbook name, naming valid options", async () => {
@@ -184,11 +181,10 @@ describe("compose_playbook", () => {
 				},
 			}),
 		});
-		const json = (await res.json()) as {
-			error: { message: string; data?: { validNames: string[] } };
-		};
-		expect(json.error.message).toContain("does-not-exist");
-		expect(json.error.data?.validNames).toContain("epic-goal");
+		const err = toolError(await res.json());
+		expect(err?.code).toBe("not_found");
+		expect(err?.message).toContain("does-not-exist");
+		expect(err?.details?.validNames).toContain("epic-goal");
 	});
 });
 

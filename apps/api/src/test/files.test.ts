@@ -12,6 +12,7 @@ import {
 	seedToken,
 	seedUser,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 import { resetRateLimits } from "./rate-limit-reset";
 
@@ -811,19 +812,19 @@ describe("Files MCP tools", () => {
 		expect(afterDelete).toHaveLength(0);
 	});
 
-	it("get_attachment returns a JSON-RPC error for an unknown id", async () => {
-		const res = (await mcpCall(
+	it("get_attachment returns a not_found tool error for an unknown id", async () => {
+		const res = await mcpCall(
 			workspaceId,
 			"tools/call",
 			{ name: "get_attachment", arguments: { id: crypto.randomUUID() } },
 			authHeaders(token, slug)
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.code).toBe(-32000);
+		);
+		expect("error" in (res as object)).toBe(false);
+		expect(toolError(res)?.code).toBe("not_found");
 	});
 
 	it("create_link_attachment rejects a wiki_ref for a non-existent page", async () => {
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			workspaceId,
 			"tools/call",
 			{
@@ -836,9 +837,9 @@ describe("Files MCP tools", () => {
 				},
 			},
 			authHeaders(token, slug)
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.code).toBe(-32000);
+		);
+		expect("error" in (res as object)).toBe(false);
+		expect(toolError(res)?.code).toBe("not_found");
 	});
 
 	it("delete_attachment via MCP also removes the underlying R2 object for uploaded files", async () => {
@@ -879,9 +880,9 @@ describe("Files MCP tools", () => {
 		expect(result).toEqual([]);
 	});
 
-	it("create_link_attachment via MCP rejects a viewer session → JSON-RPC error", async () => {
+	it("create_link_attachment via MCP rejects a viewer session with a forbidden tool error", async () => {
 		const { workspace, viewer } = await seedWorkspaceRoles();
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			workspace.id,
 			"tools/call",
 			{
@@ -894,11 +895,12 @@ describe("Files MCP tools", () => {
 				},
 			},
 			authHeaders(viewer.token, workspace.slug)
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
+		);
+		expect("error" in (res as object)).toBe(false);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 
-	it("delete_attachment via MCP rejects a viewer session → JSON-RPC error", async () => {
+	it("delete_attachment via MCP rejects a viewer session with a forbidden tool error", async () => {
 		const { workspace, owner, viewer } = await seedWorkspaceRoles();
 		const created = await mcpToolResult<{ id: string }>(
 			workspace.id,
@@ -912,13 +914,14 @@ describe("Files MCP tools", () => {
 			authHeaders(owner.token, workspace.slug)
 		);
 
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			workspace.id,
 			"tools/call",
 			{ name: "delete_attachment", arguments: { id: created.id } },
 			authHeaders(viewer.token, workspace.slug)
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
+		);
+		expect("error" in (res as object)).toBe(false);
+		expect(toolError(res)?.code).toBe("forbidden");
 	});
 });
 
@@ -1191,13 +1194,13 @@ describe("Attachment project visibility", () => {
 	});
 
 	it("hides the attachment from the MCP surface too", async () => {
-		const res = (await mcpCall(
+		const res = await mcpCall(
 			workspaceId,
 			"tools/call",
 			{ name: "get_attachment", arguments: { id: hiddenAttachmentId } },
 			asMember()
-		)) as JsonRpcError;
-		expect(res.error).toBeDefined();
-		expect(res.error.code).toBe(-32000);
+		);
+		expect("error" in (res as object)).toBe(false);
+		expect(toolError(res)?.code).toBe("not_found");
 	});
 });

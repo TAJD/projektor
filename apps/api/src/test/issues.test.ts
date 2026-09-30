@@ -16,6 +16,7 @@ import {
 	seedTaskType,
 	seedUser,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 
 async function callMcpTool(
@@ -23,7 +24,10 @@ async function callMcpTool(
 	token: string,
 	slug: string,
 	params: unknown
-): Promise<{ result?: { content: Array<{ text: string }> }; error?: { message: string } }> {
+): Promise<{
+	result?: { content: Array<{ text: string }> };
+	error?: { code?: number; message: string };
+}> {
 	const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
 		method: "POST",
 		headers: { ...authHeaders(token, slug), "Content-Type": "application/json" },
@@ -1574,8 +1578,9 @@ describe("Issues MCP — typeId", () => {
 			name: "update_issue",
 			arguments: { id: epicId, typeId: storyTypeId },
 		});
-		expect(updateResp.error).toBeDefined();
-		expect(updateResp.error?.message).toContain("child issues");
+		expect(updateResp.error).toBeUndefined();
+		expect(toolError(updateResp)?.code).toBe("validation");
+		expect(toolError(updateResp)?.message).toContain("child issues");
 
 		const getRes = await SELF.fetch(`http://localhost/api/issues/${epicId}`, {
 			headers: authHeaders(token, slug),
@@ -2225,7 +2230,8 @@ describe("PROJ-712 — unrecognized MCP params are rejected, not silently droppe
 	it("list_issues rejects an unknown param instead of ignoring it", async () => {
 		await seedIssue(workspaceId, projectId, userId, { title: "Some issue" });
 		const res = await mcpCall({ name: "list_issues", arguments: { projectKey: projectId } });
-		expect(res.error).toBeDefined();
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("get_issue rejects an unknown param instead of ignoring it", async () => {
@@ -2236,7 +2242,8 @@ describe("PROJ-712 — unrecognized MCP params are rejected, not silently droppe
 		const { id } = JSON.parse(createResp.result!.content[0].text) as { id: string };
 
 		const res = await mcpCall({ name: "get_issue", arguments: { id, bogus: "x" } });
-		expect(res.error).toBeDefined();
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("create_issue_link rejects an unknown param instead of ignoring it", async () => {
@@ -2249,7 +2256,8 @@ describe("PROJ-712 — unrecognized MCP params are rejected, not silently droppe
 			name: "create_issue_link",
 			arguments: { sourceIssueId: aId, targetIssueId: bId, type: "blocks", extra: "x" },
 		});
-		expect(res.error).toBeDefined();
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("validation");
 	});
 });
 
@@ -2298,7 +2306,8 @@ describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
 		expect(res.error).toBeUndefined();
 
 		const getRes = await mcpCall({ name: "get_issue", arguments: { ref } });
-		expect(getRes.error).toBeDefined();
+		expect(getRes.error).toBeUndefined();
+		expect(toolError(getRes)?.code).toBe("not_found");
 	});
 
 	it("create_issue_link accepts refs for sourceIssueId/targetIssueId", async () => {
@@ -2344,7 +2353,8 @@ describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
 
 	it("an unresolvable ref returns NotFoundError, not a silent empty result", async () => {
 		const res = await mcpCall({ name: "update_issue", arguments: { id: "NOPE-1", title: "x" } });
-		expect(res.error).toBeDefined();
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("not_found");
 	});
 
 	it("an unresolvable project key returns NotFoundError, not a silent empty result", async () => {
@@ -2352,7 +2362,8 @@ describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
 			name: "create_issue",
 			arguments: { projectId: "NOPE", title: "x" },
 		});
-		expect(res.error).toBeDefined();
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("not_found");
 	});
 
 	it("update_issue with a parentId ref to an invisible project fails the same as an unresolvable ref", async () => {
@@ -2384,9 +2395,14 @@ describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
 			{ name: "update_issue", arguments: { id: mine.id, parentId: hidden.id } }
 		);
 
-		expect(missingRes.error).toBeDefined();
-		expect(invisibleRes.error).toBeDefined();
-		expect(invisibleRes.error?.message).toBe(missingRes.error?.message);
+		expect(missingRes.error).toBeUndefined();
+		expect(invisibleRes.error).toBeUndefined();
+		const missingErr = toolError(missingRes);
+		const invisibleErr = toolError(invisibleRes);
+		expect(missingErr).toBeDefined();
+		expect(invisibleErr?.code).toBe(missingErr?.code);
+		expect(invisibleErr?.message).toBe(missingErr?.message);
+		expect(invisibleErr?.hint).toBe(missingErr?.hint);
 	});
 
 	it("list_issues with a project key the caller can't see returns an empty page, not a 404, same as a nonexistent key", async () => {
@@ -2457,8 +2473,10 @@ describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
 			name: "list_issues",
 			arguments: { parentRef: "PROJ-1" },
 		});
-		expect(res.error).toBeDefined();
-		expect(res.error?.message).toContain("parentRef");
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("validation");
+		const err = toolError(res);
+		expect(`${err?.message} ${JSON.stringify(err?.fields)} ${err?.hint}`).toContain("parentRef");
 	});
 });
 
@@ -2547,7 +2565,9 @@ describe("Issues — assignee workspace membership (PROJ-785)", () => {
 			name: "create_issue",
 			arguments: { projectId, title: "Bad assignee via MCP", assigneeId: otherFixture.user.id },
 		});
-		expect(res.error).toBeDefined();
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("validation");
+		expect(toolError(res)?.fields?.assigneeId).toBeDefined();
 	});
 
 	it("MCP create_issue accepts a real workspace member as assignee", async () => {
@@ -2572,7 +2592,9 @@ describe("Issues — assignee workspace membership (PROJ-785)", () => {
 			name: "update_issue",
 			arguments: { id, assigneeId: otherFixture.user.id },
 		});
-		expect(res.error).toBeDefined();
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("validation");
+		expect(toolError(res)?.fields?.assigneeId).toBeDefined();
 	});
 
 	it("MCP update_issue null clears the assignee without a membership check", async () => {
@@ -2766,7 +2788,8 @@ describe("PROJ-931 — compact MCP responses", () => {
 	it("get_issues rejects more than 50 combined ids", async () => {
 		const ids = Array.from({ length: 51 }, () => crypto.randomUUID());
 		const res = await mcpCall({ name: "get_issues", arguments: { ids } });
-		expect(res.error).toBeDefined();
+		expect(res.error).toBeUndefined();
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("get_issues preserves request order and reports unresolved/invisible refs+ids as missing", async () => {
@@ -2801,22 +2824,21 @@ describe("PROJ-931 — compact MCP responses", () => {
 		}
 	});
 
-	it("verbose/fields wrong types are rejected with -32602 before reaching the service", async () => {
+	it("verbose/fields wrong types are rejected with a validation tool error before reaching the service", async () => {
 		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Bad opts" });
-		const errorCode = (res: { error?: { message: string } }) =>
-			(res.error as { code?: number } | undefined)?.code;
+		const errorCode = (res: unknown) => toolError(res)?.code;
 
 		const badVerbose = await mcpCall({ name: "get_issue", arguments: { id, verbose: "yes" } });
-		expect(errorCode(badVerbose)).toBe(-32602);
+		expect(errorCode(badVerbose)).toBe("validation");
 
 		const badFields = await mcpCall({ name: "get_issue", arguments: { id, fields: "title" } });
-		expect(errorCode(badFields)).toBe(-32602);
+		expect(errorCode(badFields)).toBe("validation");
 
 		const badFieldsList = await mcpCall({
 			name: "list_issues",
 			arguments: { fields: [1, 2] },
 		});
-		expect(errorCode(badFieldsList)).toBe(-32602);
+		expect(errorCode(badFieldsList)).toBe("validation");
 	});
 
 	it("REST GET /api/issues/batch has parity with the MCP get_issues tool", async () => {
@@ -2904,9 +2926,9 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(issue.needs_audit).toBe(false);
 
 		const typo = await mcpCall({ name: "get_issue", arguments: { id, fields: ["titel"] } });
-		expect((typo.error as { code?: number } | undefined)?.code).toBe(-32602);
+		expect(toolError(typo)?.code).toBe("validation");
 		const proto = await mcpCall({ name: "get_issue", arguments: { id, fields: ["constructor"] } });
-		expect((proto.error as { code?: number } | undefined)?.code).toBe(-32602);
+		expect(toolError(proto)?.code).toBe("validation");
 	});
 
 	it("REST /api/issues/batch: refs with spaces, missing in request order, 400 over 50", async () => {

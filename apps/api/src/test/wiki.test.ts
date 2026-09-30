@@ -13,6 +13,7 @@ import {
 	seedToken,
 	seedUser,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 import { resetRateLimits } from "./rate-limit-reset";
 
@@ -1423,8 +1424,8 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 			{ title: "Nested", content: "v1", slug: "a/b" },
 			authHeaders(token, slug)
 		);
-		expect(isMcpError(res)).toBe(true);
-		if (isMcpError(res)) expect(res.error.code).toBe(-32602);
+		expect(isMcpError(res)).toBe(false);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("MCP update_wiki_page rejects renaming to a slug containing '/' (PROJ-517, REST/MCP parity)", async () => {
@@ -1443,7 +1444,8 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 			{ slug: created.slug, newSlug: "a/b" },
 			authHeaders(token, slug)
 		);
-		expect(isMcpError(res)).toBe(true);
+		expect(isMcpError(res)).toBe(false);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("a slashy slug rewritten by the PROJ-517 backfill still resolves, and the old slug redirects (#1)", async () => {
@@ -1721,7 +1723,7 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 		expect(oldPage.slug).toBe("team-handbook");
 	});
 
-	it("MCP create_wiki_page rejects a colliding slug with a ConflictError (-32000)", async () => {
+	it("MCP create_wiki_page rejects a colliding slug with a ConflictError (conflict tool error)", async () => {
 		await mcpCall(
 			workspaceId,
 			"create_wiki_page",
@@ -1734,8 +1736,8 @@ describe("Wiki slug uniqueness and redirects (PROJ-483)", () => {
 			{ title: "Conflict Page" },
 			authHeaders(token, slug)
 		);
-		expect(isMcpError(res)).toBe(true);
-		if (isMcpError(res)) expect(res.error.code).toBe(-32000);
+		expect(isMcpError(res)).toBe(false);
+		expect(toolError(res)?.code).toBe("conflict");
 	});
 });
 
@@ -2065,8 +2067,8 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 			{ slug: created.slug, content: "---\nstatus: not-a-real-status\n---\nbody" },
 			authHeaders(token, slug)
 		);
-		expect(isMcpError(res)).toBe(true);
-		if (isMcpError(res)) expect(res.error.code).toBe(-32602);
+		expect(isMcpError(res)).toBe(false);
+		expect(toolError(res)?.code).toBe("validation");
 	});
 
 	it("REST GET /api/wiki filters by type and status", async () => {
@@ -2578,10 +2580,11 @@ describe("Wiki optimistic locking (PROJ-484)", () => {
 			content: "v4 (stale attempt)",
 			baseRevisionId: staleRevision.id,
 		});
-		expect(isMcpError(conflictResult)).toBe(true);
-		if (isMcpError(conflictResult)) {
-			expect(conflictResult.error.code).toBe(-32000);
-			const data = conflictResult.error.data as { currentRevisionId: string; diff: string };
+		expect(isMcpError(conflictResult)).toBe(false);
+		const conflictErr = toolError(conflictResult);
+		expect(conflictErr?.code).toBe("conflict");
+		if (conflictErr) {
+			const data = conflictErr.details as { currentRevisionId: string; diff: string };
 			expect(data.currentRevisionId).toBe(currentLatest.id);
 			// staleRevision snapshots the pre-edit content of the FIRST edit ("v1"); the
 			// content the caller actually had is the NEXT revision's snapshot ("v2"), which
@@ -3448,8 +3451,8 @@ describe("Wiki patch operations (PROJ-490)", () => {
 			values: { status: "not-a-real-status" },
 			baseRevisionId: null,
 		});
-		expect(isMcpError(invalid)).toBe(true);
-		if (isMcpError(invalid)) expect(invalid.error.code).toBe(-32602);
+		expect(isMcpError(invalid)).toBe(false);
+		expect(toolError(invalid)?.code).toBe("validation");
 
 		const page = mcpData<{ type: string; status: string }>(
 			await mcp("get_wiki_page", { slug: created.slug })
@@ -3488,12 +3491,10 @@ describe("Wiki patch operations (PROJ-490)", () => {
 			text: "From MCP agent C.",
 			baseRevisionId: null,
 		});
-		expect(isMcpError(conflict)).toBe(true);
-		if (isMcpError(conflict)) {
-			expect(conflict.error.code).toBe(-32000);
-			const data = conflict.error.data as { currentRevisionId: string };
-			expect(typeof data.currentRevisionId).toBe("string");
-		}
+		expect(isMcpError(conflict)).toBe(false);
+		const conflictErr = toolError(conflict);
+		expect(conflictErr?.code).toBe("conflict");
+		expect(typeof conflictErr?.details?.currentRevisionId).toBe("string");
 
 		const missingHeading = await mcp("patch_wiki_page", {
 			slug: created.slug,
@@ -3502,18 +3503,17 @@ describe("Wiki patch operations (PROJ-490)", () => {
 			text: "x",
 			baseRevisionId: null,
 		});
-		expect(isMcpError(missingHeading)).toBe(true);
-		if (isMcpError(missingHeading)) {
-			const data = missingHeading.error.data as { currentHeadings: string[] };
-			expect(data.currentHeadings).toEqual(["Alpha", "Beta"]);
-		}
+		expect(isMcpError(missingHeading)).toBe(false);
+		const missingErr = toolError(missingHeading);
+		expect(missingErr?.code).toBe("not_found");
+		expect(missingErr?.details?.currentHeadings).toEqual(["Alpha", "Beta"]);
 	});
 
 	// PROJ-523: the sibling ambiguous-heading case is a ValidationError, not a
 	// NotFoundError — before PROJ-508's error.data plumbing it collapsed to a bare
 	// "Invalid params" over MCP, dropping the duplicate-heading detail REST callers
 	// got via body.error.formErrors. Twin of the REST test below.
-	it("MCP: patch_wiki_page rejects an ambiguous heading with formErrors in error.data", async () => {
+	it("MCP: patch_wiki_page rejects an ambiguous heading with formErrors as the tool error message", async () => {
 		const created = mcpData<{ slug: string }>(
 			await mcp("create_wiki_page", {
 				title: "MCP Patch Ambiguous",
@@ -3528,18 +3528,11 @@ describe("Wiki patch operations (PROJ-490)", () => {
 			text: "Replaced.",
 			baseRevisionId: null,
 		});
-		expect(isMcpError(result)).toBe(true);
-		if (isMcpError(result)) {
-			expect(result.error.code).toBe(-32602);
-			expect(result.error.message).toContain("Invalid params");
-			expect(result.error.message).toContain("ambiguous");
-			const data = result.error.data as {
-				formErrors: string[];
-				fieldErrors: Record<string, string[]>;
-			};
-			expect(data.formErrors.join(" ")).toContain("ambiguous");
-			expect(data.fieldErrors.heading).toEqual(["h1", "h2"]);
-		}
+		expect(isMcpError(result)).toBe(false);
+		const err = toolError(result);
+		expect(err?.code).toBe("validation");
+		expect(err?.message).toContain("ambiguous");
+		expect(err?.fields?.heading).toEqual(["h1", "h2"]);
 	});
 
 	// PROJ-490: `#` lines only start a section in ordinary block context. A shell
@@ -4102,7 +4095,8 @@ describe("Wiki link graph and backlinks (PROJ-485)", () => {
 			{},
 			authHeaders(member.token, member.workspace.slug)
 		);
-		expect(isMcpError(result)).toBe(true);
+		expect(isMcpError(result)).toBe(false);
+		expect(toolError(result)?.code).toBe("forbidden");
 	});
 });
 

@@ -134,3 +134,146 @@ export function toMcpError(
 	console.error(`[mcp] unhandled error in tools/call (request ${requestId}):`, err);
 	return { code: -32000, message: `Internal error (request: ${requestId})`, data: { requestId } };
 }
+
+// ---------------------------------------------------------------------------
+// PROJ-893: tool execution failures are tool *results* (`isError: true`), not JSON-RPC
+// protocol errors. The MCP spec puts them there so the model sees the failure and can
+// self-correct; a client only MAY show a protocol error to the model. JSON-RPC errors
+// (toMcpError above) stay reserved for protocol faults — parse error, invalid request,
+// method not found, unknown tool — and for an unexpected internal failure, whose
+// message must never carry anything but a request id.
+//
+// The code set is the kinds services already throw (services/errors.ts: PROJ-878's
+// not_found / forbidden / conflict / validation / payload_too_large) plus rate_limited,
+// which the request-limiter work (PROJ-899) will produce. Scope denials are neither: they
+// stay an HTTP 403 with a WWW-Authenticate challenge (PROJ-651), handled in routes/mcp.ts.
+// ---------------------------------------------------------------------------
+
+export type ToolErrorCode =
+	| "not_found"
+	| "forbidden"
+	| "conflict"
+	| "validation"
+	| "payload_too_large"
+	| "rate_limited";
+
+export type ToolErrorBody = {
+	code: ToolErrorCode;
+	message: string;
+	/** Per-field problems, for `validation`. */
+	fields?: Record<string, string[]>;
+	/** A concrete next step the model can take. */
+	hint?: string;
+	/** Structured extras a service attached (a wiki conflict diff, the current headings, …). */
+	details?: Record<string, unknown>;
+};
+
+export type ToolErrorResult = {
+	content: Array<{ type: "text"; text: string }>;
+	isError: true;
+};
+
+export type ToolErrorContext = {
+	/** The tool that was called — hints name the tool that would have found the thing. */
+	toolName?: string;
+	/** The caller's effective role, so a `forbidden` hint can say what is missing. */
+	role?: string;
+};
+
+export function toolErrorResult(error: ToolErrorBody): ToolErrorResult {
+	return { content: [{ type: "text", text: JSON.stringify({ error }) }], isError: true };
+}
+
+function definedFields(
+	fieldErrors: ZodFlattenOutput["fieldErrors"]
+): Record<string, string[]> | undefined {
+	const out: Record<string, string[]> = {};
+	for (const [field, messages] of Object.entries(fieldErrors)) {
+		if (messages && messages.length > 0) out[field] = messages;
+	}
+	return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function notFoundHint(message: string, toolName: string | undefined): string {
+	const subject = `${message} ${toolName ?? ""}`.toLowerCase();
+	if (subject.includes("wiki") || subject.includes("page")) {
+		return "Wiki pages are addressed by slug. Use search_wiki or wiki_tree to find one.";
+	}
+	if (subject.includes("issue")) {
+		return "Refs look like PROJ-42 (project key + number). Use search_issues to find one.";
+	}
+	if (subject.includes("project")) {
+		return "Projects are addressed by UUID or key (e.g. PROJ). Use list_projects to see them.";
+	}
+	if (subject.includes("agent session")) {
+		return "Sessions come from register_agent; an ended session no longer exists to call.";
+	}
+	return "Check the id or ref. Use the matching search_ or list_ tool to look it up.";
+}
+
+function conflictHint(message: string, details: Record<string, unknown> | undefined): string {
+	if (details && "currentRevisionId" in details) {
+		return "The page changed since you read it. Re-read it with get_wiki_page, then apply your change with patch_wiki_page.";
+	}
+	if (/wip limit/i.test(message)) {
+		return "Finish or release one of the issues listed as currently held, then claim again.";
+	}
+	return "Someone else's change got there first. Re-read the current state and retry.";
+}
+
+/**
+ * The tool-result form of a failed tools/call, or null when the failure is not one the
+ * model can act on (an unexpected internal error — the caller keeps the JSON-RPC
+ * "Internal error (request: …)" for those, which never leaks internals).
+ */
+export function toToolError(err: unknown, ctx: ToolErrorContext = {}): ToolErrorResult | null {
+	if (err instanceof ValidationError) {
+		const fields = definedFields(err.issues.fieldErrors);
+		const message =
+			err.issues.formErrors.length > 0 ? err.issues.formErrors.join("; ") : "Invalid arguments";
+		return toolErrorResult({
+			code: "validation",
+			message,
+			...(fields ? { fields } : {}),
+			...(fields ? { hint: `Fix ${Object.keys(fields).join(", ")} and retry.` } : {}),
+		});
+	}
+	if (!(err instanceof ServiceError)) return null;
+
+	switch (err.kind) {
+		case "not_found": {
+			const details = err instanceof NotFoundError ? err.details : undefined;
+			return toolErrorResult({
+				code: "not_found",
+				message: err.message,
+				hint: notFoundHint(err.message, ctx.toolName),
+				...(hasDetails(details) ? { details } : {}),
+			});
+		}
+		case "forbidden":
+			return toolErrorResult({
+				code: "forbidden",
+				message: err.message,
+				hint: ctx.role
+					? `Your role here is ${ctx.role}; this needs a higher one (members write, admins and owners manage).`
+					: "Your role does not allow this; members write, admins and owners manage.",
+			});
+		case "conflict": {
+			const details = err instanceof ConflictError ? err.details : undefined;
+			return toolErrorResult({
+				code: "conflict",
+				message: err.message,
+				hint: conflictHint(err.message, details),
+				...(hasDetails(details) ? { details } : {}),
+			});
+		}
+		case "payload_too_large":
+			return toolErrorResult({
+				code: "payload_too_large",
+				message: err.message,
+				hint: "Send less data, or split it across several calls.",
+			});
+		default:
+			return null;
+	}
+}
