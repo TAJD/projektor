@@ -2337,7 +2337,7 @@ describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
 		expect(res.error).toBeUndefined();
 		const { id } = JSON.parse(res.result!.content[0].text) as { id: string };
 
-		const getRes = await mcpCall({ name: "get_issue", arguments: { id } });
+		const getRes = await mcpCall({ name: "get_issue", arguments: { id, verbose: true } });
 		const issue = JSON.parse(getRes.result!.content[0].text) as { project_id: string };
 		expect(issue.project_id).toBe(projectId);
 	});
@@ -2447,7 +2447,8 @@ describe("PROJ-713 — write tools resolve refs/keys server-side", () => {
 			arguments: { query: "Findable", projectId: projectKey },
 		});
 		expect(res.error).toBeUndefined();
-		const results = JSON.parse(res.result!.content[0].text) as Array<{ title: string }>;
+		const results = (JSON.parse(res.result!.content[0].text) as { items: Array<{ title: string }> })
+			.items;
 		expect(results.map((r) => r.title)).toContain("Findable via key search");
 	});
 
@@ -2719,7 +2720,7 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(child.customFields).toEqual([
 			expect.objectContaining({ key: "proj931_cf", value: "hello" }),
 		]);
-		expect(JSON.parse(child.labels as string)).toEqual(["bug"]);
+		expect(child.labels).toEqual(["bug"]);
 	});
 
 	it("list_issues items are compacted the same way as get_issue", async () => {
@@ -2819,7 +2820,7 @@ describe("PROJ-931 — compact MCP responses", () => {
 		for (const name of ["get_issue", "list_issues", "get_issues"]) {
 			const tool = issuesTools.find((t) => t.name === name);
 			expect(tool?.description).toContain(
-				"Omitted keys are null/empty/false; pass verbose:true for the full shape."
+				"Omitted keys are null/empty/false; pass verbose:true for the raw shape."
 			);
 		}
 	});
@@ -2831,7 +2832,7 @@ describe("PROJ-931 — compact MCP responses", () => {
 		const badVerbose = await mcpCall({ name: "get_issue", arguments: { id, verbose: "yes" } });
 		expect(errorCode(badVerbose)).toBe("validation");
 
-		const badFields = await mcpCall({ name: "get_issue", arguments: { id, fields: "title" } });
+		const badFields = await mcpCall({ name: "get_issue", arguments: { id, fields: "nope" } });
 		expect(errorCode(badFields)).toBe("validation");
 
 		const badFieldsList = await mcpCall({

@@ -21,6 +21,7 @@ import { playbooksTools } from "../mcp/playbooks";
 import { projectActivityTools } from "../mcp/project-activity";
 import { projectsTools } from "../mcp/projects";
 import { getPrompt, listPrompts } from "../mcp/prompts";
+import { capPage } from "../mcp/serialize";
 import { sprintsTools } from "../mcp/sprints";
 import { taskStatusesTools } from "../mcp/task-statuses";
 import { taskTypesTools } from "../mcp/task-types";
@@ -236,7 +237,13 @@ router.post("/:workspaceId", async (c) => {
 			}
 
 			try {
-				const result = await tool.handler(args, ctx);
+				const raw = await tool.handler(args, ctx);
+				// PROJ-891: any `{items}` result over ~20,000 chars is cut to fit, never mid-JSON.
+				// (Tools with a native cursor already capped themselves and resume exactly.)
+				const result =
+					raw && typeof raw === "object" && Array.isArray((raw as { items?: unknown }).items)
+						? capPage(raw as { items: unknown[]; next?: string })
+						: raw;
 				return c.json(
 					jsonRpcResult(body.id, {
 						// PROJ-931: minified — pretty-printing roughly doubled token cost

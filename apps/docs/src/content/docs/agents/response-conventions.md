@@ -1,0 +1,74 @@
+---
+title: "Response conventions"
+description: "How MCP tool results are shaped: summary/full views, fields, dropped nulls and internal ids, the {items, next} list shape, and the 20,000-character cap."
+sidebar:
+  order: 3
+---
+MCP tool results are metered in tokens, so they are shaped to carry only what an agent
+can act on. REST (`/api/*`) is unchanged: it always returns the full row shape.
+
+## Dropped fields
+
+Unless you pass `verbose:true`, a result omits:
+
+- `null` values, empty arrays, zero rollups and `false` defaults (an omitted key means null / empty / false).
+- Internal ids: `workspace_id`, `project_id`, `type_id`, `status_id`, `created_by_id`.
+- Duplicated name/key pairs: `project_key`, `project_name`, `type_key`, `type_name`, `status_key`, `status_name`. The kept equivalents are `ref` (`PROJ-42`), `type`, `status` and `priority`.
+
+`labels` is a real array (`["mcp","api"]`), not a JSON string. `verbose:true` returns the raw row.
+
+## `view=summary|full`
+
+List and get tools for issues take `view`. The default is `full` on the current surface.
+
+| View | Issue fields |
+| --- | --- |
+| `summary` | `ref`, `title`, `status`, `priority`, `type`, `parent?`, `assignee?`, `updated` |
+| `full` | everything non-empty: the summary fields plus `body` (when requested), `labels`, `status_category`, `assignee_id`/`assignee_name`, `sprint_id`, `created_at`, `updated_at`, `completed_at`, `needs_audit`, `rollup`, `links`, `customFields`, `url` |
+
+`parent` is the parent's id until refs are returned everywhere. `assignee` is the
+assignee's name.
+
+## `fields=`
+
+`fields` is an explicit allowlist and wins over `view`. Pass an array or a comma-separated string:
+`fields: "ref,title,updated"`. Every named field is always present, with `null` if the
+issue has no value for it. Unknown names are a validation error.
+
+## Lists: `{items, next}`
+
+Every MCP list returns `{items: [...], next?: "..."}`. When `next` is present, pass it
+back unchanged as `cursor` to get the following page. When it is absent there are no more.
+
+| Tool | Continue with |
+| --- | --- |
+| `list_issues` | `cursor` (a `(created_at,id)` compound cursor); `total` is included |
+| `search_wiki` | `cursor` |
+| `list_wiki_changes` | `cursor` (in place of `since`) |
+| `list_project_activity`, `list_comments`, `search_issues`, `wiki_tree` | `{items}` only; use `limit`/`since` |
+
+Before and after for `list_issues` (50 issues): ~54 KB before; with `view=summary`, ~7 KB.
+
+```jsonc
+// before
+{"items":[{"id":"…","workspace_id":"…","project_id":"…","number":42,"title":"Fix login",
+  "status":"todo","priority":"high","assignee_id":null,"labels":"[]","parent_id":null,
+  "type_id":"…","type_key":"bug","type_name":"Bug","status_id":"…","status_key":"todo",
+  "status_name":"Todo","sprint_id":null,"created_by_id":"…","completed_at":null,
+  "needs_audit":false,"project_key":"PROJ","project_name":"Projektor","customFields":[],"url":"…"}],
+ "nextCursor":"1790200737:…","total":120}
+
+// after: view=summary
+{"items":[{"ref":"PROJ-42","title":"Fix login","status":"todo","priority":"high",
+  "type":"bug","updated":1790201659}],"next":"1790200737:…","total":120}
+```
+
+## The 20,000-character cap
+
+A single tool result is capped at about 20,000 characters, cut on an item boundary so it
+is always valid JSON. When it fires the result carries `truncated:true`:
+
+- If the tool has a cursor (`list_issues`), `next` resumes right after the last item returned. Nothing is skipped.
+- Otherwise there is no `next`, and a `hint` says to lower `limit` or narrow the filters.
+
+A result is never a partial JSON document.

@@ -377,6 +377,13 @@ unexpected internal failure:
 
 A client that treated every `error` as "the call failed" must also check `result.isError`.
 
+### List results and the result cap
+
+Every list tool returns `{"items": [...], "next": "…"}`; pass `next` back as `cursor` for
+the next page. A result over ~20,000 characters is cut on an item boundary and flagged
+`truncated:true`. Issue tools take `view=summary|full` and `fields=`. See
+[Response conventions](/projektor/agents/response-conventions/).
+
 ### Stable API contracts
 
 These are the load-bearing shapes the Worker enforces — verified against the source:

@@ -1,13 +1,15 @@
 import type { MCPTool } from "@projektor/types";
 import { listProjectActivity } from "../services/project-activity";
 import { READ } from "./annotations";
+import { toPage } from "./serialize";
 
 export const projectActivityTools: MCPTool[] = [
 	{
 		name: "list_project_activity",
 		description:
 			"List recent activity events for a project across issues, comments, wiki pages, and sprints. " +
-			"Returns events ordered most-recent first.",
+			"Returns `{items}` ordered most-recent first; a result over ~20,000 chars is cut to fit with " +
+			"`truncated:true` (lower `limit` or raise `since`). See /projektor/agents/response-conventions/.",
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],
@@ -26,7 +28,7 @@ export const projectActivityTools: MCPTool[] = [
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			return listProjectActivity(ctx, input);
+			return toPage(await listProjectActivity(ctx, input));
 		},
 	},
 ];

@@ -40,7 +40,11 @@ async function mcpCall<T>(
 	return res.json();
 }
 
-type IssuePage = { items: Array<Record<string, unknown>>; nextCursor: number | null };
+type IssuePage = {
+	items: Array<Record<string, unknown>>;
+	next?: string;
+	nextCursor?: number | null;
+};
 
 describe("MCP endpoint", () => {
 	let token: string;
@@ -156,7 +160,7 @@ describe("MCP endpoint", () => {
 		const data = JSON.parse(res.result.content[0].text) as IssuePage;
 		expect(Array.isArray(data.items)).toBe(true);
 		expect(data.items).toHaveLength(0);
-		expect(data.nextCursor).toBeNull();
+		expect(data.next).toBeUndefined();
 	});
 
 	it("tools/call create_issue then list_issues returns it", async () => {
@@ -195,7 +199,8 @@ describe("MCP endpoint", () => {
 			{ name: "search_wiki", arguments: { query: "MCP endpoint" } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
-		const results = JSON.parse(res.result.content[0].text) as Array<{ title: string }>;
+		const results = (JSON.parse(res.result.content[0].text) as { items: Array<{ title: string }> })
+			.items;
 		expect(results.length).toBeGreaterThan(0);
 		expect(results[0].title).toBe("MCP Docs");
 	});
@@ -365,7 +370,7 @@ describe("MCP endpoint", () => {
 		expect((restData.items[0] as { title: string }).title).toBe("Assigned");
 	});
 
-	it("MCP and REST list_issues return identical structure { items, nextCursor }", async () => {
+	it("MCP list_issues returns { items, next } (PROJ-891); REST keeps { items, nextCursor }", async () => {
 		const mcpRes = (await mcpCall<{ content: Array<{ text: string }> }>(
 			workspaceId,
 			"tools/call",
@@ -378,7 +383,7 @@ describe("MCP endpoint", () => {
 		const restData = (await restRes.json()) as IssuePage;
 
 		expect(Array.isArray(mcpData.items)).toBe(true);
-		expect("nextCursor" in mcpData).toBe(true);
+		expect("nextCursor" in mcpData).toBe(false);
 		expect(Array.isArray(restData.items)).toBe(true);
 		expect("nextCursor" in restData).toBe(true);
 	});
@@ -456,8 +461,8 @@ describe("MCP endpoint", () => {
 			{ name: "search_wiki", arguments: { query: "" } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
-		const results = JSON.parse(res.result.content[0].text) as unknown[];
-		expect(results).toEqual([]);
+		const results = JSON.parse(res.result.content[0].text) as { items: unknown[] };
+		expect(results).toEqual({ items: [] });
 	});
 
 	it("MCP search_wiki excerpt is at most 250 chars", async () => {
@@ -474,7 +479,9 @@ describe("MCP endpoint", () => {
 			{ name: "search_wiki", arguments: { query: "Verbose" } },
 			headers
 		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
-		const results = JSON.parse(res.result.content[0].text) as Array<{ excerpt: string }>;
+		const results = (
+			JSON.parse(res.result.content[0].text) as { items: Array<{ excerpt: string }> }
+		).items;
 		expect(results).toHaveLength(1);
 		expect(results[0].excerpt.length).toBeLessThanOrEqual(250);
 	});

@@ -2209,7 +2209,7 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 			authHeaders(token, slug)
 		);
 
-		const result = mcpData<Array<{ title: string }>>(
+		const result = mcpData<{ items: Array<{ title: string }> }>(
 			await mcpCall(
 				workspaceId,
 				"search_wiki",
@@ -2217,7 +2217,7 @@ describe("Wiki frontmatter metadata (PROJ-488)", () => {
 				authHeaders(token, slug)
 			)
 		);
-		expect(result.map((r) => r.title)).toEqual(["Widget Spec"]);
+		expect(result.items.map((r) => r.title)).toEqual(["Widget Spec"]);
 	});
 });
 
@@ -5466,10 +5466,10 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		const watchesAfter = mcpData<Array<{ pageId: string }>>(await mcp("list_wiki_watches", {}));
 		expect(watchesAfter.some((w) => w.pageId === page.id)).toBe(false);
 
-		const changes = mcpData<{ changes: Array<{ pageId: string; action: string }> }>(
+		const changes = mcpData<{ items: Array<{ pageId: string; action: string }>; next: string }>(
 			await mcp("list_wiki_changes", { since: t0 })
 		);
-		expect(changes.changes.some((c) => c.pageId === page.id && c.action === "created")).toBe(true);
+		expect(changes.items.some((c) => c.pageId === page.id && c.action === "created")).toBe(true);
 	});
 });
 

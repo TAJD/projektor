@@ -5,6 +5,7 @@ import * as wikiService from "../services/wiki";
 import * as wikiDraftsService from "../services/wiki-drafts";
 import * as wikiWatchersService from "../services/wiki-watchers";
 import { CREATE, DESTRUCTIVE, PLAIN_WRITE, READ } from "./annotations";
+import { toPage } from "./serialize";
 
 // PROJ-513: `type` is freeform — these are advertised as hints, never as an
 // inputSchema `enum` (which clients treat as the only legal values).
@@ -70,7 +71,8 @@ export const wikiTools: MCPTool[] = [
 			"signal) per result. type/status/tags filter on the denormalised frontmatter columns " +
 			"(R6). Results are demoted (ranked below everything else, ties broken by bm25 within " +
 			"each tier) when the page is computed-stale/unverified OR has an explicit " +
-			"status: stale|deprecated (R7).",
+			"status: stale|deprecated (R7). Returns `{items, next?}` — pass `next` back as `cursor`. " +
+			"See /projektor/agents/response-conventions/.",
 		inputSchema: {
 			type: "object",
 			required: ["query"],
@@ -78,6 +80,10 @@ export const wikiTools: MCPTool[] = [
 				query: { type: "string" },
 				limit: { type: "number", default: 10 },
 				offset: { type: "number", default: 0 },
+				cursor: {
+					type: "string",
+					description: "Pass the previous page's `next` unchanged (replaces offset)",
+				},
 				projectId: { type: "string", description: "Restrict search to this project ID" },
 				updatedSince: {
 					type: "number",
@@ -103,7 +109,22 @@ export const wikiTools: MCPTool[] = [
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			return wikiService.searchWiki(ctx, input);
+			const { cursor, ...rest } = (input ?? {}) as Record<string, unknown>;
+			if (cursor !== undefined) {
+				const offset = Number(cursor);
+				if (!Number.isInteger(offset) || offset < 0) {
+					throw new ValidationError({
+						formErrors: [],
+						fieldErrors: { cursor: ["invalid cursor"] },
+					});
+				}
+				rest.offset = offset;
+			}
+			const items = (await wikiService.searchWiki(ctx, rest)) as unknown[];
+			// A full page means there may be more: the cursor is the next offset.
+			const limit = typeof rest.limit === "number" ? rest.limit : 10;
+			const offset = typeof rest.offset === "number" ? rest.offset : 0;
+			return toPage(items, items.length >= limit ? offset + limit : null);
 		},
 	},
 	{
@@ -344,7 +365,9 @@ export const wikiTools: MCPTool[] = [
 	},
 	{
 		name: "wiki_tree",
-		description: "Get the wiki page hierarchy as a nested tree, optionally filtered by project",
+		description:
+			"Get the wiki page hierarchy as a nested tree, optionally filtered by project. Returns " +
+			"`{items}` — the root nodes (see /projektor/agents/response-conventions/).",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -354,7 +377,7 @@ export const wikiTools: MCPTool[] = [
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			return wikiService.getWikiTree(ctx, input);
+			return toPage(await wikiService.getWikiTree(ctx, input));
 		},
 	},
 	{
@@ -659,7 +682,7 @@ export const wikiTools: MCPTool[] = [
 			"Cheap delta feed of wiki page changes since a unix-seconds timestamp — for agents " +
 			"polling 'what changed' instead of re-fetching/re-searching the whole wiki. " +
 			"`since` is EXCLUSIVE; " +
-			"poll again using the response's `nextSince`, not a locally-computed timestamp, so " +
+			"poll again passing the response's `next` as `cursor`, not a locally-computed timestamp, so " +
 			"changes landing on the same second as the cutoff are never missed or double-" +
 			"delivered. Defaults to every wiki page the caller can see (same visibility as " +
 			"list_wiki_pages/search_wiki) — pass watchedOnly=true to narrow to pages the caller " +
@@ -667,11 +690,14 @@ export const wikiTools: MCPTool[] = [
 			"projectId reflect the page as it was just before deletion (the row itself is gone).",
 		inputSchema: {
 			type: "object",
-			required: ["since"],
 			properties: {
 				since: {
 					type: "number",
 					description: "Unix seconds; only changes strictly after this are returned",
+				},
+				cursor: {
+					type: "string",
+					description: "Pass the previous page's `next` unchanged (replaces `since`)",
 				},
 				limit: { type: "number", default: 100 },
 				projectId: { type: "string", description: "Restrict to changes on pages in this project" },
@@ -684,7 +710,16 @@ export const wikiTools: MCPTool[] = [
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			return wikiWatchersService.listWikiChanges(ctx, input);
+			const { cursor, ...rest } = (input ?? {}) as Record<string, unknown>;
+			if (cursor !== undefined) rest.since = Number(cursor);
+			if (rest.since === undefined || Number.isNaN(rest.since)) {
+				throw new ValidationError({
+					formErrors: [],
+					fieldErrors: { since: ["pass since (unix seconds) or cursor from a previous `next`"] },
+				});
+			}
+			const result = await wikiWatchersService.listWikiChanges(ctx, rest);
+			return toPage(result.changes, result.nextSince);
 		},
 	},
 	{
