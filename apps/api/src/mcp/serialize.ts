@@ -291,8 +291,10 @@ export function capPage<P extends { items: unknown[]; next?: string }>(
 		if (JSON.stringify(build(mid)).length <= max) lo = mid;
 		else hi = mid - 1;
 	}
-	// Back off to a cut the tool says is resumable, if there is one.
+	// Back off to a cut the tool says is resumable. If none exists (e.g. every event shares
+	// one second), an over-cap page is better than a cursor that silently skips items.
 	let k = lo;
 	while (k > 1 && opts.canCutAt && !opts.canCutAt(k)) k--;
-	return build(opts.canCutAt && !opts.canCutAt(k) ? lo : k);
+	if (opts.canCutAt && !opts.canCutAt(k)) return page;
+	return build(k);
 }

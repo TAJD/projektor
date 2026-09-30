@@ -194,7 +194,7 @@ export const wikiTools: MCPTool[] = [
 					section,
 					content: w.text,
 					totalChars: w.totalChars,
-					...(w.next || cursor !== undefined ? { contentTruncated: true } : {}),
+					...{ contentTruncated: true },
 					...(w.next ? { next: w.next } : {}),
 				};
 			}
@@ -787,9 +787,13 @@ export const wikiTools: MCPTool[] = [
 				});
 			}
 			const result = await wikiWatchersService.listWikiChanges(ctx, rest);
-			// `next` is only present when there were changes; the feed is drained when it is absent.
+			// `next` is present whenever the cursor moved (even if every row in the batch was filtered
+			// out, so a poller keeps advancing); the feed is drained when it is absent.
 			const events = result.changes as Array<{ createdAt: number }>;
-			const page = toPage(events, events.length > 0 ? result.nextSince : null);
+			const page = toPage(
+				events,
+				result.nextSince > (rest.since as number) ? result.nextSince : null
+			);
 			// `since` is exclusive, so a cut must not split events sharing one second.
 			return capPage(page, {
 				cursorOf: (i) => String(events[i].createdAt),

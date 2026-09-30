@@ -7,12 +7,21 @@ import {
 	registerAgent,
 	startWork,
 } from "../services/agents";
+import { ValidationError } from "../services/errors";
 import { PLAIN_WRITE, READ } from "./annotations";
 
 /** claim_issue names the session `agentId`; heartbeat/end call it `id`. Accept both. */
 function withIdAlias(input: unknown): unknown {
 	const { agentId, ...rest } = (input ?? {}) as { agentId?: unknown; id?: unknown };
-	return rest.id === undefined && agentId !== undefined ? { ...rest, id: agentId } : rest;
+	if (agentId === undefined || agentId === null) return rest;
+	if (rest.id === undefined || rest.id === null) return { ...rest, id: agentId };
+	if (rest.id !== agentId) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { agentId: ["conflicts with id — pass one of them"] },
+		});
+	}
+	return rest;
 }
 
 export const agentsTools: MCPTool[] = [

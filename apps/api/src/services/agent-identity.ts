@@ -71,7 +71,7 @@ export async function resolveAgentSessionId(
 			agentId: [
 				rows.length === 0
 					? "no live session on this credential — pass agentId from register_agent"
-					: "several live sessions on this credential — pass agentId from register_agent",
+					: `several ${opts.includeStale ? "active" : "live"} sessions on this credential — pass agentId from register_agent`,
 			],
 		},
 	});

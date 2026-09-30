@@ -146,6 +146,17 @@ describe("PROJ-891 review fixes (unit)", () => {
 		expect(out.next).toBe(String(last));
 	});
 
+	it("capPage returns the whole page rather than skip items when no safe cut exists", () => {
+		const items = Array.from({ length: 30 }, () => ({ t: 5, pad: "x".repeat(100) }));
+		const page = toPage(items, "orig");
+		const out = capPage(page, {
+			max: 1000,
+			cursorOf: () => "5",
+			canCutAt: (kept) => items[kept - 1].t !== items[kept]?.t,
+		});
+		expect(out).toBe(page);
+	});
+
 	it("capPage leaves an empty page alone", () => {
 		const empty = toPage([]);
 		expect(capPage(empty)).toBe(empty);
@@ -339,5 +350,21 @@ describe("PROJ-891: MCP tools", () => {
 			cursor: "",
 		});
 		expect(empty.items).toEqual([]);
+	});
+
+	it("list_wiki_changes: `next` advances when the batch had changes, and a section read is flagged partial", async () => {
+		const slug = (
+			await tool<{ slug: string }>("create_wiki_page", {
+				title: "Sect Page",
+				content: "# A\nalpha\n## B\nbeta\n",
+			})
+		).slug;
+		const changes = await tool<{ items: unknown[]; next?: string }>("list_wiki_changes", {
+			since: 0,
+		});
+		expect(changes.items.length).toBeGreaterThan(0);
+		expect(changes.next).toBeTypeOf("string");
+		const sec = await tool<{ contentTruncated?: boolean }>("get_wiki_page", { slug, section: "B" });
+		expect(sec.contentTruncated).toBe(true);
 	});
 });
