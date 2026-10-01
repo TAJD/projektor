@@ -1,6 +1,6 @@
 ---
 title: "Self-hosting Projektor"
-description: "Deploy your own Projektor instance on Cloudflare in five minutes."
+description: "Deploy your own Projektor instance to your Cloudflare account in about five minutes: one click, one command, or one prompt to an agent."
 sidebar:
   order: 1
 ---
