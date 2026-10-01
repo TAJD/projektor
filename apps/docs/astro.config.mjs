@@ -2,11 +2,28 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import starlightLinksValidator from "starlight-links-validator";
 import mermaid from "astro-mermaid";
+import sitemap from "@astrojs/sitemap";
+import { BASE, DESCRIPTION, REPO_URL, SITE_ORIGIN, SITE_URL } from "./src/site.mjs";
+import { lastmodFor } from "./scripts/sitemap-lastmod.mjs";
+
+// Site-wide WebSite structured data (PROJ-947). The homepage adds its
+// SoftwareApplication / SoftwareSourceCode graph in src/routeData.ts.
+const websiteJsonLd = {
+	"@context": "https://schema.org",
+	"@type": "WebSite",
+	"@id": `${SITE_URL}#website`,
+	name: "Projektor",
+	url: SITE_URL,
+	description: DESCRIPTION,
+	inLanguage: "en",
+	publisher: { "@type": "Person", name: "Thomas Dickson", url: "https://tom-dickson.com" },
+	sameAs: [REPO_URL],
+};
 
 // Project GitHub Pages: served at https://tajd.github.io/projektor/
 export default defineConfig({
-	site: "https://tajd.github.io",
-	base: "/projektor",
+	site: SITE_ORIGIN,
+	base: BASE,
 	integrations: [
 		// Must come before starlight() — it rewrites ```mermaid fences before
 		// Starlight's Expressive Code claims them as plain code blocks. autoTheme
@@ -14,8 +31,8 @@ export default defineConfig({
 		mermaid({ autoTheme: true }),
 		starlight({
 			title: "Projektor",
-			description:
-				"A self-hosted, MCP-native Jira + wiki that runs in a single Cloudflare Worker.",
+			description: DESCRIPTION,
+			routeMiddleware: "./src/routeData.ts",
 			customCss: ["./src/styles/projektor.css"],
 			head: [
 				{
@@ -29,7 +46,7 @@ export default defineConfig({
 				// twitter:card=summary_large_image with no image to back it.
 				{
 					tag: "meta",
-					attrs: { property: "og:image", content: "https://tajd.github.io/projektor/og.png" },
+					attrs: { property: "og:image", content: `${SITE_URL}og.png` },
 				},
 				{
 					tag: "meta",
@@ -41,11 +58,16 @@ export default defineConfig({
 				},
 				{
 					tag: "meta",
-					attrs: { property: "og:image:alt", content: "Projektor — AI-native project management on Cloudflare" },
+					attrs: { property: "og:image:alt", content: "Projektor: open-source MCP issue tracker and wiki on Cloudflare" },
 				},
 				{
 					tag: "meta",
-					attrs: { name: "twitter:image", content: "https://tajd.github.io/projektor/og.png" },
+					attrs: { name: "twitter:image", content: `${SITE_URL}og.png` },
+				},
+				{
+					tag: "script",
+					attrs: { type: "application/ld+json" },
+					content: JSON.stringify(websiteJsonLd),
 				},
 				// The body font is a 500KB variable woff2 loaded via @font-face in
 				// projektor.css; preloading avoids the late-discovery flash.
@@ -53,7 +75,7 @@ export default defineConfig({
 					tag: "link",
 					attrs: {
 						rel: "preload",
-						href: "/projektor/fonts/MonaspaceNeon-Variable.woff2",
+						href: `${BASE}/fonts/MonaspaceNeon-Variable.woff2`,
 						as: "font",
 						type: "font/woff2",
 						crossorigin: "anonymous",
@@ -98,6 +120,14 @@ export default defineConfig({
 				{ label: "Philosophy", items: [{ autogenerate: { directory: "philosophy" } }] },
 				{ label: "Contributing", items: [{ autogenerate: { directory: "contributing" } }] },
 			],
+		}),
+		// Added explicitly (Starlight would otherwise add it with defaults) so each URL
+		// gets a <lastmod>: the last git commit touching the page's source file.
+		sitemap({
+			serialize(item) {
+				const lastmod = lastmodFor(item.url);
+				return lastmod ? { ...item, lastmod } : item;
+			},
 		}),
 	],
 });
