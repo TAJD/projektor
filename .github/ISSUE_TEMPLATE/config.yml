@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/TAJD/projektor/blob/main/SECURITY.md
+    about: Please report security issues privately, not as a public issue.
+  - name: Documentation
+    url: https://tajd.github.io/projektor/
+    about: Guides for self-hosting, connecting agents over MCP, and the REST API.
