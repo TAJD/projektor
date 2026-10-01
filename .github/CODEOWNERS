@@ -1,3 +1,8 @@
 # PROJ-837: adding an access-guard exception is a security decision.
 /apps/api/src/test/architecture/access-guard-allowlist.ts @TAJD
 /apps/api/src/services/access.ts @TAJD
+
+# PROJ-915: human-authored docs. Agents must not edit these; report drift on the
+# current editorial issue (PROJ-914 or its successor) instead.
+/README.md @TAJD
+/apps/docs/src/content/docs/philosophy/ @TAJD

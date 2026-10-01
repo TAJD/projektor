@@ -67,6 +67,15 @@ gates) live in exactly one place, the [workflow spec](https://tajd.github.io/pro
 
 Design records, implementation plans, and specs belong in the projektor wiki (`create_wiki_page`/`update_wiki_page`), not in a repo `docs/` folder. Keeping them in the wiki makes them discoverable and searchable (`search_wiki`) instead of buried in git history. Root-level user-facing docs (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`) are the only docs that belong in the repo itself.
 
+## Human-authored files
+
+Most docs may be generated or written by agents, but these paths are human-authored (Tom's decision, PROJ-915):
+
+- `README.md`
+- `apps/docs/src/content/docs/philosophy/**`
+
+Agents must not edit these files, not even to fix a typo or a stale fact. When your work makes one of them inaccurate, add a comment to the current editorial issue (PROJ-914 or its successor) that quotes the affected line and states the fact that changed. Docs checks may still scan these files and report drift, but the fix goes to the editorial issue, never into an agent's diff. `.github/CODEOWNERS` requires @TAJD's review on both paths.
+
 ## Architecture: the service-layer contract (most important)
 
 There are **two surfaces** over the same data — a REST API and an MCP (JSON-RPC) server.
