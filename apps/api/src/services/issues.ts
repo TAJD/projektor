@@ -132,6 +132,57 @@ async function validateParent(
 
 type ListIssuesFilters = z.infer<typeof ListIssuesSchema>;
 
+// PROJ-960: `issues.labels` is a JSON array string. json_each() raises on malformed JSON,
+// which would turn one bad row into a 500 for the whole list, so a non-JSON value reads as
+// an empty label set instead (the column is only ever written via JSON.stringify, so this
+// is insurance, not an expected path). Labels match exactly — they're tags, not text.
+const labelsJsonSql = (col: string) =>
+	`CASE WHEN json_valid(${col}) THEN ${col} ELSE '[]' END` as const;
+
+type LabelFilter = Readonly<{ labels?: string[]; labelsMode?: "all" | "any" }>;
+
+/**
+ * Raw-SQL form of the label filter, for the hand-written FTS query in searchIssues. `col`
+ * is the (already table-qualified) labels column. All-of means one EXISTS per label, so
+ * every label must be present; "any" is a single EXISTS over an IN list. At most 20 labels
+ * (schema cap), well under D1's 100-parameter limit.
+ */
+function labelFilterSql(col: string, filter: LabelFilter): { sql: string; params: string[] } {
+	const labels = [...new Set(filter.labels ?? [])];
+	if (labels.length === 0) return { sql: "", params: [] };
+	const json = labelsJsonSql(col);
+	if (filter.labelsMode === "any") {
+		return {
+			sql: ` AND EXISTS (SELECT 1 FROM json_each(${json}) WHERE value IN (${labels.map(() => "?").join(", ")}))`,
+			params: labels,
+		};
+	}
+	return {
+		sql: labels
+			.map(() => ` AND EXISTS (SELECT 1 FROM json_each(${json}) WHERE value = ?)`)
+			.join(""),
+		params: labels,
+	};
+}
+
+function addLabelFilter(conditions: Condition[], filters: LabelFilter): void {
+	const labels = [...new Set(filters.labels ?? [])];
+	if (labels.length === 0) return;
+	const json = sql`CASE WHEN json_valid(${schema.issues.labels}) THEN ${schema.issues.labels} ELSE '[]' END`;
+	if (filters.labelsMode === "any") {
+		conditions.push(
+			sql`EXISTS (SELECT 1 FROM json_each(${json}) WHERE value IN (${sql.join(
+				labels.map((l) => sql`${l}`),
+				sql`, `
+			)}))`
+		);
+		return;
+	}
+	for (const label of labels) {
+		conditions.push(sql`EXISTS (SELECT 1 FROM json_each(${json}) WHERE value = ${label})`);
+	}
+}
+
 function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): void {
 	const { status, statusId, statusIds, category, priority, priorities } = filters;
 
@@ -258,6 +309,7 @@ async function buildListIssuesConditions(
 	if (visible) conditions.push(visible);
 	addStatusFilters(conditions, filters);
 	addAssociationFilters(conditions, ctx, filters);
+	addLabelFilter(conditions, filters);
 	await addCustomFieldFilter(orm, ctx, conditions, filters);
 	addDateRangeFilters(conditions, filters);
 	return conditions;
@@ -2085,35 +2137,70 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
 		: result.data.projectId;
 
-	const ftsQuery = sanitizeFtsQuery(query);
-	if (!ftsQuery) return [];
-
-	let q = `SELECT i.id, i.number, i.title, i.status, i.priority,
-              p.id as project_id, p.key as project_key, p.name as project_name
-           FROM issues_fts
-           JOIN issues i ON i.id = issues_fts.issue_id
-           LEFT JOIN projects p ON p.id = i.project_id
-           WHERE issues_fts MATCH ? AND issues_fts.workspace_id = ?`;
-	const params: unknown[] = [ftsQuery, ctx.workspaceId];
-
+	// Everything both queries below share, applied to issues aliased `i`: the optional
+	// project, the caller's visible projects (PROJ-311), and the PROJ-960 label filter.
+	let scope = "";
+	const scopeParams: unknown[] = [];
 	if (projectId) {
-		q += " AND i.project_id = ?";
-		params.push(projectId);
+		scope += " AND i.project_id = ?";
+		scopeParams.push(projectId);
 	}
-
-	// PROJ-311: restrict full-text results to the user's visible projects.
 	const visible = visibleProjectSqlFragment(ctx, "i.project_id");
 	if (visible) {
-		q += ` AND ${visible.sql}`;
-		params.push(...visible.params);
+		scope += ` AND ${visible.sql}`;
+		scopeParams.push(...visible.params);
 	}
+	const labelScope = labelFilterSql("i.labels", result.data);
+	scope += labelScope.sql;
+	scopeParams.push(...labelScope.params);
 
-	q += " ORDER BY bm25(issues_fts) LIMIT ?";
-	params.push(limit);
+	const columns = `i.id, i.number, i.title, i.status, i.priority,
+	              p.id as project_id, p.key as project_key, p.name as project_name`;
 
-	const { results } = await ctx.db
-		.prepare(q)
-		.bind(...params)
-		.all();
-	return results;
+	// PROJ-960: the FTS index covers title and body only, so searching for a label's text
+	// found nothing even when dozens of issues carried it. An issue whose label equals the
+	// whole query (case-insensitive) is an exact hit, so those lead the results.
+	const trimmed = query.trim();
+	const labelHits = (
+		await ctx.db
+			.prepare(
+				`SELECT ${columns}
+				 FROM issues i
+				 LEFT JOIN projects p ON p.id = i.project_id
+				 WHERE i.workspace_id = ?
+				   AND EXISTS (SELECT 1 FROM json_each(${labelsJsonSql("i.labels")}) WHERE lower(value) = lower(?))
+				   ${scope}
+				 ORDER BY i.created_at DESC, i.id DESC LIMIT ?`
+			)
+			.bind(ctx.workspaceId, trimmed, ...scopeParams, limit)
+			.all<{ id: string }>()
+	).results;
+
+	const ftsQuery = sanitizeFtsQuery(query);
+	const ftsHits = ftsQuery
+		? (
+				await ctx.db
+					.prepare(
+						`SELECT ${columns}
+						 FROM issues_fts
+						 JOIN issues i ON i.id = issues_fts.issue_id
+						 LEFT JOIN projects p ON p.id = i.project_id
+						 WHERE issues_fts MATCH ? AND issues_fts.workspace_id = ?
+						   ${scope}
+						 ORDER BY bm25(issues_fts) LIMIT ?`
+					)
+					.bind(ftsQuery, ctx.workspaceId, ...scopeParams, limit)
+					.all<{ id: string }>()
+			).results
+		: [];
+
+	const seen = new Set<string>();
+	const merged: Array<{ id: string }> = [];
+	for (const row of [...labelHits, ...ftsHits]) {
+		if (seen.has(row.id)) continue;
+		seen.add(row.id);
+		merged.push(row);
+		if (merged.length >= limit) break;
+	}
+	return merged;
 }

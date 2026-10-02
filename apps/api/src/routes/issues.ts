@@ -34,6 +34,8 @@ router.get("/", async (c) => {
 		typeId,
 		excludeTypeIds,
 		sprintId,
+		labels,
+		labelsMode,
 		cfKey,
 		cfOp,
 		cfValue,
@@ -63,6 +65,8 @@ router.get("/", async (c) => {
 				typeId,
 				excludeTypeIds,
 				sprintId,
+				labels,
+				labelsMode,
 				cfKey,
 				cfOp,
 				cfValue,
@@ -102,10 +106,16 @@ router.get("/prioritized", async (c) => {
 
 router.get("/search", async (c) => {
 	const ctx = ctxFromHono(c);
-	const { q, projectId, limit } = c.req.query();
+	const { q, projectId, limit, labels, labelsMode } = c.req.query();
 	try {
 		return c.json(
-			await searchIssues(ctx, { query: q, projectId, limit: limit ? Number(limit) : undefined })
+			await searchIssues(ctx, {
+				query: q,
+				projectId,
+				labels,
+				labelsMode,
+				limit: limit ? Number(limit) : undefined,
+			})
 		);
 	} catch (e) {
 		return serviceErrToResponse(c, e);

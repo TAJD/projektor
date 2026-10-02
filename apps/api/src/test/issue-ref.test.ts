@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
 	seedGroupGrant,
@@ -49,6 +49,15 @@ describe("PROJ-959: issue refs accepted by every issue-id tool", () => {
 		expect(err).toBeUndefined();
 		return data.id as string;
 	}
+
+	// Headroom over wrangler.test.toml's RATE_LIMIT_API_MAX (5) so a test may make several calls.
+	const prevApiMax = env.RATE_LIMIT_API_MAX;
+	beforeAll(() => {
+		env.RATE_LIMIT_API_MAX = "10000";
+	});
+	afterAll(() => {
+		env.RATE_LIMIT_API_MAX = prevApiMax;
+	});
 
 	beforeEach(async () => {
 		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture());
