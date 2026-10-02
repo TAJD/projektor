@@ -143,7 +143,7 @@ export async function listMessages(ctx: ServiceCtx, raw: unknown) {
 	const result = ListMessagesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { cursor, limit } = result.data;
-	const scope = await resolveMessageScope(ctx, result.data.scope);
+	const scope = await resolveMessageScope(ctx, result.data.scope, { lenient: true });
 
 	const orm = drizzle(ctx.db, { schema });
 

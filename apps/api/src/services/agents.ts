@@ -14,7 +14,7 @@ import { postMessage } from "./agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
 import { claimFiles, releaseClaimsForAgent } from "./file-claims";
 import { claimIssue, releaseLeasesForAgent } from "./issue-leases";
-import { resolveIssueIdParam, resolveOptionalIssueId } from "./issue-ref";
+import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
 import { updateIssue } from "./issues";
 import { resolveVisibleProjectIdParam } from "./projects";
 import type { ServiceCtx } from "./types";
@@ -116,7 +116,7 @@ export async function startWork(ctx: ServiceCtx, raw: unknown) {
 	// PROJ-959: resolve a ref up front, before a session is registered, so an unknown ref
 	// fails cleanly instead of leaving a session to compensate for. Everything below then
 	// works with the UUID (the message scope and the claims must agree on it).
-	const issueId = await resolveIssueIdParam(ctx, result.data.issue);
+	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issue);
 
 	const session = await registerAgent(ctx, { name, issueId });
 
@@ -234,7 +234,10 @@ export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 	const result = FinishWorkSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { sessionId, issue: issueId, completionReport, status } = result.data;
+	const { sessionId, completionReport, status } = result.data;
+	// PROJ-959: resolved even when nothing is transitioned, so an unknown or hidden ref is
+	// "Issue not found" rather than being silently ignored.
+	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issue);
 
 	if (status !== undefined || completionReport !== undefined) {
 		await updateIssue(ctx, issueId, {

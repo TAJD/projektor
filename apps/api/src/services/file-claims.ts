@@ -5,7 +5,7 @@ import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../s
 import { visibleProjectPredicate } from "./access";
 import { buildPostMessageStatements } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
-import { resolveIssueIdParam, resolveOptionalIssueId } from "./issue-ref";
+import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
 import { resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks } from "./sql";
@@ -276,7 +276,7 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	const result = ClaimFilesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { agentId, force } = result.data;
-	const issueId = await resolveIssueIdParam(ctx, result.data.issueId);
+	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issueId);
 	// A path listed twice would insert two active claims on it in one batch, which the
 	// active-claim unique index rejects (rolling the whole batch back). Claim it once,
 	// keeping the caller's order.

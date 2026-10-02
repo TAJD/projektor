@@ -14,7 +14,7 @@ import {
 	UnsupportedMediaTypeError,
 	ValidationError,
 } from "./errors";
-import { resolveIssueIdParam } from "./issue-ref";
+import { resolveVisibleIssueIdParam } from "./issue-ref";
 import type { ServiceCtx } from "./types";
 import * as wikiService from "./wiki";
 
@@ -74,7 +74,7 @@ async function resolveEntityId(
 ): Promise<string> {
 	if (entityType !== "issue") return entityId;
 	try {
-		return await resolveIssueIdParam(ctx, entityId);
+		return await resolveVisibleIssueIdParam(ctx, entityId);
 	} catch (e) {
 		if (lenient && e instanceof NotFoundError) return entityId;
 		throw e;

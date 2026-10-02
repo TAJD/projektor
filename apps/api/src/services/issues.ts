@@ -137,7 +137,10 @@ type ListIssuesFilters = z.infer<typeof ListIssuesSchema>;
 // an empty label set instead (the column is only ever written via JSON.stringify, so this
 // is insurance, not an expected path). Labels match exactly — they're tags, not text.
 const labelsJsonSql = (col: string) =>
-	`CASE WHEN json_valid(${col}) THEN ${col} ELSE '[]' END` as const;
+	`CASE WHEN json_valid(${col}) THEN CASE WHEN json_type(${col}) = 'array' THEN ${col} ELSE '[]' END ELSE '[]' END` as const;
+
+// Mirrors the per-label cap in schemas/issues.ts (z.string().max(50)).
+const MAX_LABEL_LENGTH = 50;
 
 type LabelFilter = Readonly<{ labels?: string[]; labelsMode?: "all" | "any" }>;
 
@@ -168,7 +171,7 @@ function labelFilterSql(col: string, filter: LabelFilter): { sql: string; params
 function addLabelFilter(conditions: Condition[], filters: LabelFilter): void {
 	const labels = [...new Set(filters.labels ?? [])];
 	if (labels.length === 0) return;
-	const json = sql`CASE WHEN json_valid(${schema.issues.labels}) THEN ${schema.issues.labels} ELSE '[]' END`;
+	const json = sql.raw(labelsJsonSql('"issues"."labels"'));
 	if (filters.labelsMode === "any") {
 		conditions.push(
 			sql`EXISTS (SELECT 1 FROM json_each(${json}) WHERE value IN (${sql.join(
@@ -2161,20 +2164,25 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 	// found nothing even when dozens of issues carried it. An issue whose label equals the
 	// whole query (case-insensitive) is an exact hit, so those lead the results.
 	const trimmed = query.trim();
-	const labelHits = (
-		await ctx.db
-			.prepare(
-				`SELECT ${columns}
+	// A label is at most 50 characters (schemas/issues.ts), so a longer query can't be one —
+	// skip the json_each scan, which no index backs, for prose queries.
+	const mayBeLabel = trimmed.length > 0 && trimmed.length <= MAX_LABEL_LENGTH;
+	const labelHits = !mayBeLabel
+		? []
+		: (
+				await ctx.db
+					.prepare(
+						`SELECT ${columns}
 				 FROM issues i
 				 LEFT JOIN projects p ON p.id = i.project_id
 				 WHERE i.workspace_id = ?
 				   AND EXISTS (SELECT 1 FROM json_each(${labelsJsonSql("i.labels")}) WHERE lower(value) = lower(?))
 				   ${scope}
 				 ORDER BY i.created_at DESC, i.id DESC LIMIT ?`
-			)
-			.bind(ctx.workspaceId, trimmed, ...scopeParams, limit)
-			.all<{ id: string }>()
-	).results;
+					)
+					.bind(ctx.workspaceId, trimmed, ...scopeParams, limit)
+					.all<{ id: string }>()
+			).results;
 
 	const ftsQuery = sanitizeFtsQuery(query);
 	const ftsHits = ftsQuery

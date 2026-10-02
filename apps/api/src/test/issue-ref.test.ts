@@ -1,13 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import {
-	authHeaders,
-	seedGroupGrant,
-	seedIssue,
-	seedProject,
-	seedProjectFixture,
-	toolError,
-} from "./helpers";
+import { authHeaders, seedIssue, seedProject, seedProjectFixture, toolError } from "./helpers";
 
 // PROJ-959: every MCP tool that takes an issue id accepts a UUID or a ref like "PROJ-42".
 // One test per tool, each passing the *ref*, so a tool that regresses to UUID-only fails
@@ -291,28 +284,84 @@ describe("PROJ-959: issue refs accepted by every issue-id tool", () => {
 	});
 
 	describe("project visibility is not bypassed by a ref", () => {
-		it("a ref in a project the caller has no grant on answers exactly like an unknown ref", async () => {
-			// A second project the (member) fixture user has no grant on.
+		// The fixture user is a plain member granted only on PROJ; HIDN has no grant.
+		let hiddenRef: string;
+		let hiddenId: string;
+
+		beforeEach(async () => {
 			const hidden = await seedProject(workspaceId, "HIDN");
 			const secret = await seedIssue(workspaceId, hidden.id, userId, { title: "Secret" });
-			// Make the fixture user a plain member without any grant on HIDN.
-			await env.DB.prepare("UPDATE workspace_members SET role = 'member' WHERE workspace_id = ?")
-				.bind(workspaceId)
-				.run();
+			hiddenRef = `HIDN-${secret.number}`;
+			hiddenId = secret.id;
+		});
 
-			const hiddenRef = await call("add_comment", { issueId: `HIDN-${secret.number}`, body: "x" });
-			const unknownRef = await call("add_comment", { issueId: "HIDN-9999", body: "x" });
-			expect(hiddenRef.err?.code).toBe("not_found");
-			expect(hiddenRef.err?.message).toBe(unknownRef.err?.message);
+		// Each strict tool must answer a hidden ref exactly like an unknown one, and the
+		// hidden issue's UUID must never appear in the response.
+		const strict: Array<[string, (issue: string, agentId: string) => Record<string, unknown>]> = [
+			["add_comment", (issueId) => ({ issueId, body: "x" })],
+			["claim_issue", (issueId, agentId) => ({ issueId, agentId })],
+			["claim_files", (issueId, agentId) => ({ issueId, agentId, paths: ["a.ts"] })],
+			["register_agent", (issueId) => ({ name: "n", issueId })],
+			["start_work", (issueId) => ({ issue: issueId, name: "w" })],
+			["post_message", (issueId) => ({ scope: `issue:${issueId}`, body: "x" })],
+			[
+				"create_link_attachment",
+				(issueId) => ({
+					kind: "url",
+					entityType: "issue",
+					entityId: issueId,
+					url: "https://example.com",
+					label: "l",
+				}),
+			],
+		];
 
-			// And the list filters can't be used as an existence oracle either.
-			const leases = await call("list_issue_leases", { issueId: `HIDN-${secret.number}` });
+		for (const [tool, args] of strict) {
+			it(`${tool}: hidden ref is indistinguishable from an unknown ref`, async () => {
+				const agentId = await register();
+				const hiddenRes = await call(tool, args(hiddenRef, agentId));
+				const unknownRes = await call(tool, args("HIDN-9999", agentId));
+				expect(hiddenRes.err?.code).toBe("not_found");
+				expect(hiddenRes.err?.message).toBe(
+					unknownRes.err?.message?.replace("HIDN-9999", hiddenRef)
+				);
+				expect(JSON.stringify(hiddenRes)).not.toContain(hiddenId);
+			});
+		}
+
+		it("move_issues_to_sprint: hidden ref in the batch fails like an unknown one", async () => {
+			const sprint = await call("create_sprint", { projectId, name: "S" });
+			const hiddenRes = await call("move_issues_to_sprint", {
+				sprintId: sprint.data.id,
+				issueIds: [hiddenRef],
+			});
+			expect(hiddenRes.err?.code).toBe("not_found");
+			expect(hiddenRes.err?.message).toBe(`Issue not found: ${hiddenRef}`);
+			expect(JSON.stringify(hiddenRes)).not.toContain(hiddenId);
+		});
+
+		it("release_issue / finish_work: hidden ref is not_found without leaking the UUID", async () => {
+			const agentId = await register();
+			const release = await call("release_issue", { issueId: hiddenRef, agentId });
+			expect(JSON.stringify(release)).not.toContain(hiddenId);
+			const start = await call("start_work", { issue: ref, name: "w" });
+			const finish = await call("finish_work", {
+				sessionId: start.data.sessionId,
+				issue: hiddenRef,
+			});
+			expect(finish.err?.code).toBe("not_found");
+			expect(JSON.stringify(finish)).not.toContain(hiddenId);
+		});
+
+		it("list filters treat a hidden ref as empty, same as unknown", async () => {
+			const leases = await call("list_issue_leases", { issueId: hiddenRef });
 			expect(leases.err).toBeUndefined();
 			expect(leases.data.items).toHaveLength(0);
-
-			// Keep seedGroupGrant referenced so the unused-import lint stays quiet if the
-			// fixture shape changes.
-			expect(typeof seedGroupGrant).toBe("function");
+			const msgs = await call("list_messages", { scope: `issue:${hiddenRef}` });
+			expect(msgs.err).toBeUndefined();
+			expect(msgs.data.items).toHaveLength(0);
+			const unknown = await call("list_messages", { scope: "issue:HIDN-9999" });
+			expect(unknown.data.items).toHaveLength(0);
 		});
 	});
 });

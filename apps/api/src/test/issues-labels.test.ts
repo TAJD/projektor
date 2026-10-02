@@ -175,6 +175,7 @@ describe("PROJ-960: label filtering", () => {
 				.bind(JSON.stringify(["bug"]), secret.id)
 				.run();
 			const { body } = await list("labels=bug");
+			expect(titles(body.items)).toContain("secret");
 			expect(titles(body.items)).not.toContain("hidden-bug");
 		});
 	});
@@ -244,7 +245,28 @@ describe("PROJ-960: label filtering", () => {
 				.bind(JSON.stringify(["found-in-tech-debt-2026-10"]), secret.id)
 				.run();
 			const hits = await search("q=found-in-tech-debt-2026-10");
+			expect(titles(hits)).toContain("Unrelated title one");
 			expect(titles(hits)).not.toContain("hidden");
+		});
+
+		it("limit merges label hits and FTS hits: 1 label hit + FTS hits, limit 2", async () => {
+			await createIssue("zebra", ["stripes"]);
+			await createIssue("Stripes pattern", []);
+			await createIssue("Stripes guide", []);
+			const hits = await search("q=stripes&limit=2");
+			expect(hits).toHaveLength(2);
+			expect(hits[0].title).toBe("zebra");
+		});
+
+		it("a query longer than 50 chars skips the label branch without error", async () => {
+			expect(await search(`q=${"x".repeat(60)}`)).toHaveLength(0);
+		});
+
+		it("accepts repeated labels params over REST", async () => {
+			const hits = await search(
+				"q=cache&labels=cache&labels=found-in-tech-debt-2026-10&labelsMode=any"
+			);
+			expect(titles(hits)).toEqual(["Cache invalidation bug", "Cache warmup"]);
 		});
 	});
 });

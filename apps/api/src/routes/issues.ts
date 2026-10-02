@@ -1,5 +1,5 @@
 import type { HonoEnv } from "@projektor/types";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { claimIssue, listIssueLeases, releaseIssue } from "../services/issue-leases";
@@ -18,6 +18,13 @@ import { ctxFromHono } from "../services/types";
 
 const router = new Hono<HonoEnv>();
 
+// PROJ-960: `labels` may be comma-separated (labels=a,b) or repeated (labels=a&labels=b);
+// c.req.query() would silently keep only one repeated value.
+function queryLabels(c: Context<HonoEnv>): string | undefined {
+	const values = c.req.queries("labels");
+	return values ? values.join(",") : undefined;
+}
+
 router.get("/", async (c) => {
 	const ctx = ctxFromHono(c);
 	const {
@@ -34,7 +41,6 @@ router.get("/", async (c) => {
 		typeId,
 		excludeTypeIds,
 		sprintId,
-		labels,
 		labelsMode,
 		cfKey,
 		cfOp,
@@ -65,7 +71,7 @@ router.get("/", async (c) => {
 				typeId,
 				excludeTypeIds,
 				sprintId,
-				labels,
+				labels: queryLabels(c),
 				labelsMode,
 				cfKey,
 				cfOp,
@@ -106,13 +112,13 @@ router.get("/prioritized", async (c) => {
 
 router.get("/search", async (c) => {
 	const ctx = ctxFromHono(c);
-	const { q, projectId, limit, labels, labelsMode } = c.req.query();
+	const { q, projectId, limit, labelsMode } = c.req.query();
 	try {
 		return c.json(
 			await searchIssues(ctx, {
 				query: q,
 				projectId,
-				labels,
+				labels: queryLabels(c),
 				labelsMode,
 				limit: limit ? Number(limit) : undefined,
 			})

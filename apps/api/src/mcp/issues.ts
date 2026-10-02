@@ -381,7 +381,7 @@ export const issuesTools: MCPTool[] = [
 		name: "search_issues",
 		description:
 			"Search issues by keyword in title or body, or by exact label text (an issue whose label " +
-			"equals the whole query is a hit, listed first). Pass `labels` to narrow keyword hits to " +
+			"equals the whole query is a hit, listed first; case-insensitive for ASCII only). Pass `labels` to narrow keyword hits to " +
 			"issues carrying those labels. To list every issue with a label — with pagination — use " +
 			"list_issues with `labels` instead; search returns at most 50.",
 		inputSchema: {
