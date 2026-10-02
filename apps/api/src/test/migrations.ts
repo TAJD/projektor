@@ -69,6 +69,7 @@ import m0065 from "../../../../packages/db/migrations/0065_wiki_fts_rowid.sql?ra
 import m0066 from "../../../../packages/db/migrations/0066_repair_status_category.sql?raw";
 import m0067 from "../../../../packages/db/migrations/0067_agent_session_credential.sql?raw";
 import m0068 from "../../../../packages/db/migrations/0068_issue_link_follows_from.sql?raw";
+import m0069 from "../../../../packages/db/migrations/0069_project_epic_auto_close.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -140,4 +141,5 @@ export const MIGRATIONS = [
 	m0066,
 	m0067,
 	m0068,
+	m0069,
 ];

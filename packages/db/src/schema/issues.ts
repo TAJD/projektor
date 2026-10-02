@@ -15,6 +15,9 @@ export const projects = sqliteTable(
 		updatedAt: integer("updated_at").notNull(),
 		// Per-project agent WIP cap (PROJ-253). NULL = use the workspace default.
 		agentWipLimit: integer("agent_wip_limit"),
+		// PROJ-962: close an epic automatically when its last child is done/cancelled
+		// (false = update_issue only returns a parentReadyToClose hint).
+		epicAutoClose: integer("epic_auto_close", { mode: "boolean" }).notNull().default(false),
 		// Human-readable URL slug, e.g. "start-line" (PROJ-376). Nullable for
 		// pre-migration rows that failed backfill; unique per workspace, enforced
 		// by a partial index (see migrations/0035_project_slug.sql) so NULLs don't

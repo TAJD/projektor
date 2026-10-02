@@ -1708,12 +1708,76 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	// PROJ-961: a done-transition that reports a remainder spawns the follow-up.
 	const remainder = data.completionReport?.remainder;
-	if (remainder && enteringDone) {
-		const followUp = await createRemainderFollowUp(ctx, orm, existing, remainder);
-		return { ok: true, followUp };
-	}
+	const followUp =
+		remainder && enteringDone
+			? await createRemainderFollowUp(ctx, orm, existing, remainder)
+			: undefined;
 
-	return { ok: true };
+	// PROJ-962: runs after the follow-up exists, so an open follow-up under the same epic
+	// keeps it from being reported ready (or closed) while work remains.
+	const parent = closing ? await handleLastChildClosed(ctx, orm, existing) : undefined;
+
+	return {
+		ok: true,
+		...(followUp ? { followUp } : {}),
+		...(parent ?? {}),
+	};
+}
+
+// PROJ-962: when the last open child of an epic is done/cancelled, either close the epic
+// (project.epicAutoClose) or tell the caller it is ready: `parentReadyToClose:{ref}` is the
+// default so a human/agent still decides; `parentClosed:{ref}` reports an automatic close.
+async function handleLastChildClosed(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	existing: ExistingIssue & { projectId: string }
+): Promise<
+	{ parentReadyToClose: { ref: string } } | { parentClosed: { ref: string } } | undefined
+> {
+	if (!existing.parentId) return undefined;
+	const parent = await orm
+		.select({
+			id: schema.issues.id,
+			number: schema.issues.number,
+			status: schema.issues.status,
+			statusCategory: schema.issues.statusCategory,
+			typeKey: schema.taskTypes.key,
+			projectKey: schema.projects.key,
+			epicAutoClose: schema.projects.epicAutoClose,
+		})
+		.from(schema.issues)
+		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+		.leftJoin(
+			schema.taskTypes,
+			and(
+				eq(schema.taskTypes.id, schema.issues.typeId),
+				eq(schema.taskTypes.workspaceId, ctx.workspaceId)
+			)
+		)
+		.where(
+			and(eq(schema.issues.id, existing.parentId), eq(schema.issues.workspaceId, ctx.workspaceId))
+		)
+		.get();
+	if (parent?.typeKey !== "epic") return undefined;
+	if (isDoneState(parent.statusCategory, parent.status)) return undefined;
+	if (isCancelledState(parent.statusCategory, parent.status)) return undefined;
+
+	// Open = neither done nor cancelled, by category or by legacy key (see isDoneState).
+	const open = await orm.$count(
+		schema.issues,
+		and(
+			eq(schema.issues.parentId, parent.id),
+			eq(schema.issues.workspaceId, ctx.workspaceId),
+			notInArray(schema.issues.statusCategory, ["done", "cancelled"]),
+			notInArray(schema.issues.status, ["done", "cancelled"])
+		)
+	);
+	if (open > 0) return undefined;
+
+	const ref = `${parent.projectKey}-${parent.number}`;
+	if (!parent.epicAutoClose) return { parentReadyToClose: { ref } };
+	await updateIssue(ctx, parent.id, { status: "done" });
+	return { parentClosed: { ref } };
 }
 
 // PROJ-961: the work an agent reports as not done becomes its own issue — same parent

@@ -64,7 +64,8 @@ export const projectsTools: MCPTool[] = [
 	{
 		name: "update_project",
 		description:
-			"Update a project name, description, or archived state (owner/admin only). Set archived: true to hide it from the default project list, false to restore it.",
+			"Update a project name, description, archived state, or epic-closing behaviour (owner/admin only). Set archived: true to hide it from the default project list, false to restore it. " +
+			"epicAutoClose: true closes an epic automatically when its last child is done/cancelled; false (default) makes update_issue/finish_work return parentReadyToClose:{ref} instead.",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
@@ -73,6 +74,11 @@ export const projectsTools: MCPTool[] = [
 				name: { type: "string", description: "New project name" },
 				description: { type: "string", description: "New description" },
 				archived: { type: "boolean", description: "Archive (true) or unarchive (false)" },
+				epicAutoClose: {
+					type: "boolean",
+					description:
+						"Auto-close an epic when its last child is done/cancelled (default false: hint only)",
+				},
 			},
 		},
 		annotations: IDEMPOTENT_WRITE,

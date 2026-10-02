@@ -239,7 +239,7 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 	// "Issue not found" rather than being silently ignored.
 	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issue);
 
-	let followUp: { id: string; ref: string } | undefined;
+	let extra: Record<string, unknown> = {};
 	if (status !== undefined || completionReport !== undefined) {
 		const updated = await updateIssue(ctx, issueId, {
 			...(status !== undefined ? { status } : {}),
@@ -249,12 +249,13 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 			// agentSessionId on a plain update_issue already does.
 			agentSessionId: sessionId,
 		});
-		// PROJ-961: completionReport.remainder on a done transition spawns a follow-up issue.
-		followUp = updated.followUp;
+		// PROJ-961/962: surface followUp / parentReadyToClose / parentClosed from the update.
+		const { ok: _ok, ...rest } = updated;
+		extra = rest;
 	}
 
 	const ended = await endAgent(ctx, { id: sessionId });
-	return followUp ? { ...ended, followUp } : ended;
+	return Object.keys(extra).length > 0 ? { ...ended, ...extra } : ended;
 }
 
 /**
