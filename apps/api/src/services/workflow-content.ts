@@ -57,6 +57,7 @@ picking up autonomous work.
   on a human. An agent-worked issue still needs a completion report before it can
   close (see below). Instead of gating the transition, projektor classifies the
   report's evidence and flags weak closures for **audit after the fact** — see below.
+- **Human-authored files** (PROJ-915): agents never edit \`README.md\` or \`apps/docs/src/content/docs/philosophy/**\`; when your work makes one inaccurate, comment on the current editorial issue (PROJ-914 or its successor) quoting the line and the fact that changed.
 
 ## Completion reports
 
