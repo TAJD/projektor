@@ -13,10 +13,10 @@ export const CreateProjectSchema = z.object({
 	description: z.string().max(500).optional(),
 	// PROJ-253: per-project agent WIP cap. null/omitted = workspace default.
 	agentWipLimit: z.number().int().min(1).max(100).nullable().optional(),
-	// PROJ-962: close an epic automatically when its last child is done/cancelled.
-	epicAutoClose: z.boolean().optional(),
 });
 
 export const UpdateProjectSchema = CreateProjectSchema.partial().extend({
 	archived: z.boolean().optional(),
+	// PROJ-962: close an epic automatically when its last child is done/cancelled.
+	epicAutoClose: z.boolean().optional(),
 });

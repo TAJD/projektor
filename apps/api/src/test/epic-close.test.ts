@@ -1,6 +1,14 @@
 import { env, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedIssue, seedProjectFixture, seedTaskType, toolError } from "./helpers";
+import {
+	authHeaders,
+	seedGroupGrant,
+	seedIssue,
+	seedProject,
+	seedProjectFixture,
+	seedTaskType,
+	toolError,
+} from "./helpers";
 
 // PROJ-962: closing the last open child of an epic either closes the epic
 // (project.epicAutoClose) or returns parentReadyToClose:{ref}.
@@ -217,6 +225,104 @@ describe("PROJ-962: epic closing when the last child is closed", () => {
 			const last = await close(kids[2].ref);
 			expect(last.data.parentReadyToClose).toEqual({ ref: epicRef });
 			expect(await epicStatus()).not.toBe("done");
+		});
+	});
+
+	describe("review hardening", () => {
+		it("a re-save of an already-closed child does not re-trigger the epic check", async () => {
+			await call("update_project", { id: projectId, epicAutoClose: true });
+			await close(kids[0].ref);
+			await close(kids[1].ref);
+			await close(kids[2].ref);
+			expect(await epicStatus()).toBe("done");
+			await env.DB.prepare(
+				"UPDATE issues SET status = 'in_progress', status_category = 'in_progress' WHERE id = ?"
+			)
+				.bind(epicId)
+				.run();
+			const again = await close(kids[2].ref);
+			expect(again.err).toBeUndefined();
+			expect(again.data.parentClosed).toBeUndefined();
+			expect(again.data.parentReadyToClose).toBeUndefined();
+			expect(await epicStatus()).toBe("in_progress");
+			// done -> cancelled is also not a new closing
+			const cancelled = await close(kids[2].ref, "cancelled");
+			expect(cancelled.data.parentClosed).toBeUndefined();
+		});
+
+		it("a gate on the epic degrades to the hint instead of failing the child's close", async () => {
+			await call("update_project", { id: projectId, epicAutoClose: true });
+			// The epic was worked by an agent without a completion report, so an agent-style
+			// done (PROJ-254) would be rejected.
+			const epicWork = await call("start_work", { issue: epicRef, name: "epic-worker" });
+			await call("finish_work", { sessionId: epicWork.data.sessionId, issue: epicRef });
+			await close(kids[0].ref);
+			await close(kids[1].ref);
+			const last = await close(kids[2].ref);
+			expect(last.err).toBeUndefined();
+			expect(last.data.parentReadyToClose).toEqual({ ref: epicRef });
+			const child = await env.DB.prepare("SELECT status FROM issues WHERE id = ?")
+				.bind(kids[2].id)
+				.first<{ status: string }>();
+			expect(child?.status).toBe("done");
+		});
+	});
+
+	describe("as a plain member", () => {
+		let hiddenEpic: { id: string; ref: string };
+
+		beforeEach(async () => {
+			({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture());
+			const epicType = await seedTaskType(workspaceId, { key: "epic" });
+			const hidden = await seedProject(workspaceId, "HIDN");
+			const e = await seedIssue(workspaceId, hidden.id, userId, { title: "Hidden epic" });
+			await env.DB.prepare("UPDATE issues SET type_id = ? WHERE id = ?")
+				.bind(epicType.id, e.id)
+				.run();
+			hiddenEpic = { id: e.id, ref: `HIDN-${e.number}` };
+			await env.DB.prepare("UPDATE projects SET epic_auto_close = 1 WHERE id = ?")
+				.bind(hidden.id)
+				.run();
+			const k = await seedIssue(workspaceId, projectId, userId, {
+				title: "child",
+				parentId: hiddenEpic.id,
+			});
+			kids = [{ id: k.id, ref: `PROJ-${k.number}` }];
+			epicId = hiddenEpic.id;
+		});
+
+		it("never learns about an epic in a project it cannot see", async () => {
+			const res = await close(kids[0].ref);
+			expect(res.err).toBeUndefined();
+			expect(JSON.stringify(res.data)).not.toContain("HIDN");
+			expect(await epicStatus()).not.toBe("done");
+		});
+
+		it("with only a viewer grant on the epic's project, gets the hint but no auto-close", async () => {
+			const hiddenProject = await env.DB.prepare("SELECT project_id AS p FROM issues WHERE id = ?")
+				.bind(hiddenEpic.id)
+				.first<{ p: string }>();
+			await seedGroupGrant(workspaceId, userId, hiddenProject?.p ?? "", "viewer");
+			const res = await close(kids[0].ref);
+			expect(res.err).toBeUndefined();
+			expect(res.data.parentReadyToClose).toEqual({ ref: hiddenEpic.ref });
+			expect(res.data.parentClosed).toBeUndefined();
+			expect(await epicStatus()).not.toBe("done");
+		});
+
+		it("a follow-up that cannot be created is reported, not thrown", async () => {
+			const res = await call("update_issue", {
+				id: kids[0].ref,
+				status: "done",
+				completionReport: { ...report, remainder: "left" },
+			});
+			expect(res.err).toBeUndefined();
+			expect(res.data.followUp).toBeUndefined();
+			expect(res.data.followUpError).toContain("could not be created");
+			const child = await env.DB.prepare("SELECT status FROM issues WHERE id = ?")
+				.bind(kids[0].id)
+				.first<{ status: string }>();
+			expect(child?.status).toBe("done");
 		});
 	});
 });

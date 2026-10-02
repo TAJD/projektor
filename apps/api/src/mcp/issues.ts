@@ -369,7 +369,7 @@ export const issuesTools: MCPTool[] = [
 						remainder: {
 							type: "string",
 							description:
-								"What is NOT done. When the issue is marked done, a follow-up issue is created " +
+								"What is NOT done. Only acted on in the call that moves the issue to done (ignored for in_review/other updates; it is still recorded in the report comment). When it is, a follow-up issue is created " +
 								"under the same parent with the same labels, linked follows_from this one; its " +
 								"ref is returned as followUp.ref",
 						},

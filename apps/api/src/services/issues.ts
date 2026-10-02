@@ -1262,6 +1262,9 @@ async function applyStatusFields(
 	setValues: SetValues;
 	reviewOrDoneTransition: boolean;
 	enteringDone: boolean;
+	// PROJ-962: closed (done/cancelled) now and not before — unlike `closing`, a re-save of an
+	// already-closed issue doesn't count, so it can't re-trigger the parent-epic check.
+	enteringClosed: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
 	// PROJ-928: resolved to done/cancelled by category OR legacy key — a workspace with
 	// no custom task_statuses row backing this key has category === null (see
@@ -1273,6 +1276,7 @@ async function applyStatusFields(
 			setValues: {},
 			reviewOrDoneTransition: false,
 			enteringDone: false,
+			enteringClosed: false,
 			gateRejectionStatement: null,
 			closing: false,
 		};
@@ -1342,6 +1346,11 @@ async function applyStatusFields(
 		setValues,
 		reviewOrDoneTransition: transition.enteringInReview || transition.enteringDone,
 		enteringDone: transition.enteringDone,
+		enteringClosed:
+			(isDoneState(newStatusCategory, resolvedStatusKey) ||
+				isCancelledState(newStatusCategory, resolvedStatusKey)) &&
+			!isDoneState(existing.statusCategory, existing.status) &&
+			!isCancelledState(existing.statusCategory, existing.status),
 		gateRejectionStatement,
 		closing:
 			isDoneState(newStatusCategory, resolvedStatusKey) ||
@@ -1442,6 +1451,7 @@ async function buildUpdateSetValues(
 	setValues: SetValues;
 	recordCompletionReport: boolean;
 	enteringDone: boolean;
+	enteringClosed: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
 	closing: boolean;
 }> {
@@ -1465,6 +1475,7 @@ async function buildUpdateSetValues(
 		setValues,
 		recordCompletionReport,
 		enteringDone: statusFields.enteringDone,
+		enteringClosed: statusFields.enteringClosed,
 		gateRejectionStatement: statusFields.gateRejectionStatement,
 		closing: statusFields.closing,
 	};
@@ -1600,8 +1611,14 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		await requireWorkspaceMember(ctx, data.assigneeId);
 	}
 
-	const { setValues, recordCompletionReport, enteringDone, gateRejectionStatement, closing } =
-		await buildUpdateSetValues(ctx, orm, data, existing);
+	const {
+		setValues,
+		recordCompletionReport,
+		enteringDone,
+		enteringClosed,
+		gateRejectionStatement,
+		closing,
+	} = await buildUpdateSetValues(ctx, orm, data, existing);
 
 	// PROJ-870: custom-field writes are validated (read) before the batch, same as before,
 	// but the upserts themselves are now built as statements and folded in below instead of
@@ -1708,18 +1725,30 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	// PROJ-961: a done-transition that reports a remainder spawns the follow-up.
 	const remainder = data.completionReport?.remainder;
-	const followUp =
-		remainder && enteringDone
-			? await createRemainderFollowUp(ctx, orm, existing, remainder)
-			: undefined;
+	let followUp: { id: string; ref: string } | undefined;
+	let followUpError: string | undefined;
+	if (remainder && enteringDone) {
+		// The issue is already saved as done by now, so a failure here (e.g. the parent lives
+		// in a project the caller can't see) is reported rather than thrown: throwing would
+		// present a committed write as failed, and a retry can't recreate the follow-up.
+		try {
+			followUp = await createRemainderFollowUp(ctx, orm, existing, remainder);
+		} catch (e) {
+			followUpError = `Issue saved as done, but the follow-up for the remainder could not be created: ${
+				e instanceof Error ? e.message : String(e)
+			}. Create it manually.`;
+		}
+	}
 
 	// PROJ-962: runs after the follow-up exists, so an open follow-up under the same epic
-	// keeps it from being reported ready (or closed) while work remains.
-	const parent = closing ? await handleLastChildClosed(ctx, orm, existing) : undefined;
+	// keeps it from being reported ready (or closed) while work remains. Only on a real
+	// transition into done/cancelled, never a re-save of an already-closed child.
+	const parent = enteringClosed ? await handleLastChildClosed(ctx, orm, existing) : undefined;
 
 	return {
 		ok: true,
 		...(followUp ? { followUp } : {}),
+		...(followUpError ? { followUpError } : {}),
 		...(parent ?? {}),
 	};
 }
@@ -1744,6 +1773,7 @@ async function handleLastChildClosed(
 			typeKey: schema.taskTypes.key,
 			projectKey: schema.projects.key,
 			epicAutoClose: schema.projects.epicAutoClose,
+			projectId: schema.issues.projectId,
 		})
 		.from(schema.issues)
 		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
@@ -1759,6 +1789,14 @@ async function handleLastChildClosed(
 		)
 		.get();
 	if (parent?.typeKey !== "epic") return undefined;
+	// The response must not reveal an epic (key + number) in a project the caller can't see,
+	// and an automatic close needs write access there like any other close would.
+	let canWrite = isWorkspaceAdmin(ctx.role);
+	if (!canWrite) {
+		const role = await effectiveProjectRole(ctx, parent.projectId);
+		if (role === null) return undefined;
+		canWrite = canWriteProject(role);
+	}
 	if (isDoneState(parent.statusCategory, parent.status)) return undefined;
 	if (isCancelledState(parent.statusCategory, parent.status)) return undefined;
 
@@ -1775,8 +1813,15 @@ async function handleLastChildClosed(
 	if (open > 0) return undefined;
 
 	const ref = `${parent.projectKey}-${parent.number}`;
-	if (!parent.epicAutoClose) return { parentReadyToClose: { ref } };
-	await updateIssue(ctx, parent.id, { status: "done" });
+	if (!parent.epicAutoClose || !canWrite) return { parentReadyToClose: { ref } };
+	try {
+		await updateIssue(ctx, parent.id, { status: "done" });
+	} catch {
+		// The child's close is already saved; a gate on the epic (e.g. a completion report
+		// required for an agent-worked issue) must not turn that into an error. Fall back to
+		// the hint so the caller can close the epic with its own report.
+		return { parentReadyToClose: { ref } };
+	}
 	return { parentClosed: { ref } };
 }
 
