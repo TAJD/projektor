@@ -11,7 +11,10 @@ export const fileClaimsTools: MCPTool[] = [
 			type: "object",
 			required: ["issueId", "paths"],
 			properties: {
-				issueId: { type: "string", description: "Issue UUID to associate the claims with" },
+				issueId: {
+					type: "string",
+					description: "Issue UUID or ref like PROJ-42, to associate the claims with",
+				},
 				agentId: {
 					type: "string",
 					description: "Agent session UUID claiming the files (optional)",
@@ -46,7 +49,8 @@ export const fileClaimsTools: MCPTool[] = [
 				},
 				issueId: {
 					type: "string",
-					description: "Restrict release to claims held by this issue (optional)",
+					description:
+						"Restrict release to claims held by this issue, UUID or ref like PROJ-42 (optional)",
 				},
 			},
 		},
@@ -66,7 +70,10 @@ export const fileClaimsTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			properties: {
-				issueId: { type: "string", description: "Filter by issue UUID (optional)" },
+				issueId: {
+					type: "string",
+					description: "Filter by issue UUID or ref like PROJ-42 (optional)",
+				},
 				path: {
 					type: "string",
 					description:

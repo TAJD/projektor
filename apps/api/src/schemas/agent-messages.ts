@@ -1,8 +1,19 @@
 import { z } from "zod";
+import { ISSUE_REF_PATTERN } from "./common";
 
-const scopeSchema = z.string().refine((v) => v === "workspace" || /^issue:[0-9a-f-]{36}$/.test(v), {
-	message: 'scope must be "workspace" or "issue:<uuid>"',
-});
+// PROJ-959: an issue channel may be addressed by UUID or by ref ("issue:PROJ-42"); the
+// service canonicalises it to the UUID form so both spellings name the same channel.
+const scopeSchema = z
+	.string()
+	.refine(
+		(v) =>
+			v === "workspace" ||
+			/^issue:[0-9a-f-]{36}$/.test(v) ||
+			(v.startsWith("issue:") && ISSUE_REF_PATTERN.test(v.slice("issue:".length))),
+		{
+			message: 'scope must be "workspace", "issue:<uuid>" or "issue:<ref like PROJ-42>"',
+		}
+	);
 
 export const PostMessageSchema = z.object({
 	scope: scopeSchema,

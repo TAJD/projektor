@@ -20,7 +20,10 @@ export const filesTools: MCPTool[] = [
 			required: ["entityType", "entityId"],
 			properties: {
 				entityType: { type: "string", enum: ["issue", "wiki_page"] },
-				entityId: { type: "string" },
+				entityId: {
+					type: "string",
+					description: "Issue UUID or ref like PROJ-42 (when entityType is issue), or wiki page id",
+				},
 			},
 		},
 		annotations: READ,
@@ -52,7 +55,10 @@ export const filesTools: MCPTool[] = [
 			properties: {
 				kind: { type: "string", enum: ["wiki_ref", "url"] },
 				entityType: { type: "string", enum: ["issue", "wiki_page"] },
-				entityId: { type: "string" },
+				entityId: {
+					type: "string",
+					description: "Issue UUID or ref like PROJ-42 (when entityType is issue), or wiki page id",
+				},
 				wikiPageId: { type: "string", description: "Required when kind is 'wiki_ref'" },
 				url: { type: "string", description: "Required when kind is 'url'" },
 				label: { type: "string", description: "Optional display label when kind is 'url'" },

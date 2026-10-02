@@ -136,8 +136,8 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `list_comments` | List comments on an issue. Returns `{items}` (see /projektor/agents/response-conventions/). | read-only |
-| `add_comment` | Add a comment to an issue | write |
+| `list_comments` | List comments on an issue (UUID or ref like PROJ-42). Returns `{items}` (see /projektor/agents/response-conventions/). | read-only |
+| `add_comment` | Add a comment to an issue (UUID or ref like PROJ-42) | write |
 | `update_comment` | Update the body of a comment (author only) | write |
 | `delete_comment` | Delete a comment (author, admin, or owner) | destructive |
 

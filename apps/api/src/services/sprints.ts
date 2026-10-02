@@ -10,6 +10,7 @@ import {
 } from "../schemas/sprints";
 import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { resolveIssueIdsParam } from "./issue-ref";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -202,7 +203,9 @@ export async function deleteSprint(ctx: ServiceCtx, id: string) {
 export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 	const result = MoveIssuesToSprintSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueIds, sprintId } = result.data;
+	const { sprintId } = result.data;
+	// PROJ-959: issueIds may mix UUIDs and refs like "PROJ-42"; everything below sees UUIDs.
+	const issueIds = await resolveIssueIdsParam(ctx, result.data.issueIds);
 
 	const orm = drizzle(ctx.db, { schema });
 	const sprint = await orm

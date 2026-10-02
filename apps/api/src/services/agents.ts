@@ -14,6 +14,7 @@ import { postMessage } from "./agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
 import { claimFiles, releaseClaimsForAgent } from "./file-claims";
 import { claimIssue, releaseLeasesForAgent } from "./issue-leases";
+import { resolveIssueIdParam, resolveOptionalIssueId } from "./issue-ref";
 import { updateIssue } from "./issues";
 import { resolveVisibleProjectIdParam } from "./projects";
 import type { ServiceCtx } from "./types";
@@ -44,7 +45,8 @@ function isApiTokenMethod(method: string): boolean {
 export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 	const result = RegisterAgentSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, name } = result.data;
+	const { name } = result.data;
+	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -110,7 +112,11 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 export async function startWork(ctx: ServiceCtx, raw: unknown) {
 	const result = StartWorkSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issue: issueId, paths, name } = result.data;
+	const { paths, name } = result.data;
+	// PROJ-959: resolve a ref up front, before a session is registered, so an unknown ref
+	// fails cleanly instead of leaving a session to compensate for. Everything below then
+	// works with the UUID (the message scope and the claims must agree on it).
+	const issueId = await resolveIssueIdParam(ctx, result.data.issue);
 
 	const session = await registerAgent(ctx, { name, issueId });
 
@@ -257,7 +263,8 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 	const result = ListActiveAgentsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, includeStale } = result.data;
+	const { includeStale } = result.data;
+	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
 	const projectId = result.data.projectId
 		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
 		: undefined;

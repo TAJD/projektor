@@ -37,7 +37,7 @@ export const agentsTools: MCPTool[] = [
 			type: "object",
 			required: ["issue", "name"],
 			properties: {
-				issue: { type: "string", description: "Issue UUID to claim" },
+				issue: { type: "string", description: "Issue UUID or ref like PROJ-42, to claim" },
 				paths: {
 					type: "array",
 					items: { type: "string" },
@@ -62,7 +62,10 @@ export const agentsTools: MCPTool[] = [
 			required: ["sessionId", "issue"],
 			properties: {
 				sessionId: { type: "string", description: "Agent session UUID to end" },
-				issue: { type: "string", description: "Issue UUID to optionally transition" },
+				issue: {
+					type: "string",
+					description: "Issue UUID or ref like PROJ-42, to optionally transition",
+				},
 				status: { type: "string", description: "New status for the issue (optional)" },
 				completionReport: {
 					type: "object",
@@ -89,7 +92,10 @@ export const agentsTools: MCPTool[] = [
 			required: ["name"],
 			properties: {
 				name: { type: "string", description: "Display name for the agent session (max 200)" },
-				issueId: { type: "string", description: "Issue UUID to link this session to (optional)" },
+				issueId: {
+					type: "string",
+					description: "Issue UUID or ref like PROJ-42, to link this session to (optional)",
+				},
 				kind: {
 					type: "string",
 					enum: ["agent", "human"],
@@ -152,7 +158,10 @@ export const agentsTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			properties: {
-				issueId: { type: "string", description: "Filter by issue UUID (optional)" },
+				issueId: {
+					type: "string",
+					description: "Filter by issue UUID or ref like PROJ-42 (optional)",
+				},
 				projectId: {
 					type: "string",
 					description:

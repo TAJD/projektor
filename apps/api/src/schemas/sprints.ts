@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IssueIdOrRefSchema } from "./common";
 
 const SprintStatusEnum = z.enum(["planned", "active", "completed"]);
 
@@ -25,6 +26,6 @@ export const UpdateSprintSchema = z
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 
 export const MoveIssuesToSprintSchema = z.object({
-	issueIds: z.array(z.string().uuid()).min(1).max(500),
+	issueIds: z.array(IssueIdOrRefSchema).min(1).max(500),
 	sprintId: z.string().uuid(),
 });

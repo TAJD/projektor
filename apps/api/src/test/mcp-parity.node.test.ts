@@ -85,7 +85,7 @@ const REST_ONLY: Record<string, string> = {
 	"oauth.ts:listConnectorGrants": "settings-only: a connector must not enumerate credentials",
 	"oauth.ts:revokeConnectorGrant": "settings-only: revoking a credential is a browser action",
 	// Misc.
-	"issues.ts:resolveIssueIdParam": "URL param coercion, not an operation",
+	"issue-ref.ts:resolveIssueIdParam": "URL param coercion, not an operation",
 	"projects.ts:getProjectBySlug": "slug routing for the browser; agents address projects by id",
 	"projects.ts:listProjectsAcrossWorkspaces":
 		"cross-workspace summary for the browser's project switcher; MCP is scoped to one workspace per endpoint",

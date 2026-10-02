@@ -8,6 +8,7 @@ import {
 import { visibleProjectPredicate } from "./access";
 import { resolveAgentSessionId } from "./agent-identity";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { resolveIssueIdParam, resolveOptionalIssueId } from "./issue-ref";
 import { resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import type { ServiceCtx } from "./types";
@@ -213,7 +214,7 @@ async function reclaimStaleLeaseOrThrow(
 export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = ClaimIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId } = result.data;
+	const issueId = await resolveIssueIdParam(ctx, result.data.issueId);
 	// PROJ-894: an omitted agentId resolves to the credential's single live session.
 	const agentId = await resolveAgentSessionId(ctx, result.data.agentId);
 
@@ -296,7 +297,8 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 export async function releaseIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = ReleaseIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, agentId } = result.data;
+	const { agentId } = result.data;
+	const issueId = await resolveIssueIdParam(ctx, result.data.issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const now = Math.floor(Date.now() / 1000);
@@ -501,7 +503,8 @@ export async function isLiveAgentSessionId(
 export async function listIssueLeases(ctx: ServiceCtx, raw: unknown) {
 	const result = ListIssueLeasesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, agentId, includeStale } = result.data;
+	const { agentId, includeStale } = result.data;
+	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
 	const projectId = result.data.projectId
 		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
 		: undefined;

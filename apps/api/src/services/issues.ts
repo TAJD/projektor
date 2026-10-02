@@ -42,6 +42,7 @@ import {
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
 import { listLinksForIssue } from "./issue-links";
+import { ISSUE_REF_PATTERN, resolveIssueIdParam } from "./issue-ref";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks, sanitizeFtsQuery } from "./sql";
@@ -457,50 +458,10 @@ async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, 
 	);
 }
 
-// Digits are bounded: parseInt("9".repeat(400)) is Infinity, which drizzle would happily
-// bind and D1 would reject as a type error — a 500 where a 404 belongs. Anything longer
-// than this isn't a ref, so it falls through to being treated as an id and 404s.
-export const ISSUE_REF_PATTERN = /^([A-Z][A-Z0-9]*)-(\d{1,9})$/;
-
-/**
- * Accept either identifier in an `:issueId` path segment.
- *
- * PROJ-438: only `GET /api/issues/:id` understood a ref, so a browser landing on
- * /projects/KEY/N/… had to resolve the UUID and only then ask for that issue's comments
- * and links — a full round trip of dead time on the critical path, per sub-resource.
- *
- * This resolves within `ctx.workspaceId` only, and answers "not found" for a ref that
- * doesn't, so it can't be used to probe for issues in another workspace.
- *
- * It does NOT check project visibility. Both current callers hand the returned id
- * straight to a service that does (PROJ-311), and duplicating the check here would be a
- * second place to get it wrong. If you add a caller, confirm that holds for yours too —
- * an id from this function is workspace-scoped and nothing more.
- */
-export async function resolveIssueIdParam(
-	ctx: ServiceCtx,
-	param: string,
-	notFoundMessage = "Issue not found"
-): Promise<string> {
-	const m = param.match(ISSUE_REF_PATTERN);
-	if (!m) return param;
-
-	const orm = drizzle(ctx.db, { schema });
-	const row = await orm
-		.select({ id: schema.issues.id })
-		.from(schema.issues)
-		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-		.where(
-			and(
-				eq(schema.projects.key, m[1]),
-				eq(schema.issues.number, parseInt(m[2], 10)),
-				eq(schema.issues.workspaceId, ctx.workspaceId)
-			)
-		)
-		.get();
-	if (!row) throw new NotFoundError(notFoundMessage);
-	return row.id;
-}
+// PROJ-959: the ref pattern and resolver moved to services/issue-ref.ts so services that
+// issues.ts itself imports (comments, leases, file claims) can resolve refs without an
+// import cycle. Re-exported here so existing callers keep their import path.
+export { ISSUE_REF_PATTERN, resolveIssueIdParam };
 
 async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, ref: string) {
 	const m = ref.match(ISSUE_REF_PATTERN);

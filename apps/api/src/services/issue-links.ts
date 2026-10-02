@@ -11,7 +11,7 @@ import {
 import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
-import { resolveIssueIdParam } from "./issues";
+import { resolveIssueIdParam } from "./issue-ref";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 

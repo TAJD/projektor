@@ -14,7 +14,7 @@ export const agentMessagesTools: MCPTool[] = [
 				scope: {
 					type: "string",
 					description:
-						'Channel scope: "workspace" for the workspace-wide channel, or "issue:<uuid>" for an issue channel',
+						'Channel scope: "workspace" for the workspace-wide channel, or "issue:<uuid>" / "issue:<ref like PROJ-42>" for an issue channel (both spellings name the same channel)',
 				},
 				agentId: {
 					type: "string",
@@ -38,7 +38,7 @@ export const agentMessagesTools: MCPTool[] = [
 			properties: {
 				scope: {
 					type: "string",
-					description: 'Channel scope: "workspace" or "issue:<uuid>"',
+					description: 'Channel scope: "workspace", "issue:<uuid>" or "issue:<ref like PROJ-42>"',
 				},
 				cursor: {
 					type: "string",
