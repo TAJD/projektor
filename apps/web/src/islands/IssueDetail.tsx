@@ -623,6 +623,7 @@ function IssueDetailView(
 						links={props.links}
 						fetchingLinks={props.fetchingLinks}
 						fetchLinks={props.fetchLinks}
+						issueStatusCategory={issue.status_category}
 					/>
 
 					<AttachmentsSection

@@ -18,7 +18,7 @@
 // measured overflow.
 import { render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AttachmentsSection, BodySection } from "./IssueDetailParts";
+import { AttachmentsSection, BodySection, RelationsSection } from "./IssueDetailParts";
 import type { Comment, IssueData } from "./issue-detail-helpers";
 
 const WIDE_TABLE_BODY = `
@@ -239,5 +239,50 @@ describe("AttachmentsSection delete (PROJ-876)", () => {
 		screen.getByLabelText(/Remove notes\.txt/).click();
 		await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Couldn't delete/));
 		expect(fetchAttachments).not.toHaveBeenCalled();
+	});
+});
+
+// PROJ-961: a done issue that spawned a follow-up reads "Partially done → PROJ-n".
+describe("RelationsSection follow-ups (PROJ-961)", () => {
+	const followedBy = {
+		id: "l1",
+		type: "followed_by" as const,
+		linkedIssueId: "i2",
+		linkedIssueTitle: "Follow-up: Issue",
+		linkedIssueNumber: 7,
+		linkedIssueProjectKey: "PROJ",
+		linkedIssueStatusCategory: "todo",
+		createdById: "u1",
+		createdAt: 0,
+	};
+
+	function renderWith(category: string | null, links = [followedBy]) {
+		render(
+			<RelationsSection
+				issueId="i1"
+				workspaceSlug="ws"
+				links={links}
+				fetchingLinks={false}
+				fetchLinks={vi.fn().mockResolvedValue(undefined)}
+				issueStatusCategory={category}
+			/>
+		);
+	}
+
+	it("labels the follow-up 'Partially done →' on a done issue", () => {
+		renderWith("done");
+		expect(screen.getByText("Partially done →")).toBeTruthy();
+		expect(screen.getByText("PROJ-7")).toBeTruthy();
+	});
+
+	it("labels it 'Followed by' while the issue is still open", () => {
+		renderWith("in_progress");
+		expect(screen.getByText("Followed by")).toBeTruthy();
+		expect(screen.queryByText("Partially done →")).toBeNull();
+	});
+
+	it("shows 'Follows from' on the follow-up itself", () => {
+		renderWith("todo", [{ ...followedBy, type: "follows_from" as never }]);
+		expect(screen.getByText("Follows from")).toBeTruthy();
 	});
 });

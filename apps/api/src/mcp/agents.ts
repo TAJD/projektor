@@ -56,7 +56,8 @@ export const agentsTools: MCPTool[] = [
 		description:
 			"Optionally transition an issue (completion-report rules apply, same as update_issue), then " +
 			"release every claim/lease the session holds and end it — replaces update_issue + " +
-			"release_issue + release_files + end_agent.",
+			"release_issue + release_files + end_agent. completionReport.remainder on a done transition " +
+			"creates a linked follow-up issue; its ref comes back as followUp.ref.",
 		inputSchema: {
 			type: "object",
 			required: ["sessionId", "issue"],
@@ -75,6 +76,13 @@ export const agentsTools: MCPTool[] = [
 						summary: { type: "string" },
 						verification: { type: "string" },
 						prLink: { type: "string" },
+						remainder: {
+							type: "string",
+							description:
+								"What is NOT done. When the issue is marked done, a follow-up issue is created " +
+								"under the same parent with the same labels, linked follows_from this one; its " +
+								"ref is returned as followUp.ref",
+						},
 					},
 				},
 			},

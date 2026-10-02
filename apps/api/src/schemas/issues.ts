@@ -28,6 +28,9 @@ export const CompletionReportSchema = z.object({
 		.string()
 		.transform((val) => (z.string().url().safeParse(val).success ? val : undefined))
 		.optional(),
+	// PROJ-961: what is NOT done. When the issue is marked done, a follow-up issue
+	// (same parent, same labels, linked follows_from) is created carrying this text.
+	remainder: z.string().trim().min(1).max(20000).optional(),
 });
 
 export const UpdateIssueSchema = z
@@ -145,8 +148,24 @@ export const SearchIssuesInputSchema = z
 	})
 	.strict();
 
-export const LinkTypeInputEnum = z.enum(["blocks", "blocked_by", "relates_to", "duplicates"]);
-export const LinkTypeStoredEnum = z.enum(["blocks", "relates_to", "duplicates"]);
+export const LinkTypeInputEnum = z.enum([
+	"blocks",
+	"blocked_by",
+	"relates_to",
+	"duplicates",
+	"follows_from",
+]);
+export const LinkTypeStoredEnum = z.enum(["blocks", "relates_to", "duplicates", "follows_from"]);
+// PROJ-961: what list_issue_links reports from the viewing issue's side; "followed_by" is the
+// inverse of follows_from and is output-only.
+export const LinkTypeEffectiveEnum = z.enum([
+	"blocks",
+	"blocked_by",
+	"relates_to",
+	"duplicates",
+	"follows_from",
+	"followed_by",
+]);
 
 export const CreateIssueLinkSchema = z
 	.object({

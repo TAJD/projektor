@@ -325,7 +325,9 @@ export const issuesTools: MCPTool[] = [
 			"pass agentSessionId to identify yourself as an agent; entering in_review as " +
 			"an agent requires completionReport. Agents CAN transition directly to done (no human " +
 			"approval gate) — but if the completionReport.verification isn't externally checkable (no " +
-			"CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review.",
+			"CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. " +
+			"If the work is only partly done, pass completionReport.remainder when marking done: a follow-up " +
+			"issue (same parent and labels, linked follows_from) is created and its ref returned as followUp.ref.",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
@@ -364,6 +366,13 @@ export const issuesTools: MCPTool[] = [
 						summary: { type: "string" },
 						verification: { type: "string" },
 						prLink: { type: "string" },
+						remainder: {
+							type: "string",
+							description:
+								"What is NOT done. When the issue is marked done, a follow-up issue is created " +
+								"under the same parent with the same labels, linked follows_from this one; its " +
+								"ref is returned as followUp.ref",
+						},
 					},
 				},
 			},

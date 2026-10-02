@@ -41,7 +41,7 @@ import {
 	issueHasLiveAgentLease,
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
-import { listLinksForIssue } from "./issue-links";
+import { createLink, listLinksForIssue } from "./issue-links";
 import { ISSUE_REF_PATTERN, resolveIssueIdParam } from "./issue-ref";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
@@ -1261,6 +1261,7 @@ async function applyStatusFields(
 ): Promise<{
 	setValues: SetValues;
 	reviewOrDoneTransition: boolean;
+	enteringDone: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
 	// PROJ-928: resolved to done/cancelled by category OR legacy key — a workspace with
 	// no custom task_statuses row backing this key has category === null (see
@@ -1271,6 +1272,7 @@ async function applyStatusFields(
 		return {
 			setValues: {},
 			reviewOrDoneTransition: false,
+			enteringDone: false,
 			gateRejectionStatement: null,
 			closing: false,
 		};
@@ -1339,6 +1341,7 @@ async function applyStatusFields(
 	return {
 		setValues,
 		reviewOrDoneTransition: transition.enteringInReview || transition.enteringDone,
+		enteringDone: transition.enteringDone,
 		gateRejectionStatement,
 		closing:
 			isDoneState(newStatusCategory, resolvedStatusKey) ||
@@ -1377,6 +1380,7 @@ function formatCompletionReportComment(
 		summary: string;
 		verification: string;
 		prLink?: string;
+		remainder?: string;
 	}>
 ): string {
 	const lines = [
@@ -1387,6 +1391,7 @@ function formatCompletionReportComment(
 		`**Verification:** ${report.verification}`,
 	];
 	if (report.prLink) lines.push("", `**PR:** ${report.prLink}`);
+	if (report.remainder) lines.push("", `**Remainder (not done):** ${report.remainder}`);
 	return lines.join("\n");
 }
 
@@ -1436,6 +1441,7 @@ async function buildUpdateSetValues(
 ): Promise<{
 	setValues: SetValues;
 	recordCompletionReport: boolean;
+	enteringDone: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
 	closing: boolean;
 }> {
@@ -1458,6 +1464,7 @@ async function buildUpdateSetValues(
 	return {
 		setValues,
 		recordCompletionReport,
+		enteringDone: statusFields.enteringDone,
 		gateRejectionStatement: statusFields.gateRejectionStatement,
 		closing: statusFields.closing,
 	};
@@ -1593,7 +1600,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		await requireWorkspaceMember(ctx, data.assigneeId);
 	}
 
-	const { setValues, recordCompletionReport, gateRejectionStatement, closing } =
+	const { setValues, recordCompletionReport, enteringDone, gateRejectionStatement, closing } =
 		await buildUpdateSetValues(ctx, orm, data, existing);
 
 	// PROJ-870: custom-field writes are validated (read) before the batch, same as before,
@@ -1699,7 +1706,50 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		data: { id, updates: data },
 	});
 
+	// PROJ-961: a done-transition that reports a remainder spawns the follow-up.
+	const remainder = data.completionReport?.remainder;
+	if (remainder && enteringDone) {
+		const followUp = await createRemainderFollowUp(ctx, orm, existing, remainder);
+		return { ok: true, followUp };
+	}
+
 	return { ok: true };
+}
+
+// PROJ-961: the work an agent reports as not done becomes its own issue — same parent
+// (so it stays under the epic) and labels, linked follows_from the original — instead of
+// living in a comment nobody triages. Runs after the update batch: only a real transition
+// to done reaches it, so a retried done-update can't create a second follow-up.
+async function createRemainderFollowUp(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	existing: ExistingIssue & { projectId: string },
+	remainder: string
+): Promise<{ id: string; ref: string }> {
+	const row = await orm
+		.select({
+			labels: schema.issues.labels,
+			number: schema.issues.number,
+			projectKey: schema.projects.key,
+		})
+		.from(schema.issues)
+		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+		.where(and(eq(schema.issues.id, existing.id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+		.get();
+	const originalRef = row ? `${row.projectKey}-${row.number}` : existing.id;
+	const created = await createIssue(ctx, {
+		projectId: existing.projectId,
+		title: `Follow-up: ${existing.title}`.slice(0, 500),
+		body: `Remainder from ${originalRef} (marked done):\n\n${remainder}`,
+		labels: Array.isArray(row?.labels) ? row.labels : [],
+		...(existing.parentId ? { parentId: existing.parentId } : {}),
+	});
+	await createLink(ctx, {
+		sourceIssueId: created.id,
+		targetIssueId: existing.id,
+		type: "follows_from",
+	});
+	return { id: created.id, ref: `${row?.projectKey ?? ""}-${created.number}` };
 }
 
 export async function deleteIssue(ctx: ServiceCtx, rawId: string) {

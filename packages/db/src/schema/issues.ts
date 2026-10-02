@@ -192,7 +192,7 @@ export const issueLinks = sqliteTable(
 		targetIssueId: text("target_issue_id")
 			.notNull()
 			.references(() => issues.id, { onDelete: "cascade" }),
-		type: text("type", { enum: ["blocks", "relates_to", "duplicates"] }).notNull(),
+		type: text("type", { enum: ["blocks", "relates_to", "duplicates", "follows_from"] }).notNull(),
 		createdById: text("created_by_id")
 			.notNull()
 			.references(() => users.id),

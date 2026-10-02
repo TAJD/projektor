@@ -7,7 +7,8 @@ export const issueLinksTools: MCPTool[] = [
 	{
 		name: "create_issue_link",
 		description:
-			"Create a typed link between two issues (blocks, blocked_by, relates_to, duplicates)",
+			"Create a typed link between two issues (blocks, blocked_by, relates_to, duplicates, follows_from). " +
+			"follows_from: the source is a follow-up that continues the target (list_issue_links reports the inverse as followed_by)",
 		inputSchema: {
 			type: "object",
 			required: ["sourceIssueId", "targetIssueId", "type"],
@@ -22,7 +23,7 @@ export const issueLinksTools: MCPTool[] = [
 				},
 				type: {
 					type: "string",
-					enum: ["blocks", "blocked_by", "relates_to", "duplicates"],
+					enum: ["blocks", "blocked_by", "relates_to", "duplicates", "follows_from"],
 					description: "Relationship type from the source issue's perspective",
 				},
 			},

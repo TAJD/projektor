@@ -239,8 +239,9 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 	// "Issue not found" rather than being silently ignored.
 	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issue);
 
+	let followUp: { id: string; ref: string } | undefined;
 	if (status !== undefined || completionReport !== undefined) {
-		await updateIssue(ctx, issueId, {
+		const updated = await updateIssue(ctx, issueId, {
 			...(status !== undefined ? { status } : {}),
 			...(completionReport !== undefined ? { completionReport } : {}),
 			// Attributes the transition to this session for the PROJ-375 audit flag and
@@ -248,9 +249,12 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 			// agentSessionId on a plain update_issue already does.
 			agentSessionId: sessionId,
 		});
+		// PROJ-961: completionReport.remainder on a done transition spawns a follow-up issue.
+		followUp = updated.followUp;
 	}
 
-	return endAgent(ctx, { id: sessionId });
+	const ended = await endAgent(ctx, { id: sessionId });
+	return followUp ? { ...ended, followUp } : ended;
 }
 
 /**
