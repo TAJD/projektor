@@ -138,7 +138,7 @@ export const sprintsTools: MCPTool[] = [
 				issueIds: {
 					type: "array",
 					items: { type: "string" },
-					description: "Issue UUIDs to move (max 500)",
+					description: "Issue UUIDs or refs like PROJ-42, may be mixed (max 500)",
 				},
 			},
 		},

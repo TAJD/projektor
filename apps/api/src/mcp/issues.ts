@@ -115,6 +115,19 @@ export const issuesTools: MCPTool[] = [
 					description: "Comma-separated task type IDs to exclude (e.g. the epic type)",
 				},
 				sprintId: { type: "string", description: "Filter by sprint ID" },
+				labels: {
+					type: "array",
+					items: { type: "string" },
+					description:
+						"Only issues carrying these labels (exact match, case-sensitive; max 20). All of them " +
+						'by default — set labelsMode:"any" for at least one. Paginates like any other filter.',
+				},
+				labelsMode: {
+					type: "string",
+					enum: ["all", "any"],
+					default: "all",
+					description: "How `labels` combine: all (default) or any",
+				},
 				cfKey: { type: "string", description: "Custom field key to filter by" },
 				cfOp: {
 					type: "string",
@@ -312,7 +325,9 @@ export const issuesTools: MCPTool[] = [
 			"pass agentSessionId to identify yourself as an agent; entering in_review as " +
 			"an agent requires completionReport. Agents CAN transition directly to done (no human " +
 			"approval gate) — but if the completionReport.verification isn't externally checkable (no " +
-			"CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review.",
+			"CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. " +
+			"If the work is only partly done, pass completionReport.remainder when marking done: a follow-up " +
+			"issue (same parent and labels, linked follows_from) is created and its ref returned as followUp.ref.",
 		inputSchema: {
 			type: "object",
 			required: ["id"],
@@ -351,6 +366,13 @@ export const issuesTools: MCPTool[] = [
 						summary: { type: "string" },
 						verification: { type: "string" },
 						prLink: { type: "string" },
+						remainder: {
+							type: "string",
+							description:
+								"What is NOT done. Only acted on in the call that moves the issue to done (ignored for in_review/other updates; it is still recorded in the report comment). When it is, a follow-up issue is created " +
+								"under the same parent with the same labels, linked follows_from this one; its " +
+								"ref is returned as followUp.ref",
+						},
 					},
 				},
 			},
@@ -366,7 +388,11 @@ export const issuesTools: MCPTool[] = [
 	},
 	{
 		name: "search_issues",
-		description: "Search issues by keyword in title or body",
+		description:
+			"Search issues by keyword in title or body, or by exact label text (an issue whose label " +
+			"equals the whole query is a hit, listed first; case-insensitive for ASCII only). Pass `labels` to narrow keyword hits to " +
+			"issues carrying those labels. To list every issue with a label — with pagination — use " +
+			"list_issues with `labels` instead; search returns at most 50.",
 		inputSchema: {
 			type: "object",
 			required: ["query"],
@@ -375,6 +401,19 @@ export const issuesTools: MCPTool[] = [
 				projectId: {
 					type: "string",
 					description: "Restrict search to a specific project — UUID or project key like PROJ",
+				},
+				labels: {
+					type: "array",
+					items: { type: "string" },
+					description:
+						"Only issues carrying these labels (exact match, case-sensitive; max 20). All of them " +
+						'by default — set labelsMode:"any" for at least one.',
+				},
+				labelsMode: {
+					type: "string",
+					enum: ["all", "any"],
+					default: "all",
+					description: "How `labels` combine: all (default) or any",
 				},
 				limit: { type: "number", default: 20, description: "Max 50" },
 			},

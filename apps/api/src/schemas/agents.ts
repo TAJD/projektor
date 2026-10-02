@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { BooleanQueryParam, StatusEnum } from "./common";
+import { BooleanQueryParam, IssueIdOrRefSchema, StatusEnum } from "./common";
 import { CompletionReportSchema } from "./issues";
 
 export const RegisterAgentSchema = z.object({
-	issueId: z.string().uuid().optional(),
+	issueId: IssueIdOrRefSchema.optional(),
 	name: z.string().min(1).max(200),
 	// PROJ-336: deprecated — accepted for MCP client compatibility but ignored by
 	// the service (see services/agents.ts). It was the original spoofable
@@ -25,7 +25,7 @@ export const EndAgentSchema = z.object({
 // resolves its projectId filter. includeStale widens the default live-only filter to
 // every session in the workspace, including ended/stale ones.
 export const ListActiveAgentsSchema = z.object({
-	issueId: z.string().uuid().optional(),
+	issueId: IssueIdOrRefSchema.optional(),
 	projectId: z.string().optional(),
 	includeStale: BooleanQueryParam.optional(),
 });
@@ -34,7 +34,7 @@ export const ListActiveAgentsSchema = z.object({
 // `issue` (not `issueId`) and `name` match the AC's literal parameter names.
 export const StartWorkSchema = z
 	.object({
-		issue: z.string().uuid(),
+		issue: IssueIdOrRefSchema,
 		paths: z.array(z.string().min(1).max(400)).max(100).optional(),
 		name: z.string().min(1).max(200),
 	})
@@ -46,7 +46,7 @@ export const StartWorkSchema = z
 export const FinishWorkSchema = z
 	.object({
 		sessionId: z.string().uuid(),
-		issue: z.string().uuid(),
+		issue: IssueIdOrRefSchema,
 		completionReport: CompletionReportSchema.optional(),
 		status: StatusEnum.optional(),
 	})

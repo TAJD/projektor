@@ -2,6 +2,7 @@ import { drizzle, schema } from "@projektor/db";
 import { and, asc, eq, gt, sql } from "drizzle-orm";
 import { ListMessagesSchema, PostMessageSchema } from "../schemas/agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
+import { resolveMessageScope } from "./issue-ref";
 import type { ServiceCtx } from "./types";
 
 // PROJ-929: mirrors ACTIVE_TTL in services/agents.ts (and SESSION_TTL_SECONDS in
@@ -78,7 +79,10 @@ export function buildPostMessageStatements(
 export async function postMessage(ctx: ServiceCtx, raw: unknown) {
 	const result = PostMessageSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { scope, agentId, body } = result.data;
+	const { agentId, body } = result.data;
+	// PROJ-959: "issue:PROJ-42" is stored (and read) as "issue:<uuid>", so a ref and a UUID
+	// name the same channel.
+	const scope = await resolveMessageScope(ctx, result.data.scope);
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -138,7 +142,8 @@ export async function postMessage(ctx: ServiceCtx, raw: unknown) {
 export async function listMessages(ctx: ServiceCtx, raw: unknown) {
 	const result = ListMessagesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { scope, cursor, limit } = result.data;
+	const { cursor, limit } = result.data;
+	const scope = await resolveMessageScope(ctx, result.data.scope, { lenient: true });
 
 	const orm = drizzle(ctx.db, { schema });
 

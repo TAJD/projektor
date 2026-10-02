@@ -4,7 +4,7 @@ export type { CustomFieldValue, TaskStatus };
 
 export interface IssueLink {
 	id: string;
-	type: "blocks" | "blocked_by" | "relates_to" | "duplicates";
+	type: "blocks" | "blocked_by" | "relates_to" | "duplicates" | "follows_from" | "followed_by";
 	linkedIssueId: string;
 	linkedIssueTitle: string;
 	linkedIssueNumber: number;
@@ -83,6 +83,8 @@ export const LINK_TYPE_LABELS: Record<string, string> = {
 	blocked_by: "Blocked by",
 	relates_to: "Relates to",
 	duplicates: "Duplicates",
+	follows_from: "Follows from",
+	followed_by: "Followed by",
 };
 
 export const LINK_TYPE_OPTIONS = [
@@ -90,6 +92,7 @@ export const LINK_TYPE_OPTIONS = [
 	{ value: "blocks", label: "Blocks" },
 	{ value: "blocked_by", label: "Blocked by" },
 	{ value: "duplicates", label: "Duplicates" },
+	{ value: "follows_from", label: "Follows from" },
 ];
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

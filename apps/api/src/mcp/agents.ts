@@ -37,7 +37,7 @@ export const agentsTools: MCPTool[] = [
 			type: "object",
 			required: ["issue", "name"],
 			properties: {
-				issue: { type: "string", description: "Issue UUID to claim" },
+				issue: { type: "string", description: "Issue UUID or ref like PROJ-42, to claim" },
 				paths: {
 					type: "array",
 					items: { type: "string" },
@@ -56,13 +56,17 @@ export const agentsTools: MCPTool[] = [
 		description:
 			"Optionally transition an issue (completion-report rules apply, same as update_issue), then " +
 			"release every claim/lease the session holds and end it — replaces update_issue + " +
-			"release_issue + release_files + end_agent.",
+			"release_issue + release_files + end_agent. completionReport.remainder on a done transition " +
+			"creates a linked follow-up issue; its ref comes back as followUp.ref.",
 		inputSchema: {
 			type: "object",
 			required: ["sessionId", "issue"],
 			properties: {
 				sessionId: { type: "string", description: "Agent session UUID to end" },
-				issue: { type: "string", description: "Issue UUID to optionally transition" },
+				issue: {
+					type: "string",
+					description: "Issue UUID or ref like PROJ-42, to optionally transition",
+				},
 				status: { type: "string", description: "New status for the issue (optional)" },
 				completionReport: {
 					type: "object",
@@ -72,6 +76,13 @@ export const agentsTools: MCPTool[] = [
 						summary: { type: "string" },
 						verification: { type: "string" },
 						prLink: { type: "string" },
+						remainder: {
+							type: "string",
+							description:
+								"What is NOT done. Only acted on in the call that moves the issue to done (ignored for in_review/other updates; it is still recorded in the report comment). When it is, a follow-up issue is created " +
+								"under the same parent with the same labels, linked follows_from this one; its " +
+								"ref is returned as followUp.ref",
+						},
 					},
 				},
 			},
@@ -89,7 +100,10 @@ export const agentsTools: MCPTool[] = [
 			required: ["name"],
 			properties: {
 				name: { type: "string", description: "Display name for the agent session (max 200)" },
-				issueId: { type: "string", description: "Issue UUID to link this session to (optional)" },
+				issueId: {
+					type: "string",
+					description: "Issue UUID or ref like PROJ-42, to link this session to (optional)",
+				},
 				kind: {
 					type: "string",
 					enum: ["agent", "human"],
@@ -152,7 +166,10 @@ export const agentsTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			properties: {
-				issueId: { type: "string", description: "Filter by issue UUID (optional)" },
+				issueId: {
+					type: "string",
+					description: "Filter by issue UUID or ref like PROJ-42 (optional)",
+				},
 				projectId: {
 					type: "string",
 					description:

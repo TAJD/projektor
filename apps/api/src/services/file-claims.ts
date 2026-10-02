@@ -5,6 +5,7 @@ import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../s
 import { visibleProjectPredicate } from "./access";
 import { buildPostMessageStatements } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
+import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
 import { resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks } from "./sql";
@@ -274,7 +275,8 @@ function buildClaimInsertStatements(
 export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	const result = ClaimFilesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, agentId, force } = result.data;
+	const { agentId, force } = result.data;
+	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issueId);
 	// A path listed twice would insert two active claims on it in one batch, which the
 	// active-claim unique index rejects (rolling the whole batch back). Claim it once,
 	// keeping the caller's order.
@@ -438,7 +440,8 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	const result = ReleaseFilesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { paths, issueId } = result.data;
+	const { paths } = result.data;
+	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const now = Math.floor(Date.now() / 1000);
@@ -531,7 +534,8 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	const result = ListFileClaimsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, path, includeStale } = result.data;
+	const { path, includeStale } = result.data;
+	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
 	const projectId = result.data.projectId
 		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
 		: undefined;

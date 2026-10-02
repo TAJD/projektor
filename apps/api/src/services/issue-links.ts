@@ -4,14 +4,14 @@ import type { z } from "zod";
 import {
 	CreateIssueLinkSchema,
 	DeleteIssueLinkSchema,
-	type LinkTypeInputEnum,
+	type LinkTypeEffectiveEnum,
 	type LinkTypeStoredEnum,
 	ListIssueLinksSchema,
 } from "../schemas/issues";
 import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
-import { resolveIssueIdParam } from "./issues";
+import { resolveIssueIdParam } from "./issue-ref";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -29,7 +29,7 @@ async function requireIssueProjectWrite(
 }
 
 type StoredLinkType = z.infer<typeof LinkTypeStoredEnum>;
-type EffectiveLinkType = z.infer<typeof LinkTypeInputEnum>;
+type EffectiveLinkType = z.infer<typeof LinkTypeEffectiveEnum>;
 
 interface LinkRow {
 	id: string;
@@ -245,6 +245,7 @@ export async function listLinksForIssue(ctx: ServiceCtx, raw: unknown) {
 		} else {
 			linkedIssueId = row.sourceIssueId;
 			if (row.type === "blocks") effectiveType = "blocked_by";
+			else if (row.type === "follows_from") effectiveType = "followed_by";
 		}
 
 		return {

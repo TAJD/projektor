@@ -41,7 +41,8 @@ import {
 	issueHasLiveAgentLease,
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
-import { listLinksForIssue } from "./issue-links";
+import { createLink, listLinksForIssue } from "./issue-links";
+import { ISSUE_REF_PATTERN, resolveIssueIdParam } from "./issue-ref";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks, sanitizeFtsQuery } from "./sql";
@@ -130,6 +131,60 @@ async function validateParent(
 }
 
 type ListIssuesFilters = z.infer<typeof ListIssuesSchema>;
+
+// PROJ-960: `issues.labels` is a JSON array string. json_each() raises on malformed JSON,
+// which would turn one bad row into a 500 for the whole list, so a non-JSON value reads as
+// an empty label set instead (the column is only ever written via JSON.stringify, so this
+// is insurance, not an expected path). Labels match exactly — they're tags, not text.
+const labelsJsonSql = (col: string) =>
+	`CASE WHEN json_valid(${col}) THEN CASE WHEN json_type(${col}) = 'array' THEN ${col} ELSE '[]' END ELSE '[]' END` as const;
+
+// Mirrors the per-label cap in schemas/issues.ts (z.string().max(50)).
+const MAX_LABEL_LENGTH = 50;
+
+type LabelFilter = Readonly<{ labels?: string[]; labelsMode?: "all" | "any" }>;
+
+/**
+ * Raw-SQL form of the label filter, for the hand-written FTS query in searchIssues. `col`
+ * is the (already table-qualified) labels column. All-of means one EXISTS per label, so
+ * every label must be present; "any" is a single EXISTS over an IN list. At most 20 labels
+ * (schema cap), well under D1's 100-parameter limit.
+ */
+function labelFilterSql(col: string, filter: LabelFilter): { sql: string; params: string[] } {
+	const labels = [...new Set(filter.labels ?? [])];
+	if (labels.length === 0) return { sql: "", params: [] };
+	const json = labelsJsonSql(col);
+	if (filter.labelsMode === "any") {
+		return {
+			sql: ` AND EXISTS (SELECT 1 FROM json_each(${json}) WHERE value IN (${labels.map(() => "?").join(", ")}))`,
+			params: labels,
+		};
+	}
+	return {
+		sql: labels
+			.map(() => ` AND EXISTS (SELECT 1 FROM json_each(${json}) WHERE value = ?)`)
+			.join(""),
+		params: labels,
+	};
+}
+
+function addLabelFilter(conditions: Condition[], filters: LabelFilter): void {
+	const labels = [...new Set(filters.labels ?? [])];
+	if (labels.length === 0) return;
+	const json = sql.raw(labelsJsonSql('"issues"."labels"'));
+	if (filters.labelsMode === "any") {
+		conditions.push(
+			sql`EXISTS (SELECT 1 FROM json_each(${json}) WHERE value IN (${sql.join(
+				labels.map((l) => sql`${l}`),
+				sql`, `
+			)}))`
+		);
+		return;
+	}
+	for (const label of labels) {
+		conditions.push(sql`EXISTS (SELECT 1 FROM json_each(${json}) WHERE value = ${label})`);
+	}
+}
 
 function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): void {
 	const { status, statusId, statusIds, category, priority, priorities } = filters;
@@ -257,6 +312,7 @@ async function buildListIssuesConditions(
 	if (visible) conditions.push(visible);
 	addStatusFilters(conditions, filters);
 	addAssociationFilters(conditions, ctx, filters);
+	addLabelFilter(conditions, filters);
 	await addCustomFieldFilter(orm, ctx, conditions, filters);
 	addDateRangeFilters(conditions, filters);
 	return conditions;
@@ -457,50 +513,10 @@ async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, 
 	);
 }
 
-// Digits are bounded: parseInt("9".repeat(400)) is Infinity, which drizzle would happily
-// bind and D1 would reject as a type error — a 500 where a 404 belongs. Anything longer
-// than this isn't a ref, so it falls through to being treated as an id and 404s.
-export const ISSUE_REF_PATTERN = /^([A-Z][A-Z0-9]*)-(\d{1,9})$/;
-
-/**
- * Accept either identifier in an `:issueId` path segment.
- *
- * PROJ-438: only `GET /api/issues/:id` understood a ref, so a browser landing on
- * /projects/KEY/N/… had to resolve the UUID and only then ask for that issue's comments
- * and links — a full round trip of dead time on the critical path, per sub-resource.
- *
- * This resolves within `ctx.workspaceId` only, and answers "not found" for a ref that
- * doesn't, so it can't be used to probe for issues in another workspace.
- *
- * It does NOT check project visibility. Both current callers hand the returned id
- * straight to a service that does (PROJ-311), and duplicating the check here would be a
- * second place to get it wrong. If you add a caller, confirm that holds for yours too —
- * an id from this function is workspace-scoped and nothing more.
- */
-export async function resolveIssueIdParam(
-	ctx: ServiceCtx,
-	param: string,
-	notFoundMessage = "Issue not found"
-): Promise<string> {
-	const m = param.match(ISSUE_REF_PATTERN);
-	if (!m) return param;
-
-	const orm = drizzle(ctx.db, { schema });
-	const row = await orm
-		.select({ id: schema.issues.id })
-		.from(schema.issues)
-		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-		.where(
-			and(
-				eq(schema.projects.key, m[1]),
-				eq(schema.issues.number, parseInt(m[2], 10)),
-				eq(schema.issues.workspaceId, ctx.workspaceId)
-			)
-		)
-		.get();
-	if (!row) throw new NotFoundError(notFoundMessage);
-	return row.id;
-}
+// PROJ-959: the ref pattern and resolver moved to services/issue-ref.ts so services that
+// issues.ts itself imports (comments, leases, file claims) can resolve refs without an
+// import cycle. Re-exported here so existing callers keep their import path.
+export { ISSUE_REF_PATTERN, resolveIssueIdParam };
 
 async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, ref: string) {
 	const m = ref.match(ISSUE_REF_PATTERN);
@@ -1245,6 +1261,10 @@ async function applyStatusFields(
 ): Promise<{
 	setValues: SetValues;
 	reviewOrDoneTransition: boolean;
+	enteringDone: boolean;
+	// PROJ-962: closed (done/cancelled) now and not before — unlike `closing`, a re-save of an
+	// already-closed issue doesn't count, so it can't re-trigger the parent-epic check.
+	enteringClosed: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
 	// PROJ-928: resolved to done/cancelled by category OR legacy key — a workspace with
 	// no custom task_statuses row backing this key has category === null (see
@@ -1255,6 +1275,8 @@ async function applyStatusFields(
 		return {
 			setValues: {},
 			reviewOrDoneTransition: false,
+			enteringDone: false,
+			enteringClosed: false,
 			gateRejectionStatement: null,
 			closing: false,
 		};
@@ -1323,6 +1345,12 @@ async function applyStatusFields(
 	return {
 		setValues,
 		reviewOrDoneTransition: transition.enteringInReview || transition.enteringDone,
+		enteringDone: transition.enteringDone,
+		enteringClosed:
+			(isDoneState(newStatusCategory, resolvedStatusKey) ||
+				isCancelledState(newStatusCategory, resolvedStatusKey)) &&
+			!isDoneState(existing.statusCategory, existing.status) &&
+			!isCancelledState(existing.statusCategory, existing.status),
 		gateRejectionStatement,
 		closing:
 			isDoneState(newStatusCategory, resolvedStatusKey) ||
@@ -1361,6 +1389,7 @@ function formatCompletionReportComment(
 		summary: string;
 		verification: string;
 		prLink?: string;
+		remainder?: string;
 	}>
 ): string {
 	const lines = [
@@ -1371,6 +1400,7 @@ function formatCompletionReportComment(
 		`**Verification:** ${report.verification}`,
 	];
 	if (report.prLink) lines.push("", `**PR:** ${report.prLink}`);
+	if (report.remainder) lines.push("", `**Remainder (not done):** ${report.remainder}`);
 	return lines.join("\n");
 }
 
@@ -1420,6 +1450,8 @@ async function buildUpdateSetValues(
 ): Promise<{
 	setValues: SetValues;
 	recordCompletionReport: boolean;
+	enteringDone: boolean;
+	enteringClosed: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
 	closing: boolean;
 }> {
@@ -1442,6 +1474,8 @@ async function buildUpdateSetValues(
 	return {
 		setValues,
 		recordCompletionReport,
+		enteringDone: statusFields.enteringDone,
+		enteringClosed: statusFields.enteringClosed,
 		gateRejectionStatement: statusFields.gateRejectionStatement,
 		closing: statusFields.closing,
 	};
@@ -1577,8 +1611,14 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		await requireWorkspaceMember(ctx, data.assigneeId);
 	}
 
-	const { setValues, recordCompletionReport, gateRejectionStatement, closing } =
-		await buildUpdateSetValues(ctx, orm, data, existing);
+	const {
+		setValues,
+		recordCompletionReport,
+		enteringDone,
+		enteringClosed,
+		gateRejectionStatement,
+		closing,
+	} = await buildUpdateSetValues(ctx, orm, data, existing);
 
 	// PROJ-870: custom-field writes are validated (read) before the batch, same as before,
 	// but the upserts themselves are now built as statements and folded in below instead of
@@ -1683,7 +1723,142 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		data: { id, updates: data },
 	});
 
-	return { ok: true };
+	// PROJ-961: a done-transition that reports a remainder spawns the follow-up.
+	const remainder = data.completionReport?.remainder;
+	let followUp: { id: string; ref: string } | undefined;
+	let followUpError: string | undefined;
+	if (remainder && enteringDone) {
+		// The issue is already saved as done by now, so a failure here (e.g. the parent lives
+		// in a project the caller can't see) is reported rather than thrown: throwing would
+		// present a committed write as failed, and a retry can't recreate the follow-up.
+		try {
+			followUp = await createRemainderFollowUp(ctx, orm, existing, remainder);
+		} catch (e) {
+			followUpError = `Issue saved as done, but the follow-up for the remainder could not be created: ${
+				e instanceof Error ? e.message : String(e)
+			}. Create it manually.`;
+		}
+	}
+
+	// PROJ-962: runs after the follow-up exists, so an open follow-up under the same epic
+	// keeps it from being reported ready (or closed) while work remains. Only on a real
+	// transition into done/cancelled, never a re-save of an already-closed child.
+	const parent = enteringClosed ? await handleLastChildClosed(ctx, orm, existing) : undefined;
+
+	return {
+		ok: true,
+		...(followUp ? { followUp } : {}),
+		...(followUpError ? { followUpError } : {}),
+		...(parent ?? {}),
+	};
+}
+
+// PROJ-962: when the last open child of an epic is done/cancelled, either close the epic
+// (project.epicAutoClose) or tell the caller it is ready: `parentReadyToClose:{ref}` is the
+// default so a human/agent still decides; `parentClosed:{ref}` reports an automatic close.
+async function handleLastChildClosed(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	existing: ExistingIssue & { projectId: string }
+): Promise<
+	{ parentReadyToClose: { ref: string } } | { parentClosed: { ref: string } } | undefined
+> {
+	if (!existing.parentId) return undefined;
+	const parent = await orm
+		.select({
+			id: schema.issues.id,
+			number: schema.issues.number,
+			status: schema.issues.status,
+			statusCategory: schema.issues.statusCategory,
+			typeKey: schema.taskTypes.key,
+			projectKey: schema.projects.key,
+			epicAutoClose: schema.projects.epicAutoClose,
+			projectId: schema.issues.projectId,
+		})
+		.from(schema.issues)
+		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+		.leftJoin(
+			schema.taskTypes,
+			and(
+				eq(schema.taskTypes.id, schema.issues.typeId),
+				eq(schema.taskTypes.workspaceId, ctx.workspaceId)
+			)
+		)
+		.where(
+			and(eq(schema.issues.id, existing.parentId), eq(schema.issues.workspaceId, ctx.workspaceId))
+		)
+		.get();
+	if (parent?.typeKey !== "epic") return undefined;
+	// The response must not reveal an epic (key + number) in a project the caller can't see,
+	// and an automatic close needs write access there like any other close would.
+	let canWrite = isWorkspaceAdmin(ctx.role);
+	if (!canWrite) {
+		const role = await effectiveProjectRole(ctx, parent.projectId);
+		if (role === null) return undefined;
+		canWrite = canWriteProject(role);
+	}
+	if (isDoneState(parent.statusCategory, parent.status)) return undefined;
+	if (isCancelledState(parent.statusCategory, parent.status)) return undefined;
+
+	// Open = neither done nor cancelled, by category or by legacy key (see isDoneState).
+	const open = await orm.$count(
+		schema.issues,
+		and(
+			eq(schema.issues.parentId, parent.id),
+			eq(schema.issues.workspaceId, ctx.workspaceId),
+			notInArray(schema.issues.statusCategory, ["done", "cancelled"]),
+			notInArray(schema.issues.status, ["done", "cancelled"])
+		)
+	);
+	if (open > 0) return undefined;
+
+	const ref = `${parent.projectKey}-${parent.number}`;
+	if (!parent.epicAutoClose || !canWrite) return { parentReadyToClose: { ref } };
+	try {
+		await updateIssue(ctx, parent.id, { status: "done" });
+	} catch {
+		// The child's close is already saved; a gate on the epic (e.g. a completion report
+		// required for an agent-worked issue) must not turn that into an error. Fall back to
+		// the hint so the caller can close the epic with its own report.
+		return { parentReadyToClose: { ref } };
+	}
+	return { parentClosed: { ref } };
+}
+
+// PROJ-961: the work an agent reports as not done becomes its own issue — same parent
+// (so it stays under the epic) and labels, linked follows_from the original — instead of
+// living in a comment nobody triages. Runs after the update batch: only a real transition
+// to done reaches it, so a retried done-update can't create a second follow-up.
+async function createRemainderFollowUp(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	existing: ExistingIssue & { projectId: string },
+	remainder: string
+): Promise<{ id: string; ref: string }> {
+	const row = await orm
+		.select({
+			labels: schema.issues.labels,
+			number: schema.issues.number,
+			projectKey: schema.projects.key,
+		})
+		.from(schema.issues)
+		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+		.where(and(eq(schema.issues.id, existing.id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+		.get();
+	const originalRef = row ? `${row.projectKey}-${row.number}` : existing.id;
+	const created = await createIssue(ctx, {
+		projectId: existing.projectId,
+		title: `Follow-up: ${existing.title}`.slice(0, 500),
+		body: `Remainder from ${originalRef} (marked done):\n\n${remainder}`,
+		labels: Array.isArray(row?.labels) ? row.labels : [],
+		...(existing.parentId ? { parentId: existing.parentId } : {}),
+	});
+	await createLink(ctx, {
+		sourceIssueId: created.id,
+		targetIssueId: existing.id,
+		type: "follows_from",
+	});
+	return { id: created.id, ref: `${row?.projectKey ?? ""}-${created.number}` };
 }
 
 export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
@@ -2124,35 +2299,75 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
 		: result.data.projectId;
 
-	const ftsQuery = sanitizeFtsQuery(query);
-	if (!ftsQuery) return [];
-
-	let q = `SELECT i.id, i.number, i.title, i.status, i.priority,
-              p.id as project_id, p.key as project_key, p.name as project_name
-           FROM issues_fts
-           JOIN issues i ON i.id = issues_fts.issue_id
-           LEFT JOIN projects p ON p.id = i.project_id
-           WHERE issues_fts MATCH ? AND issues_fts.workspace_id = ?`;
-	const params: unknown[] = [ftsQuery, ctx.workspaceId];
-
+	// Everything both queries below share, applied to issues aliased `i`: the optional
+	// project, the caller's visible projects (PROJ-311), and the PROJ-960 label filter.
+	let scope = "";
+	const scopeParams: unknown[] = [];
 	if (projectId) {
-		q += " AND i.project_id = ?";
-		params.push(projectId);
+		scope += " AND i.project_id = ?";
+		scopeParams.push(projectId);
 	}
-
-	// PROJ-311: restrict full-text results to the user's visible projects.
 	const visible = visibleProjectSqlFragment(ctx, "i.project_id");
 	if (visible) {
-		q += ` AND ${visible.sql}`;
-		params.push(...visible.params);
+		scope += ` AND ${visible.sql}`;
+		scopeParams.push(...visible.params);
 	}
+	const labelScope = labelFilterSql("i.labels", result.data);
+	scope += labelScope.sql;
+	scopeParams.push(...labelScope.params);
 
-	q += " ORDER BY bm25(issues_fts) LIMIT ?";
-	params.push(limit);
+	const columns = `i.id, i.number, i.title, i.status, i.priority,
+	              p.id as project_id, p.key as project_key, p.name as project_name`;
 
-	const { results } = await ctx.db
-		.prepare(q)
-		.bind(...params)
-		.all();
-	return results;
+	// PROJ-960: the FTS index covers title and body only, so searching for a label's text
+	// found nothing even when dozens of issues carried it. An issue whose label equals the
+	// whole query (case-insensitive) is an exact hit, so those lead the results.
+	const trimmed = query.trim();
+	// A label is at most 50 characters (schemas/issues.ts), so a longer query can't be one —
+	// skip the json_each scan, which no index backs, for prose queries.
+	const mayBeLabel = trimmed.length > 0 && trimmed.length <= MAX_LABEL_LENGTH;
+	const labelHits = !mayBeLabel
+		? []
+		: (
+				await ctx.db
+					.prepare(
+						`SELECT ${columns}
+				 FROM issues i
+				 LEFT JOIN projects p ON p.id = i.project_id
+				 WHERE i.workspace_id = ?
+				   AND EXISTS (SELECT 1 FROM json_each(${labelsJsonSql("i.labels")}) WHERE lower(value) = lower(?))
+				   ${scope}
+				 ORDER BY i.created_at DESC, i.id DESC LIMIT ?`
+					)
+					.bind(ctx.workspaceId, trimmed, ...scopeParams, limit)
+					.all<{ id: string }>()
+			).results;
+
+	const ftsQuery = sanitizeFtsQuery(query);
+	const ftsHits = ftsQuery
+		? (
+				await ctx.db
+					.prepare(
+						`SELECT ${columns}
+						 FROM issues_fts
+						 JOIN issues i ON i.id = issues_fts.issue_id
+						 LEFT JOIN projects p ON p.id = i.project_id
+						 WHERE issues_fts MATCH ? AND issues_fts.workspace_id = ?
+						   ${scope}
+						 ORDER BY bm25(issues_fts) LIMIT ?`
+					)
+					.bind(ftsQuery, ctx.workspaceId, ...scopeParams, limit)
+					.all<{ id: string }>()
+			).results
+		: [];
+
+	const seen = new Set<string>();
+	const merged: Array<{ id: string }> = [];
+	for (const row of [...labelHits, ...ftsHits]) {
+		if (seen.has(row.id)) continue;
+		seen.add(row.id);
+		merged.push(row);
+		if (merged.length >= limit) break;
+	}
+	return merged;
 }

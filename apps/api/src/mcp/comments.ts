@@ -3,15 +3,18 @@ import { addComment, deleteComment, listComments, updateComment } from "../servi
 import { DESTRUCTIVE, IDEMPOTENT_WRITE, PLAIN_WRITE, READ } from "./annotations";
 import { toPage } from "./serialize";
 
+// PROJ-959: every comment tool resolves a ref the same way get_issue does.
+const ISSUE_ID_PROP = { type: "string", description: "UUID of the issue, or a ref like PROJ-42" };
+
 export const commentsTools: MCPTool[] = [
 	{
 		name: "list_comments",
 		description:
-			"List comments on an issue. Returns `{items}` (see /projektor/agents/response-conventions/).",
+			"List comments on an issue (UUID or ref like PROJ-42). Returns `{items}` (see /projektor/agents/response-conventions/).",
 		inputSchema: {
 			type: "object",
 			required: ["issueId"],
-			properties: { issueId: { type: "string" } },
+			properties: { issueId: ISSUE_ID_PROP },
 		},
 		annotations: READ,
 		async handler(input, ctx) {
@@ -20,12 +23,12 @@ export const commentsTools: MCPTool[] = [
 	},
 	{
 		name: "add_comment",
-		description: "Add a comment to an issue",
+		description: "Add a comment to an issue (UUID or ref like PROJ-42)",
 		inputSchema: {
 			type: "object",
 			required: ["issueId", "body"],
 			properties: {
-				issueId: { type: "string" },
+				issueId: ISSUE_ID_PROP,
 				body: { type: "string", minLength: 1, maxLength: 10000 },
 			},
 		},
@@ -41,7 +44,7 @@ export const commentsTools: MCPTool[] = [
 			type: "object",
 			required: ["issueId", "commentId", "body"],
 			properties: {
-				issueId: { type: "string" },
+				issueId: ISSUE_ID_PROP,
 				commentId: { type: "string" },
 				body: { type: "string", minLength: 1, maxLength: 10000 },
 			},
@@ -58,7 +61,7 @@ export const commentsTools: MCPTool[] = [
 			type: "object",
 			required: ["issueId", "commentId"],
 			properties: {
-				issueId: { type: "string" },
+				issueId: ISSUE_ID_PROP,
 				commentId: { type: "string" },
 			},
 		},

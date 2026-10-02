@@ -8,6 +8,7 @@ import {
 } from "../schemas/comments";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { resolveIssueIdParam } from "./issue-ref";
 import { broadcastWorkspaceEvent } from "./realtime";
 import type { ServiceCtx } from "./types";
 
@@ -41,7 +42,7 @@ async function assertIssueVisible(ctx: ServiceCtx, issueId: string): Promise<str
 export async function listComments(ctx: ServiceCtx, input: unknown): Promise<CommentRow[]> {
 	const parsed = ListCommentsSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { issueId } = parsed.data;
+	const issueId = await resolveIssueIdParam(ctx, parsed.data.issueId);
 
 	await assertIssueVisible(ctx, issueId);
 
@@ -72,7 +73,8 @@ export async function listComments(ctx: ServiceCtx, input: unknown): Promise<Com
 export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id: string }> {
 	const parsed = AddCommentSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { issueId, body } = parsed.data;
+	const { body } = parsed.data;
+	const issueId = await resolveIssueIdParam(ctx, parsed.data.issueId);
 
 	const projectId = await assertIssueVisible(ctx, issueId);
 	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
@@ -122,7 +124,8 @@ export function buildAddCommentInsertStatement(
 export async function updateComment(ctx: ServiceCtx, input: unknown): Promise<{ ok: true }> {
 	const parsed = UpdateCommentSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { issueId, commentId, body } = parsed.data;
+	const { commentId, body } = parsed.data;
+	const issueId = await resolveIssueIdParam(ctx, parsed.data.issueId);
 
 	const projectId = await assertIssueVisible(ctx, issueId);
 
@@ -153,7 +156,8 @@ export async function updateComment(ctx: ServiceCtx, input: unknown): Promise<{ 
 export async function deleteComment(ctx: ServiceCtx, input: unknown): Promise<{ ok: true }> {
 	const parsed = DeleteCommentSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { issueId, commentId } = parsed.data;
+	const { commentId } = parsed.data;
+	const issueId = await resolveIssueIdParam(ctx, parsed.data.issueId);
 
 	const projectId = await assertIssueVisible(ctx, issueId);
 

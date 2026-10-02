@@ -28,6 +28,9 @@ export const CompletionReportSchema = z.object({
 		.string()
 		.transform((val) => (z.string().url().safeParse(val).success ? val : undefined))
 		.optional(),
+	// PROJ-961: what is NOT done. When the issue is marked done, a follow-up issue
+	// (same parent, same labels, linked follows_from) is created carrying this text.
+	remainder: z.string().trim().min(1).max(20000).optional(),
 });
 
 export const UpdateIssueSchema = z
@@ -56,6 +59,17 @@ export const IssueListCursorSchema = z
 		return { createdAt: Number(createdAt), id } as { createdAt: number; id?: string };
 	});
 
+// PROJ-931: accepts either a real array (MCP JSON) or a comma-separated string
+// (REST query param), same convention as the existing statusIds/excludeTypeIds filters.
+const CommaOrArraySchema = z
+	.union([z.string(), z.array(z.string())])
+	.transform((v) => (Array.isArray(v) ? v : v.split(",")).map((s) => s.trim()).filter(Boolean));
+
+// PROJ-960: label filter shared by list_issues and search_issues. Labels are matched exactly
+// (case-sensitive, the way they're stored). Same bounds as the labels a create/update accepts.
+const LabelFilterSchema = CommaOrArraySchema.pipe(z.array(z.string().max(50)).max(20));
+const LabelsModeSchema = z.enum(["all", "any"]);
+
 export const ListIssuesSchema = z
 	.object({
 		status: StatusEnum.optional(),
@@ -73,6 +87,10 @@ export const ListIssuesSchema = z
 		typeId: TaxonomyIdSchema.optional(),
 		excludeTypeIds: z.string().optional(),
 		sprintId: z.string().uuid().optional(),
+		// PROJ-960: all-of by default (every label must be present); labelsMode:"any" matches
+		// issues carrying at least one. An empty list is no filter.
+		labels: LabelFilterSchema.optional(),
+		labelsMode: LabelsModeSchema.optional(),
 		...CustomFieldFilterSchema.shape,
 		// Date-range filters (PROJ-212), epoch seconds; inclusive bounds.
 		completedAfter: z.coerce.number().optional(),
@@ -105,12 +123,6 @@ export const GetIssueSchema = z
 	.strict()
 	.refine((obj) => obj.id || obj.ref, { message: "Provide either id or ref" });
 
-// PROJ-931: accepts either a real array (MCP JSON) or a comma-separated string
-// (REST query param), same convention as the existing statusIds/excludeTypeIds filters.
-const CommaOrArraySchema = z
-	.union([z.string(), z.array(z.string())])
-	.transform((v) => (Array.isArray(v) ? v : v.split(",")).map((s) => s.trim()).filter(Boolean));
-
 export const GetIssuesBatchSchema = z
 	.object({
 		refs: CommaOrArraySchema.optional(),
@@ -129,12 +141,31 @@ export const SearchIssuesInputSchema = z
 	.object({
 		query: z.string().min(1),
 		projectId: z.string().optional(),
+		// PROJ-960: narrow the keyword hits to issues carrying these labels (see ListIssuesSchema).
+		labels: LabelFilterSchema.optional(),
+		labelsMode: LabelsModeSchema.optional(),
 		limit: z.number().int().min(1).max(50).optional().default(20),
 	})
 	.strict();
 
-export const LinkTypeInputEnum = z.enum(["blocks", "blocked_by", "relates_to", "duplicates"]);
-export const LinkTypeStoredEnum = z.enum(["blocks", "relates_to", "duplicates"]);
+export const LinkTypeInputEnum = z.enum([
+	"blocks",
+	"blocked_by",
+	"relates_to",
+	"duplicates",
+	"follows_from",
+]);
+export const LinkTypeStoredEnum = z.enum(["blocks", "relates_to", "duplicates", "follows_from"]);
+// PROJ-961: what list_issue_links reports from the viewing issue's side; "followed_by" is the
+// inverse of follows_from and is output-only.
+export const LinkTypeEffectiveEnum = z.enum([
+	"blocks",
+	"blocked_by",
+	"relates_to",
+	"duplicates",
+	"follows_from",
+	"followed_by",
+]);
 
 export const CreateIssueLinkSchema = z
 	.object({
