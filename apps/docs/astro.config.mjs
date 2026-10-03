@@ -80,6 +80,7 @@ export default defineConfig({
 						{ label: "Connect an agent", slug: "agents/mcp-connection" },
 						{ label: "Deploying & operating", slug: "guides/deploying" },
 						{ label: "Live demo", slug: "guides/live-demo" },
+						{ label: "FAQ", slug: "faq" },
 						{ label: "Releases & changelog", link: "https://github.com/TAJD/projektor/releases" },
 					],
 				},

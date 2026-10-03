@@ -34,3 +34,4 @@ space change quickly; if you find something out of date,
 
 For the long-form argument behind Projektor's design choices, read
 [Projektor and the agent-coordination field](/projektor/philosophy/alternatives/).
+For short answers to common questions, see the [FAQ](/projektor/faq/).
