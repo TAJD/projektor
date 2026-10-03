@@ -1,5 +1,5 @@
 ---
-title: "Your first ten minutes"
+title: "Getting started: deploy Projektor and connect an agent"
 description: "Deploy an instance, connect an agent, and get it doing real work — the shortest path from zero to a working setup."
 sidebar:
   order: 0

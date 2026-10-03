@@ -6,8 +6,9 @@
  * so astro.config.mjs passes each URL through `lastmodFor` in its `serialize` hook.
  *
  * A shallow clone (CI's default checkout) would give every page the same date, which
- * is worse than none, so in that case no lastmod is emitted. The docs deploy workflow
- * checks out full history for this reason.
+ * is worse than none, so in that case no lastmod is emitted and the build warns. The
+ * docs deploy workflow checks out full history and sets REQUIRE_SITEMAP_LASTMOD=1, which
+ * turns the warning into a build failure so a lost fetch-depth cannot ship silently.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -27,6 +28,14 @@ function git(args) {
 }
 
 const usable = git(["rev-parse", "--is-shallow-repository"]) === "false";
+if (!usable) {
+	const message =
+		"sitemap-lastmod: no full git history (shallow clone or no git), so the sitemap has no <lastmod>.";
+	if (process.env.REQUIRE_SITEMAP_LASTMOD === "1") {
+		throw new Error(`${message} Check out with fetch-depth: 0.`);
+	}
+	console.warn(message);
+}
 const cache = new Map();
 
 /** Source file for a sitemap URL, e.g. https://…/projektor/guides/live-demo/ → guides/live-demo.md */

@@ -3,7 +3,7 @@ import starlight from "@astrojs/starlight";
 import starlightLinksValidator from "starlight-links-validator";
 import mermaid from "astro-mermaid";
 import sitemap from "@astrojs/sitemap";
-import { BASE, DESCRIPTION, REPO_URL, SITE_ORIGIN, SITE_URL } from "./src/site.mjs";
+import { BASE, DESCRIPTION, SITE_ORIGIN, SITE_URL } from "./src/site.mjs";
 import { lastmodFor } from "./scripts/sitemap-lastmod.mjs";
 
 // Site-wide WebSite structured data (PROJ-947). The homepage adds its
@@ -17,7 +17,6 @@ const websiteJsonLd = {
 	description: DESCRIPTION,
 	inLanguage: "en",
 	publisher: { "@type": "Person", name: "Thomas Dickson", url: "https://tom-dickson.com" },
-	sameAs: [REPO_URL],
 };
 
 // Project GitHub Pages: served at https://tajd.github.io/projektor/

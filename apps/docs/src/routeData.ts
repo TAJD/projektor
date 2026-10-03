@@ -28,7 +28,6 @@ const homepageGraph = {
 			screenshot: SCREENSHOT_URL,
 			author,
 			license: "https://opensource.org/license/mit",
-			offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
 			sameAs: [REPO_URL],
 		},
 		{
@@ -60,7 +59,7 @@ export const onRequest = defineRouteMiddleware((context) => {
 		hero.tagline = DESCRIPTION;
 		hero.actions = [
 			{
-				text: "Connect Claude Code",
+				text: "Connect an agent",
 				link: docsPath("agents/mcp-connection"),
 				variant: "primary",
 				icon: { type: "icon", name: "right-arrow" },
@@ -72,7 +71,7 @@ export const onRequest = defineRouteMiddleware((context) => {
 				icon: { type: "icon", name: "star" },
 			},
 			{
-				text: "Self-host in 5 minutes",
+				text: "Self-host on Cloudflare",
 				link: docsPath("guides/self-hosting"),
 				variant: "minimal",
 				icon: { type: "icon", name: "rocket" },

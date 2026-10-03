@@ -2,40 +2,50 @@
 title: Open-source MCP issue tracker and wiki on Cloudflare
 template: splash
 hero:
-  # The tagline (the canonical description) and the action buttons are filled in by
-  # src/routeData.ts from src/site.mjs, so they stay base-aware and in one place.
-  title: Open-source MCP issue tracker and wiki for coding agents
+  # The tagline (the canonical description in src/site.mjs) and the action buttons are
+  # filled in by src/routeData.ts, so they stay base-aware and defined in one place.
+  # With no description here, the page's meta description is the same sentence.
+  title: Open-source MCP issue tracker and wiki for agent fleets
 ---
 
 import { Image } from 'astro:assets';
 import { Code } from '@astrojs/starlight/components';
 import DocLink from '../../components/DocLink.astro';
 import mcpStats from '../../generated/mcp-stats.json';
-import { DEPLOY_REPO_URL, REPO_URL } from '../../site.mjs';
+import { REPO_URL } from '../../site.mjs';
 import backlogScreenshot from '../../../../../docs/images/backlog.png';
 
-export const quickstart = `git clone ${DEPLOY_REPO_URL} && cd projektor-deploy-example
-PROJEKTOR_REPO=TAJD/projektor ADMIN_EMAILS=you@example.com ./deploy-auto.sh
-claude mcp add --transport http projektor https://<your-worker>.workers.dev/mcp/<workspace-uuid>`;
+export const quickstart = `git clone ${REPO_URL} && cd projektor && pnpm install
+cp apps/api/.dev.vars.example apps/api/.dev.vars && cp apps/web/.env.example apps/web/.env
+pnpm dev`;
+
+export const connect = `claude mcp add --transport http projektor "http://127.0.0.1:8787/mcp/<workspace-id>" \\
+  --header "Authorization: Bearer <api-token>"`;
 
 ## Quickstart
 
-Deploy to your own Cloudflare account, then point Claude Code at your workspace:
+<Code code={quickstart} lang="bash" title="Run Projektor locally" wrap />
 
-<Code code={quickstart} lang="bash" title="Deploy and connect" />
+You need Node.js 22.12 or later and pnpm. `pnpm dev` applies the database migrations
+to a local database and starts the API on port 8787 and the web app on port 4321. To
+connect Claude Code, copy your workspace's server URL and an API token from **Connect
+Agent** in the sidebar and add them:
 
-Between the second and third line, put Cloudflare Access in front of the Worker and log
-in once, so the first admin owns the default workspace. Then run `/mcp` in Claude Code
-to sign in. The <DocLink to="guides/getting-started">first-ten-minutes guide</DocLink> walks
-through every step, and <DocLink to="agents/mcp-connection">connecting an agent</DocLink>
-covers the Claude app, tokens and CI.
+<Code code={connect} lang="bash" title="Connect Claude Code" wrap />
 
-<Image src={backlogScreenshot} alt="Projektor issue backlog — list view with projects sidebar, issue refs, status, priority, and assignees" />
+Then open `http://localhost:4321`, where the local dev login signs you in. To run your
+own instance on Cloudflare, follow <DocLink to="guides/self-hosting">self-hosting</DocLink>;
+<DocLink to="agents/mcp-connection">connect an agent</DocLink> covers the other ways
+to add the MCP server.
+
+<Image src={backlogScreenshot} alt="Projektor issue backlog: list view with projects sidebar, issue refs, status, priority and assignees" />
+
+## What it is
 
 Projektor holds issues, boards, sprints and a wiki, and exposes {mcpStats.tools} tools
 across {mcpStats.domains} domains over MCP. REST and MCP are two doors into one service
 layer, so an agent calls the same code the browser does: it files the ticket, moves it
-and writes the page instead of asking you to.
+and writes the wiki page itself. You review and steer from a normal web app.
 
 ## Issue leases
 
@@ -45,39 +55,40 @@ next claim reclaims its issue instead of leaving it stuck.
 
 ## File claims
 
-Agents claim the repo paths they are about to edit. A claim that collides with another
-agent's is refused as a whole and names the issue and agent already holding the path,
-and every contended path is recorded so you can see where the fleet keeps colliding.
+Agents claim the repo paths they are about to edit. A claim that includes a path someone
+else already holds is refused as a whole, and the error names the issue holding it.
+Every contended path is recorded, so a contention heatmap shows where agents keep
+colliding.
 
 ## WIP limits
 
-Each project caps how many issues agents can hold at once (three by default,
-configurable per project). It is admission control on the backlog, and
-<DocLink to="agents/flow-metrics">flow metrics</DocLink> tell you whether the cap is
-too tight or too loose.
+Each project caps how many issues agents can hold at once: three by default,
+configurable per project. <DocLink to="agents/flow-metrics">Flow metrics</DocLink> show
+whether the cap is too tight or too loose.
 
 ## A wiki next to the issues
 
 Nested markdown pages with full-text search, revision history and backlinks, on the
-same MCP surface as the tracker. Agents write the design notes and keep them current
-alongside the tickets they relate to.
+same MCP surface as the tracker. Agents can write design notes and keep them current
+alongside the issues they relate to.
 
 ## Self-hosted on Cloudflare
 
 One Cloudflare Worker in your own account: D1 for data, KV for cache, R2 for
-attachments. No servers or containers to run. Deploy from a config-only repo with one
-click, one command, or by asking an agent; see <DocLink to="guides/self-hosting">self-hosting</DocLink>.
+attachments and Durable Objects for agent coordination. No servers or containers to run. The quickstart above runs on your
+machine; <DocLink to="guides/self-hosting">self-hosting</DocLink> covers deploying it
+to your Cloudflare account from a pre-built release.
 
-## Why it exists
+## Where it is heading
 
-Other trackers were built for people and had agent access added later; git-file
-trackers are agent-native but live inside a single repo. Projektor is agent-native
-from the schema up and works across projects and machines. The longer aim is a
-software factory: a fleet of agents working a shared backlog, with you steering from a
-normal web app. Projektor's own roadmap is tracked inside Projektor.
+The longer aim is a software factory: a fleet of agents working a shared backlog across
+projects and machines, with a person steering. Projektor's own roadmap is tracked in
+Projektor.
 
 <DocLink to="agents/agent-workflows">How the agent workflow fits together</DocLink> ·
 <DocLink to="philosophy/alternatives">How Projektor differs from other tools</DocLink> ·
+<DocLink to="compare">Compare with Jira, Linear and others</DocLink> ·
+<DocLink to="faq">FAQ</DocLink> ·
 <DocLink to="guides/live-demo">Look around a live instance</DocLink> ·
 [How and why it was built](https://tom-dickson.com/blog/projektor-mcp-issue-tracker-cloudflare-workers/) ·
 <a href={REPO_URL}>Star Projektor on GitHub</a>
