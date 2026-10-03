@@ -1,5 +1,5 @@
 ---
-title: "Projektor FAQ"
+title: "FAQ"
 description: "Short answers about Projektor: what it is, connecting Claude Code, stopping agents editing the same file, Cloudflare cost, and alternatives."
 ---
 Short answers to the questions people ask most often about Projektor. Each
@@ -12,16 +12,17 @@ that runs in a single Cloudflare Worker. AI agents use it through an MCP
 server that exposes everything a browser user can do, and humans use the same
 data through a web UI with list and board views, sprints and a wiki. It is MIT
 licensed and you deploy it to your own Cloudflare account.
-See [Your first ten minutes](/projektor/guides/getting-started/).
+See [Getting started](/projektor/guides/getting-started/).
 
 ## How do I give Claude Code a task tracker?
 
-Deploy Projektor to your Cloudflare account, mint an API token, and add it as
-an HTTP MCP server with `claude mcp add --transport http`, passing the token in
-an `Authorization` header and your workspace's MCP URL. Claude Code can then
-create, search, claim and close issues and read or write wiki pages through
-MCP tools. The exact command and a smoke test are in
-[Connect an AI agent](/projektor/agents/mcp-connection/).
+Run Projektor, then add your workspace's MCP URL to Claude Code with
+`claude mcp add --transport http projektor "https://<your-host>/mcp/<workspace-id>"`
+and sign in from `/mcp` in your browser. Headless agents and CI can instead pass a
+workspace API token in an `Authorization` header. Claude Code can then create,
+search, claim and close issues and read or write wiki pages through MCP tools.
+The exact commands and a smoke test are on the
+[Connect Claude](/projektor/agents/mcp-connection/#2-claude-code) page.
 
 ## How do multiple AI agents avoid editing the same file?
 
@@ -90,11 +91,12 @@ claims. See [Projektor vs Linear + MCP](/projektor/compare/linear/).
 
 The Claude app, including Claude Desktop, connects through Settings →
 Connectors: you add your instance's MCP URL as a custom connector and sign in,
-with no token to paste. Projektor's docs do not include a tested Cursor setup;
-Cursor's own docs say it can connect to remote MCP servers by URL with custom
-headers, which is all Projektor's endpoint needs (an `Authorization` bearer
-token), but that combination has not been verified by the project. See
-[Connect an AI agent](/projektor/agents/mcp-connection/#3b-connect-the-claude-app)
+with no token to paste. The Connect page also has a Cursor config, written from
+Cursor's own documentation and not yet run inside Cursor, and a
+Claude Desktop config file route through `mcp-remote`. Any client that supports
+remote HTTP MCP servers should work, since the endpoint needs only a URL and either
+OAuth sign-in or an `Authorization` bearer token. See
+[Connect Claude](/projektor/agents/mcp-connection/#1-claude-app-or-claudeai-sign-in)
 and [Cursor's MCP docs](https://cursor.com/docs/context/mcp).
 
 ## Does Projektor include a wiki?

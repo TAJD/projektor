@@ -1,5 +1,5 @@
 ---
-title: "Projektor vs Jira + Atlassian MCP: a self-hosted Jira alternative for AI agents"
+title: "Projektor vs Jira + Atlassian MCP: self-hosted alternative"
 description: "Projektor vs Jira and Confluence via the Atlassian Rovo MCP server: self-hosted with agent coordination, or Atlassian Cloud at scale."
 sidebar:
   label: "vs Jira / Atlassian MCP"
@@ -39,7 +39,8 @@ argument, see [Projektor and the agent-coordination field](/projektor/philosophy
 ## Choose Projektor if
 
 - You want a self-hosted Jira alternative that deploys to your own Cloudflare
-  account with one click or one command, not an enterprise rollout.
+  account from a pre-built release (see the Self-hosting guide), not an enterprise
+  rollout.
 - You want issues and wiki in one small open-source system that you can read
   and change.
 - Several AI agents work in parallel and you want the tracker to hand out
