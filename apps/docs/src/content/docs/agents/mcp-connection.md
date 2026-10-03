@@ -1,7 +1,8 @@
 ---
-title: "Connect Claude"
+title: "Connect Claude and other MCP clients to Projektor"
 description: "Connect the Claude app, Claude Code or any MCP client to your Projektor instance: OAuth sign-in first, API tokens for headless agents."
 sidebar:
+  label: "Connect Claude"
   order: 1
 ---
 This is the one page for connecting an agent to Projektor. Every other page links here.

@@ -1,91 +1,94 @@
 ---
-title: AI-native project management on Cloudflare
-description: AI-native project management, self-hosted on Cloudflare. An issue tracker and wiki where every action a person takes in the browser, an agent takes over MCP.
+title: Open-source MCP issue tracker and wiki on Cloudflare
 template: splash
-head:
-  - tag: script
-    attrs:
-      type: application/ld+json
-    content: |
-      {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "Projektor",
-        "description": "A self-hosted, MCP-native issue tracker and wiki that runs in a single Cloudflare Worker. Every action a person takes in the browser, an agent takes over MCP.",
-        "url": "https://tajd.github.io/projektor/",
-        "applicationCategory": "DeveloperApplication",
-        "operatingSystem": "Cloudflare Workers",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        },
-        "license": "https://github.com/TAJD/projektor/blob/main/LICENSE",
-        "codeRepository": "https://github.com/TAJD/projektor",
-        "sameAs": ["https://github.com/TAJD/projektor"]
-      }
 hero:
-  title: Projektor
-  tagline: AI-native project management, self-hosted on Cloudflare. An issue tracker and wiki your coding agent runs as well as you do — one Worker, in your own account.
-  actions:
-    - text: Connect an agent
-      link: /projektor/agents/mcp-connection/
-      icon: right-arrow
-      variant: primary
-    - text: Self-host in 5 minutes
-      link: /projektor/guides/self-hosting/
-      icon: rocket
-    - text: GitHub
-      link: https://github.com/TAJD/projektor
-      icon: github
-      variant: minimal
+  # The tagline (the canonical description in src/site.mjs) and the action buttons are
+  # filled in by src/routeData.ts, so they stay base-aware and defined in one place.
+  # With no description here, the page's meta description is the same sentence.
+  title: Open-source MCP issue tracker and wiki for agent fleets
 ---
 
 import { Image } from 'astro:assets';
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { Code } from '@astrojs/starlight/components';
+import DocLink from '../../components/DocLink.astro';
 import mcpStats from '../../generated/mcp-stats.json';
+import { REPO_URL } from '../../site.mjs';
 import backlogScreenshot from '../../../../../docs/images/backlog.png';
 
-<Image src={backlogScreenshot} alt="Projektor issue backlog — list view with projects sidebar, issue refs, status, priority, and assignees" />
+export const quickstart = `git clone ${REPO_URL} && cd projektor && pnpm install
+cp apps/api/.dev.vars.example apps/api/.dev.vars && cp apps/web/.env.example apps/web/.env
+pnpm dev`;
+
+export const connect = `claude mcp add --transport http projektor "http://127.0.0.1:8787/mcp/<workspace-id>" \\
+  --header "Authorization: Bearer <api-token>"`;
+
+## Quickstart
+
+<Code code={quickstart} lang="bash" title="Run Projektor locally" wrap />
+
+You need Node.js 22.12 or later and pnpm. `pnpm dev` applies the database migrations
+to a local database and starts the API on port 8787 and the web app on port 4321. To
+connect Claude Code, copy your workspace's server URL and an API token from **Connect
+Agent** in the sidebar and add them:
+
+<Code code={connect} lang="bash" title="Connect Claude Code" wrap />
+
+Then open `http://localhost:4321`, where the local dev login signs you in. To run your
+own instance on Cloudflare, follow <DocLink to="guides/self-hosting">self-hosting</DocLink>;
+<DocLink to="agents/mcp-connection">connect an agent</DocLink> covers the other ways
+to add the MCP server.
+
+<Image src={backlogScreenshot} alt="Projektor issue backlog: list view with projects sidebar, issue refs, status, priority and assignees" />
+
+## What it is
 
 Projektor holds issues, boards, sprints and a wiki, and exposes {mcpStats.tools} tools
-across {mcpStats.domains} domains over MCP. The agent files the ticket, moves it and
-writes the page instead of asking you to. Other trackers were built for people and had
-agent access bolted on later; git-file trackers are agent-native but live inside a
-single repo. Projektor is agent-native from the schema up, works across projects, and
-is cheap enough to leave running.
+across {mcpStats.domains} domains over MCP. REST and MCP are two doors into one service
+layer, so an agent calls the same code the browser does: it files the ticket, moves it
+and writes the wiki page itself. You review and steer from a normal web app.
 
-<CardGrid stagger>
-  <Card title="Every action, both surfaces" icon="puzzle">
-    REST and MCP are two doors into one service layer. An agent is not driving a
-    reduced API built for robots — it calls the code the browser calls. Shipping a
-    feature to one surface and not the other counts as a bug.
-  </Card>
-  <Card title="You still run the project" icon="approve-check">
-    Agents do the filing; you do the steering, in a normal web app. Backlog and kanban
-    board, epics, sprint planning, a nested wiki with full-text search, flow metrics.
-    Nothing an agent does is buried in a log.
-  </Card>
-  <Card title="Built for fleets" icon="seti:notebook">
-    An agent registry, file claims and coordination messages let many agents work the
-    same repo in parallel without colliding.
-  </Card>
-  <Card title="Runs on the edge" icon="cloudflare">
-    One Cloudflare Worker: Hono, D1 for data, KV for cache, R2 for attachments. No
-    servers, no containers. Deploy to your own account in minutes.
-  </Card>
-</CardGrid>
+## Issue leases
 
-## Self-host in minutes
+An agent takes a lease on an issue before it starts work, so two agents never pick up
+the same ticket. Leases follow the holder's heartbeat: if an agent stops reporting, the
+next claim reclaims its issue instead of leaving it stuck.
 
-Deploy to your own Cloudflare account from a config-only repo. Wrangler provisions D1,
-KV and R2, applies the migrations and ships. Use the one-click button, run one command,
-or hand the repo to an agent and say *"deploy projektor to my Cloudflare account."*
+## File claims
 
-[Your first ten minutes →](/projektor/guides/getting-started/) ·
-[Why Projektor looks like this →](/projektor/agents/agent-workflows/) ·
-[Poke around a live instance first →](/projektor/guides/live-demo/) ·
-[How and why it was built →](https://tom-dickson.com/blog/projektor-mcp-issue-tracker-cloudflare-workers/)
+Agents claim the repo paths they are about to edit. A claim that includes a path someone
+else already holds is refused as a whole, and the error names the issue holding it.
+Every contended path is recorded, so a contention heatmap shows where agents keep
+colliding.
 
-Projektor's own roadmap is tracked inside Projektor; these docs are generated from
-the same repo.
+## WIP limits
+
+Each project caps how many issues agents can hold at once: three by default,
+configurable per project. <DocLink to="agents/flow-metrics">Flow metrics</DocLink> show
+whether the cap is too tight or too loose.
+
+## A wiki next to the issues
+
+Nested markdown pages with full-text search, revision history and backlinks, on the
+same MCP surface as the tracker. Agents can write design notes and keep them current
+alongside the issues they relate to.
+
+## Self-hosted on Cloudflare
+
+One Cloudflare Worker in your own account: D1 for data, KV for cache, R2 for
+attachments and Durable Objects for agent coordination. No servers or containers to run. The quickstart above runs on your
+machine; <DocLink to="guides/self-hosting">self-hosting</DocLink> covers deploying it
+to your Cloudflare account from a pre-built release.
+
+## Where it is heading
+
+The longer aim is a software factory: a fleet of agents working a shared backlog across
+projects and machines, with a person steering. Projektor's own roadmap is tracked in
+Projektor.
+
+<DocLink to="agents/agent-workflows">How the agent workflow fits together</DocLink> ·
+<DocLink to="philosophy/alternatives">How Projektor differs from other tools</DocLink> ·
+<DocLink to="compare">Compare with Jira, Linear and others</DocLink> ·
+<DocLink to="faq">FAQ</DocLink> ·
+<DocLink to="guides/live-demo">Look around a live instance</DocLink> ·
+[How and why it was built](https://tom-dickson.com/blog/projektor-mcp-issue-tracker-cloudflare-workers/) ·
+<a href={REPO_URL}>Star Projektor on GitHub</a>
