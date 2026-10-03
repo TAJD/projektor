@@ -92,6 +92,7 @@ export default defineConfig({
 						{ label: "Feedback widget integration", slug: "guides/feedback-widget-integration" },
 					],
 				},
+				{ label: "Compare", items: [{ autogenerate: { directory: "compare" } }] },
 				{ label: "Architecture", items: [{ autogenerate: { directory: "architecture" } }] },
 				{ label: "Philosophy", items: [{ autogenerate: { directory: "philosophy" } }] },
 				{ label: "Contributing", items: [{ autogenerate: { directory: "contributing" } }] },
