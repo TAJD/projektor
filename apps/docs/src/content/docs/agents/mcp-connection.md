@@ -83,11 +83,112 @@ printed by `/bootstrap` currently has that order; use the form above until that 
 `X-Workspace-Slug` is optional on the MCP endpoint, because the UUID in the URL already
 names the workspace.
 
-## 3. Other MCP clients
+The server is added for the current project only. Add `--scope user` to use it in every
+project, or `--scope project` to write a shared [`.mcp.json`](#project-mcpjson-claude-code-shared-with-your-team).
 
-Projektor speaks MCP over Streamable HTTP (JSON-RPC 2.0 over `POST`), so any client that
-supports remote HTTP servers works. Give it the server URL, and either let it run the
-OAuth sign-in or send `Authorization: Bearer pk_<token>` as a header.
+## 3. Copy-paste configs
+
+For Claude Code on the command line, see [§2](#2-claude-code). Every config below uses
+the same server URL from **Connect Agent**: replace `<your-host>` and `<workspace-id>`.
+Keep tokens out of files you commit; the token configs read them from the environment.
+
+### Project `.mcp.json` (Claude Code, shared with your team)
+
+Commit this at the repository root. Sign-in, with nothing secret in the file:
+
+```json
+{
+  "mcpServers": {
+    "projektor": {
+      "type": "http",
+      "url": "https://<your-host>/mcp/<workspace-id>"
+    }
+  }
+}
+```
+
+With a token, read from each person's environment:
+
+```json
+{
+  "mcpServers": {
+    "projektor": {
+      "type": "http",
+      "url": "https://<your-host>/mcp/<workspace-id>",
+      "headers": {
+        "Authorization": "Bearer ${PROJEKTOR_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Claude Code asks once per project before it trusts servers from `.mcp.json`.
+
+### Claude Desktop
+
+Use the connector from [§1](#1-claude-app-or-claudeai-sign-in): it is the same feature
+in the desktop app, and it needs no config file. If you must use a token instead (for
+example on a plan without custom connectors), `claude_desktop_config.json` only starts
+local programs, so bridge to the remote server with
+[`mcp-remote`](https://github.com/geelen/mcp-remote):
+
+```json
+{
+  "mcpServers": {
+    "projektor": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://<your-host>/mcp/<workspace-id>",
+        "--header",
+        "Authorization:${AUTH_HEADER}"
+      ],
+      "env": { "AUTH_HEADER": "Bearer pk_<token>" }
+    }
+  }
+}
+```
+
+The file lives at `~/Library/Application Support/Claude/claude_desktop_config.json` on
+macOS and `%APPDATA%\Claude\claude_desktop_config.json` on Windows. There is no space
+after `Authorization:`, because Claude Desktop on Windows mangles spaces in `args`; the
+space goes in the `env` value instead (mcp-remote's documented workaround). This file
+holds the token in plain text.
+
+### Cursor
+
+`.cursor/mcp.json` in the project, or `~/.cursor/mcp.json` for every project:
+
+```json
+{
+  "mcpServers": {
+    "projektor": {
+      "url": "https://<your-host>/mcp/<workspace-id>",
+      "headers": {
+        "Authorization": "Bearer ${env:PROJEKTOR_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Cursor's sign-in with Projektor is untested: Projektor registers clients through
+Client ID Metadata Documents, not dynamic client registration, so use a token here.
+
+### Any other MCP client
+
+Projektor speaks MCP over Streamable HTTP (JSON-RPC 2.0 over `POST`, no SSE). Any client
+that supports remote HTTP servers works: give it the server URL, and either let it run
+the OAuth sign-in or send `Authorization: Bearer pk_<token>`.
+
+**How these were checked:** the Claude Code commands, both `.mcp.json` files and the
+`mcp-remote` bridge were run against a local instance (`claude mcp list` → `Connected`, or
+`Needs authentication` before sign-in; `mcp-remote` returned the tool list). The
+Claude Desktop and Cursor file formats follow those clients' own docs
+([Claude Code MCP](https://code.claude.com/docs/en/mcp), [mcp-remote](https://github.com/geelen/mcp-remote),
+[Cursor MCP](https://cursor.com/docs/context/mcp)) and were not loaded in the apps themselves.
 
 ## 4. Behind Cloudflare Access (headless agents)
 
