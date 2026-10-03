@@ -1,246 +1,216 @@
 ---
-title: "Connect an AI agent"
-description: "Connect Claude Code or any MCP-compatible agent to your Projektor instance."
+title: "Connect Claude"
+description: "Connect the Claude app, Claude Code or any MCP client to your Projektor instance: OAuth sign-in first, API tokens for headless agents."
 sidebar:
   order: 1
 ---
-Connect Claude Code (or any MCP-compatible agent) to your projektor instance.
+This is the one page for connecting an agent to Projektor. Every other page links here.
 
----
+**You need one thing:** your workspace's **server URL**. In Projektor, open **Connect Agent**
+in the sidebar and copy it. It looks like this, with the workspace UUID (not the slug) at
+the end:
 
-## 1. Prerequisites
-
-- **A running projektor instance.** See the [self-hosting guide](/projektor/guides/self-hosting/) or the full [deploy guide](/projektor/guides/deploying/).
-- **Claude Code installed.** `npm install -g @anthropic-ai/claude-code` (or the desktop/IDE app).
-- **A projektor API token.** Two ways to get one:
-  - **Development** — use the bootstrap endpoint (see §2 below). No login required; needs `BOOTSTRAP_SECRET`.
-  - **Production** — log in through the UI → Settings → Tokens → "New token"; or mint one via the REST API (see §3).
-
-Using the Claude Code CLI? Continue to §2/§3 below. Using the Claude app (desktop or web) instead? Skip to [§3b. Connect the Claude app](#3b-connect-the-claude-app).
-
----
-
-## 2. One-shot connect (dev / bootstrap)
-
-The bootstrap endpoint provisions a workspace, user, and token in a single call, then prints the exact `claude mcp add` command to run. Use this for local dev or staging environments where `BOOTSTRAP_SECRET` is set.
-
-```bash
-# 1. Bootstrap workspace + token
-curl -s "https://<your-worker>.workers.dev/bootstrap" \
-  -H "X-Bootstrap-Secret: <your-secret>"
-
-# Response includes mcpAddCommand - pipe it straight to your shell:
-curl -s "https://<your-worker>.workers.dev/bootstrap" \
-  -H "X-Bootstrap-Secret: <your-secret>" \
-  | jq -r .mcpAddCommand | sh
+```text
+https://<your-host>/mcp/<workspace-id>
 ```
 
-Local dev (BOOTSTRAP_SECRET defaults to `localdev` in `.dev.vars.example`):
+## Which credential when
 
-```bash
-curl -s http://127.0.0.1:8787/bootstrap \
-  -H "X-Bootstrap-Secret: localdev" \
-  | jq -r .mcpAddCommand | sh
-```
+- **Sign-in (OAuth)**: for the Claude app, claude.ai, and Claude Code on your own machine.
+  Any member creates one by approving a consent screen. Each person gets their own grant,
+  capped by their workspace role.
+- **Workspace API token** (`pk_…`): for headless agents, CI and scripts, where no one is
+  there to sign in. A workspace admin or owner creates it from a signed-in browser session.
+- **Cloudflare Access service token**: sent *alongside* an API token when the instance is
+  behind Cloudflare Access. It gets the request through Access; it is not a Projektor
+  credential. Whoever administers your Cloudflare Zero Trust account creates it.
 
-The bootstrap endpoint is enabled only when `ENVIRONMENT=development` — any other value, including an unset one, disables it. It is idempotent, so it's safe to call more than once.
+Personal access tokens (`POST /auth/tokens`) also exist, but they are a human-only action
+(see [Tokens](#tokens)). Agents cannot mint any kind of token.
 
----
+## 1. Claude app or claude.ai (sign-in)
 
-## 3. Manual connect (production)
+1. In Claude, open the **Connectors** settings and click **Add custom connector**. On a
+   Team or Enterprise plan, an owner adds it once for the organization, and members then
+   click **Connect** on it.
+2. Paste the server URL. Leave the advanced settings empty, then click **Add**.
+3. Claude opens Projektor's sign-in. Approve the consent screen, which names the
+   workspace, your identity and the permissions being granted.
+4. In a chat, enable the connector from the **+** menu → **Connectors**.
 
-Mint a token from the UI (Settings → Tokens) or via the API, then add the MCP server:
+The Claude-side steps follow Anthropic's
+[custom connectors guide](https://support.claude.com/en/articles/11175166-getting-started-with-custom-connectors-using-remote-mcp)
+(custom connectors need a Pro, Max, Team or Enterprise plan). The connector works in
+Claude Desktop too.
 
-```bash
-claude mcp add \
-  --transport http \
-  --header "Authorization: Bearer pk_<64 hex chars>" \
-  --header "X-Workspace-Slug: <slug>" \
-  projektor "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
-```
-
-**Finding the workspace ID:** it is returned by `GET /api/workspaces` or shown in the bootstrap response. The slug is the short identifier you chose when creating the workspace (e.g. `projektor`).
-
-**Minting a personal access token via REST** — from a signed-in browser session only
-(a Cloudflare Access JWT, sent as the `Cf-Access-Jwt-Assertion` header or the
-`CF_Authorization` cookie). API tokens and connected apps get `403`: a credential can't
-mint another credential, so a token confined to one workspace can't create a broader one
-(PROJ-903).
-
-```bash
-curl -s -X POST "https://<your-worker>.workers.dev/auth/tokens" \
-  -H "Cf-Access-Jwt-Assertion: <cf-access-jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-agent",
-    "workspaceId": "<workspace-uuid>",
-    "scopes": ["read", "write"],
-    "expiresAt": 1893456000
-  }'
-# Response: { "token": "<64 hex chars>" }
-```
-
-Omit `workspaceId` for a user-scoped token that works in every workspace you belong to;
-include it to confine the token to one workspace. Personal tokens have no `pk_` prefix
-(that's the workspace-token format from `POST /api/workspaces/:slug/tokens`).
-
-Workspace tokens follow the same rule: `POST /api/workspaces/:slug/tokens` and
-`DELETE /api/workspaces/:slug/tokens/:tokenId` require a signed-in browser session as a
-workspace admin or owner. A `pk_` token or connected app gets `403`, so an agent's
-credential can't mint a sibling token with wider scopes (PROJ-917). Listing tokens
-(`GET`) still works with any admin credential, since it returns no secrets.
-
-`scopes` is a list of `"read"`, `"write"`, or `"*"` (full access) — e.g. `["read"]`, `["read", "write"]`, or `["*"]`. `expiresAt` is optional (unix seconds).
-
-Token minting is one of a handful of REST-only endpoints — see [REST endpoints](/projektor/agents/rest-endpoints/) for the full list.
-
----
-
-## 3b. Connect the Claude app
-
-The Claude app (desktop, web at claude.ai, and mobile) doesn't use the `claude mcp add` CLI command — it connects to remote MCP servers through **Connectors** in Settings.
-
-**Add it by URL and sign in.** No token to mint, paste, or rotate.
-
-1. **Free / Pro / Max plans:** go to **Settings → Connectors** and click **"Add custom connector."**
-   **Team / Enterprise plans:** an owner adds it once for the org via **Admin settings → Connectors → Add custom connector**; members then connect to it from **Settings → Connectors**.
-2. **Server URL:** paste `https://<your-worker>.workers.dev/mcp/<workspace-uuid>` — the same URL shape used in §3, with the workspace UUID (not the slug) in the path. Leave the request-headers section empty.
-3. Click **Add**. Claude discovers that the endpoint needs authorization, opens projektor's sign-in, and shows a consent screen naming **the workspace, your identity, and the permissions being granted**.
-4. Approve. Claude receives its own credential; tools become available in a conversation.
-
-Each person who connects gets their own grant. It is scoped to one workspace, it can never exceed the role that person holds there, and if they leave the workspace it stops working on the next request with nothing to clean up.
-
-### Scopes
+Your grant is scoped to one workspace and can never exceed your role there. If you leave
+the workspace, it stops working on the next request. It lasts 30 days, and reconnecting
+issues a fresh one. To review or withdraw it, see the **Connected applications** list on
+the **Connect Agent** page. The list shows only your own grants; no one else can see or
+revoke them.
 
 | Scope | What it allows |
 | --- | --- |
 | `projektor:read` | Read issues, wiki pages, projects and comments |
 | `projektor:write` | Create and change issues, wiki pages, projects and comments |
 
-A connector that requests no scopes is granted both. Your workspace role is still the ceiling: a `viewer` who grants `projektor:write` gets a connector that can read, because the service layer checks the role on every call.
+A connector that requests no scopes is granted both. Your role is still the ceiling: a
+`viewer` who grants `projektor:write` can only read.
 
-### Reviewing and withdrawing access
+## 2. Claude Code
 
-**Settings → API Tokens → Connected applications** lists the connectors you have authorized for the workspace, and disconnects any of them. Revocation takes effect on the next request — nothing is cached that would keep a withdrawn connector alive. Claude reports it as "authentication required" and offers to reconnect, rather than failing silently.
+**Sign in (recommended on your own machine):**
 
-A grant expires 30 days after it is issued, shown in the **Expires** column. Reconnecting from Claude issues a fresh one; there is nothing to rotate in the meantime.
+```bash
+claude mcp add --transport http projektor "https://<your-host>/mcp/<workspace-id>"
+```
 
-The list is yours alone. Unlike API tokens, which are workspace property and managed by admins, a connector grant is a personal credential: no one else can see or revoke yours, and you cannot see theirs.
+Then start `claude`, run `/mcp`, pick `projektor` and follow the sign-in in your browser.
+Until you do, `claude mcp list` shows `projektor … ! Needs authentication`.
 
-### Fallback: a pasted API token
+**With a workspace API token (headless):**
 
-If your projektor instance predates OAuth support, or the connector fails to discover the authorization server, you can still connect with a `pk_` token in a request header.
+```bash
+claude mcp add --transport http projektor "https://<your-host>/mcp/<workspace-id>" \
+  --header "Authorization: Bearer pk_<token>"
+```
 
-1. Mint a token via **Settings → Tokens → "New token"**, as in [§1](#1-prerequisites) / [§3](#3-manual-connect-production).
-2. In the connector dialog, open **Request headers** and add `Authorization` → `Bearer pk_<64 hex chars>` (enter the scheme yourself — Claude sends the value verbatim, it does not prepend `Bearer`).
-3. **No `X-Workspace-Slug` needed.** The MCP endpoint resolves the workspace from the UUID already in the URL path.
-4. If the instance is behind Cloudflare Access, also add `CF-Access-Client-Id` / `CF-Access-Client-Secret` as described in [§7](#7-cloudflare-access-note).
+Put the server name and URL **before** `--header`. `--header` takes several values, so on
+current Claude Code a command that puts the headers first fails with
+`error: missing required argument 'name'`. The command shown in the token dialog and
+printed by `/bootstrap` currently has that order; use the form above until that is fixed.
 
-:::caution
-**This is a worse credential than the OAuth flow, not merely a less convenient one.** Request headers on a connector are a beta feature, and on Team/Enterprise plans they are set by an org admin and **shared by everyone in the organisation** — one credential for the whole org, not one per person. That means no per-user attribution, and no way to withdraw one person's access without withdrawing everyone's. Prefer the sign-in flow above wherever the instance supports it.
+`X-Workspace-Slug` is optional on the MCP endpoint, because the UUID in the URL already
+names the workspace.
 
-Header *names* are also restricted to an allowlist (`authorization`, `x-api-key`, `x-auth-token`, and similar standard names). `Authorization` is allowlisted. The `CF-Access-Client-*` names are not, and may be rejected unless Anthropic has added them for your organization — if the connector fails with a `403` on an Access-protected instance, use the Claude Code CLI path (§2/§3) instead, which sends arbitrary headers with no such restriction.
+## 3. Other MCP clients
+
+Projektor speaks MCP over Streamable HTTP (JSON-RPC 2.0 over `POST`), so any client that
+supports remote HTTP servers works. Give it the server URL, and either let it run the
+OAuth sign-in or send `Authorization: Bearer pk_<token>` as a header.
+
+## 4. Behind Cloudflare Access (headless agents)
+
+A browser session gets through Access by logging in. A headless agent can't, so it sends
+a Cloudflare Access [service token](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
+alongside its API token:
+
+```bash
+claude mcp add --transport http projektor "https://<your-host>/mcp/<workspace-id>" \
+  --header "Authorization: Bearer pk_<token>" \
+  --header "CF-Access-Client-Id: <client-id>" \
+  --header "CF-Access-Client-Secret: <client-secret>"
+```
+
+:::caution[Unverified: may return 401 today]
+Cloudflare Access forwards a service-token JWT to the Worker, and that JWT has no email.
+Since v0.6.15, Projektor rejects such a JWT before it checks the `Authorization` header.
+This combination has not been re-tested against a live Access instance; it is tracked in
+PROJ-979. If you get `401 {"error":"Invalid Access token"}`, that is the cause.
 :::
 
-### For operators
+The sign-in flow needs no service token, but the operator must exempt two OAuth paths
+from Access first. See [For operators](#for-operators).
 
-The connector flow needs three things in the Worker configuration; a deployment missing any of them will still serve `pk_` tokens but cannot complete a sign-in. See the [deployment guide](/projektor/guides/deploying/) for the full setup.
+## Verify it worked
 
-- An `OAUTH_KV` namespace binding. The name is fixed and cannot be changed.
-- `/.well-known/*` routed to the Worker ahead of static assets. Without it the discovery documents return the site's HTML shell, and the client reads a `200` as a valid document rather than as a failure.
+1. `claude mcp list` should print `projektor: https://<your-host>/mcp/<workspace-id> (HTTP) - √ Connected`.
+2. Without any agent, this request should return `200` with `"serverInfo":{"name":"projektor",…}`:
+
+   ```bash
+   curl -s -X POST "https://<your-host>/mcp/<workspace-id>" \
+     -H "Authorization: Bearer pk_<token>" \
+     -H "Content-Type: application/json" \
+     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+   ```
+
+3. In Claude, ask: "List the projects in this workspace."
+
+## If it doesn't work
+
+**`404 {"error":"Workspace not found"}`** (Claude Code: `MCP endpoint not found`). The URL
+holds the workspace slug, or a UUID that doesn't exist. Copy the server URL from
+**Connect Agent**; the path takes the UUID.
+
+**`401 {"error":"Unauthorized"}`** (Claude Code: `Server rejected the configured
+Authorization header (HTTP 401)`). The token is wrong, revoked or expired, or the `Bearer `
+prefix is missing. Get a new token from an admin, and send it as
+`Authorization: Bearer pk_…`.
+
+**`403 {"error":"Forbidden"}`**. The token belongs to a different workspace: a workspace
+token works only in the workspace it was created in. You also get a 403 if you are not a
+member of this workspace. Use the server URL of the token's own workspace, or create a
+token in this one.
+
+**The connector never shows a sign-in, or discovery returns `302`.** Cloudflare Access is
+answering the OAuth discovery request with a login redirect. The operator adds the
+[Access carve-outs](#for-operators).
+
+## Tokens
+
+**Workspace API tokens** (the `pk_` kind, for agents) are made on the **Connect Agent** page
+under **API tokens — admins only** → **+ New token**. Pick a name, **Read + Write** or
+**Read-only**, and an optional expiry in days. The token is shown once. The REST route
+behind that dialog is `POST /api/workspaces/<slug>/tokens`, with a body like
+`{"name": "ci-agent", "scopes": ["read", "write"], "expiresInDays": 90}`. It returns
+`{"id", "token": "pk_<64 hex chars>", "name", "scopes", "expiresAt"}`. `scopes` takes
+`"read"`, `"write"` or `"*"`; `expiresInDays` is 1 to 365, or leave it out for no expiry.
+
+Creating or revoking a token requires a **signed-in browser session** as a workspace admin
+or owner. A request made with an API token or an OAuth grant gets `403` ("Workspace
+tokens can only be created or revoked from a signed-in browser session…"), so an agent
+can never mint a sibling credential (PROJ-917). Listing tokens (`GET`) works with any
+admin credential, since it returns no secrets.
+
+**Personal access tokens** (`POST /auth/tokens`) follow the same rule: signed-in browser
+sessions only, and they are not offered in the UI (PROJ-903). They have **no** `pk_` prefix: the response is `{"token": "<72 characters: two UUIDs run together>"}`.
+Agents should use a workspace token or the sign-in flow instead.
+
+## For operators
+
+The sign-in flow needs three things in the Worker configuration. Without them, the
+instance still serves `pk_` tokens but cannot complete a sign-in. Details are in the
+[deployment guide](/projektor/guides/deploying/).
+
+- An `OAUTH_KV` namespace binding. The name is fixed.
+- `/.well-known/*` in `run_worker_first`, so discovery reaches the Worker instead of the
+  site's HTML shell.
 - The `global_fetch_strictly_public` and `cache_option_enabled` compatibility flags.
 
-If the instance sits behind **Cloudflare Access**, two paths must bypass the Access policy or the flow cannot start:
+Behind Cloudflare Access, `/.well-known/*` and `/oauth/token` must **bypass** Access, and
+`/oauth/authorize` must stay **protected**: see
+[Deploying → Cloudflare Access carve-outs for OAuth](/projektor/guides/deploying/#6-cloudflare-access-carve-outs-for-oauth).
 
-- `/.well-known/*` — discovery is unauthenticated by specification. Behind Access it answers `302` to a login page, and the client reports that the authorization server never received any traffic. This is the single most common way the connector fails to appear at all.
-- `/oauth/token` — the client exchanges its authorization code here with no browser session to present.
+:::note[One-click deploy: no sign-in yet]
+The [Deploy to Cloudflare button](https://github.com/TAJD/projektor-deploy-example) and
+its `deploy-auto.sh` currently pin Projektor **v0.3.7**, which predates sign-in (added in
+v0.6.1). Their generated config also has no
+`OAUTH_KV` binding, no `/.well-known/*` in `run_worker_first` and neither OAuth
+compatibility flag. On an instance deployed that way, connect with a workspace API token
+([§2](#2-claude-code)) until the deploy repo is updated, or follow the
+[manual deploy](/projektor/guides/deploying/), which ships the full config.
+:::
 
-`/oauth/authorize` must stay **behind** Access: that redirect is what signs the user in before the consent screen decides anything.
+## Local development
 
----
-
-## 4. Verify the connection
-
-**1. Confirm the server is registered:**
-
-```bash
-claude mcp list
-# projektor should appear in the list
-```
-
-**2. Raw JSON-RPC smoke test** — exercises auth + workspace headers end-to-end, no agent required:
-
-```bash
-curl -s https://<your-worker>.workers.dev/mcp/<workspace-uuid> \
-  -H "Authorization: Bearer pk_..." \
-  -H "X-Workspace-Slug: <slug>" \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
-```
-
-**3. Inside a Claude Code session:** run `/mcp` to confirm connection status, then give it a natural-language check — e.g. "list issues in PROJ".
-
----
-
-## 5. Tool catalog
-
-The complete, always-current catalog is **generated from source** — every tool,
-grouped by domain, rendered from `apps/api/src/mcp/*.ts`:
-
-➡️ **[MCP tool catalog](/projektor/agents/tool-catalog/)** (on the docs site: *Agents & MCP → MCP tool catalog*).
-
-It is regenerated and freshness-checked by CI, so it can never drift from the code.
-This guide intentionally does **not** repeat the table — there is one source of truth.
-
----
-
-## 6. Common agent workflows
-
-Once connected, give Claude Code natural-language instructions:
-
-**Create and triage issues**
-> "Create a ticket for fixing the login redirect in the PROJ project — high priority, assign it to me."
-
-**Query and summarise work**
-> "Show me all open issues in PROJ, grouped by status."
-> "What are the highest-priority issues I should work on next?"
-
-**Sprint planning**
-> "Create a sprint called 'Week 24' in PROJ, then move all in-progress and high-priority backlog issues into it."
-> "Mark the current sprint complete and show me what's left unfinished."
-
-**Wiki writing**
-> "Write a wiki page summarising what we shipped in this sprint — use the completed issues as your source."
-> "Search the wiki for 'auth flow' and show me what we've documented."
-
-**Member management**
-> "List workspace members and their roles."
-> "Invite user@example.com as a member."
-
-**Cross-issue work**
-> "Find all issues blocked by PROJ-12 and summarise what's at risk."
-
----
-
-## 7. Cloudflare Access note
-
-If your projektor instance is behind Cloudflare Access (which it should be in production), headless agents need a **service token** rather than a user JWT. See the [Cloudflare Access docs on service tokens](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/) for minting one.
-
-Pass the service token credentials alongside the API token:
+`GET /bootstrap` seeds a workspace, a user and a `pk_` token on a local stack (only when
+`ENVIRONMENT=development` and `BOOTSTRAP_SECRET` is set; see `AGENTS.md` → *Dev workflow*):
 
 ```bash
-claude mcp add \
-  --transport http \
-  --header "Authorization: Bearer pk_<token>" \
-  --header "X-Workspace-Slug: <slug>" \
-  --header "CF-Access-Client-Id: <client-id>" \
-  --header "CF-Access-Client-Secret: <client-secret>" \
-  projektor "https://<your-worker>.workers.dev/mcp/<workspace-uuid>"
+curl -s http://127.0.0.1:8787/bootstrap -H "X-Bootstrap-Secret: localdev"
 ```
 
-For the **OAuth connector** path (§3b) the operator has separate work to do: Access also sits in front of the OAuth discovery and token endpoints, which no browser session ever reaches. Bypass applications for `/.well-known` and `/oauth/token` are required, and `/oauth/authorize` must stay protected — see [Deploying → Cloudflare Access](/projektor/guides/deploying/#6-cloudflare-access-carve-outs-for-oauth).
+The response has `workspace.id`, `token` and `mcpUrl`. Its `mcpAddCommand` currently puts
+`--header` first, which current Claude Code rejects (see [§2](#2-claude-code)), so build the
+command from `mcpUrl` and `token` instead.
 
-Without a valid CF Access service token, the Worker returns a `403` before it reaches the MCP layer — the agent connection fails silently. The bootstrap flow bypasses Access; agent workflows in production need both headers.
+The local sign-in flow needs a real browser: the dev auth bypass is deliberately off on
+`/mcp/`, so an unauthenticated MCP request gets the `401` challenge that starts OAuth.
+
+## Next
+
+- Every tool, generated from source: [MCP tool catalog](/projektor/agents/tool-catalog/).
+- What to ask for, and how agents coordinate: [Agentic workflows](/projektor/agents/agent-workflows/).
 
 ---
 
@@ -260,10 +230,10 @@ Content-Type: application/json
 
 | Header | Value |
 |--------|-------|
-| `Authorization` | `Bearer pk_<64 hex chars>` |
+| `Authorization` | `Bearer pk_<64 hex chars>` (workspace token) or the OAuth access token Claude obtained |
 | `X-Workspace-Slug` | `<slug>` (optional on the MCP route — see below) |
 
-The token is workspace-scoped — a token from workspace A is rejected for workspace B.
+A workspace token or OAuth grant is confined to its workspace: used on another workspace's URL it gets `403`.
 
 `X-Workspace-Slug` is **optional for `POST /mcp/<workspaceId>`**: when it's absent, the
 workspace is resolved from the UUID in the path, so a client can connect with only the
@@ -390,5 +360,5 @@ These are the load-bearing shapes the Worker enforces — verified against the s
 
 - **MCP URL shape:** `POST /mcp/<workspaceId>` — UUID in the path, slug only in the header.
 - **Required headers:** `Authorization` is always required. `X-Workspace-Slug` is required on every non-MCP endpoint; on `POST /mcp/<workspaceId>` it is optional because the path UUID resolves the workspace.
-- **Token prefix:** `pk_` (64 hex chars); verified via SHA-256 hash lookup against D1.
+- **Token shape:** workspace tokens are `pk_` + 64 hex chars; personal access tokens have no prefix (two UUIDs run together, 72 characters). Both are verified by SHA-256 hash lookup against D1.
 - **CORS:** both headers are in the Worker's explicit `allowHeaders` list.

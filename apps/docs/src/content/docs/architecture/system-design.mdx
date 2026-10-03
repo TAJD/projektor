@@ -154,8 +154,8 @@ implied by the runtime:
 
 ## Request flow
 
-1. **Agent** → `POST /mcp/:workspaceId` with `Authorization: Bearer pk_…` + `X-Workspace-Slug`.
-2. `authMiddleware`: CF Access JWT → API-token (D1 hash lookup) → dev bypass.
+1. **Agent** → `POST /mcp/:workspaceId` with `Authorization: Bearer …` (an OAuth access token or a `pk_` API token; `X-Workspace-Slug` is optional here).
+2. `authMiddleware`: OAuth grant → CF Access JWT → API token (D1 hash lookup) → dev bypass (never on `/mcp/`) → public read-only viewer (if enabled).
 3. `workspaceMiddleware`: resolve slug → load workspace → verify `workspace_members` row.
 4. MCP router dispatches one of three method groups:
    - `initialize` — server info and capabilities.
