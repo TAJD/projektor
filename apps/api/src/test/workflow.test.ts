@@ -52,6 +52,11 @@ describe("Workflow spec", () => {
 		// PROJ-599: a pointer only, per the spec's own single-home rule.
 		expect(body.content).toContain("## Playbooks");
 		expect(body.content).toContain('get_playbook("epic-goal")');
+		// PROJ-915: the human-authored files rule is stated in one line.
+		expect(body.content).toContain("**Human-authored files**");
+		expect(body.content).toContain("`README.md`");
+		expect(body.content).toContain("`apps/docs/src/content/docs/philosophy/**`");
+		expect(body.content).toContain("PROJ-914");
 		// PROJ-933: a stable content-hash version accompanies the spec.
 		expect(typeof body.version).toBe("string");
 		expect(body.version.length).toBeGreaterThan(0);

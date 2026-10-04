@@ -1,7 +1,8 @@
 ---
-title: "Architecture"
-description: "How Projektor is put together: surfaces, service layer, and storage."
+title: "Architecture: one Cloudflare Worker serving MCP and REST"
+description: "How Projektor is put together: one Cloudflare Worker serving REST and MCP over a shared service layer, backed by D1, KV and R2."
 sidebar:
+  label: "Architecture"
   order: 1
 ---
 import mcpStats from "../../../generated/mcp-stats.json";
@@ -122,6 +123,13 @@ service-layer contract), but a small, documented subset of REST endpoints — fi
 attachments, tokens, public share links, feedback submission — has no MCP
 equivalent and is safe to depend on; see [REST endpoints](/projektor/agents/rest-endpoints/).
 
+Parity is checked by a test, not held by review. `mcp-parity.node.test.ts` cross-references
+every exported service function against the REST routes, the runtime MCP registry and the
+documented tool catalog, and fails the build on drift, including a catalog reordered
+without the dispatch table. Operations deliberately on one surface only are listed in the
+test with a reason each, and a stale entry fails it too, so the exceptions stay few and
+visible.
+
 ## Platform constraints
 
 A few Cloudflare platform limits are encoded directly in the service layer, not just
@@ -154,8 +162,8 @@ implied by the runtime:
 
 ## Request flow
 
-1. **Agent** → `POST /mcp/:workspaceId` with `Authorization: Bearer pk_…` + `X-Workspace-Slug`.
-2. `authMiddleware`: CF Access JWT → API-token (D1 hash lookup) → dev bypass.
+1. **Agent** → `POST /mcp/:workspaceId` with `Authorization: Bearer …` (an OAuth access token or a `pk_` API token; `X-Workspace-Slug` is optional here).
+2. `authMiddleware`: OAuth grant → CF Access JWT → API token (D1 hash lookup) → dev bypass (never on `/mcp/`) → public read-only viewer (if enabled).
 3. `workspaceMiddleware`: resolve slug → load workspace → verify `workspace_members` row.
 4. MCP router dispatches one of three method groups:
    - `initialize` — server info and capabilities.

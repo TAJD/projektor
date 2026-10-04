@@ -10,13 +10,14 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DESCRIPTION, SITE_URL } from "../src/site.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const docsApp = join(here, "..");
 const contentDir = join(docsApp, "src", "content", "docs");
 const distDir = join(docsApp, "dist");
 
-const SITE = "https://tajd.github.io/projektor";
+const SITE = SITE_URL.replace(/\/$/, "");
 
 function walk(dir) {
 	const out = [];
@@ -56,7 +57,7 @@ const pages = walk(contentDir)
 const index = [
 	"# Projektor",
 	"",
-	"> A self-hosted, MCP-native Jira + wiki that runs in a single Cloudflare Worker. AI agents are a first-class client over a JSON-RPC MCP endpoint.",
+	`> ${DESCRIPTION} AI agents are a first-class client over a JSON-RPC MCP endpoint.`,
 	"",
 	"## Docs",
 	"",

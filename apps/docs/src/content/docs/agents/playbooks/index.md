@@ -1,7 +1,8 @@
 ---
-title: "Playbooks"
-description: "Generic, reusable agent working patterns, shipped and served the same way projektor serves its own workflow spec — fetchable at the moment of use, with server-side parameterised composition."
+title: "Agent playbooks: reusable working patterns for MCP agents"
+description: "Reusable agent working patterns, served like the workflow spec: fetch one when you need it, or have the server fill it in with live data."
 sidebar:
+  label: "Playbooks"
   order: 0
 ---
 

@@ -9,7 +9,7 @@ export function buildMcpAddCommand({ workspaceSlug, mcpUrl, token }: McpAddComma
 		`claude mcp add --transport http ` +
 		`--header "Authorization: Bearer ${token}" ` +
 		`--header "X-Workspace-Slug: ${workspaceSlug}" ` +
-		`projektor "${mcpUrl}"`
+		`-- projektor "${mcpUrl}"`
 	);
 }
 
@@ -22,6 +22,6 @@ export function buildMcpAddCommandMultiline({
 		`claude mcp add --transport http \\`,
 		`  --header "Authorization: Bearer ${token}" \\`,
 		`  --header "X-Workspace-Slug: ${workspaceSlug}" \\`,
-		`  projektor "${mcpUrl}"`,
+		`  -- projektor "${mcpUrl}"`,
 	].join("\n");
 }

@@ -33,10 +33,12 @@ editing anything:
   claiming `src/` reserves nothing under `src/`, so name concrete paths and name them the
   same way the rest of the fleet does. Issue leases (`claim_issue`) are work-item-level —
   they stop two agents picking up the same ticket. The two are independent; you need both.
-- **Your session goes stale if you stop heartbeating.** Liveness is heartbeat-based:
+- **Your session goes stale if it goes quiet.** Liveness is heartbeat-based:
   `ACTIVE_TTL` in `apps/api/src/services/agents.ts` (mirrored as `SESSION_TTL_SECONDS` in
-  `apps/api/src/services/issue-leases.ts`) is **120 seconds**. Register, then go quiet for
-  two minutes without a `heartbeat_agent` call, and your session goes stale — you must
+  `apps/api/src/services/issue-leases.ts`) is **120 seconds**. Any call made with your
+  session id (`claim_issue`, `claim_files`, `update_issue`, `post_message`) refreshes it,
+  so use the two-call path below and you will rarely need an explicit `heartbeat_agent`.
+  Go quiet for two minutes with no such call and your session goes stale: you must
   heartbeat again before you can claim.
 - **Both tiers self-heal.** An issue lease or file claim held by a stale session is
   reclaimed by the next claimer in the same call (`release_reason: "expired"`). Still call
@@ -66,6 +68,15 @@ gates) live in exactly one place, the [workflow spec](https://tajd.github.io/pro
 ## Planning and design docs live in the wiki, not the repo
 
 Design records, implementation plans, and specs belong in the projektor wiki (`create_wiki_page`/`update_wiki_page`), not in a repo `docs/` folder. Keeping them in the wiki makes them discoverable and searchable (`search_wiki`) instead of buried in git history. Root-level user-facing docs (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`) are the only docs that belong in the repo itself.
+
+## Human-authored files
+
+Most docs may be generated or written by agents, but these paths are human-authored (Tom's decision, PROJ-915):
+
+- `README.md`
+- `apps/docs/src/content/docs/philosophy/**`
+
+Agents must not edit these files, not even to fix a typo or a stale fact. When your work makes one of them inaccurate, add a comment to the current editorial issue (PROJ-914 or its successor) that quotes the affected line and states the fact that changed. Docs checks may still scan these files and report drift, but the fix goes to the editorial issue, never into an agent's diff. `.github/CODEOWNERS` requires @TAJD's review on both paths.
 
 ## Architecture: the service-layer contract (most important)
 
@@ -356,7 +367,7 @@ before deciding whether to `force`):
 1. `register_agent` at session start, linking the issue you're implementing — save the returned `id`.
 2. `claim_files` before touching any file (check `list_file_claims` first; back off, don't `force`).
 3. `post_message` to `scope: "issue:<uuid>"` when you start/blocker/finish; `scope: "workspace"` for fleet-wide notices.
-4. `heartbeat_agent` every ~60 s (sessions time out after 120 s of silence).
+4. `heartbeat_agent` only if more than ~2 minutes pass between calls that carry your session id (those refresh it already; sessions time out after 120 s of silence).
 5. `release_files` then `end_agent` when done.
 
 See the [MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) for each tool's exact input schema.
@@ -372,7 +383,7 @@ This repo is built out via parallel workers in separate git worktrees. To avoid 
 
 ### Spawn prompt requirement
 
-Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination (required)` section stating the call sequence (either the two-call `start_work`/`finish_work` path or the five-call path) from "Fleet coordination protocol" above.
+Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination (required)` section stating the call sequence from "Fleet coordination protocol" above. Default to the two-call `start_work`/`finish_work` path and tell workers not to call `heartbeat_agent`, `register_agent` or `release_*` separately; use the five-call path only when a task needs finer-grained control.
 
 A full spawn prompt also needs a **Finish** section (what "done" means for the task,
 and what to report back) alongside the Coordination section above.

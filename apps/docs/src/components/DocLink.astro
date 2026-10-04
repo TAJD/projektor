@@ -1,0 +1,45 @@
+---
+/**
+ * A base-aware link to another docs page (PROJ-939).
+ *
+ * Markdown links have to spell out the `/projektor/` base for starlight-links-validator
+ * to check them. In MDX we can do better: pass the page's content id (`guides/self-hosting`)
+ * and this component prefixes `import.meta.env.BASE_URL`, so a base or domain change needs
+ * no content edits. The validator never sees these hrefs, so the build fails here instead
+ * when the target page does not exist.
+ */
+import { getEntry } from "astro:content";
+import { LinkButton } from "@astrojs/starlight/components";
+import type { StarlightIcon } from "@astrojs/starlight/types";
+
+interface Props {
+	/** Content id of the target page, e.g. "guides/self-hosting". "index" is the homepage. */
+	to: string;
+	/** Optional in-page anchor, without the leading "#". */
+	hash?: string;
+	/** Render as a Starlight LinkButton instead of an inline link. */
+	button?: "primary" | "secondary" | "minimal";
+	icon?: StarlightIcon;
+}
+
+const { to, hash, button, icon } = Astro.props;
+const entry = await getEntry("docs", to);
+if (!entry) {
+	throw new Error(`DocLink: no docs page with id "${to}"`);
+}
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const path = to === "index" ? "/" : `/${to}/`;
+const href = `${base}${path}${hash ? `#${hash}` : ""}`;
+---
+
+{
+	button ? (
+		<LinkButton href={href} variant={button} icon={icon}>
+			<slot />
+		</LinkButton>
+	) : (
+		<a href={href}>
+			<slot />
+		</a>
+	)
+}

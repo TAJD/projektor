@@ -571,7 +571,11 @@ async function fetchIssueByIdOrRef(
 	id: string | undefined,
 	ref: string | undefined
 ) {
-	if (id) return fetchIssueById(orm, ctx, id);
+	if (id) {
+		return ISSUE_REF_PATTERN.test(id)
+			? fetchIssueByRef(orm, ctx, id)
+			: fetchIssueById(orm, ctx, id);
+	}
 	if (ref) return fetchIssueByRef(orm, ctx, ref);
 	return null;
 }

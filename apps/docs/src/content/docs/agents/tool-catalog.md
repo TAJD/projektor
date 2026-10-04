@@ -1,7 +1,8 @@
 ---
-title: "MCP tool catalog"
-description: "Every MCP tool Projektor exposes, generated from source."
+title: "MCP tool catalog: every Projektor tool by domain"
+description: "Every MCP tool Projektor exposes, grouped by domain and marked read-only, write or destructive. Generated from source and checked by CI."
 sidebar:
+  label: "MCP tool catalog"
   order: 2
 ---
 Every MCP tool Projektor exposes, grouped by domain, with one-line descriptions.
