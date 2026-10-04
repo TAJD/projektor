@@ -155,6 +155,9 @@ async function tryCfAccessAuth(c: Context<HonoEnv>): Promise<AuthOutcome> {
 		c.req.header("Cf-Access-Jwt-Assertion") ??
 		parseCookie(c.req.header("cookie") ?? "", "CF_Authorization");
 	if (!cfJwt) return { kind: "skip" };
+	if (c.req.header("Authorization")?.startsWith("Bearer ") && isServiceTokenJwt(cfJwt, c.env)) {
+		return { kind: "skip" };
+	}
 
 	let user: AuthUser | null;
 	try {
@@ -350,8 +353,7 @@ export async function authMiddleware(c: Context<HonoEnv>, next: Next) {
 // JWT without `exp` compared `undefined < now` → false → never expired, and one without
 // `email` (a Cloudflare Access *service-token* JWT) crashed provisioning with a 500.
 // Now: `exp`, `aud` and `iss` are required; `email` is required too, because every
-// Access identity projektor serves is a person. Service-token JWTs are rejected (401) —
-// machine callers use pk_ API tokens or OAuth instead, which carry confinement and scopes.
+// Access identity projektor serves is a person; a service-token JWT only defers to a bearer.
 const JwtHeaderSchema = z.object({ alg: z.string(), kid: z.string().optional() });
 const JwtPayloadSchema = z.object({
 	exp: z.number(),
@@ -376,13 +378,23 @@ function decodeJwtFields(
 	}
 }
 
-/** The single claim check, used by both the key-less pre-screen and the verifier. */
 function jwtClaimsValid(
 	header: JwtHeader,
 	payload: JwtPayload,
 	audience: string,
 	issuer: string
 ): payload is JwtPayload & { email: string } {
+	return (
+		jwtIdentityClaimsValid(header, payload, audience, issuer) && typeof payload.email === "string"
+	);
+}
+
+function jwtIdentityClaimsValid(
+	header: JwtHeader,
+	payload: JwtPayload,
+	audience: string,
+	issuer: string
+): boolean {
 	if (header.alg !== "RS256") return false;
 
 	const now = Math.floor(Date.now() / 1000);
@@ -391,8 +403,23 @@ function jwtClaimsValid(
 	const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
 	if (!aud.includes(audience)) return false;
 
-	if (payload.iss !== issuer) return false;
-	return typeof payload.email === "string";
+	return payload.iss === issuer;
+}
+
+function isServiceTokenJwt(jwt: string, env: Env): boolean {
+	const parts = jwt.split(".");
+	if (parts.length !== 3) return false;
+	const decoded = decodeJwtFields(parts);
+	return (
+		decoded !== null &&
+		decoded.payload.email === undefined &&
+		jwtIdentityClaimsValid(
+			decoded.header,
+			decoded.payload,
+			env.CF_ACCESS_AUDIENCE,
+			`https://${env.CF_ACCESS_TEAM_DOMAIN}`
+		)
+	);
 }
 
 async function verifySignatureAgainstKeys(
