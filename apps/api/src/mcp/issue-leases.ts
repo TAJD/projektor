@@ -12,7 +12,7 @@ export const issueLeasesTools: MCPTool[] = [
 			type: "object",
 			required: ["issueId"],
 			properties: {
-				issueId: { type: "string", description: "Issue UUID to lease" },
+				issueId: { type: "string", description: "Issue UUID or ref like PROJ-42, to lease" },
 				agentId: {
 					type: "string",
 					description:
@@ -33,7 +33,7 @@ export const issueLeasesTools: MCPTool[] = [
 			type: "object",
 			required: ["issueId"],
 			properties: {
-				issueId: { type: "string", description: "Issue UUID to release" },
+				issueId: { type: "string", description: "Issue UUID or ref like PROJ-42, to release" },
 				agentId: {
 					type: "string",
 					description: "Only release if the lease is held by this agent session (optional)",
@@ -56,7 +56,10 @@ export const issueLeasesTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			properties: {
-				issueId: { type: "string", description: "Filter to leases on this issue (optional)" },
+				issueId: {
+					type: "string",
+					description: "Filter to leases on this issue, UUID or ref like PROJ-42 (optional)",
+				},
 				agentId: { type: "string", description: "Filter to leases held by this agent (optional)" },
 				projectId: {
 					type: "string",

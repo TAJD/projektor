@@ -14,6 +14,7 @@ import {
 	UnsupportedMediaTypeError,
 	ValidationError,
 } from "./errors";
+import { resolveVisibleIssueIdParam } from "./issue-ref";
 import type { ServiceCtx } from "./types";
 import * as wikiService from "./wiki";
 
@@ -53,6 +54,31 @@ function ownerVisibleFilter(ctx: ServiceCtx): { sql: string; params: unknown[] }
 		          AND p.project_id IS NOT NULL AND NOT ${page.sql})`,
 		params: [...issue.params, ...page.params],
 	};
+}
+
+/**
+ * PROJ-959: an attachment's owner is stored by UUID, but callers may name an issue by its
+ * ref ("PROJ-42"). Resolve before anything reads or writes, so the stored entity_id is
+ * always the canonical UUID and list/create agree on it. Wiki pages pass through as-is.
+ *
+ * `lenient` (the read path): an unknown ref falls through unchanged instead of throwing.
+ * No stored entity_id can equal a ref, so the listing is simply empty — the same answer an
+ * issue the caller can't see already gets (ownerVisibleFilter), so the response can't be
+ * used to tell "doesn't exist" from "exists in a project you were never granted".
+ */
+async function resolveEntityId(
+	ctx: ServiceCtx,
+	entityType: "issue" | "wiki_page",
+	entityId: string,
+	lenient = false
+): Promise<string> {
+	if (entityType !== "issue") return entityId;
+	try {
+		return await resolveVisibleIssueIdParam(ctx, entityId);
+	} catch (e) {
+		if (lenient && e instanceof NotFoundError) return entityId;
+		throw e;
+	}
 }
 
 /**
@@ -150,7 +176,8 @@ function toDto(r: AttachmentRow): AttachmentDto {
 export async function listAttachments(ctx: ServiceCtx, input: unknown): Promise<AttachmentDto[]> {
 	const parsed = ListAttachmentsSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { entityType, entityId } = parsed.data;
+	const { entityType } = parsed.data;
+	const entityId = await resolveEntityId(ctx, entityType, parsed.data.entityId, true);
 
 	// PROJ-311/PROJ-407: only join in wiki page details the caller is actually allowed to
 	// see (workspace-level pages, or project-scoped pages they have a grant on). A row
@@ -195,8 +222,11 @@ export async function createLinkAttachment(
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const data = parsed.data;
 
+	// Permission first: resolving a ref before this check would let a viewer tell a real
+	// ref (then Forbidden) from an unknown one (NotFound).
 	requireAttachmentWrite(ctx);
-	await assertEntityWritable(ctx, data.entityType, data.entityId);
+	const entityId = await resolveEntityId(ctx, data.entityType, data.entityId);
+	await assertEntityWritable(ctx, data.entityType, entityId);
 
 	if (data.kind === "wiki_ref") {
 		// PROJ-311: getWikiPage enforces project-grant visibility, not just existence —
@@ -222,7 +252,7 @@ export async function createLinkAttachment(
 			data.kind === "url" ? data.url : null,
 			data.kind === "wiki_ref" ? data.wikiPageId : null,
 			data.entityType,
-			data.entityId,
+			entityId,
 			ctx.userId,
 			now
 		)
@@ -272,9 +302,10 @@ export async function assertUploadAllowed(
 export async function recordUpload(ctx: ServiceCtx, input: unknown): Promise<{ id: string }> {
 	const parsed = RecordFileUploadSchema.safeParse(input);
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
-	const { entityType, entityId, filename, contentType, size, r2Key } = parsed.data;
+	const { entityType, filename, contentType, size, r2Key } = parsed.data;
 
 	requireAttachmentWrite(ctx);
+	const entityId = await resolveEntityId(ctx, entityType, parsed.data.entityId);
 	await assertEntityWritable(ctx, entityType, entityId);
 
 	const id = crypto.randomUUID();

@@ -271,6 +271,7 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 	if (parsed.data.key !== undefined) setObj.key = parsed.data.key;
 	if (parsed.data.description !== undefined) setObj.description = parsed.data.description;
 	if (parsed.data.agentWipLimit !== undefined) setObj.agentWipLimit = parsed.data.agentWipLimit;
+	if (parsed.data.epicAutoClose !== undefined) setObj.epicAutoClose = parsed.data.epicAutoClose;
 	if (parsed.data.archived !== undefined) setObj.archivedAt = parsed.data.archived ? now : null;
 
 	if (Object.keys(setObj).length === 0)

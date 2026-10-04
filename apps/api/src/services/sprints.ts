@@ -10,6 +10,7 @@ import {
 } from "../schemas/sprints";
 import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { resolveIssueIdsParam } from "./issue-ref";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -202,7 +203,7 @@ export async function deleteSprint(ctx: ServiceCtx, id: string) {
 export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 	const result = MoveIssuesToSprintSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueIds, sprintId } = result.data;
+	const { sprintId } = result.data;
 
 	const orm = drizzle(ctx.db, { schema });
 	const sprint = await orm
@@ -212,6 +213,12 @@ export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 		.get();
 	if (!sprint) throw new NotFoundError("Sprint not found");
 	await requireSprintProjectWrite(ctx, sprint.projectId);
+
+	// PROJ-959: issueIds may mix UUIDs and refs like "PROJ-42"; everything below sees UUIDs.
+	// Resolved only after the sprint and write checks, so a caller who can't write here
+	// can't use the batch to probe refs; a ref to an issue the caller can't see fails as
+	// "Issue not found: <ref>", same as an unknown one.
+	const issueIds = await resolveIssueIdsParam(ctx, result.data.issueIds);
 
 	// PROJ-357: requireSprintProjectWrite only checked the *sprint's* project.
 	// Reject any caller-supplied issue that doesn't belong to that project —

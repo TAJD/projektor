@@ -21,7 +21,7 @@ running server.
 | Tool | Description | Kind |
 |------|-------------|------|
 | `start_work` | Register an agent session and claim an issue (plus files, if given) in one call — replaces register_agent + claim_issue + claim_files + post_message. All-or-nothing with compensating cleanup: on any conflict (same errors as claim_issue/claim_files) the session is ended and nothing is left claimed. If the process crashes mid-call, the same claims become reclaimable once the session's heartbeat goes stale (120s). | write |
-| `finish_work` | Optionally transition an issue (completion-report rules apply, same as update_issue), then release every claim/lease the session holds and end it — replaces update_issue + release_issue + release_files + end_agent. | write |
+| `finish_work` | Optionally transition an issue (completion-report rules apply, same as update_issue), then release every claim/lease the session holds and end it — replaces update_issue + release_issue + release_files + end_agent. completionReport.remainder on a done transition creates a linked follow-up issue; its ref comes back as followUp.ref. | write |
 | `register_agent` | Register an agent session, optionally linked to an issue | write |
 | `heartbeat_agent` | Send a heartbeat to keep an agent session active | write |
 | `end_agent` | End an agent session | write |
@@ -103,7 +103,7 @@ running server.
 | `list_projects` | List projects in the workspace. Archived projects are excluded by default. | read-only |
 | `create_project` | Create a new project in the workspace | write |
 | `get_project` | Get a project by ID | read-only |
-| `update_project` | Update a project name, description, or archived state (owner/admin only). Set archived: true to hide it from the default project list, false to restore it. | write |
+| `update_project` | Update a project name, description, archived state, or epic-closing behaviour (owner/admin only). Set archived: true to hide it from the default project list, false to restore it. epicAutoClose: true closes an epic automatically when its last child is done/cancelled; false (default) makes update_issue/finish_work return parentReadyToClose:{ref} instead. | write |
 | `delete_project` | Delete a project and all its issues (owner only) | destructive |
 
 ### Project activity
@@ -120,8 +120,8 @@ running server.
 | `get_issue` | Get a single issue by ID or project key + number (e.g. "PROJ-42"). `body` is returned up to 16000 chars; if it is longer the result has `bodyTruncated:true`, `bodyTotalChars` and `next` — pass `next` back as `cursor` for the rest. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 | `get_issues` | Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than repeated get_issue calls for triage. Items carry customFields but no rollup/links/assignee_name, and omit `body` unless includeBody:true. Returned in the order refs/ids were given; `missing` lists (once each) any requested ref/id that didn't resolve or isn't visible to you. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 | `create_issue` | Create a new issue in a project. For an issue an agent should be able to pick up autonomously, the body should state acceptance criteria and scope (files/components) — see get_workflow's definition of ready. get_prioritized_issues excludes issues missing these by default. Verification isn't part of the readiness bar (PROJ-738) — it's required later, in the completionReport when entering review/done. | write |
-| `update_issue` | Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. | write |
-| `search_issues` | Search issues by keyword in title or body | read-only |
+| `update_issue` | Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. If the work is only partly done, pass completionReport.remainder when marking done: a follow-up issue (same parent and labels, linked follows_from) is created and its ref returned as followUp.ref. | write |
+| `search_issues` | Search issues by keyword in title or body, or by exact label text (an issue whose label equals the whole query is a hit, listed first; case-insensitive for ASCII only). Pass `labels` to narrow keyword hits to issues carrying those labels. To list every issue with a label — with pagination — use list_issues with `labels` instead; search returns at most 50. | read-only |
 | `delete_issue` | Delete an issue by ID or ref (e.g. PROJ-42) | destructive |
 | `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria or scope/files) are excluded. If none of the open issues pass, the ranked (not-ready) list is returned anyway with `degraded: true` on the response and `needsGrooming`/`missingCriteria` on each issue, rather than an empty array — empty otherwise means "no open work", which would be a lie. | read-only |
 
@@ -129,7 +129,7 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `create_issue_link` | Create a typed link between two issues (blocks, blocked_by, relates_to, duplicates) | write |
+| `create_issue_link` | Create a typed link between two issues (blocks, blocked_by, relates_to, duplicates, follows_from). follows_from: the source is a follow-up that continues the target (list_issue_links reports the inverse as followed_by) | write |
 | `delete_issue_link` | Delete an issue link by ID | destructive |
 | `list_issue_links` | List all links for an issue (shows effective type from this issue's perspective) | read-only |
 
@@ -137,8 +137,8 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `list_comments` | List comments on an issue. Returns `{items}` (see /projektor/agents/response-conventions/). | read-only |
-| `add_comment` | Add a comment to an issue | write |
+| `list_comments` | List comments on an issue (UUID or ref like PROJ-42). Returns `{items}` (see /projektor/agents/response-conventions/). | read-only |
+| `add_comment` | Add a comment to an issue (UUID or ref like PROJ-42) | write |
 | `update_comment` | Update the body of a comment (author only) | write |
 | `delete_comment` | Delete a comment (author, admin, or owner) | destructive |
 

@@ -140,6 +140,12 @@ export const FK_CLEANUP_ALLOWLIST: Record<string, FkCleanupEntry> = {
 	"issue_leases -> workspaces (CASCADE)": {
 		cleanedBy: ["services/workspaces.ts#WORKSPACE_CLEANUP_SQL"],
 	},
+	"issue_links_new -> issues (CASCADE)": {
+		guarded: "temporary table of the 0068 issue_links rebuild (renamed to issue_links)",
+	},
+	"issue_links_new -> workspaces (CASCADE)": {
+		guarded: "temporary table of the 0068 issue_links rebuild (renamed to issue_links)",
+	},
 	"issue_links -> issues (CASCADE)": {
 		cleanedBy: ["services/issues.ts#deleteIssue", "services/projects.ts#PROJECT_CLEANUP_SQL"],
 	},

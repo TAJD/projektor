@@ -17,4 +17,6 @@ export const CreateProjectSchema = z.object({
 
 export const UpdateProjectSchema = CreateProjectSchema.partial().extend({
 	archived: z.boolean().optional(),
+	// PROJ-962: close an epic automatically when its last child is done/cancelled.
+	epicAutoClose: z.boolean().optional(),
 });

@@ -14,6 +14,7 @@ import { postMessage } from "./agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
 import { claimFiles, releaseClaimsForAgent } from "./file-claims";
 import { claimIssue, releaseLeasesForAgent } from "./issue-leases";
+import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
 import { updateIssue } from "./issues";
 import { resolveVisibleProjectIdParam } from "./projects";
 import type { ServiceCtx } from "./types";
@@ -44,7 +45,8 @@ function isApiTokenMethod(method: string): boolean {
 export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 	const result = RegisterAgentSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, name } = result.data;
+	const { name } = result.data;
+	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -110,7 +112,11 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 export async function startWork(ctx: ServiceCtx, raw: unknown) {
 	const result = StartWorkSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issue: issueId, paths, name } = result.data;
+	const { paths, name } = result.data;
+	// PROJ-959: resolve a ref up front, before a session is registered, so an unknown ref
+	// fails cleanly instead of leaving a session to compensate for. Everything below then
+	// works with the UUID (the message scope and the claims must agree on it).
+	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issue);
 
 	const session = await registerAgent(ctx, { name, issueId });
 
@@ -228,10 +234,14 @@ export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 	const result = FinishWorkSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { sessionId, issue: issueId, completionReport, status } = result.data;
+	const { sessionId, completionReport, status } = result.data;
+	// PROJ-959: resolved even when nothing is transitioned, so an unknown or hidden ref is
+	// "Issue not found" rather than being silently ignored.
+	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issue);
 
+	let extra: Record<string, unknown> = {};
 	if (status !== undefined || completionReport !== undefined) {
-		await updateIssue(ctx, issueId, {
+		const updated = await updateIssue(ctx, issueId, {
 			...(status !== undefined ? { status } : {}),
 			...(completionReport !== undefined ? { completionReport } : {}),
 			// Attributes the transition to this session for the PROJ-375 audit flag and
@@ -239,9 +249,13 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 			// agentSessionId on a plain update_issue already does.
 			agentSessionId: sessionId,
 		});
+		// PROJ-961/962: surface followUp / parentReadyToClose / parentClosed from the update.
+		const { ok: _ok, ...rest } = updated;
+		extra = rest;
 	}
 
-	return endAgent(ctx, { id: sessionId });
+	const ended = await endAgent(ctx, { id: sessionId });
+	return Object.keys(extra).length > 0 ? { ...ended, ...extra } : ended;
 }
 
 /**
@@ -257,7 +271,8 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 	const result = ListActiveAgentsSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { issueId, includeStale } = result.data;
+	const { includeStale } = result.data;
+	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
 	const projectId = result.data.projectId
 		? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
 		: undefined;

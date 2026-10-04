@@ -730,9 +730,12 @@ export function RelationsSection({
 	links,
 	fetchingLinks,
 	fetchLinks,
+	issueStatusCategory,
 }: {
 	issueId: string;
 	workspaceSlug?: string;
+	// PROJ-961: a done issue with a follow-up reads "Partially done → PROJ-n".
+	issueStatusCategory?: string | null;
 	links: IssueLink[];
 	fetchingLinks: boolean;
 	fetchLinks: () => Promise<void>;
@@ -743,10 +746,15 @@ export function RelationsSection({
 	const [addingLink, setAddingLink] = useState(false);
 	const [linkFormError, setLinkFormError] = useState<string | null>(null);
 
-	const linksByType = (["blocked_by", "blocks", "relates_to", "duplicates"] as const)
+	const linksByType = (
+		["blocked_by", "blocks", "relates_to", "duplicates", "follows_from", "followed_by"] as const
+	)
 		.map((type) => ({
 			type,
-			label: LINK_TYPE_LABELS[type],
+			label:
+				type === "followed_by" && issueStatusCategory === "done"
+					? "Partially done →"
+					: LINK_TYPE_LABELS[type],
 			items: links.filter((l) => l.type === type),
 		}))
 		.filter((g) => g.items.length > 0);
