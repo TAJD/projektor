@@ -78,8 +78,9 @@ claude mcp add --transport http projektor "https://<your-host>/mcp/<workspace-id
 
 Put the server name and URL **before** `--header`. `--header` takes several values, so on
 current Claude Code a command that puts the headers first fails with
-`error: missing required argument 'name'`. The command shown in the token dialog and
-printed by `/bootstrap` currently has that order; use the form above until that is fixed.
+`error: missing required argument 'name'`. If you write the headers first, end them with
+`--` (`claude mcp add --transport http --header "…" -- projektor "<url>"`), which is the
+form the token dialog and `/bootstrap` print.
 
 `X-Workspace-Slug` is optional on the MCP endpoint, because the UUID in the URL already
 names the workspace.
@@ -302,9 +303,7 @@ compatibility flag. On an instance deployed that way, connect with a workspace A
 curl -s http://127.0.0.1:8787/bootstrap -H "X-Bootstrap-Secret: localdev"
 ```
 
-The response has `workspace.id`, `token` and `mcpUrl`. Its `mcpAddCommand` currently puts
-`--header` first, which current Claude Code rejects (see [§2](#2-claude-code)), so build the
-command from `mcpUrl` and `token` instead.
+The response has `workspace.id`, `token`, `mcpUrl` and a ready-to-run `mcpAddCommand`.
 
 The local sign-in flow needs a real browser: the dev auth bypass is deliberately off on
 `/mcp/`, so an unauthenticated MCP request gets the `401` challenge that starts OAuth.
