@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished } from "vitest";
 import { issuesTools } from "../mcp/issues";
 import { ListIssuesSchema } from "../schemas/issues";
 import {
@@ -628,6 +628,41 @@ describe("Issues API", () => {
 		const results = (await res.json()) as Array<{ title: string }>;
 		expect(results).toHaveLength(1);
 		expect(results[0].title).toBe("Alpha project issue");
+	});
+
+	it("MCP search_issues with projectId (UUID or key) scopes results instead of emptying them (PROJ-584)", async () => {
+		const prevApiMax = env.RATE_LIMIT_API_MAX;
+		env.RATE_LIMIT_API_MAX = "1000";
+		onTestFinished(() => {
+			env.RATE_LIMIT_API_MAX = prevApiMax;
+		});
+		const other = await seedProject(workspaceId, "SEC");
+		for (const [pid, title] of [
+			[projectId, "Alpha project issue"],
+			[other.id, "Beta project issue"],
+		]) {
+			await SELF.fetch("http://localhost/api/issues", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ projectId: pid, title, body: "shared-term" }),
+			});
+		}
+
+		const search = async (args: Record<string, unknown>) => {
+			const res = await callMcpTool(workspaceId, token, slug, {
+				name: "search_issues",
+				arguments: { query: "shared-term", ...args },
+			});
+			expect(res.error).toBeUndefined();
+			const body = JSON.parse(res.result!.content[0].text) as { items: Array<{ title: string }> };
+			return body.items.map((i) => i.title).sort();
+		};
+
+		expect(await search({})).toEqual(["Alpha project issue", "Beta project issue"]);
+		expect(await search({ projectId })).toEqual(["Alpha project issue"]);
+		expect(await search({ projectId: "PROJ" })).toEqual(["Alpha project issue"]);
+		expect(await search({ projectId: other.id })).toEqual(["Beta project issue"]);
+		expect(await search({ projectId: "SEC" })).toEqual(["Beta project issue"]);
 	});
 
 	it("GET /api/issues/search returns project fields in results", async () => {
