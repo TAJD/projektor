@@ -123,6 +123,13 @@ service-layer contract), but a small, documented subset of REST endpoints — fi
 attachments, tokens, public share links, feedback submission — has no MCP
 equivalent and is safe to depend on; see [REST endpoints](/projektor/agents/rest-endpoints/).
 
+Parity is checked by a test, not held by review. `mcp-parity.node.test.ts` cross-references
+every exported service function against the REST routes, the runtime MCP registry and the
+documented tool catalog, and fails the build on drift, including a catalog reordered
+without the dispatch table. Operations deliberately on one surface only are listed in the
+test with a reason each, and a stale entry fails it too, so the exceptions stay few and
+visible.
+
 ## Platform constraints
 
 A few Cloudflare platform limits are encoded directly in the service layer, not just
