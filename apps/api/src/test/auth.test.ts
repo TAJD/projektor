@@ -475,6 +475,13 @@ describe("PROJ-358: JWKS force-refresh on signature verification failure", () =>
 		env.CF_ACCESS_TEAM_DOMAIN = domain;
 		env.CF_ACCESS_AUDIENCE = audience;
 
+		const otherPublicJwk = (await crypto.subtle.exportKey(
+			"jwk",
+			otherKeyPair.publicKey
+		)) as JsonWebKey;
+		resetAuthCachesForTests();
+		await env.KV.put("cf-access-certs", JSON.stringify([otherPublicJwk]));
+
 		let fetchCalls = 0;
 		vi.stubGlobal(
 			"fetch",
