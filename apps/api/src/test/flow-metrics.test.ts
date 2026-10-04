@@ -5,10 +5,16 @@ import {
 	authHeaders,
 	type JsonRpcResult,
 	seedComment,
-	seedIssue,
+	seedIssue as seedIssueNow,
 	seedProjectFixture,
 	seedTaskType,
 } from "./helpers";
+
+const seedIssue: typeof seedIssueNow = (workspaceId, projectId, userId, opts) =>
+	seedIssueNow(workspaceId, projectId, userId, {
+		createdAt: Math.floor(Date.now() / 1000) - 3600,
+		...opts,
+	});
 
 interface FlowMetrics {
 	leadTime: Distribution;
