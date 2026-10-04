@@ -1,7 +1,8 @@
 ---
-title: "Live demo"
-description: "See Projektor running before you deploy your own instance."
+title: "Live demo: try Projektor before you deploy"
+description: "Browse a read-only public Projektor instance running on Cloudflare Workers before you deploy your own copy."
 sidebar:
+  label: "Live demo"
   order: 1
 ---
 Want to see Projektor running before you deploy your own? Visit the

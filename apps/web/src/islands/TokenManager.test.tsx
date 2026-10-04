@@ -88,7 +88,7 @@ describe("TokenManager", () => {
 		expect(screen.getByRole("button", { name: /Create token/i })).toBeTruthy();
 	});
 
-	it("mcpAddCommandMultiline puts flags before the name/url positionals (PROJ-620)", () => {
+	it("mcpAddCommandMultiline puts flags first and ends them with -- before the name/url (PROJ-620, PROJ-978)", () => {
 		const command = buildMcpAddCommandMultiline({
 			workspaceSlug: "my-ws",
 			mcpUrl: "https://example.com/mcp/w1",
@@ -99,7 +99,7 @@ describe("TokenManager", () => {
 				"claude mcp add --transport http \\",
 				'  --header "Authorization: Bearer tok123" \\',
 				'  --header "X-Workspace-Slug: my-ws" \\',
-				'  projektor "https://example.com/mcp/w1"',
+				'  -- projektor "https://example.com/mcp/w1"',
 			].join("\n")
 		);
 	});

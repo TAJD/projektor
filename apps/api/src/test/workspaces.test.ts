@@ -503,7 +503,7 @@ describe("GET /api/workspaces/:slug/mcp-info (PROJ-83)", () => {
 		expect(body.mcpAddCommandTemplate).toContain(slug);
 	});
 
-	it("mcpAddCommandTemplate puts flags before the name/url positionals (PROJ-620)", async () => {
+	it("mcpAddCommandTemplate puts flags first and ends them with -- before the name/url (PROJ-620, PROJ-978)", async () => {
 		const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/mcp-info`, {
 			headers: memberHeaders,
 		});
@@ -513,7 +513,7 @@ describe("GET /api/workspaces/:slug/mcp-info (PROJ-83)", () => {
 			`claude mcp add --transport http ` +
 				`--header "Authorization: Bearer {{TOKEN}}" ` +
 				`--header "X-Workspace-Slug: ${slug}" ` +
-				`projektor "${body.mcpUrl}"`
+				`-- projektor "${body.mcpUrl}"`
 		);
 	});
 });

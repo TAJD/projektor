@@ -5,22 +5,27 @@
 
 ## Connect your agent
 
-```bash
-# Dev: one-command bootstrap
-curl -s https://<worker>.workers.dev/bootstrap \
-  -H "X-Bootstrap-Secret: <secret>" | jq -r .mcpAddCommand | sh
+One page: https://tajd.github.io/projektor/agents/mcp-connection/
 
-# Then use the printed: claude mcp add --transport http --header ... projektor <url>
+```bash
+# Claude Code, sign-in (OAuth): add, then run /mcp inside claude to sign in
+claude mcp add --transport http projektor "https://<host>/mcp/<workspace-uuid>"
+
+# Headless, workspace API token (minted by an admin in the web UI; agents cannot mint tokens)
+claude mcp add --transport http projektor "https://<host>/mcp/<workspace-uuid>" \
+  --header "Authorization: Bearer pk_<token>"
 ```
+
+Name and URL go before --header (--header is variadic).
 
 ## MCP endpoint
 
 POST /mcp/<workspace-uuid>
 Content-Type: application/json
 
-Required headers:
-  Authorization: Bearer pk_<64 hex chars>
-  X-Workspace-Slug: <slug>
+Headers:
+  Authorization: Bearer <OAuth access token | pk_<64 hex chars>>
+  X-Workspace-Slug: <slug>   (optional on /mcp/; the UUID names the workspace)
 
 Protocol: JSON-RPC 2.0 (MCP Streamable HTTP - not SSE)
 Methods: initialize  tools/list  tools/call

@@ -1,5 +1,5 @@
 ---
-title: "Your first ten minutes"
+title: "Getting started: deploy Projektor and connect an agent"
 description: "Deploy an instance, connect an agent, and get it doing real work — the shortest path from zero to a working setup."
 sidebar:
   order: 0
@@ -23,12 +23,18 @@ then log in with any address in `ADMIN_EMAILS`: the first one to log in creates 
 default workspace and becomes its owner automatically. Step-by-step:
 [CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
-## 3. Connect an agent (about 2 minutes)
+## 3. Connect Claude (about 2 minutes)
 
-In the UI, go to **Settings → Tokens → New token**, then paste the ready-to-run
-`claude mcp add` command it shows you. That's it — the agent now has the same access
-a browser user has. Other agents, other connection modes (dev bootstrap, the Claude
-app, CI): [Connect an agent](/projektor/agents/mcp-connection/).
+Open **Connect Agent** in the sidebar and copy the server URL
+(`https://<your-host>/mcp/<workspace-id>`). In the Claude app or on claude.ai, add it as a
+custom connector and sign in; in Claude Code, run
+`claude mcp add --transport http projektor "<server URL>"`, then `/mcp` to sign in.
+
+Behind Cloudflare Access, sign-in only works once the OAuth paths are exempt from Access:
+see [Deploying → Cloudflare Access carve-outs for OAuth](/projektor/guides/deploying/#6-cloudflare-access-carve-outs-for-oauth).
+An instance from the one-click deploy button can't use sign-in yet, so use a workspace API
+token there. Every option, including headless agents and what to do when it fails, is on
+one page: [Connect Claude](/projektor/agents/mcp-connection/).
 
 ## 4. Give it something to do
 

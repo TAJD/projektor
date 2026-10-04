@@ -1,6 +1,6 @@
 ---
 title: "Self-hosting Projektor"
-description: "Deploy your own Projektor instance on Cloudflare in five minutes."
+description: "Deploy your own Projektor instance to your Cloudflare account from a config-only repo that downloads a pre-built release: no source checkout, no build step."
 sidebar:
   order: 1
 ---

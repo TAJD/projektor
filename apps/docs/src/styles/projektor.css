@@ -93,3 +93,22 @@
 	font-weight: 700;
 	letter-spacing: -0.02em;
 }
+
+/*
+ * Homepage hero (PROJ-939). The splash hero has no image, so drop Starlight's empty
+ * right-hand column and its oversized H1 and padding: the quickstart block should be
+ * visible without scrolling on a 1280x800 screen.
+ */
+@media (min-width: 50rem) {
+	.hero {
+		grid-template-columns: 100%;
+		padding-block: 3rem 0.5rem;
+	}
+	.hero h1 {
+		font-size: var(--sl-text-5xl);
+		max-width: 34ch;
+	}
+	.hero .tagline {
+		max-width: 62ch;
+	}
+}

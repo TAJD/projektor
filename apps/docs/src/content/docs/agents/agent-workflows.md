@@ -198,6 +198,8 @@ not a rewrite.
 | Presence / bus | none native | registry + messages | none native |
 | Self-host cost | free (no server) | cheap (serverless) | heavy / SaaS |
 
+For tool-by-tool comparisons with sources, see [Compare](/projektor/compare/).
+
 These are deliberate bets, not oversights:
 
 1. **A central coordinator on the write path.** A deployed tracker puts
