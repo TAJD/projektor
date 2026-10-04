@@ -3010,3 +3010,38 @@ describe("PROJ-931 — get_issues project visibility", () => {
 		expect(data.missing).toEqual([ref, theirIssue.id]);
 	});
 });
+
+describe("get_issue: a ref in `id` resolves like `ref` (PROJ-977)", () => {
+	let token: string, slug: string, workspaceId: string, projectId: string, userId: string;
+	let otherProjectId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture({
+			role: "owner",
+		}));
+		otherProjectId = (await seedProject(workspaceId, "ROVI")).id;
+	});
+
+	async function getTitleOrCode(args: Record<string, unknown>) {
+		const res = await callMcpTool(workspaceId, token, slug, { name: "get_issue", arguments: args });
+		expect(res.error).toBeUndefined();
+		const err = toolError(res);
+		if (err) return err.code;
+		return (JSON.parse(res.result!.content[0].text) as { title: string }).title;
+	}
+
+	it("resolves refs passed as id across two projects, a UUID, and the ref param", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "In PROJ" });
+		const b = await seedIssue(workspaceId, otherProjectId, userId, { title: "In ROVI" });
+
+		expect(await getTitleOrCode({ id: `PROJ-${a.number}` })).toBe("In PROJ");
+		expect(await getTitleOrCode({ id: `ROVI-${b.number}` })).toBe("In ROVI");
+		expect(await getTitleOrCode({ id: b.id })).toBe("In ROVI");
+		expect(await getTitleOrCode({ ref: `ROVI-${b.number}` })).toBe("In ROVI");
+	});
+
+	it("answers not_found for a ref in id that does not exist", async () => {
+		expect(await getTitleOrCode({ id: "PROJ-99999" })).toBe("not_found");
+		expect(await getTitleOrCode({ id: "NOPE-1" })).toBe("not_found");
+	});
+});
