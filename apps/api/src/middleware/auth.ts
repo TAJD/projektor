@@ -591,6 +591,7 @@ const USER_LOCAL_TTL_MS = 300 * 1000;
 // the same file would hit the still-warm cache and verify against the wrong keys.
 export function resetAuthCachesForTests(): void {
 	inMemoryCertsCache = null;
+	lastForcedRefreshAt = 0;
 	inMemoryUserCache.clear();
 }
 
