@@ -1418,3 +1418,100 @@ describe("PROJ-430: CF Access certs fetch failure", () => {
 		});
 	});
 });
+
+describe("PROJ-979: Access service-token JWT alongside a pk_ token", () => {
+	const domain = "proj-979.example.com";
+	const audience = "proj-979-audience";
+	let prev: { a: string; d: string };
+	let serviceJwt: string;
+
+	beforeEach(async () => {
+		prev = { a: env.CF_ACCESS_AUDIENCE, d: env.CF_ACCESS_TEAM_DOMAIN };
+		env.CF_ACCESS_TEAM_DOMAIN = domain;
+		env.CF_ACCESS_AUDIENCE = audience;
+
+		const keyPair = (await crypto.subtle.generateKey(
+			{
+				name: "RSASSA-PKCS1-v1_5",
+				modulusLength: 2048,
+				publicExponent: new Uint8Array([1, 0, 1]),
+				hash: "SHA-256",
+			},
+			true,
+			["sign", "verify"]
+		)) as CryptoKeyPair;
+
+		serviceJwt = await signTestJwt(keyPair.privateKey, {
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			aud: audience,
+			iss: `https://${domain}`,
+			common_name: "headless-agent.access",
+		});
+	});
+
+	afterEach(() => {
+		env.CF_ACCESS_AUDIENCE = prev.a;
+		env.CF_ACCESS_TEAM_DOMAIN = prev.d;
+	});
+
+	it("a valid pk_ token authenticates on REST and MCP despite the email-less JWT", async () => {
+		const fixture = await seedFixture();
+		const headers = {
+			...authHeaders(fixture.token, fixture.workspace.slug),
+			"Cf-Access-Jwt-Assertion": serviceJwt,
+		};
+
+		const rest = await SELF.fetch("http://localhost/api/issues", { headers });
+		expect(rest.status).toBe(200);
+
+		const mcp = await SELF.fetch(`http://localhost/mcp/${fixture.workspace.id}`, {
+			method: "POST",
+			headers: { ...headers, "Content-Type": "application/json" },
+			body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+		});
+		expect(mcp.status).toBe(200);
+	});
+
+	it("the same JWT without a bearer is still a 401", async () => {
+		const fixture = await seedFixture();
+
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			headers: {
+				"Cf-Access-Jwt-Assertion": serviceJwt,
+				"X-Workspace-Slug": fixture.workspace.slug,
+			},
+		});
+		expect(res.status).toBe(401);
+		expect(((await res.json()) as { error: string }).error).toBe("Invalid Access token");
+	});
+
+	it("an invalid bearer is still a 401 with the JWT present", async () => {
+		const fixture = await seedFixture();
+
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			headers: {
+				...authHeaders("pk_not-a-real-token", fixture.workspace.slug),
+				"Cf-Access-Jwt-Assertion": serviceJwt,
+			},
+		});
+		expect(res.status).toBe(401);
+	});
+
+	it("an email-less JWT for another audience is still a 401 even with a valid bearer", async () => {
+		const fixture = await seedFixture();
+		const header = encodeJwtPart({ alg: "RS256", typ: "JWT" });
+		const payload = encodeJwtPart({
+			exp: Math.floor(Date.now() / 1000) + 3600,
+			aud: "someone-else",
+			iss: `https://${domain}`,
+		});
+
+		const res = await SELF.fetch("http://localhost/api/issues", {
+			headers: {
+				...authHeaders(fixture.token, fixture.workspace.slug),
+				"Cf-Access-Jwt-Assertion": `${header}.${payload}.fakesig`,
+			},
+		});
+		expect(res.status).toBe(401);
+	});
+});

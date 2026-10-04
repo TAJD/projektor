@@ -205,11 +205,15 @@ claude mcp add --transport http projektor "https://<your-host>/mcp/<workspace-id
   --header "CF-Access-Client-Secret: <client-secret>"
 ```
 
-:::caution[Unverified: may return 401 today]
 Cloudflare Access forwards a service-token JWT to the Worker, and that JWT has no email.
-Since v0.6.15, Projektor rejects such a JWT before it checks the `Authorization` header.
-This combination has not been re-tested against a live Access instance; it is tracked in
-PROJ-979. If you get `401 {"error":"Invalid Access token"}`, that is the cause.
+Projektor ignores it when an `Authorization: Bearer` token is present, and the API token
+decides. The same JWT with no bearer token is rejected with
+`401 {"error":"Invalid Access token"}`: the service token only gets the request through
+Access, and a Projektor credential is still required.
+
+:::note[Not yet checked against a live Access instance]
+This behaviour is covered by tests that send a signed, email-less Access JWT alongside a
+`pk_` token. It has not been re-tested against a real Cloudflare Access deployment.
 :::
 
 The sign-in flow needs no service token, but the operator must exempt two OAuth paths
