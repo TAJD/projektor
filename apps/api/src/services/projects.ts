@@ -334,6 +334,7 @@ const PROJECT_CLEANUP_SQL: readonly string[] = [
 	`DELETE FROM wip_cap_denials WHERE project_id = ?1 AND workspace_id = ?2`,
 	`DELETE FROM issue_gate_rejections WHERE issue_id IN (${ISSUES_OF_PROJECT})`,
 	`DELETE FROM share_tokens WHERE workspace_id = ?2 AND issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM agent_messages WHERE workspace_id = ?2 AND scope IN (SELECT 'issue:' || id FROM issues WHERE project_id = ?1 AND workspace_id = ?2)`,
 	`DELETE FROM attachments WHERE workspace_id = ?2 AND entity_type = 'issue' AND entity_id IN (${ISSUES_OF_PROJECT})`,
 	`UPDATE agent_sessions SET issue_id = NULL WHERE workspace_id = ?2 AND issue_id IN (${ISSUES_OF_PROJECT})`,
 	`UPDATE feedback SET linked_issue_id = NULL WHERE workspace_id = ?2 AND linked_issue_id IN (${ISSUES_OF_PROJECT})`,

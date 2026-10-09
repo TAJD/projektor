@@ -1939,6 +1939,9 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 		ctx.db
 			.prepare("DELETE FROM share_tokens WHERE issue_id = ? AND workspace_id = ?")
 			.bind(id, ctx.workspaceId),
+		ctx.db
+			.prepare("DELETE FROM agent_messages WHERE scope = ?1 AND workspace_id = ?2")
+			.bind(`issue:${id}`, ctx.workspaceId),
 		// ON DELETE CASCADE rows — delete outright.
 		toD1Statement(
 			ctx,

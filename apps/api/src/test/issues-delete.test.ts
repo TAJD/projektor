@@ -188,7 +188,16 @@ describe("deleteIssue — dependent row cleanup (PROJ-922)", () => {
 		expect(r2Key).toBeTruthy();
 		expect(await env.R2.get(r2Key!)).not.toBeNull();
 
+		await env.DB.prepare(
+			`INSERT INTO agent_messages (id, workspace_id, scope, body, created_at) VALUES (?, ?, ?, 'hi', 0)`
+		)
+			.bind(crypto.randomUUID(), workspaceId, `issue:${issueId}`)
+			.run();
+
 		// Sanity: every dependent row exists before delete.
+		expect(
+			await tableCount("SELECT COUNT(*) AS n FROM agent_messages WHERE scope = ?", `issue:${issueId}`)
+		).toBe(1);
 		expect(
 			await tableCount("SELECT COUNT(*) AS n FROM issue_comments WHERE issue_id = ?", issueId)
 		).toBe(1);
@@ -248,6 +257,9 @@ describe("deleteIssue — dependent row cleanup (PROJ-922)", () => {
 		expect(deleteRes.status).toBe(200);
 
 		// --- assert: nothing references the deleted issue any more ---
+		expect(
+			await tableCount("SELECT COUNT(*) AS n FROM agent_messages WHERE scope = ?", `issue:${issueId}`)
+		).toBe(0);
 		expect(
 			await env.DB.prepare("SELECT id FROM issues WHERE id = ?").bind(issueId).first()
 		).toBeNull();
