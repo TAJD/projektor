@@ -101,12 +101,13 @@ export async function listProjectsAcrossWorkspaces(
         COUNT(CASE WHEN COALESCE(NULLIF(i.status_category, ''), i.status) NOT IN ('done','cancelled') THEN 1 END)
           AS open_issue_count,
         COUNT(CASE WHEN COALESCE(NULLIF(i.status_category, ''), i.status) NOT IN ('done','cancelled')
-                     AND i.status = 'backlog' THEN 1 END)
+                     AND (ts.is_backlog = 1 OR (ts.id IS NULL AND i.status = 'backlog')) THEN 1 END)
           AS backlog_issue_count
       FROM projects p
       JOIN workspaces w         ON w.id  = p.workspace_id
       JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = ?
       LEFT JOIN issues i        ON i.project_id = p.id
+      LEFT JOIN task_statuses ts ON ts.id = i.status_id AND ts.workspace_id = p.workspace_id
       -- PROJ-311: in each workspace the user sees all projects if owner/admin there,
       -- otherwise only projects their groups grant (indexed EXISTS).
       WHERE (wm.role IN ('owner','admin')

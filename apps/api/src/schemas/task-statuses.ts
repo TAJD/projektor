@@ -19,6 +19,7 @@ export const CreateTaskStatusSchema = z.object({
 	// PROJ-749: explicit review step (the review gate + review flow metrics). Not inferred
 	// from the key.
 	isReviewStep: z.boolean().optional(),
+	isBacklog: z.boolean().optional(),
 });
 
 export const UpdateTaskStatusSchema = z
@@ -29,5 +30,6 @@ export const UpdateTaskStatusSchema = z
 		position: z.number().int().min(0).optional(),
 		isDefault: z.boolean().optional(),
 		isReviewStep: z.boolean().optional(),
+		isBacklog: z.boolean().optional(),
 	})
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });

@@ -186,6 +186,8 @@ function addLabelFilter(conditions: Condition[], filters: LabelFilter): void {
 	}
 }
 
+const MAX_STATUS_IDS_FILTER = 50;
+
 function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): void {
 	const { status, statusId, statusIds, category, priority, priorities } = filters;
 
@@ -202,6 +204,12 @@ function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): 
 			.split(",")
 			.map((s) => s.trim())
 			.filter(Boolean);
+		if (ids.length > MAX_STATUS_IDS_FILTER) {
+			throw new ValidationError({
+				formErrors: [`statusIds accepts at most ${MAX_STATUS_IDS_FILTER} ids`],
+				fieldErrors: {},
+			});
+		}
 		if (ids.length) conditions.push(inArray(schema.issues.statusId, ids));
 	}
 	if (category) conditions.push(eq(schema.issues.statusCategory, category));

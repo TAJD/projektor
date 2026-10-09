@@ -70,6 +70,7 @@ import m0066 from "../../../../packages/db/migrations/0066_repair_status_categor
 import m0067 from "../../../../packages/db/migrations/0067_agent_session_credential.sql?raw";
 import m0068 from "../../../../packages/db/migrations/0068_issue_link_follows_from.sql?raw";
 import m0069 from "../../../../packages/db/migrations/0069_project_epic_auto_close.sql?raw";
+import m0070 from "../../../../packages/db/migrations/0070_task_status_backlog.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -142,4 +143,5 @@ export const MIGRATIONS = [
 	m0067,
 	m0068,
 	m0069,
+	m0070,
 ];

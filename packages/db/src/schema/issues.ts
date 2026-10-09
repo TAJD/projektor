@@ -66,6 +66,7 @@ export const taskStatuses = sqliteTable(
 		isDefault: integer("is_default").notNull().default(0),
 		// PROJ-749: explicit review-step flag (review gate + review flow metrics).
 		isReviewStep: integer("is_review_step").notNull().default(0),
+		isBacklog: integer("is_backlog").notNull().default(0),
 	},
 	(t) => ({
 		wsKeyIdx: uniqueIndex("task_statuses_workspace_key_idx").on(t.workspaceId, t.key),
