@@ -28,21 +28,7 @@ import MarkdownEditor from "./LazyMarkdownEditor";
 import { Button } from "./ui/Button";
 import Select from "./ui/Select";
 
-// Minimal duplicate of the mermaid rules in WikiPage.tsx's WIKI_PAGE_STYLES
-// (~line 1749) — issue/comment prose uses Tailwind's typography .prose, not
-// WikiPage's hand-rolled one, so there's no shared stylesheet to hang this on.
 const MERMAID_PROSE_STYLES = `
-	.prose pre.mermaid {
-		display: flex;
-		justify-content: center;
-		background: none;
-		padding: 0;
-	}
-	.prose pre.mermaid svg {
-		max-width: 100%;
-		width: auto;
-		height: auto;
-	}
 	/* PROJ-603: the .prose box itself no longer scrolls (that forced overflow-y
 	 * to auto too, clipping outside-positioned <ol>/<ul> markers). Typography
 	 * already gives <pre> its own overflow-x: auto; tables get none by default,
@@ -382,9 +368,7 @@ function useBodyEditor(
 		if (editingBody) return;
 		const container = bodyRef.current;
 		if (!container) return;
-		renderMermaidDiagrams(container).catch(() => {
-			// non-fatal — leave the raw code block visible
-		});
+		void renderMermaidDiagrams(container);
 	}, [issue.body, editingBody]);
 
 	function startEditBody(fromDraft = false) {
@@ -1536,9 +1520,7 @@ function CommentItem({
 		if (isEditing) return;
 		const container = bodyRef.current;
 		if (!container) return;
-		renderMermaidDiagrams(container).catch(() => {
-			// non-fatal — leave the raw code block visible
-		});
+		void renderMermaidDiagrams(container);
 	}, [comment.body, isEditing]);
 
 	return (

@@ -45,16 +45,76 @@ export function renderMd(markdown: string): string {
 
 export const renderMarkdown = renderMd;
 
+function mermaidTheme(): "dark" | "neutral" {
+	const explicit = document.documentElement.getAttribute("data-theme");
+	if (explicit) return explicit === "dark" ? "dark" : "neutral";
+	return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "neutral";
+}
+
+function failureReason(err: unknown): string {
+	const message = err instanceof Error ? err.message : String(err);
+	return message.split("\n")[0].trim().slice(0, 200) || "unknown error";
+}
+
+function showMermaidFailure(node: HTMLElement, err: unknown): void {
+	console.warn("Mermaid diagram failed to render", err);
+	node.textContent = node.dataset.mermaidSrc ?? node.textContent;
+	const note = document.createElement("div");
+	note.className = "mermaid-error";
+	note.setAttribute("role", "note");
+	note.textContent = `Diagram failed to render: ${failureReason(err)}`;
+	node.after(note);
+}
+
+let watchingMermaidTheme = false;
+
+function watchMermaidTheme(): void {
+	if (watchingMermaidTheme) return;
+	watchingMermaidTheme = true;
+	const redraw = () => void renderMermaidDiagrams(document.body);
+	new MutationObserver(redraw).observe(document.documentElement, {
+		attributes: true,
+		attributeFilter: ["data-theme"],
+	});
+	window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener?.("change", redraw);
+}
+
 /**
  * Hydrate any `<pre class="mermaid">` placeholders inside `container` into
- * rendered SVG diagrams. Call after the sanitized HTML has been mounted.
+ * rendered SVG diagrams. Call after the sanitized HTML has been mounted. Never
+ * rejects: a diagram that fails keeps its source and gets an inline note. Diagrams
+ * already drawn in the current theme are skipped; a theme change re-draws them.
  */
 export async function renderMermaidDiagrams(container: Element): Promise<void> {
-	const nodes = container.querySelectorAll<HTMLElement>("pre.mermaid");
+	const theme = mermaidTheme();
+	const nodes = [...container.querySelectorAll<HTMLElement>("pre.mermaid")].filter(
+		(n) => n.dataset.mermaidTheme !== theme
+	);
 	if (nodes.length === 0) return;
-	const { default: mermaid } = await import("mermaid");
-	mermaid.initialize({ startOnLoad: false, theme: "neutral" });
-	await mermaid.run({ nodes });
+	for (const node of nodes) {
+		node.dataset.mermaidSrc ??= node.textContent ?? "";
+		node.dataset.mermaidTheme = theme;
+		if (node.nextElementSibling?.matches(".mermaid-error")) node.nextElementSibling.remove();
+	}
+	let mermaid: typeof import("mermaid")["default"];
+	try {
+		({ default: mermaid } = await import("mermaid"));
+	} catch (err) {
+		for (const node of nodes) showMermaidFailure(node, err);
+		return;
+	}
+	mermaid.initialize({ startOnLoad: false, theme });
+	watchMermaidTheme();
+	for (const node of nodes) {
+		node.removeAttribute("data-processed");
+		node.textContent = node.dataset.mermaidSrc ?? "";
+		try {
+			await mermaid.run({ nodes: [node], suppressErrors: false });
+		} catch (err) {
+			for (const stray of document.querySelectorAll('[id^="dmermaid-"]')) stray.remove();
+			showMermaidFailure(node, err);
+		}
+	}
 }
 
 // PROJ-488 (R6): a leading `---\n<yaml>\n---` block is metadata, not prose — the API

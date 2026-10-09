@@ -196,7 +196,10 @@ describe("deleteIssue — dependent row cleanup (PROJ-922)", () => {
 
 		// Sanity: every dependent row exists before delete.
 		expect(
-			await tableCount("SELECT COUNT(*) AS n FROM agent_messages WHERE scope = ?", `issue:${issueId}`)
+			await tableCount(
+				"SELECT COUNT(*) AS n FROM agent_messages WHERE scope = ?",
+				`issue:${issueId}`
+			)
 		).toBe(1);
 		expect(
 			await tableCount("SELECT COUNT(*) AS n FROM issue_comments WHERE issue_id = ?", issueId)
@@ -258,7 +261,10 @@ describe("deleteIssue — dependent row cleanup (PROJ-922)", () => {
 
 		// --- assert: nothing references the deleted issue any more ---
 		expect(
-			await tableCount("SELECT COUNT(*) AS n FROM agent_messages WHERE scope = ?", `issue:${issueId}`)
+			await tableCount(
+				"SELECT COUNT(*) AS n FROM agent_messages WHERE scope = ?",
+				`issue:${issueId}`
+			)
 		).toBe(0);
 		expect(
 			await env.DB.prepare("SELECT id FROM issues WHERE id = ?").bind(issueId).first()

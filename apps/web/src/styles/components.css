@@ -386,3 +386,25 @@
 	background: var(--accent);
 	color: var(--on-accent);
 }
+
+/* ── Mermaid diagrams (rendered by renderMermaidDiagrams in utils/markdown.ts) ── */
+.prose pre.mermaid {
+	display: flex;
+	justify-content: center;
+	background: none;
+	padding: 0;
+}
+.prose pre.mermaid svg {
+	max-width: 100%;
+	width: auto;
+	height: auto;
+}
+.prose .mermaid-error {
+	margin: -0.5rem 0 1rem;
+	padding: 0.375rem 0.625rem;
+	font-size: 0.8125rem;
+	color: var(--danger-text);
+	background: var(--danger-bg);
+	border: 1px solid var(--danger-border);
+	border-radius: var(--radius-sm);
+}

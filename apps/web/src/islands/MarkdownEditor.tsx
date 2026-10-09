@@ -3,7 +3,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { useEffect, useRef, useState } from "preact/hooks";
-import { renderMarkdown } from "../utils/markdown";
+import { renderMarkdown, renderMermaidDiagrams } from "../utils/markdown";
 
 export interface Props {
 	value: string;
@@ -238,6 +238,14 @@ function EditorToolbar({
 }
 
 function PreviewPane({ preview, mobilePreview }: { preview: string; mobilePreview: boolean }) {
+	const bodyRef = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			if (bodyRef.current) void renderMermaidDiagrams(bodyRef.current);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [preview]);
+
 	return (
 		<div
 			class={
@@ -256,6 +264,7 @@ function PreviewPane({ preview, mobilePreview }: { preview: string; mobilePrevie
 			</div>
 			{preview ? (
 				<div
+					ref={bodyRef}
 					class="flex-1 overflow-auto px-4 py-3 text-sm leading-[1.7] text-text-base prose prose-sm max-w-none"
 					dangerouslySetInnerHTML={{ __html: preview }}
 				/>

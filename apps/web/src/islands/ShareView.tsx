@@ -37,23 +37,6 @@ const PRIORITY_COLORS: Record<string, { bg: string; text: string }> = {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// Minimal duplicate of the mermaid rules in WikiPage.tsx's WIKI_PAGE_STYLES
-// (~line 1749) — the share page's .prose is hand-rolled CSS in
-// pages/share/view.astro, not WikiPage's, so there's no shared stylesheet to hang this on.
-const MERMAID_PROSE_STYLES = `
-	.prose pre.mermaid {
-		display: flex;
-		justify-content: center;
-		background: none;
-		padding: 0;
-	}
-	.prose pre.mermaid svg {
-		max-width: 100%;
-		width: auto;
-		height: auto;
-	}
-`;
-
 function formatDate(unixSeconds: number): string {
 	const d = new Date(unixSeconds * 1000);
 	return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
@@ -136,9 +119,7 @@ export default function ShareView() {
 	useEffect(() => {
 		const container = bodyRef.current;
 		if (!container) return;
-		renderMermaidDiagrams(container).catch(() => {
-			// non-fatal — leave the raw code block visible
-		});
+		void renderMermaidDiagrams(container);
 	}, [issue?.body]);
 
 	useEffect(() => {
@@ -200,7 +181,6 @@ export default function ShareView() {
 
 			{/* Custom fields */}
 			<CustomFieldsSection fields={issue.customFields} />
-			<style>{MERMAID_PROSE_STYLES}</style>
 		</div>
 	);
 }
