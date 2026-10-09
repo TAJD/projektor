@@ -155,17 +155,21 @@ describe("PROJ-927: issues.status_category follows the task status on every writ
 		)
 			.bind(feedbackId, src?.id, f.workspaceId, f.projectId)
 			.run();
+		const fallback = await seedTaskStatus(f.workspaceId, {
+			key: "intake",
+			category: "in_progress",
+			isDefault: true,
+		});
 		const convert = await SELF.fetch(
 			`http://localhost/api/projects/${f.projectId}/feedback/bulk-convert-to-issue`,
 			{ method: "POST", headers, body: JSON.stringify({ feedbackIds: [feedbackId] }) }
 		);
 		expect(convert.status).toBe(201);
 		const { id: converted } = (await convert.json()) as { id: string };
-		const row = await env.DB.prepare(
-			"SELECT i.status_category AS cat, i.status_id AS sid, ts.category AS expected FROM issues i LEFT JOIN task_statuses ts ON ts.id = i.status_id WHERE i.id = ?"
-		)
+		const row = await env.DB.prepare("SELECT status_category, status_id FROM issues WHERE id = ?")
 			.bind(converted)
-			.first<{ cat: string; sid: string | null; expected: string | null }>();
-		expect(row?.cat).toBe(row?.expected ?? "");
+			.first<{ status_category: string; status_id: string | null }>();
+		expect(row?.status_id).toBe(fallback.id);
+		expect(row?.status_category).toBe("in_progress");
 	});
 });

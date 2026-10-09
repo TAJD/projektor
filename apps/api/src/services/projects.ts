@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { IdSchema } from "../schemas/common";
 import { CreateProjectSchema, UpdateProjectSchema } from "../schemas/projects";
 import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
@@ -288,25 +288,20 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 		.get();
 	if (!existing) throw new NotFoundError("Project not found");
 
-	if (parsed.data.key !== undefined) {
-		const clash = await orm
-			.select({ id: schema.projects.id })
-			.from(schema.projects)
-			.where(
-				and(
-					eq(schema.projects.workspaceId, ctx.workspaceId),
-					eq(schema.projects.key, parsed.data.key),
-					ne(schema.projects.id, id)
-				)
-			)
-			.get();
-		if (clash) throw new ConflictError(`Project key ${parsed.data.key} already exists`);
-	}
+	const newKey = parsed.data.key;
+	const keyFree =
+		newKey === undefined
+			? undefined
+			: sql`NOT EXISTS (SELECT 1 FROM projects other WHERE other.workspace_id = ${ctx.workspaceId} AND other.key = ${newKey} AND other.id <> ${id})`;
 
-	await orm
+	const result = await orm
 		.update(schema.projects)
 		.set(setObj)
-		.where(and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId)));
+		.where(
+			and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId), keyFree)
+		);
+	if (newKey !== undefined && result.meta.changes === 0)
+		throw new ConflictError(`Project key ${newKey} already exists`);
 
 	const diff: Record<string, unknown> = { ...setObj };
 	delete diff.updatedAt;

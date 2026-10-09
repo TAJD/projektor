@@ -190,6 +190,39 @@ describe("renderMermaidDiagrams", () => {
 		);
 	});
 
+	it("leaves diagrams inside a display:none ancestor unrendered until they are shown", async () => {
+		const run = vi.fn().mockImplementation(async ({ nodes }: { nodes: HTMLElement[] }) => {
+			nodes[0].innerHTML = "<svg></svg>";
+		});
+		const { render, container } = await withMermaid(run);
+		container.style.display = "none";
+		await render(container);
+		expect(run).not.toHaveBeenCalled();
+
+		container.style.display = "";
+		await render(container);
+		expect(run).toHaveBeenCalledTimes(1);
+	});
+
+	it("serialises overlapping renders so a second call never resets a node mid-draw", async () => {
+		let active = 0;
+		let overlapped = false;
+		const run = vi.fn().mockImplementation(async () => {
+			active++;
+			if (active > 1) overlapped = true;
+			await new Promise((r) => setTimeout(r, 5));
+			active--;
+		});
+		const { render, container } = await withMermaid(run);
+		const first = render(container);
+		await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+		document.documentElement.setAttribute("data-theme", "dark");
+		const second = render(container);
+		await Promise.all([first, second]);
+		expect(overlapped).toBe(false);
+		expect(run).toHaveBeenCalledTimes(2);
+	});
+
 	it("keeps the source, shows a note and warns when a diagram fails to render", async () => {
 		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const run = vi.fn().mockRejectedValue(new Error("Parse error on line 2\nExpecting 'X'"));

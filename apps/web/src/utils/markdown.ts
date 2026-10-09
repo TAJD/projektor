@@ -85,10 +85,24 @@ function watchMermaidTheme(): void {
  * rejects: a diagram that fails keeps its source and gets an inline note. Diagrams
  * already drawn in the current theme are skipped; a theme change re-draws them.
  */
-export async function renderMermaidDiagrams(container: Element): Promise<void> {
+export function renderMermaidDiagrams(container: Element): Promise<void> {
+	mermaidQueue = mermaidQueue.then(() => drawMermaidDiagrams(container));
+	return mermaidQueue;
+}
+
+let mermaidQueue: Promise<void> = Promise.resolve();
+
+function isRendered(node: HTMLElement): boolean {
+	for (let el: Element | null = node; el; el = el.parentElement) {
+		if (getComputedStyle(el).display === "none") return false;
+	}
+	return true;
+}
+
+async function drawMermaidDiagrams(container: Element): Promise<void> {
 	const theme = mermaidTheme();
 	const nodes = [...container.querySelectorAll<HTMLElement>("pre.mermaid")].filter(
-		(n) => n.dataset.mermaidTheme !== theme
+		(n) => n.dataset.mermaidTheme !== theme && isRendered(n)
 	);
 	if (nodes.length === 0) return;
 	for (const node of nodes) {

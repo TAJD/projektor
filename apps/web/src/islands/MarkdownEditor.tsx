@@ -244,7 +244,7 @@ function PreviewPane({ preview, mobilePreview }: { preview: string; mobilePrevie
 			if (bodyRef.current) void renderMermaidDiagrams(bodyRef.current);
 		}, 300);
 		return () => clearTimeout(timer);
-	}, [preview]);
+	}, [preview, mobilePreview]);
 
 	return (
 		<div
