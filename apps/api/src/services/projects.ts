@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 import { IdSchema } from "../schemas/common";
 import { CreateProjectSchema, UpdateProjectSchema } from "../schemas/projects";
 import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
@@ -286,6 +286,21 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 		.where(and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId)))
 		.get();
 	if (!existing) throw new NotFoundError("Project not found");
+
+	if (parsed.data.key !== undefined) {
+		const clash = await orm
+			.select({ id: schema.projects.id })
+			.from(schema.projects)
+			.where(
+				and(
+					eq(schema.projects.workspaceId, ctx.workspaceId),
+					eq(schema.projects.key, parsed.data.key),
+					ne(schema.projects.id, id)
+				)
+			)
+			.get();
+		if (clash) throw new ConflictError(`Project key ${parsed.data.key} already exists`);
+	}
 
 	await orm
 		.update(schema.projects)
