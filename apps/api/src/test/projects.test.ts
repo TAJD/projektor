@@ -205,6 +205,28 @@ describe("Projects REST", () => {
 		expect(patchRes.status).toBe(200);
 	});
 
+	it("PATCH /api/projects/:id returns 409 when renaming the key onto another project's key (PROJ-983)", async () => {
+		const mk = async (name: string, key: string) =>
+			(await (
+				await SELF.fetch("http://localhost/api/projects", {
+					method: "POST",
+					headers: ownerHeaders,
+					body: JSON.stringify({ name, key }),
+				})
+			).json()) as { id: string };
+		await mk("Keep", "KEEPK");
+		const { id } = await mk("Move", "MOVEK");
+		const patch = (key: string) =>
+			SELF.fetch(`http://localhost/api/projects/${id}`, {
+				method: "PATCH",
+				headers: ownerHeaders,
+				body: JSON.stringify({ key }),
+			});
+
+		expect((await patch("KEEPK")).status).toBe(409);
+		expect((await patch("MOVEK")).status).toBe(200);
+	});
+
 	it("PATCH /api/projects/:id rejects member (403)", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/projects", {
 			method: "POST",

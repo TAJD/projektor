@@ -43,6 +43,11 @@ export const taskStatusesTools: MCPTool[] = [
 					description:
 						"Mark this status as a review step (completion-report gate, review flow metrics). Not inferred from the key.",
 				},
+				isBacklog: {
+					type: "boolean",
+					description:
+						"Count issues in this status as backlog on the project tile. Not inferred from the key.",
+				},
 			},
 		},
 		annotations: CREATE,
@@ -67,6 +72,11 @@ export const taskStatusesTools: MCPTool[] = [
 					type: "boolean",
 					description:
 						"Mark this status as a review step (completion-report gate, review flow metrics). Not inferred from the key.",
+				},
+				isBacklog: {
+					type: "boolean",
+					description:
+						"Count issues in this status as backlog on the project tile. Not inferred from the key.",
 				},
 			},
 		},

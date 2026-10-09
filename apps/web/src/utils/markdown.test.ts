@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderMd, stripFrontmatter } from "./markdown";
 
 // PROJ-488 (R6): frontmatter is metadata, not prose — the rendered view drops it.
@@ -140,11 +140,118 @@ describe("renderMermaidDiagrams", () => {
 		await renderWithMock(container);
 
 		expect(initialize).toHaveBeenCalled();
-		expect(run).toHaveBeenCalledWith({ nodes: expect.anything() });
+		expect(initialize).toHaveBeenCalledWith({ startOnLoad: false, theme: "neutral" });
+		expect(run).toHaveBeenCalledTimes(1);
 		expect(run.mock.calls[0][0].nodes).toHaveLength(1);
 
 		vi.doUnmock("mermaid");
 		vi.resetModules();
+	});
+
+	async function withMermaid(run: ReturnType<typeof vi.fn>, initialize = vi.fn()) {
+		vi.doMock("mermaid", () => ({ default: { initialize, run } }));
+		vi.resetModules();
+		const mod = await import("./markdown");
+		const container = document.createElement("div");
+		container.innerHTML = '<pre class="mermaid">graph TD\nA --> B</pre>';
+		document.body.appendChild(container);
+		return { render: mod.renderMermaidDiagrams, container, initialize };
+	}
+
+	afterEach(() => {
+		document.documentElement.removeAttribute("data-theme");
+		document.body.innerHTML = "";
+		vi.doUnmock("mermaid");
+		vi.resetModules();
+		vi.restoreAllMocks();
+	});
+
+	it("uses mermaid's dark theme when the app theme is dark", async () => {
+		document.documentElement.setAttribute("data-theme", "dark");
+		const { render, container, initialize } = await withMermaid(vi.fn());
+		await render(container);
+		expect(initialize).toHaveBeenCalledWith({ startOnLoad: false, theme: "dark" });
+	});
+
+	it("re-draws from the original source when the theme is toggled", async () => {
+		const run = vi.fn().mockImplementation(async ({ nodes }: { nodes: HTMLElement[] }) => {
+			nodes[0].innerHTML = "<svg></svg>";
+		});
+		const { render, container, initialize } = await withMermaid(run);
+		await render(container);
+		await render(container);
+		expect(run).toHaveBeenCalledTimes(1);
+
+		document.documentElement.setAttribute("data-theme", "dark");
+		await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+		expect(initialize).toHaveBeenLastCalledWith({ startOnLoad: false, theme: "dark" });
+		expect(container.querySelector("pre.mermaid")?.getAttribute("data-mermaid-src")).toBe(
+			"graph TD\nA --> B"
+		);
+	});
+
+	it("leaves diagrams inside a display:none ancestor unrendered until they are shown", async () => {
+		const run = vi.fn().mockImplementation(async ({ nodes }: { nodes: HTMLElement[] }) => {
+			nodes[0].innerHTML = "<svg></svg>";
+		});
+		const { render, container } = await withMermaid(run);
+		container.style.display = "none";
+		await render(container);
+		expect(run).not.toHaveBeenCalled();
+
+		container.style.display = "";
+		await render(container);
+		expect(run).toHaveBeenCalledTimes(1);
+	});
+
+	it("serialises overlapping renders so a second call never resets a node mid-draw", async () => {
+		let active = 0;
+		let overlapped = false;
+		const run = vi.fn().mockImplementation(async () => {
+			active++;
+			if (active > 1) overlapped = true;
+			await new Promise((r) => setTimeout(r, 5));
+			active--;
+		});
+		const { render, container } = await withMermaid(run);
+		const first = render(container);
+		await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+		document.documentElement.setAttribute("data-theme", "dark");
+		const second = render(container);
+		await Promise.all([first, second]);
+		expect(overlapped).toBe(false);
+		expect(run).toHaveBeenCalledTimes(2);
+	});
+
+	it("keeps the source, shows a note and warns when a diagram fails to render", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const run = vi.fn().mockRejectedValue(new Error("Parse error on line 2\nExpecting 'X'"));
+		const { render, container } = await withMermaid(run);
+
+		await expect(render(container)).resolves.toBeUndefined();
+
+		expect(container.querySelector("pre.mermaid")?.textContent).toBe("graph TD\nA --> B");
+		const note = container.querySelector(".mermaid-error");
+		expect(note?.textContent).toBe("Diagram failed to render: Parse error on line 2");
+		expect(warn).toHaveBeenCalled();
+	});
+
+	it("shows the same note when the mermaid chunk fails to load", async () => {
+		vi.spyOn(console, "warn").mockImplementation(() => {});
+		vi.doMock("mermaid", () => {
+			throw new Error("Failed to fetch dynamically imported module");
+		});
+		vi.resetModules();
+		const { renderMermaidDiagrams: render } = await import("./markdown");
+		const container = document.createElement("div");
+		container.innerHTML = '<pre class="mermaid">graph TD\nA --> B</pre>';
+
+		await expect(render(container)).resolves.toBeUndefined();
+
+		expect(container.querySelector(".mermaid-error")?.textContent).toContain(
+			"Diagram failed to render"
+		);
+		expect(container.querySelector("pre.mermaid")?.textContent).toBe("graph TD\nA --> B");
 	});
 
 	it("does nothing (no import) when there are no mermaid blocks", async () => {

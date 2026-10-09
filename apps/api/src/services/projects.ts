@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { IdSchema } from "../schemas/common";
 import { CreateProjectSchema, UpdateProjectSchema } from "../schemas/projects";
 import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
@@ -101,12 +101,13 @@ export async function listProjectsAcrossWorkspaces(
         COUNT(CASE WHEN COALESCE(NULLIF(i.status_category, ''), i.status) NOT IN ('done','cancelled') THEN 1 END)
           AS open_issue_count,
         COUNT(CASE WHEN COALESCE(NULLIF(i.status_category, ''), i.status) NOT IN ('done','cancelled')
-                     AND i.status = 'backlog' THEN 1 END)
+                     AND (ts.is_backlog = 1 OR (ts.id IS NULL AND i.status = 'backlog')) THEN 1 END)
           AS backlog_issue_count
       FROM projects p
       JOIN workspaces w         ON w.id  = p.workspace_id
       JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = ?
       LEFT JOIN issues i        ON i.project_id = p.id
+      LEFT JOIN task_statuses ts ON ts.id = i.status_id AND ts.workspace_id = p.workspace_id
       -- PROJ-311: in each workspace the user sees all projects if owner/admin there,
       -- otherwise only projects their groups grant (indexed EXISTS).
       WHERE (wm.role IN ('owner','admin')
@@ -287,10 +288,20 @@ export async function updateProject(ctx: ServiceCtx, id: string, input: unknown)
 		.get();
 	if (!existing) throw new NotFoundError("Project not found");
 
-	await orm
+	const newKey = parsed.data.key;
+	const keyFree =
+		newKey === undefined
+			? undefined
+			: sql`NOT EXISTS (SELECT 1 FROM projects other WHERE other.workspace_id = ${ctx.workspaceId} AND other.key = ${newKey} AND other.id <> ${id})`;
+
+	const result = await orm
 		.update(schema.projects)
 		.set(setObj)
-		.where(and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId)));
+		.where(
+			and(eq(schema.projects.id, id), eq(schema.projects.workspaceId, ctx.workspaceId), keyFree)
+		);
+	if (newKey !== undefined && result.meta.changes === 0)
+		throw new ConflictError(`Project key ${newKey} already exists`);
 
 	const diff: Record<string, unknown> = { ...setObj };
 	delete diff.updatedAt;
@@ -319,6 +330,7 @@ const PROJECT_CLEANUP_SQL: readonly string[] = [
 	`DELETE FROM wip_cap_denials WHERE project_id = ?1 AND workspace_id = ?2`,
 	`DELETE FROM issue_gate_rejections WHERE issue_id IN (${ISSUES_OF_PROJECT})`,
 	`DELETE FROM share_tokens WHERE workspace_id = ?2 AND issue_id IN (${ISSUES_OF_PROJECT})`,
+	`DELETE FROM agent_messages WHERE workspace_id = ?2 AND scope IN (SELECT 'issue:' || id FROM issues WHERE project_id = ?1 AND workspace_id = ?2)`,
 	`DELETE FROM attachments WHERE workspace_id = ?2 AND entity_type = 'issue' AND entity_id IN (${ISSUES_OF_PROJECT})`,
 	`UPDATE agent_sessions SET issue_id = NULL WHERE workspace_id = ?2 AND issue_id IN (${ISSUES_OF_PROJECT})`,
 	`UPDATE feedback SET linked_issue_id = NULL WHERE workspace_id = ?2 AND linked_issue_id IN (${ISSUES_OF_PROJECT})`,

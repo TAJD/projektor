@@ -191,13 +191,14 @@ export async function seedTaskStatus(
 		isDefault?: boolean;
 		position?: number;
 		isReviewStep?: boolean;
+		isBacklog?: boolean;
 	}>
 ) {
 	const id = crypto.randomUUID();
 	const key = opts?.key ?? `status-${id.slice(0, 8)}`;
 	await env.DB.prepare(
-		`INSERT INTO task_statuses (id, workspace_id, key, name, category, color, position, is_default, is_review_step)
-     VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)`
+		`INSERT INTO task_statuses (id, workspace_id, key, name, category, color, position, is_default, is_review_step, is_backlog)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`
 	)
 		.bind(
 			id,
@@ -207,7 +208,8 @@ export async function seedTaskStatus(
 			opts?.category ?? "todo",
 			opts?.position ?? 0,
 			opts?.isDefault ? 1 : 0,
-			opts?.isReviewStep ? 1 : 0
+			opts?.isReviewStep ? 1 : 0,
+			opts?.isBacklog ? 1 : 0
 		)
 		.run();
 	return { id, key, name: opts?.name ?? key };

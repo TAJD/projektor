@@ -186,6 +186,8 @@ function addLabelFilter(conditions: Condition[], filters: LabelFilter): void {
 	}
 }
 
+const MAX_STATUS_IDS_FILTER = 50;
+
 function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): void {
 	const { status, statusId, statusIds, category, priority, priorities } = filters;
 
@@ -202,6 +204,12 @@ function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): 
 			.split(",")
 			.map((s) => s.trim())
 			.filter(Boolean);
+		if (ids.length > MAX_STATUS_IDS_FILTER) {
+			throw new ValidationError({
+				formErrors: [`statusIds accepts at most ${MAX_STATUS_IDS_FILTER} ids`],
+				fieldErrors: {},
+			});
+		}
 		if (ids.length) conditions.push(inArray(schema.issues.statusId, ids));
 	}
 	if (category) conditions.push(eq(schema.issues.statusCategory, category));
@@ -1939,6 +1947,9 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 		ctx.db
 			.prepare("DELETE FROM share_tokens WHERE issue_id = ? AND workspace_id = ?")
 			.bind(id, ctx.workspaceId),
+		ctx.db
+			.prepare("DELETE FROM agent_messages WHERE scope = ?1 AND workspace_id = ?2")
+			.bind(`issue:${id}`, ctx.workspaceId),
 		// ON DELETE CASCADE rows — delete outright.
 		toD1Statement(
 			ctx,

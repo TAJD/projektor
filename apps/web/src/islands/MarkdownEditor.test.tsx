@@ -47,6 +47,17 @@ describe("MarkdownEditor", () => {
 		});
 	});
 
+	it("renders mermaid diagrams in the preview pane (PROJ-883)", async () => {
+		const run = vi.fn().mockResolvedValue(undefined);
+		vi.doMock("mermaid", () => ({ default: { initialize: vi.fn(), run } }));
+		vi.resetModules();
+		const { default: Editor } = await import("./MarkdownEditor");
+		render(<Editor value={"```mermaid\ngraph TD\n    A --> B\n```"} onChange={() => {}} />);
+		await waitFor(() => expect(run).toHaveBeenCalledTimes(1), { timeout: 2000 });
+		vi.doUnmock("mermaid");
+		vi.resetModules();
+	});
+
 	it("accepts and wires an onChange callback without throwing", () => {
 		const onChange = vi.fn();
 		// Verifies that the component mounts without error when onChange is provided.

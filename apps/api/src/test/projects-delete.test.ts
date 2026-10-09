@@ -70,11 +70,21 @@ describe("PROJ-819: deleteProject cleans up explicitly", () => {
 			projectId: other.id,
 		})) as { id: string };
 
+		await env.DB.prepare(
+			"INSERT INTO agent_messages (id, workspace_id, scope, body, created_at) VALUES (?, ?, ?, 'hi', 0)"
+		)
+			.bind(crypto.randomUUID(), workspace.id, `issue:${issue.id}`)
+			.run();
+
 		const res = await SELF.fetch(`http://localhost/api/projects/${doomed.id}`, {
 			method: "DELETE",
 			headers: authHeaders(token, workspace.slug),
 		});
 		expect(res.status).toBe(200);
+
+		expect(
+			await count("SELECT COUNT(*) AS n FROM agent_messages WHERE scope = ?", `issue:${issue.id}`)
+		).toBe(0);
 
 		expect(await count("SELECT COUNT(*) AS n FROM issues WHERE project_id = ?", doomed.id)).toBe(0);
 		expect(

@@ -29,11 +29,12 @@ export async function listTaskStatuses(ctx: ServiceCtx) {
 		.from(schema.taskStatuses)
 		.where(eq(schema.taskStatuses.workspaceId, ctx.workspaceId))
 		.orderBy(asc(schema.taskStatuses.position), asc(schema.taskStatuses.name));
-	const result = rows.map(({ isDefault, isReviewStep, workspaceId, ...rest }) => ({
+	const result = rows.map(({ isDefault, isReviewStep, isBacklog, workspaceId, ...rest }) => ({
 		...rest,
 		workspace_id: workspaceId,
 		is_default: isDefault,
 		is_review_step: isReviewStep,
+		is_backlog: isBacklog,
 	}));
 
 	await cache.set(ctx.kv, cacheKey, result, WS_META_TTL);
@@ -51,7 +52,7 @@ export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
 	if (ctx.role === "member" || ctx.role === "viewer") throw new ForbiddenError();
 	const result = CreateTaskStatusSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { key, name, category, color, position, isDefault, isReviewStep } = result.data;
+	const { key, name, category, color, position, isDefault, isReviewStep, isBacklog } = result.data;
 
 	const orm = drizzle(ctx.db, { schema });
 	const existing = await orm
@@ -81,6 +82,7 @@ export async function createTaskStatus(ctx: ServiceCtx, raw: unknown) {
 		position: position ?? 0,
 		isDefault: isDefault ? 1 : 0,
 		isReviewStep: isReviewStep ? 1 : 0,
+		isBacklog: isBacklog ? 1 : 0,
 	});
 
 	await invalidateTaskStatusesCache(ctx);
@@ -97,6 +99,7 @@ function buildTaskStatusSetObj(data: TaskStatusUpdateData) {
 	if (data.position !== undefined) setObj.position = data.position;
 	if (data.isDefault !== undefined) setObj.isDefault = data.isDefault ? 1 : 0;
 	if (data.isReviewStep !== undefined) setObj.isReviewStep = data.isReviewStep ? 1 : 0;
+	if (data.isBacklog !== undefined) setObj.isBacklog = data.isBacklog ? 1 : 0;
 	return setObj;
 }
 
@@ -195,6 +198,7 @@ export async function seedDefaultTaskStatuses(db: D1Database, workspaceId: strin
 			position: 1,
 			isDefault: 1,
 			isReviewStep: 0,
+			isBacklog: 1,
 		},
 		{ key: "todo", name: "Todo", category: "todo", position: 2, isDefault: 0, isReviewStep: 0 },
 		{
@@ -237,6 +241,7 @@ export async function seedDefaultTaskStatuses(db: D1Database, workspaceId: strin
 				position: s.position,
 				isDefault: s.isDefault,
 				isReviewStep: s.isReviewStep,
+				isBacklog: "isBacklog" in s ? s.isBacklog : 0,
 			})
 			.onConflictDoNothing();
 	}

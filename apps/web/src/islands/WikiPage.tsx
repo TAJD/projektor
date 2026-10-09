@@ -2612,9 +2612,7 @@ function useTableOfContents(
 	useEffect(() => {
 		const container = contentRef.current;
 		if (!container || !page) return;
-		renderMermaidDiagrams(container).catch(() => {
-			// non-fatal — leave the raw code block visible
-		});
+		void renderMermaidDiagrams(container);
 	}, [renderedHtml, contentMountToken]);
 
 	// PROJ-113: IntersectionObserver for active heading
@@ -3603,17 +3601,6 @@ const WIKI_PAGE_STYLES = `
 	.wiki-link-broken a:hover {
 		color: var(--accent);
 		border-color: var(--accent);
-	}
-	.prose pre.mermaid {
-		display: flex;
-		justify-content: center;
-		background: none;
-		padding: 0;
-	}
-	.prose pre.mermaid svg {
-		max-width: 100%;
-		width: auto;
-		height: auto;
 	}
 	/* PROJ-612: renderMdWithWikilinks (markdown.ts) wraps every rendered <table> in
 	 * a .table-scroll div (PROJ-605), but this page never defined the scroll rule
