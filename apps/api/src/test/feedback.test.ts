@@ -1,6 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { hashFeedbackToken } from "../services/feedback";
+import { parseAllowedOrigins } from "../services/feedback-sources";
 import {
 	authHeaders,
 	type JsonRpcError,
@@ -1108,5 +1109,48 @@ describe("Feedback read/triage MCP tools", () => {
 			authHeaders(roles.viewer.token, roles.workspace.slug)
 		);
 		expect(toolError(res)?.code).toBe("forbidden");
+	});
+});
+
+describe("malformed feedback_sources.allowed_origins", () => {
+	it("parseAllowedOrigins fails closed on bad JSON or non-string arrays", () => {
+		expect(parseAllowedOrigins(null)).toBeNull();
+		expect(parseAllowedOrigins("")).toBeNull();
+		expect(parseAllowedOrigins("not json")).toBeNull();
+		expect(parseAllowedOrigins('{"a":1}')).toBeNull();
+		expect(parseAllowedOrigins("[1,2]")).toBeNull();
+		expect(parseAllowedOrigins('["https://acme.test"]')).toEqual(["https://acme.test"]);
+	});
+
+	it("submit still 201s with no CORS header, and source reads still 200", async () => {
+		const f = await seedProjectFixture({ role: "owner" });
+		const token = await mintSource(f, { name: "W", allowedOrigins: ["https://acme.test"] });
+		await env.DB.prepare("UPDATE feedback_sources SET allowed_origins = ? WHERE token_hash = ?")
+			.bind("[not json", await hashFeedbackToken(token))
+			.run();
+
+		const submit = await SELF.fetch("http://localhost/api/feedback/submit", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+				"Content-Type": "application/json",
+				Origin: "https://acme.test",
+			},
+			body: JSON.stringify({ body: "x" }),
+		});
+		expect(submit.status).toBe(201);
+		expect(submit.headers.get("Access-Control-Allow-Origin")).toBeNull();
+
+		const list = await SELF.fetch(`http://localhost/api/projects/${f.projectId}/feedback-sources`, {
+			headers: authHeaders(f.token, f.slug),
+		});
+		expect(list.status).toBe(200);
+		const [src] = (await list.json()) as Array<{ id: string; allowedOrigins: string[] | null }>;
+		expect(src.allowedOrigins).toBeNull();
+
+		const one = await SELF.fetch(`http://localhost/api/feedback-sources/${src.id}`, {
+			headers: authHeaders(f.token, f.slug),
+		});
+		expect(one.status).toBe(200);
 	});
 });

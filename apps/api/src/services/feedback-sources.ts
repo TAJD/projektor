@@ -25,6 +25,24 @@ export interface FeedbackSourceDetailView extends FeedbackSourceView {
 	projectId: string;
 }
 
+/**
+ * Decode the `allowed_origins` column. Writes always store JSON.stringify of a
+ * validated string[], but the column is plain TEXT, so a hand-edited or legacy
+ * value must not throw: anything that isn't a JSON array of strings is treated
+ * as "no allowed origins" (fail closed — no CORS header is granted).
+ */
+export function parseAllowedOrigins(raw: string | null): string[] | null {
+	if (!raw) return null;
+	try {
+		const value: unknown = JSON.parse(raw);
+		if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value;
+	} catch {
+		// fall through to the warning below
+	}
+	console.warn("feedback_sources.allowed_origins is malformed; ignoring it");
+	return null;
+}
+
 async function sha256hex(input: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
 	return Array.from(new Uint8Array(buf))
@@ -138,7 +156,7 @@ export async function listFeedbackSources(
 		name: r.name,
 		description: r.description,
 		isActive: r.is_active === 1,
-		allowedOrigins: r.allowed_origins ? (JSON.parse(r.allowed_origins) as string[]) : null,
+		allowedOrigins: parseAllowedOrigins(r.allowed_origins),
 		tokenPreview: `${r.token_hash.slice(0, 12)}…`,
 		createdAt: r.created_at,
 		revokedAt: r.revoked_at,
@@ -159,7 +177,7 @@ export async function getFeedbackSource(
 		name: row.name,
 		description: row.description,
 		isActive: row.is_active === 1,
-		allowedOrigins: row.allowed_origins ? (JSON.parse(row.allowed_origins) as string[]) : null,
+		allowedOrigins: parseAllowedOrigins(row.allowed_origins),
 		tokenPreview: `${row.token_hash.slice(0, 12)}…`,
 		createdAt: row.created_at,
 		revokedAt: row.revoked_at,
