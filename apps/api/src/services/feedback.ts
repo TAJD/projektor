@@ -7,6 +7,7 @@ import {
 } from "../schemas/feedback";
 import { canWriteProject, requireProjectAccess, requireProjectInWorkspace } from "./access";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { parseAllowedOrigins } from "./feedback-sources";
 import { createIssue } from "./issues";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
@@ -91,7 +92,7 @@ function resolveCorsAllowOrigin(
 	source: SubmitSourceRow,
 	requestOrigin: string | null
 ): string | null {
-	const allowed = source.allowed_origins ? (JSON.parse(source.allowed_origins) as string[]) : null;
+	const allowed = parseAllowedOrigins(source.allowed_origins);
 	return allowed && requestOrigin && allowed.includes(requestOrigin) ? requestOrigin : null;
 }
 
