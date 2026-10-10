@@ -2934,6 +2934,39 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(data.missing).toEqual([]);
 	});
 
+	it("PROJ-1000: list_issues open:true drops done/cancelled, and children carry parent_ref", async () => {
+		const key = await projectKey();
+		const parent = await seedIssue(workspaceId, projectId, userId, { title: "Open parent" });
+		await seedIssue(workspaceId, projectId, userId, {
+			title: "Open child",
+			status: "todo",
+			parentId: parent.id,
+		});
+		await seedIssue(workspaceId, projectId, userId, { title: "Finished", status: "done" });
+		await seedIssue(workspaceId, projectId, userId, { title: "Dropped", status: "cancelled" });
+
+		const res = await mcpCall({ name: "list_issues", arguments: { open: true } });
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ title: string; parent_ref?: string; status: string }>;
+			total: number;
+		};
+		const titles = data.items.map((i) => i.title);
+		expect(titles).toContain("Open child");
+		expect(titles).not.toContain("Finished");
+		expect(titles).not.toContain("Dropped");
+		expect(data.total).toBe(data.items.length);
+		expect(data.items.find((i) => i.title === "Open child")?.parent_ref).toBe(
+			`${key}-${parent.number}`
+		);
+		expect(data.items.find((i) => i.title === "Open parent")?.parent_ref ?? null).toBeNull();
+
+		const conflict = await mcpCall({
+			name: "list_issues",
+			arguments: { open: true, category: "done" },
+		});
+		expect(JSON.stringify(conflict)).toContain("open cannot be combined with category");
+	});
+
 	it("PROJ-994: get_issues accepts refs in ids, in order, and reports misses as given", async () => {
 		const key = await projectKey();
 		const a = await seedIssue(workspaceId, projectId, userId, { title: "In ids A" });

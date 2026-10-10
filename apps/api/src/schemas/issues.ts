@@ -81,6 +81,7 @@ export const ListIssuesSchema = z
 		statusId: TaxonomyIdSchema.optional(),
 		statusIds: z.string().optional(),
 		category: z.enum(["todo", "in_progress", "done", "cancelled"]).optional(),
+		open: BooleanQueryParam.optional(),
 		priority: PriorityEnum.optional(),
 		priorities: z.string().optional(),
 		projectId: z.string().optional(),

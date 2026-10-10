@@ -213,6 +213,21 @@ function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): 
 		if (ids.length) conditions.push(inArray(schema.issues.statusId, ids));
 	}
 	if (category) conditions.push(eq(schema.issues.statusCategory, category));
+	if (filters.open) {
+		if (category) {
+			throw new ValidationError({
+				formErrors: [],
+				fieldErrors: { open: ["open cannot be combined with category"] },
+			});
+		}
+		conditions.push(
+			notInArray(schema.issues.status, ["done", "cancelled"]),
+			or(
+				isNull(schema.issues.statusCategory),
+				notInArray(schema.issues.statusCategory, ["done", "cancelled"])
+			)
+		);
+	}
 	if (filters.needsAudit !== undefined) {
 		conditions.push(eq(schema.issues.needsAudit, filters.needsAudit));
 	}
@@ -375,6 +390,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			assignee_id: schema.issues.assigneeId,
 			labels: sql<string>`${schema.issues.labels}`,
 			parent_id: schema.issues.parentId,
+			parent_ref: parentRefColumn(ctx),
 			type_id: schema.issues.typeId,
 			status_id: schema.issues.statusId,
 			status_category: schema.taskStatuses.category,
@@ -478,7 +494,16 @@ async function computeChildRollupsForParents(
 
 // Snake-case aliases preserve the existing response contract. The labels raw expression
 // bypasses mode:'json' deserialization so callers receive the stored JSON string as before.
-const issueColumns = {
+function parentRefColumn(ctx: ServiceCtx) {
+	const visible = visibleProjectPredicate(ctx, sql.raw("pi.project_id"));
+	return sql<string | null>`(SELECT pp.key || '-' || pi.number FROM issues pi
+		JOIN projects pp ON pp.id = pi.project_id
+		WHERE pi.id = ${schema.issues.parentId} AND pi.workspace_id = ${ctx.workspaceId}
+		${visible ? sql`AND ${visible}` : sql``})`;
+}
+
+const issueColumns = (ctx: ServiceCtx) => ({
+	parent_ref: parentRefColumn(ctx),
 	id: schema.issues.id,
 	workspace_id: schema.issues.workspaceId,
 	project_id: schema.issues.projectId,
@@ -506,12 +531,12 @@ const issueColumns = {
 	type_name: schema.taskTypes.name,
 	status_key: schema.taskStatuses.key,
 	status_name: schema.taskStatuses.name,
-} as const;
+});
 
 async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, id: string) {
 	return (
 		(await orm
-			.select(issueColumns)
+			.select(issueColumns(ctx))
 			.from(schema.issues)
 			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
@@ -535,7 +560,7 @@ async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx,
 		});
 	return (
 		(await orm
-			.select(issueColumns)
+			.select(issueColumns(ctx))
 			.from(schema.issues)
 			.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
@@ -739,7 +764,7 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 			];
 			if (visible) conditions.push(visible);
 			return orm
-				.select(issueColumns)
+				.select(issueColumns(ctx))
 				.from(schema.issues)
 				.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 				.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))

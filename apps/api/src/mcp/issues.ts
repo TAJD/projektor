@@ -89,7 +89,12 @@ export const issuesTools: MCPTool[] = [
 				category: {
 					type: "string",
 					enum: ["todo", "in_progress", "done", "cancelled"],
-					description: "Filter by status category",
+					description: "Filter by a single status category (use `open` for todo + in_progress)",
+				},
+				open: {
+					type: "boolean",
+					description:
+						"Only issues that are neither done nor cancelled. Cannot be combined with category. Items carry parent_ref (e.g. PROJ-42) next to parent_id.",
 				},
 				priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
 				priorities: {
