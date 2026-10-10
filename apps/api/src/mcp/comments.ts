@@ -5,6 +5,7 @@ import { toPage } from "./serialize";
 
 // PROJ-959: every comment tool resolves a ref the same way get_issue does.
 const ISSUE_ID_PROP = { type: "string", description: "UUID of the issue, or a ref like PROJ-42" };
+const ID_ALIAS_PROP = { type: "string", description: "Alias of issueId" };
 
 export const commentsTools: MCPTool[] = [
 	{
@@ -14,7 +15,7 @@ export const commentsTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			required: ["issueId"],
-			properties: { issueId: ISSUE_ID_PROP },
+			properties: { issueId: ISSUE_ID_PROP, id: ID_ALIAS_PROP },
 		},
 		annotations: READ,
 		async handler(input, ctx) {
@@ -29,6 +30,7 @@ export const commentsTools: MCPTool[] = [
 			required: ["issueId", "body"],
 			properties: {
 				issueId: ISSUE_ID_PROP,
+				id: ID_ALIAS_PROP,
 				body: { type: "string", minLength: 1, maxLength: 10000 },
 			},
 		},
@@ -45,6 +47,7 @@ export const commentsTools: MCPTool[] = [
 			required: ["issueId", "commentId", "body"],
 			properties: {
 				issueId: ISSUE_ID_PROP,
+				id: ID_ALIAS_PROP,
 				commentId: { type: "string" },
 				body: { type: "string", minLength: 1, maxLength: 10000 },
 			},
@@ -62,6 +65,7 @@ export const commentsTools: MCPTool[] = [
 			required: ["issueId", "commentId"],
 			properties: {
 				issueId: ISSUE_ID_PROP,
+				id: ID_ALIAS_PROP,
 				commentId: { type: "string" },
 			},
 		},

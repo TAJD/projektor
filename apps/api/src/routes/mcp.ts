@@ -4,6 +4,7 @@ import { insufficientScopeChallenge } from "../auth/challenge";
 import { type Capability, capabilityForMcpTool, tokenAllows } from "../auth/scopes";
 import { agentMessagesTools } from "../mcp/agent-messages";
 import { agentsTools } from "../mcp/agents";
+import { applyIssueAlias } from "../mcp/aliases";
 import { TOOL_DOMAIN_SLUGS, toolNamesForDomains } from "../mcp/catalog";
 import { codeHeatmapTools } from "../mcp/code-heatmap";
 import { commentsTools } from "../mcp/comments";
@@ -192,12 +193,21 @@ router.post("/:workspaceId", async (c) => {
 				return c.json(jsonRpcError(body.id, -32602, "Invalid params: `name` is required"));
 			}
 			const name = body.params.name;
-			const args = body.params.arguments ?? {};
-			if (!isPlainObject(args)) {
+			const rawArgs = body.params.arguments ?? {};
+			if (!isPlainObject(rawArgs)) {
 				return c.json(
 					jsonRpcError(body.id, -32602, "Invalid params: `arguments` must be an object")
 				);
 			}
+			const aliased = applyIssueAlias(name, rawArgs);
+			if ("conflict" in aliased) {
+				const conflictError = toToolError(
+					new ValidationError({ formErrors: [aliased.conflict], fieldErrors: {} })
+				);
+				// biome-ignore lint/style/noNonNullAssertion: a ValidationError always maps
+				return c.json(jsonRpcResult(body.id, conflictError!));
+			}
+			const args = aliased.args;
 			const tool = getAllTools(workspace.id).find((t) => t.name === name);
 			if (!tool) return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
 			// PROJ-877/920: required presence AND types/enums/lengths against the tool's

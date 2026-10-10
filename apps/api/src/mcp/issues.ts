@@ -215,6 +215,7 @@ export const issuesTools: MCPTool[] = [
 			type: "object",
 			properties: {
 				id: { type: "string" },
+				issueId: { type: "string", description: "Alias of id" },
 				ref: { type: "string", description: "Project key and number, e.g. PROJ-42" },
 				cursor: {
 					type: "string",
@@ -344,6 +345,7 @@ export const issuesTools: MCPTool[] = [
 			required: ["id"],
 			properties: {
 				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
+				issueId: { type: "string", description: "Alias of id" },
 				title: { type: "string" },
 				body: { type: "string" },
 				status: {
@@ -444,6 +446,7 @@ export const issuesTools: MCPTool[] = [
 			required: ["id"],
 			properties: {
 				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
+				issueId: { type: "string", description: "Alias of id" },
 			},
 		},
 		annotations: DESTRUCTIVE,
