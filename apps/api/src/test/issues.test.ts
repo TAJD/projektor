@@ -2934,6 +2934,24 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(data.missing).toEqual([]);
 	});
 
+	it("PROJ-994: get_issues accepts refs in ids, in order, and reports misses as given", async () => {
+		const key = await projectKey();
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "In ids A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "In ids B" });
+		const gone = crypto.randomUUID();
+		const goneRef = `${key}-999999`;
+		const res = await mcpCall({
+			name: "get_issues",
+			arguments: { ids: [b.id, `${key}-00${a.number}`, goneRef, gone] },
+		});
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ id: string }>;
+			missing: string[];
+		};
+		expect(data.items.map((i) => i.id)).toEqual([b.id, a.id]);
+		expect(data.missing.sort()).toEqual([gone, goneRef].sort());
+	});
+
 	it("get_issues lists a repeated missing ref once", async () => {
 		const ref = `${await projectKey()}-999999`;
 		const res = await mcpCall({ name: "get_issues", arguments: { refs: [ref, ref] } });

@@ -256,7 +256,8 @@ export const issuesTools: MCPTool[] = [
 				ids: {
 					type: "array",
 					items: { type: "string" },
-					description: "Issue UUIDs (max 50 combined with refs)",
+					description:
+						"Issue UUIDs; refs like PROJ-42 are accepted here too (max 50 combined with refs)",
 				},
 				includeBody: {
 					type: "boolean",

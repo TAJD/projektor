@@ -681,8 +681,9 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 	// under the identifier the caller actually used.
 	const order: Array<{ requested: string; id: string | undefined }> = [];
 
+	const refLike = [...refs, ...ids.filter((id) => ISSUE_REF_PATTERN.test(id))];
 	const numbersByKey = new Map<string, number[]>();
-	for (const ref of refs) {
+	for (const ref of refLike) {
 		const m = ref.match(ISSUE_REF_PATTERN);
 		if (!m)
 			throw new ValidationError({
@@ -719,7 +720,12 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 		for (const row of rows) refToId.set(`${key}-${row.number}`, row.id);
 	}
 	for (const ref of refs) order.push({ requested: ref, id: refToId.get(canonicalRef(ref)) });
-	for (const id of ids) order.push({ requested: id, id });
+	for (const id of ids) {
+		order.push({
+			requested: id,
+			id: ISSUE_REF_PATTERN.test(id) ? refToId.get(canonicalRef(id)) : id,
+		});
+	}
 
 	const allIds = Array.from(new Set(order.map((o) => o.id).filter((id): id is string => !!id)));
 
