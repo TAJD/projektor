@@ -241,6 +241,7 @@ export const PatchWikiPageInputSchema = z.discriminatedUnion("op", [
 		op: z.literal("append_to_page"),
 		text: z.string().min(1).max(500000),
 		...PatchBaseFields,
+		baseRevisionId: z.string().nullable().optional(),
 	}),
 	z.object({
 		op: z.literal("set_frontmatter"),

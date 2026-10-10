@@ -328,7 +328,8 @@ export const wikiTools: MCPTool[] = [
 		name: "patch_wiki_page",
 		description:
 			"Section-addressed patch operations on a wiki page's markdown, by id or slug. " +
-			"Sections are addressed by exact heading text (a `#`..`######` line and everything " +
+			"Sections are addressed by heading text, with or without the leading `#` markers " +
+			"(a `#`..`######` line and everything " +
 			"up to the next heading; `#` lines inside fenced code blocks or the YAML " +
 			"frontmatter block are not headings). A heading that appears more than once on " +
 			"the page is ambiguous and rejected — patch targets must be unique. " +
@@ -339,7 +340,7 @@ export const wikiTools: MCPTool[] = [
 			"heading needed), set_frontmatter (merge `values` into the page's YAML " +
 			"frontmatter block without touching the rest of the content — a key set to " +
 			"null is removed; a page with no frontmatter block gains one). " +
-			"baseRevisionId is required (the current revision id from " +
+			"baseRevisionId is required for every op except append_to_page (the current revision id from " +
 			"list_wiki_revisions/get_wiki_revision, or null if never revised) — conflict " +
 			"detection is SECTION-scoped, not whole-page: two agents patching different " +
 			"sections never conflict, even if the page's revision advanced between their " +
@@ -352,7 +353,6 @@ export const wikiTools: MCPTool[] = [
 			"reparsing it (never stamps verified_at).",
 		inputSchema: {
 			type: "object",
-			required: ["op", "baseRevisionId"],
 			properties: {
 				id: { type: "string", description: "Page ID" },
 				slug: { type: "string", description: "Page slug (alternative to id)" },
@@ -376,6 +376,10 @@ export const wikiTools: MCPTool[] = [
 					type: "string",
 					description: "Text to add/replace (required for every op except set_frontmatter)",
 				},
+				content: {
+					type: "string",
+					description: "Alias of `text`, matching create_wiki_page/update_wiki_page",
+				},
 				values: {
 					type: "object",
 					description:
@@ -386,7 +390,8 @@ export const wikiTools: MCPTool[] = [
 				baseRevisionId: {
 					type: ["string", "null"],
 					description:
-						"The revision id this patch is based on — null if the page has never been revised.",
+						"The revision id this patch is based on — null if the page has never been revised. " +
+						"Required except for append_to_page.",
 				},
 				summary: {
 					type: "string",

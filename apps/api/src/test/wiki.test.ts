@@ -3535,6 +3535,69 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(err?.fields?.heading).toEqual(["h1", "h2"]);
 	});
 
+	it("MCP: PROJ-992 a heading copied from the outline (with # markers) addresses the same section", async () => {
+		const content = "## Alpha\nA.\n\n## Beta\nB.\n";
+		let n = 0;
+		const pageFor = async () =>
+			mcpData<{ slug: string }>(
+				await mcp("create_wiki_page", { title: `Outline Heading ${n++}`, content })
+			);
+
+		for (const form of ["## Alpha", "# Alpha", "Alpha", "  ##   Alpha  "]) {
+			const created = await pageFor();
+			const res = await mcp("patch_wiki_page", {
+				slug: created.slug,
+				op: "append_to_section",
+				heading: form,
+				text: "added",
+				baseRevisionId: null,
+			});
+			expect(toolError(res)).toBeUndefined();
+			const page = mcpData<{ content: string }>(await mcp("get_wiki_page", { slug: created.slug }));
+			expect(page.content).toContain("added");
+		}
+
+		const created = await pageFor();
+		const bare = toolError(
+			await mcp("patch_wiki_page", {
+				slug: created.slug,
+				op: "append_to_section",
+				heading: "##",
+				text: "x",
+				baseRevisionId: null,
+			})
+		);
+		expect(bare?.code).toBe("validation");
+	});
+
+	it("MCP: PROJ-996 content aliases text, append_to_page needs no baseRevisionId, op errors list text too", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcp("create_wiki_page", { title: "Patch Alias", content: TWO_SECTIONS })
+		);
+
+		const aliased = await mcp("patch_wiki_page", {
+			slug: created.slug,
+			op: "append_to_page",
+			content: "## Appended\nvia content",
+		});
+		expect(toolError(aliased)).toBeUndefined();
+		const page = mcpData<{ content: string }>(await mcp("get_wiki_page", { slug: created.slug }));
+		expect(page.content).toContain("via content");
+
+		const both = toolError(await mcp("patch_wiki_page", { slug: created.slug }));
+		expect(both?.code).toBe("validation");
+		expect(Object.keys(both?.fields ?? {}).sort()).toEqual(["op", "text"]);
+
+		const res = await req(`http://localhost/api/wiki/${created.slug}`, {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ op: "nope", baseRevisionId: null }),
+		});
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { error: { fieldErrors: Record<string, string[]> } };
+		expect(Object.keys(body.error.fieldErrors).sort()).toEqual(["op", "text"]);
+	});
+
 	// PROJ-490: `#` lines only start a section in ordinary block context. A shell
 	// comment in a fenced code block is the most common line in a runbook — treating
 	// it as a heading would end the enclosing section mid-fence and a replace would
