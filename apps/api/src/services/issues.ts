@@ -30,7 +30,7 @@ import {
 	validateCustomFields,
 } from "./custom-fields";
 import { dorColumns } from "./definition-of-ready";
-import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { flattenWithPaths, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { isExternallyVerifiableEvidence } from "./evidence-classification";
 import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
@@ -1187,7 +1187,7 @@ function assertCompletionReportPresent(data: UpdateIssueData): void {
 			formErrors: [],
 			fieldErrors: {
 				completionReport: [
-					"summary and verification are required for an agent to enter review (PROJ-254)",
+					"completionReport.summary and completionReport.verification are required for an agent to enter review (PROJ-254)",
 				],
 			},
 		});
@@ -1559,7 +1559,7 @@ async function invalidateUpdateCaches(
 export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) {
 	const id = await resolveIssueIdParam(ctx, rawId);
 	const result = UpdateIssueSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
+	if (!result.success) throw new ValidationError(flattenWithPaths(result.error));
 	const data =
 		"parentId" in result.data && result.data.parentId
 			? { ...result.data, parentId: await resolveIssueIdParam(ctx, result.data.parentId) }

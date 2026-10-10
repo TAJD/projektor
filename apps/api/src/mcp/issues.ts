@@ -361,7 +361,9 @@ export const issuesTools: MCPTool[] = [
 				completionReport: {
 					type: "object",
 					description:
-						"Required when an agent moves an issue into in_review; also gates the done transition",
+						"Required when an agent moves an issue into in_review; also gates the done transition. " +
+						"Shape: {summary, verification, prLink?, remainder?} — summary and verification are required.",
+					required: ["summary", "verification"],
 					properties: {
 						summary: { type: "string" },
 						verification: { type: "string" },

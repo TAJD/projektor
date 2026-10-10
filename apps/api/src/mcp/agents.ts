@@ -71,7 +71,9 @@ export const agentsTools: MCPTool[] = [
 				completionReport: {
 					type: "object",
 					description:
-						"Completion report, required by the review gate in the same cases update_issue requires it (optional)",
+						"Completion report, required by the review gate in the same cases update_issue requires it (optional). " +
+						"Shape: {summary, verification, prLink?, remainder?} — summary and verification are required.",
+					required: ["summary", "verification"],
 					properties: {
 						summary: { type: "string" },
 						verification: { type: "string" },

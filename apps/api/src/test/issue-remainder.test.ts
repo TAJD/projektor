@@ -187,15 +187,6 @@ describe("PROJ-961: completionReport.remainder", () => {
 		expect(row?.parent_id).toBeNull();
 	});
 
-	it("an empty remainder is rejected, not silently ignored", async () => {
-		const { err } = await call("update_issue", {
-			id: ref,
-			status: "done",
-			completionReport: { ...report, remainder: "   " },
-		});
-		expect(err?.code).toBe("validation");
-	});
-
 	it("create_issue_link accepts follows_from directly", async () => {
 		const other = await seedIssue(workspaceId, projectId, userId, { title: "Other" });
 		const { err } = await call("create_issue_link", {
@@ -219,5 +210,50 @@ describe("PROJ-961: completionReport.remainder", () => {
 		expect(res.status).toBe(200);
 		const body = (await res.json()) as { followUp?: { ref: string } };
 		expect(body.followUp?.ref).toMatch(/^PROJ-\d+$/);
+	});
+
+	for (const blank of ["", "   "]) {
+		it(`PROJ-993: remainder ${JSON.stringify(blank)} is treated as absent`, async () => {
+			const { err, data } = await call("update_issue", {
+				id: ref,
+				status: "done",
+				completionReport: { ...report, remainder: blank },
+			});
+			expect(err).toBeUndefined();
+			expect(data.followUp).toBeUndefined();
+			expect(await followUpRows()).toHaveLength(0);
+		});
+	}
+
+	it("PROJ-993: finish_work accepts a blank remainder", async () => {
+		const reg = await call("register_agent", { name: "w", issueId: issueId });
+		const { err, data } = await call("finish_work", {
+			sessionId: reg.data.id,
+			issue: ref,
+			status: "done",
+			completionReport: { ...report, remainder: "" },
+		});
+		expect(err).toBeUndefined();
+		expect(JSON.stringify(data)).not.toContain("followUp");
+	});
+
+	it("PROJ-997: a missing completionReport subfield is named by its path", async () => {
+		const { err } = await call("update_issue", {
+			id: ref,
+			status: "done",
+			completionReport: { verification: "ci" },
+		});
+		expect(err?.code).toBe("validation");
+		expect(JSON.stringify(err)).toContain("completionReport.summary");
+	});
+
+	it("PROJ-997: an unknown completionReport key is named", async () => {
+		const { err } = await call("update_issue", {
+			id: ref,
+			status: "done",
+			completionReport: { ...report, followUps: "x" },
+		});
+		expect(err?.code).toBe("validation");
+		expect(JSON.stringify(err)).toContain("completionReport.followUps");
 	});
 });

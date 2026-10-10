@@ -30,8 +30,11 @@ export const CompletionReportSchema = z.object({
 		.optional(),
 	// PROJ-961: what is NOT done. When the issue is marked done, a follow-up issue
 	// (same parent, same labels, linked follows_from) is created carrying this text.
-	remainder: z.string().trim().min(1).max(20000).optional(),
-});
+	remainder: z.preprocess(
+		(v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+		z.string().trim().min(1).max(20000).optional()
+	),
+}).strict();
 
 export const UpdateIssueSchema = z
 	.object({
