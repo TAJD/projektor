@@ -89,7 +89,12 @@ export const issuesTools: MCPTool[] = [
 				category: {
 					type: "string",
 					enum: ["todo", "in_progress", "done", "cancelled"],
-					description: "Filter by status category",
+					description: "Filter by a single status category (use `open` for todo + in_progress)",
+				},
+				open: {
+					type: "boolean",
+					description:
+						"Only issues that are neither done nor cancelled. Cannot be combined with category. Items carry parent_ref (e.g. PROJ-42) next to parent_id.",
 				},
 				priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
 				priorities: {
@@ -210,6 +215,7 @@ export const issuesTools: MCPTool[] = [
 			type: "object",
 			properties: {
 				id: { type: "string" },
+				issueId: { type: "string", description: "Alias of id" },
 				ref: { type: "string", description: "Project key and number, e.g. PROJ-42" },
 				cursor: {
 					type: "string",
@@ -256,7 +262,8 @@ export const issuesTools: MCPTool[] = [
 				ids: {
 					type: "array",
 					items: { type: "string" },
-					description: "Issue UUIDs (max 50 combined with refs)",
+					description:
+						"Issue UUIDs; refs like PROJ-42 are accepted here too (max 50 combined with refs)",
 				},
 				includeBody: {
 					type: "boolean",
@@ -311,6 +318,11 @@ export const issuesTools: MCPTool[] = [
 					description: "UUID of the parent issue, or a ref like PROJ-42 (optional; max depth 5)",
 				},
 				typeId: { type: "string", description: "UUID of the task type to assign" },
+				type: {
+					type: "string",
+					description:
+						"Task type by key or name, case-insensitive (e.g. bug, epic) — the same value list_issues/get_issue return as `type`. Alternative to typeId.",
+				},
 			},
 		},
 		annotations: CREATE,
@@ -333,6 +345,7 @@ export const issuesTools: MCPTool[] = [
 			required: ["id"],
 			properties: {
 				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
+				issueId: { type: "string", description: "Alias of id" },
 				title: { type: "string" },
 				body: { type: "string" },
 				status: {
@@ -361,7 +374,9 @@ export const issuesTools: MCPTool[] = [
 				completionReport: {
 					type: "object",
 					description:
-						"Required when an agent moves an issue into in_review; also gates the done transition",
+						"Required when an agent moves an issue into in_review; also gates the done transition. " +
+						"Shape: {summary, verification, prLink?, remainder?} — summary and verification are required.",
+					required: ["summary", "verification"],
 					properties: {
 						summary: { type: "string" },
 						verification: { type: "string" },
@@ -431,6 +446,7 @@ export const issuesTools: MCPTool[] = [
 			required: ["id"],
 			properties: {
 				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
+				issueId: { type: "string", description: "Alias of id" },
 			},
 		},
 		annotations: DESTRUCTIVE,

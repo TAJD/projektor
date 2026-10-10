@@ -30,7 +30,7 @@ import {
 	validateCustomFields,
 } from "./custom-fields";
 import { dorColumns } from "./definition-of-ready";
-import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { ForbiddenError, flattenWithPaths, NotFoundError, ValidationError } from "./errors";
 import { isExternallyVerifiableEvidence } from "./evidence-classification";
 import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
@@ -42,7 +42,7 @@ import {
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
 import { createLink, listLinksForIssue } from "./issue-links";
-import { ISSUE_REF_PATTERN, resolveIssueIdParam } from "./issue-ref";
+import { ISSUE_REF_PATTERN, resolveIssueIdParam, resolveVisibleIssueIdParam } from "./issue-ref";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks, sanitizeFtsQuery } from "./sql";
@@ -213,6 +213,21 @@ function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): 
 		if (ids.length) conditions.push(inArray(schema.issues.statusId, ids));
 	}
 	if (category) conditions.push(eq(schema.issues.statusCategory, category));
+	if (filters.open) {
+		if (category) {
+			throw new ValidationError({
+				formErrors: [],
+				fieldErrors: { open: ["open cannot be combined with category"] },
+			});
+		}
+		conditions.push(
+			notInArray(schema.issues.status, ["done", "cancelled"]),
+			or(
+				isNull(schema.issues.statusCategory),
+				notInArray(schema.issues.statusCategory, ["done", "cancelled"])
+			)
+		);
+	}
 	if (filters.needsAudit !== undefined) {
 		conditions.push(eq(schema.issues.needsAudit, filters.needsAudit));
 	}
@@ -335,7 +350,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
 			: result.data.projectId,
 		parentId: result.data.parentId
-			? await resolveIssueIdParam(ctx, result.data.parentId)
+			? await resolveVisibleIssueIdParam(ctx, result.data.parentId)
 			: result.data.parentId,
 	};
 	const { limit } = filters;
@@ -375,6 +390,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			assignee_id: schema.issues.assigneeId,
 			labels: sql<string>`${schema.issues.labels}`,
 			parent_id: schema.issues.parentId,
+			parent_ref: parentRefColumn(ctx),
 			type_id: schema.issues.typeId,
 			status_id: schema.issues.statusId,
 			status_category: schema.taskStatuses.category,
@@ -478,7 +494,16 @@ async function computeChildRollupsForParents(
 
 // Snake-case aliases preserve the existing response contract. The labels raw expression
 // bypasses mode:'json' deserialization so callers receive the stored JSON string as before.
-const issueColumns = {
+function parentRefColumn(ctx: ServiceCtx) {
+	const visible = visibleProjectPredicate(ctx, sql.raw("pi.project_id"));
+	return sql<string | null>`(SELECT pp.key || '-' || pi.number FROM issues pi
+		JOIN projects pp ON pp.id = pi.project_id
+		WHERE pi.id = ${schema.issues.parentId} AND pi.workspace_id = ${ctx.workspaceId}
+		${visible ? sql`AND ${visible}` : sql``})`;
+}
+
+const issueColumns = (ctx: ServiceCtx) => ({
+	parent_ref: parentRefColumn(ctx),
 	id: schema.issues.id,
 	workspace_id: schema.issues.workspaceId,
 	project_id: schema.issues.projectId,
@@ -506,12 +531,12 @@ const issueColumns = {
 	type_name: schema.taskTypes.name,
 	status_key: schema.taskStatuses.key,
 	status_name: schema.taskStatuses.name,
-} as const;
+});
 
 async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, id: string) {
 	return (
 		(await orm
-			.select(issueColumns)
+			.select(issueColumns(ctx))
 			.from(schema.issues)
 			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
@@ -535,7 +560,7 @@ async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx,
 		});
 	return (
 		(await orm
-			.select(issueColumns)
+			.select(issueColumns(ctx))
 			.from(schema.issues)
 			.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
@@ -681,8 +706,9 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 	// under the identifier the caller actually used.
 	const order: Array<{ requested: string; id: string | undefined }> = [];
 
+	const refLike = [...refs, ...ids.filter((id) => ISSUE_REF_PATTERN.test(id))];
 	const numbersByKey = new Map<string, number[]>();
-	for (const ref of refs) {
+	for (const ref of refLike) {
 		const m = ref.match(ISSUE_REF_PATTERN);
 		if (!m)
 			throw new ValidationError({
@@ -719,7 +745,12 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 		for (const row of rows) refToId.set(`${key}-${row.number}`, row.id);
 	}
 	for (const ref of refs) order.push({ requested: ref, id: refToId.get(canonicalRef(ref)) });
-	for (const id of ids) order.push({ requested: id, id });
+	for (const id of ids) {
+		order.push({
+			requested: id,
+			id: ISSUE_REF_PATTERN.test(id) ? refToId.get(canonicalRef(id)) : id,
+		});
+	}
 
 	const allIds = Array.from(new Set(order.map((o) => o.id).filter((id): id is string => !!id)));
 
@@ -733,7 +764,7 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 			];
 			if (visible) conditions.push(visible);
 			return orm
-				.select(issueColumns)
+				.select(issueColumns(ctx))
 				.from(schema.issues)
 				.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 				.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
@@ -940,6 +971,37 @@ async function resolveCreateIssueDeps(ctx: ServiceCtx, data: CreateIssueData) {
 	return { resolvedTypeId, resolvedStatusId, resolvedStatusKey, resolvedStatusCategory, cfWrites };
 }
 
+async function resolveTypeNameParam(
+	ctx: ServiceCtx,
+	type: string | undefined,
+	typeId: string | null | undefined
+): Promise<string | null | undefined> {
+	if (type === undefined) return typeId;
+	const orm = drizzle(ctx.db, { schema });
+	const types = await orm
+		.select({ id: schema.taskTypes.id, key: schema.taskTypes.key, name: schema.taskTypes.name })
+		.from(schema.taskTypes)
+		.where(eq(schema.taskTypes.workspaceId, ctx.workspaceId));
+	const wanted = type.trim().toLowerCase();
+	const match =
+		types.find((t) => t.key.toLowerCase() === wanted) ??
+		types.find((t) => t.name.toLowerCase() === wanted);
+	if (!match) {
+		const valid = types.map((t) => t.key).sort();
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { type: [`Unknown type "${type}". Valid: ${valid.join(", ")}`] },
+		});
+	}
+	if (typeId && typeId !== match.id) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { type: [`type "${type}" conflicts with typeId; pass only one`] },
+		});
+	}
+	return match.id;
+}
+
 export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = CreateIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -947,7 +1009,8 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 	const parentId = result.data.parentId
 		? await resolveIssueIdParam(ctx, result.data.parentId)
 		: result.data.parentId;
-	const data = { ...result.data, projectId, parentId };
+	const typeId = await resolveTypeNameParam(ctx, result.data.type, result.data.typeId);
+	const data = { ...result.data, projectId, parentId, typeId };
 	const { title, body, priority, assigneeId, labels } = data;
 
 	// PROJ-389: confirm projectId belongs to this workspace BEFORE the admin-bypass
@@ -1187,7 +1250,7 @@ function assertCompletionReportPresent(data: UpdateIssueData): void {
 			formErrors: [],
 			fieldErrors: {
 				completionReport: [
-					"summary and verification are required for an agent to enter review (PROJ-254)",
+					"completionReport.summary and completionReport.verification are required for an agent to enter review (PROJ-254)",
 				],
 			},
 		});
@@ -1379,9 +1442,10 @@ function now(): number {
 // been written); the batched insert doesn't re-validate, so check it here, before the
 // batch, and fail the whole update with a 400 instead of storing an oversize comment.
 function completionReportCommentBody(
-	report: Parameters<typeof formatCompletionReportComment>[0]
+	report: Parameters<typeof formatCompletionReportComment>[0],
+	revised = false
 ): string {
-	const body = formatCompletionReportComment(report);
+	const body = formatCompletionReportComment(report, revised);
 	const max = AddCommentSchema.shape.body.maxLength;
 	if (max !== null && body.length > max) {
 		throw new ValidationError({
@@ -1402,10 +1466,11 @@ function formatCompletionReportComment(
 		verification: string;
 		prLink?: string;
 		remainder?: string;
-	}>
+	}>,
+	revised = false
 ): string {
 	const lines = [
-		"**Completion report**",
+		revised ? "**Completion report (revised)**" : "**Completion report**",
 		"",
 		`**Summary:** ${report.summary}`,
 		"",
@@ -1462,6 +1527,7 @@ async function buildUpdateSetValues(
 ): Promise<{
 	setValues: SetValues;
 	recordCompletionReport: boolean;
+	reviseCompletionReport: boolean;
 	enteringDone: boolean;
 	enteringClosed: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
@@ -1483,9 +1549,32 @@ async function buildUpdateSetValues(
 	if (recordCompletionReport) {
 		setValues.completionReportAt = now();
 	}
+	const statusMoves =
+		"statusId" in data || (data.status !== undefined && data.status !== existing.status);
+	const reviseCompletionReport =
+		Boolean(data.completionReport) &&
+		!reviewOrDoneTransition &&
+		!statusMoves &&
+		(isDoneState(existing.statusCategory, existing.status) || existing.statusIsReviewStep);
+	if (reviseCompletionReport && data.agentSessionId) {
+		if (isDoneState(existing.statusCategory, existing.status)) {
+			setValues.needsAudit = await computeNeedsAudit(ctx, data);
+		}
+	}
+	if (data.completionReport && !statusMoves && !reviseCompletionReport && !recordCompletionReport) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: {
+				completionReport: [
+					"completionReport only applies when entering in_review/done, or revising a finished issue",
+				],
+			},
+		});
+	}
 	return {
 		setValues,
 		recordCompletionReport,
+		reviseCompletionReport,
 		enteringDone: statusFields.enteringDone,
 		enteringClosed: statusFields.enteringClosed,
 		gateRejectionStatement: statusFields.gateRejectionStatement,
@@ -1559,7 +1648,7 @@ async function invalidateUpdateCaches(
 export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) {
 	const id = await resolveIssueIdParam(ctx, rawId);
 	const result = UpdateIssueSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
+	if (!result.success) throw new ValidationError(flattenWithPaths(result.error));
 	const data =
 		"parentId" in result.data && result.data.parentId
 			? { ...result.data, parentId: await resolveIssueIdParam(ctx, result.data.parentId) }
@@ -1626,6 +1715,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	const {
 		setValues,
 		recordCompletionReport,
+		reviseCompletionReport,
 		enteringDone,
 		enteringClosed,
 		gateRejectionStatement,
@@ -1672,12 +1762,12 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	statements.push(...buildCustomFieldUpsertStatements(ctx.db, id, cfWrites));
 
-	if (recordCompletionReport && data.completionReport) {
+	if ((recordCompletionReport || reviseCompletionReport) && data.completionReport) {
 		statements.push(
 			buildAddCommentInsertStatement(ctx, orm, {
 				id: commentId,
 				issueId: id,
-				body: completionReportCommentBody(data.completionReport),
+				body: completionReportCommentBody(data.completionReport, reviseCompletionReport),
 				now: commentNow,
 			})
 		);
@@ -1718,7 +1808,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	await ctx.db.batch(statements);
 
-	if (recordCompletionReport && data.completionReport) {
+	if ((recordCompletionReport || reviseCompletionReport) && data.completionReport) {
 		await broadcastWorkspaceEvent(ctx, {
 			type: "comment.created",
 			projectId: existing.projectId,

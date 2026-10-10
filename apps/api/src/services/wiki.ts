@@ -1,5 +1,6 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import type { ZodError } from "zod";
 import { wikiPagePath } from "../lib/urls";
 import { IdSchema } from "../schemas/common";
 import {
@@ -26,7 +27,13 @@ import {
 	visibleProjectSqlFragment,
 } from "./access";
 import { recordActivity } from "./activity";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import {
+	ConflictError,
+	ForbiddenError,
+	NotFoundError,
+	ValidationError,
+	type ZodFlattenOutput,
+} from "./errors";
 import { inChunks, sanitizeFtsQuery } from "./sql";
 import type { ServiceCtx } from "./types";
 import { deleteWikiDraftsForPages } from "./wiki-drafts";
@@ -2002,7 +2009,14 @@ function findUniqueSectionOrThrow(
 	currentSections: readonly HeadingSection[],
 	heading: string
 ): HeadingSection {
-	const currentMatches = findSections(currentSections, heading);
+	const bare = heading.replace(/^\s*#{1,6}(?:\s+|$)/, "").trim();
+	if (bare === "") {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { heading: ["heading must contain text, not only '#' markers"] },
+		});
+	}
+	const currentMatches = findSections(currentSections, bare);
 	if (currentMatches.length === 0) {
 		throw new NotFoundError(`Heading '${heading}' not found`, {
 			currentHeadings: currentSections.map((s) => s.heading),
@@ -2042,7 +2056,7 @@ async function assertNoSectionPatchConflict(
 	// A heading that was absent — or ambiguous — at base but resolves uniquely now means
 	// the section itself changed shape underneath the caller, so the empty base text
 	// below (correctly) trips the conflict check.
-	const baseMatches = findSections(parseHeadingSections(baseContent), data.heading);
+	const baseMatches = findSections(parseHeadingSections(baseContent), currentSection.heading);
 	const baseSectionText =
 		baseMatches.length === 1 ? extractSectionText(baseContent, baseMatches[0]) : "";
 	const currentSectionText = extractSectionText(currentContent, currentSection);
@@ -2074,9 +2088,41 @@ async function resolveSectionPatchContent(
 // (bounded). Section edits carry a caller-visible base, so they return the 409.
 const PATCH_RETRIES = 3;
 
+const PATCH_OPS = [
+	"append_to_section",
+	"replace_section",
+	"insert_after_heading",
+	"append_to_page",
+	"set_frontmatter",
+];
+
+function normalizePatchInput(input: unknown): unknown {
+	if (typeof input !== "object" || input === null || Array.isArray(input)) return input;
+	const { content, ...rest } = input as Record<string, unknown>;
+	if (content !== undefined && rest.text === undefined) rest.text = content;
+	return rest;
+}
+
+function patchValidationIssues(input: unknown, error: ZodError): ZodFlattenOutput {
+	const issues: ZodFlattenOutput = error.flatten();
+	const body = (typeof input === "object" && input !== null ? input : {}) as Record<
+		string,
+		unknown
+	>;
+	if (typeof body.op === "string" && PATCH_OPS.includes(body.op)) return issues;
+	issues.fieldErrors.op = [`op must be one of: ${PATCH_OPS.join(", ")}`];
+	if (body.op !== "set_frontmatter" && body.text === undefined) {
+		issues.fieldErrors.text = [
+			"text is required (alias: content) for every op except set_frontmatter",
+		];
+	}
+	return issues;
+}
+
 export async function patchWikiPage(ctx: ServiceCtx, idOrSlug: string, input: unknown) {
-	const parsed = PatchWikiPageInputSchema.safeParse(input);
-	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const normalized = normalizePatchInput(input);
+	const parsed = PatchWikiPageInputSchema.safeParse(normalized);
+	if (!parsed.success) throw new ValidationError(patchValidationIssues(normalized, parsed.error));
 	const data = parsed.data;
 	const retryable = data.op === "append_to_page" || data.op === "set_frontmatter";
 
@@ -2101,7 +2147,7 @@ async function patchWikiPageOnce(
 
 	let newContent: string;
 	if (data.op === "append_to_page") {
-		await assertRevisionBelongsToPage(ctx.db, page.id, data.baseRevisionId);
+		await assertRevisionBelongsToPage(ctx.db, page.id, data.baseRevisionId ?? null);
 		newContent = appendToPageEnd(currentContent, data.text);
 	} else if (data.op === "set_frontmatter") {
 		await assertRevisionBelongsToPage(ctx.db, page.id, data.baseRevisionId);

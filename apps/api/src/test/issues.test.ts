@@ -2934,6 +2934,96 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(data.missing).toEqual([]);
 	});
 
+	it("PROJ-1000: list_issues open:true drops done/cancelled, and children carry parent_ref", async () => {
+		const key = await projectKey();
+		const parent = await seedIssue(workspaceId, projectId, userId, { title: "Open parent" });
+		await seedIssue(workspaceId, projectId, userId, {
+			title: "Open child",
+			status: "todo",
+			parentId: parent.id,
+		});
+		await seedIssue(workspaceId, projectId, userId, { title: "Finished", status: "done" });
+		await seedIssue(workspaceId, projectId, userId, { title: "Dropped", status: "cancelled" });
+
+		const res = await mcpCall({ name: "list_issues", arguments: { open: true } });
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ title: string; parent_ref?: string; status: string }>;
+			total: number;
+		};
+		const titles = data.items.map((i) => i.title);
+		expect(titles).toContain("Open child");
+		expect(titles).not.toContain("Finished");
+		expect(titles).not.toContain("Dropped");
+		expect(data.total).toBe(data.items.length);
+		expect(data.items.find((i) => i.title === "Open child")?.parent_ref).toBe(
+			`${key}-${parent.number}`
+		);
+		expect(data.items.find((i) => i.title === "Open parent")?.parent_ref ?? null).toBeNull();
+
+		const conflict = await mcpCall({
+			name: "list_issues",
+			arguments: { open: true, category: "done" },
+		});
+		expect(JSON.stringify(conflict)).toContain("open cannot be combined with category");
+	});
+
+	it("PROJ-999: create_issue takes a type by key/name; unknown or conflicting types are errors", async () => {
+		const bug = await seedTaskType(workspaceId, { key: "bug", name: "Bug" });
+		const epic = await seedTaskType(workspaceId, { key: "epic", name: "Epic" });
+
+		const created = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Typed", type: "BUG" },
+		});
+		expect(created.error).toBeUndefined();
+		const issue = JSON.parse(created.result!.content[0].text) as { id: string };
+		const row = await env.DB.prepare("SELECT type_id FROM issues WHERE id = ?")
+			.bind(issue.id)
+			.first<{ type_id: string }>();
+		expect(row?.type_id).toBe(bug.id);
+
+		await seedTaskType(workspaceId, { key: "story", name: "bug" });
+		const keyWins = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Key wins", type: "bug" },
+		});
+		const keyWinsIssue = JSON.parse(keyWins.result!.content[0].text) as { id: string };
+		const keyWinsRow = await env.DB.prepare("SELECT type_id FROM issues WHERE id = ?")
+			.bind(keyWinsIssue.id)
+			.first<{ type_id: string }>();
+		expect(keyWinsRow?.type_id).toBe(bug.id);
+
+		const unknown = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Typo", type: "bgu" },
+		});
+		expect(unknown.result!.content[0].text).toContain("Valid: bug, epic, story");
+
+		const conflict = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Clash", type: "bug", typeId: epic.id },
+		});
+		expect(JSON.stringify(conflict)).toContain("conflicts with typeId");
+	});
+
+	it("PROJ-994: get_issues accepts refs in ids, in order, and reports misses as given", async () => {
+		const key = await projectKey();
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "In ids A" });
+		const b = await seedIssue(workspaceId, projectId, userId, { title: "In ids B" });
+		const gone = crypto.randomUUID();
+		const goneRef = `${key}-999999`;
+		const res = await mcpCall({
+			name: "get_issues",
+			arguments: { ids: [b.id, `${key}-00${a.number}`, goneRef, gone] },
+		});
+		const data = JSON.parse(res.result!.content[0].text) as {
+			items: Array<{ id: string }>;
+			missing: string[];
+		};
+		expect(data.items.map((i) => i.id)).toEqual([b.id, a.id]);
+		expect(data.missing.sort()).toEqual([gone, goneRef].sort());
+	});
+
 	it("get_issues lists a repeated missing ref once", async () => {
 		const ref = `${await projectKey()}-999999`;
 		const res = await mcpCall({ name: "get_issues", arguments: { refs: [ref, ref] } });

@@ -829,12 +829,18 @@ describe("PROJ-932: list_file_claims projectId + visibility for a non-admin memb
 		// No group grant for `userId` on `hidden` — it stays invisible to them.
 		const hiddenIssue = await seedIssue(workspaceId, hidden.id, userId, { title: "Hidden" });
 
-		const claimRes = await SELF.fetch("http://localhost/api/file-claims", {
-			method: "POST",
-			headers: authHeaders(token, slug),
-			body: JSON.stringify({ issueId: hiddenIssue.id, paths: ["hidden/secret.ts"] }),
-		});
-		expect(claimRes.status).toBe(201);
+		await env.DB.prepare(
+			`INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, released_at)
+			 VALUES (?, ?, ?, NULL, ?, ?, NULL)`
+		)
+			.bind(
+				crypto.randomUUID(),
+				workspaceId,
+				hiddenIssue.id,
+				"hidden/secret.ts",
+				Math.floor(Date.now() / 1000)
+			)
+			.run();
 
 		async function list(params: Record<string, string>) {
 			const qs = new URLSearchParams(params).toString();

@@ -303,11 +303,11 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 
 	// --- Report stamped only on a real transition (PROJ-293) ---
 
-	it("does not stamp/post a completionReport on a title-only update", async () => {
+	it("rejects, and does not stamp/post, a completionReport on a title-only update", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Pre-stamp attempt" });
 
 		const res = await patch(issue.id, { title: "Renamed", completionReport: report });
-		expect(res.status).toBe(200);
+		expect(res.status).toBe(400);
 		expect(await completionReportAtOf(issue.id)).toBeNull();
 		expect((await commentBodies(issue.id)).some((b) => b.includes("Did the thing"))).toBe(false);
 	});

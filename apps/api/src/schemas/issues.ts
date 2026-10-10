@@ -11,6 +11,7 @@ export const CreateIssueSchema = z
 		statusId: TaxonomyIdSchema.nullable().optional(),
 		priority: PriorityEnum.optional(),
 		assigneeId: z.string().uuid().optional(),
+		type: z.string().min(1).optional(),
 		labels: z.array(z.string().max(50)).max(20).optional(),
 		parentId: z.string().nullable().optional(),
 		typeId: TaxonomyIdSchema.nullable().optional(),
@@ -21,17 +22,22 @@ export const CreateIssueSchema = z
 // PROJ-254: completion report an agent (or human) submits when entering review /
 // before an issue can be marked done. Exported (PROJ-929) so finish_work's schema can
 // reuse it rather than duplicating the shape.
-export const CompletionReportSchema = z.object({
-	summary: z.string().min(1),
-	verification: z.string().min(1),
-	prLink: z
-		.string()
-		.transform((val) => (z.string().url().safeParse(val).success ? val : undefined))
-		.optional(),
-	// PROJ-961: what is NOT done. When the issue is marked done, a follow-up issue
-	// (same parent, same labels, linked follows_from) is created carrying this text.
-	remainder: z.string().trim().min(1).max(20000).optional(),
-});
+export const CompletionReportSchema = z
+	.object({
+		summary: z.string().min(1),
+		verification: z.string().min(1),
+		prLink: z
+			.string()
+			.transform((val) => (z.string().url().safeParse(val).success ? val : undefined))
+			.optional(),
+		// PROJ-961: what is NOT done. When the issue is marked done, a follow-up issue
+		// (same parent, same labels, linked follows_from) is created carrying this text.
+		remainder: z.preprocess(
+			(v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+			z.string().trim().min(1).max(20000).optional()
+		),
+	})
+	.strict();
 
 export const UpdateIssueSchema = z
 	.object({
@@ -76,6 +82,7 @@ export const ListIssuesSchema = z
 		statusId: TaxonomyIdSchema.optional(),
 		statusIds: z.string().optional(),
 		category: z.enum(["todo", "in_progress", "done", "cancelled"]).optional(),
+		open: BooleanQueryParam.optional(),
 		priority: PriorityEnum.optional(),
 		priorities: z.string().optional(),
 		projectId: z.string().optional(),

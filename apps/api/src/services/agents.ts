@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import {
 	EndAgentSchema,
 	FinishWorkSchema,
@@ -11,7 +11,7 @@ import {
 import { visibleProjectPredicate } from "./access";
 import { resolveAgentSessionId } from "./agent-identity";
 import { postMessage } from "./agent-messages";
-import { NotFoundError, ValidationError } from "./errors";
+import { flattenWithPaths, NotFoundError, ValidationError } from "./errors";
 import { claimFiles, releaseClaimsForAgent } from "./file-claims";
 import { claimIssue, releaseLeasesForAgent } from "./issue-leases";
 import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
@@ -149,6 +149,11 @@ export async function startWork(ctx: ServiceCtx, raw: unknown) {
 	}
 }
 
+function sessionVisible(ctx: ServiceCtx) {
+	const vis = visibleProjectPredicate(ctx, schema.issues.projectId);
+	return vis ? (or(isNull(schema.agentSessions.issueId), vis) ?? vis) : sql`1 = 1`;
+}
+
 export async function heartbeatAgent(ctx: ServiceCtx, raw: unknown) {
 	const result = HeartbeatAgentSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -160,11 +165,13 @@ export async function heartbeatAgent(ctx: ServiceCtx, raw: unknown) {
 	const existing = await orm
 		.select({ id: schema.agentSessions.id })
 		.from(schema.agentSessions)
+		.leftJoin(schema.issues, eq(schema.agentSessions.issueId, schema.issues.id))
 		.where(
 			and(
 				eq(schema.agentSessions.id, id),
 				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
-				eq(schema.agentSessions.status, "active")
+				eq(schema.agentSessions.status, "active"),
+				sessionVisible(ctx)
 			)
 		)
 		.get();
@@ -197,8 +204,13 @@ export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 	const existing = await orm
 		.select({ id: schema.agentSessions.id })
 		.from(schema.agentSessions)
+		.leftJoin(schema.issues, eq(schema.agentSessions.issueId, schema.issues.id))
 		.where(
-			and(eq(schema.agentSessions.id, id), eq(schema.agentSessions.workspaceId, ctx.workspaceId))
+			and(
+				eq(schema.agentSessions.id, id),
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+				sessionVisible(ctx)
+			)
 		)
 		.get();
 	if (!existing) throw new NotFoundError("Agent session not found");
@@ -233,7 +245,7 @@ export async function endAgent(ctx: ServiceCtx, raw: unknown) {
  */
 export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 	const result = FinishWorkSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
+	if (!result.success) throw new ValidationError(flattenWithPaths(result.error));
 	const { sessionId, completionReport, status } = result.data;
 	// PROJ-959: resolved even when nothing is transitioned, so an unknown or hidden ref is
 	// "Issue not found" rather than being silently ignored.
