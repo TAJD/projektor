@@ -2982,11 +2982,22 @@ describe("PROJ-931 — compact MCP responses", () => {
 			.first<{ type_id: string }>();
 		expect(row?.type_id).toBe(bug.id);
 
+		await seedTaskType(workspaceId, { key: "story", name: "bug" });
+		const keyWins = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Key wins", type: "bug" },
+		});
+		const keyWinsIssue = JSON.parse(keyWins.result!.content[0].text) as { id: string };
+		const keyWinsRow = await env.DB.prepare("SELECT type_id FROM issues WHERE id = ?")
+			.bind(keyWinsIssue.id)
+			.first<{ type_id: string }>();
+		expect(keyWinsRow?.type_id).toBe(bug.id);
+
 		const unknown = await mcpCall({
 			name: "create_issue",
 			arguments: { projectId, title: "Typo", type: "bgu" },
 		});
-		expect(unknown.result!.content[0].text).toContain("Valid: bug, epic");
+		expect(unknown.result!.content[0].text).toContain("Valid: bug, epic, story");
 
 		const conflict = await mcpCall({
 			name: "create_issue",

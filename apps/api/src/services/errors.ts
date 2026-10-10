@@ -12,10 +12,12 @@ export function flattenWithPaths(error: {
 			out.formErrors.push(issue.message);
 			continue;
 		}
-		const base = issue.path.map(String).join(".");
-		const targets = issue.keys?.length
-			? issue.keys.map((k) => ({ key: `${base}.${k}`, message: `Unrecognized key: "${k}"` }))
-			: [{ key: base, message: issue.message }];
+		const root = String(issue.path[0]);
+		const base = root === "completionReport" ? issue.path.map(String).join(".") : root;
+		const targets =
+			issue.keys?.length && root === "completionReport"
+				? issue.keys.map((k) => ({ key: `${base}.${k}`, message: `Unrecognized key: "${k}"` }))
+				: [{ key: base, message: issue.message }];
 		for (const { key, message } of targets) {
 			out.fieldErrors[key] = [...(out.fieldErrors[key] ?? []), message];
 		}

@@ -21,7 +21,7 @@ running server.
 | Tool | Description | Kind |
 |------|-------------|------|
 | `start_work` | Register an agent session and claim an issue (plus files, if given) in one call — replaces register_agent + claim_issue + claim_files + post_message. All-or-nothing with compensating cleanup: on any conflict (same errors as claim_issue/claim_files) the session is ended and nothing is left claimed. If the process crashes mid-call, the same claims become reclaimable once the session's heartbeat goes stale (120s). | write |
-| `finish_work` | Optionally transition an issue (completion-report rules apply, same as update_issue), then release every claim/lease the session holds and end it — replaces update_issue + release_issue + release_files + end_agent. completionReport.remainder on a done transition creates a linked follow-up issue; its ref comes back as followUp.ref. | write |
+| `finish_work` | Optionally transition an issue (completion-report rules apply, same as update_issue), then release every claim/lease the session holds and end it — replaces update_issue + release_issue + release_files + end_agent. completionReport.remainder on a done transition creates a linked follow-up issue; its ref comes back as followUp.ref. A completionReport needs a status that moves the issue to in_review/done (or an issue already there); otherwise the call fails before anything changes, so the session stays live to retry. | write |
 | `register_agent` | Register an agent session, optionally linked to an issue | write |
 | `heartbeat_agent` | Send a heartbeat to keep an agent session active | write |
 | `end_agent` | End an agent session | write |

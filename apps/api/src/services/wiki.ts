@@ -2056,7 +2056,7 @@ async function assertNoSectionPatchConflict(
 	// A heading that was absent — or ambiguous — at base but resolves uniquely now means
 	// the section itself changed shape underneath the caller, so the empty base text
 	// below (correctly) trips the conflict check.
-	const baseMatches = findSections(parseHeadingSections(baseContent), data.heading);
+	const baseMatches = findSections(parseHeadingSections(baseContent), currentSection.heading);
 	const baseSectionText =
 		baseMatches.length === 1 ? extractSectionText(baseContent, baseMatches[0]) : "";
 	const currentSectionText = extractSectionText(currentContent, currentSection);

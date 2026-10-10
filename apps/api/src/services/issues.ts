@@ -42,7 +42,7 @@ import {
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
 import { createLink, listLinksForIssue } from "./issue-links";
-import { ISSUE_REF_PATTERN, resolveIssueIdParam } from "./issue-ref";
+import { ISSUE_REF_PATTERN, resolveIssueIdParam, resolveVisibleIssueIdParam } from "./issue-ref";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks, sanitizeFtsQuery } from "./sql";
@@ -350,7 +350,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 			? await resolveVisibleProjectIdParam(ctx, result.data.projectId)
 			: result.data.projectId,
 		parentId: result.data.parentId
-			? await resolveIssueIdParam(ctx, result.data.parentId)
+			? await resolveVisibleIssueIdParam(ctx, result.data.parentId)
 			: result.data.parentId,
 	};
 	const { limit } = filters;
@@ -983,9 +983,9 @@ async function resolveTypeNameParam(
 		.from(schema.taskTypes)
 		.where(eq(schema.taskTypes.workspaceId, ctx.workspaceId));
 	const wanted = type.trim().toLowerCase();
-	const match = types.find(
-		(t) => t.key.toLowerCase() === wanted || t.name.toLowerCase() === wanted
-	);
+	const match =
+		types.find((t) => t.key.toLowerCase() === wanted) ??
+		types.find((t) => t.name.toLowerCase() === wanted);
 	if (!match) {
 		const valid = types.map((t) => t.key).sort();
 		throw new ValidationError({
@@ -1549,16 +1549,19 @@ async function buildUpdateSetValues(
 	if (recordCompletionReport) {
 		setValues.completionReportAt = now();
 	}
+	const statusMoves =
+		"statusId" in data || (data.status !== undefined && data.status !== existing.status);
 	const reviseCompletionReport =
 		Boolean(data.completionReport) &&
 		!reviewOrDoneTransition &&
+		!statusMoves &&
 		(isDoneState(existing.statusCategory, existing.status) || existing.statusIsReviewStep);
-	if (
-		data.completionReport &&
-		!recordCompletionReport &&
-		!reviseCompletionReport &&
-		!statusFields.enteringClosed
-	) {
+	if (reviseCompletionReport && data.agentSessionId) {
+		if (isDoneState(existing.statusCategory, existing.status)) {
+			setValues.needsAudit = await computeNeedsAudit(ctx, data);
+		}
+	}
+	if (data.completionReport && !statusMoves && !reviseCompletionReport && !recordCompletionReport) {
 		throw new ValidationError({
 			formErrors: [],
 			fieldErrors: {

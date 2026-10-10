@@ -328,7 +328,22 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		.map((path) => ({ path, existing: claimsByPath.get(path) }))
 		.filter((p): p is { path: string; existing: ActiveClaim } => Boolean(p.existing));
 
-	if (!force && contended.length > 0) {
+	const holderIds = [...new Set(contended.map((p) => p.existing.issueId))];
+	const vis = visibleProjectPredicate(ctx, schema.issues.projectId);
+	const hiddenHolders = new Set(holderIds);
+	if (!vis) {
+		hiddenHolders.clear();
+	} else if (holderIds.length > 0) {
+		const visible = await inChunks(holderIds, (idChunk) =>
+			orm
+				.select({ id: schema.issues.id })
+				.from(schema.issues)
+				.where(and(inArray(schema.issues.id, idChunk), vis))
+		);
+		for (const v of visible) hiddenHolders.delete(v.id);
+	}
+
+	if (contended.length > 0 && (!force || hiddenHolders.size > 0)) {
 		// Record every contended path (rejection is all-or-nothing, but each simultaneously
 		// held path is its own contention signal for the heat map). The reclaim above and
 		// these conflict records must persist even though the claim itself is rejected, so
@@ -352,6 +367,9 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		);
 		await ctx.db.batch(statements);
 		const first = contended[0];
+		if (hiddenHolders.has(first.existing.issueId)) {
+			throw new ConflictError(`Path "${first.path}" is held by another claim`);
+		}
 		throw new ConflictError(
 			`Path "${first.path}" is held by issue ${first.existing.issueId}` +
 				`${first.existing.agentId ? ` (agent ${first.existing.agentId})` : ""}`
@@ -458,6 +476,8 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 		if (issueId) {
 			conditions.push(eq(schema.issueFileClaims.issueId, issueId));
 		}
+		const releaseVis = visibleProjectPredicate(ctx, schema.issues.projectId);
+		if (releaseVis) conditions.push(releaseVis);
 		return orm
 			.select({
 				id: schema.issueFileClaims.id,

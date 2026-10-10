@@ -3570,6 +3570,32 @@ describe("Wiki patch operations (PROJ-490)", () => {
 		expect(bare?.code).toBe("validation");
 	});
 
+	it("MCP: PROJ-992 a # heading is not a spurious conflict when only another section changed", async () => {
+		const created = mcpData<{ slug: string }>(
+			await mcp("create_wiki_page", { title: "Marker Conflict", content: TWO_SECTIONS })
+		);
+		const base = mcpData<{ revisionId: string }>(
+			await mcp("get_wiki_page", { slug: created.slug })
+		).revisionId;
+		const other = await mcp("patch_wiki_page", {
+			slug: created.slug,
+			op: "append_to_section",
+			heading: "Beta",
+			text: "elsewhere",
+			baseRevisionId: base,
+		});
+		expect(toolError(other)).toBeUndefined();
+
+		const res = await mcp("patch_wiki_page", {
+			slug: created.slug,
+			op: "append_to_section",
+			heading: "## Alpha",
+			text: "mine",
+			baseRevisionId: base,
+		});
+		expect(toolError(res)).toBeUndefined();
+	});
+
 	it("MCP: PROJ-996 content aliases text, append_to_page needs no baseRevisionId, op errors list text too", async () => {
 		const created = mcpData<{ slug: string }>(
 			await mcp("create_wiki_page", { title: "Patch Alias", content: TWO_SECTIONS })
