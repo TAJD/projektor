@@ -4,6 +4,7 @@ import {
 	authHeaders,
 	seedAgentLease,
 	seedFixture,
+	seedGroupGrant,
 	seedIssue,
 	seedIssueFixture,
 	seedProject,
@@ -329,6 +330,7 @@ describe("Agent Messages API", () => {
 		// Workspace Y should not see workspace X's messages
 		const other = await seedFixture();
 		const otherProject = await seedProject(other.workspace.id);
+		await seedGroupGrant(other.workspace.id, other.user.id, otherProject.id, "member");
 		const otherIssue = await seedIssue(other.workspace.id, otherProject.id, other.user.id, {
 			title: "Other",
 		});

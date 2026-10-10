@@ -14,7 +14,7 @@ import {
 	UnsupportedMediaTypeError,
 	ValidationError,
 } from "./errors";
-import { resolveVisibleIssueIdParam } from "./issue-ref";
+import { ISSUE_REF_PATTERN, resolveVisibleIssueIdParam } from "./issue-ref";
 import type { ServiceCtx } from "./types";
 import * as wikiService from "./wiki";
 
@@ -72,7 +72,7 @@ async function resolveEntityId(
 	entityId: string,
 	lenient = false
 ): Promise<string> {
-	if (entityType !== "issue") return entityId;
+	if (entityType !== "issue" || !ISSUE_REF_PATTERN.test(entityId)) return entityId;
 	try {
 		return await resolveVisibleIssueIdParam(ctx, entityId);
 	} catch (e) {

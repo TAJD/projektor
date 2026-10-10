@@ -59,8 +59,8 @@ export async function resolveIssueIdParam(
  * resolution can't be used to count which issues exist in projects the caller was never
  * granted, nor to learn a hidden issue's UUID.
  *
- * A UUID passes straight through unchanged — knowing one is already the capability, and
- * those paths' own checks are unchanged by PROJ-959.
+ * A UUID gets the same check (PROJ-976): it must be in this workspace and in a project the
+ * caller can see, else the same `NotFoundError`.
  */
 export async function resolveVisibleIssueIdParam(
 	ctx: ServiceCtx,
@@ -68,7 +68,22 @@ export async function resolveVisibleIssueIdParam(
 	notFoundMessage = "Issue not found"
 ): Promise<string> {
 	const m = param.match(ISSUE_REF_PATTERN);
-	if (!m) return param;
+	if (!m) {
+		const orm = drizzle(ctx.db, { schema });
+		const found = await orm
+			.select({ id: schema.issues.id })
+			.from(schema.issues)
+			.where(
+				and(
+					eq(schema.issues.id, param),
+					eq(schema.issues.workspaceId, ctx.workspaceId),
+					visibleProjectPredicate(ctx, schema.issues.projectId)
+				)
+			)
+			.get();
+		if (!found) throw new NotFoundError(notFoundMessage);
+		return found.id;
+	}
 
 	const orm = drizzle(ctx.db, { schema });
 	const row = await orm
@@ -92,13 +107,13 @@ export async function resolveVisibleIssueIdParam(
 
 /**
  * {@link resolveVisibleIssueIdParam} for an optional *filter or link* value, with one
- * difference: a ref that doesn't resolve (unknown OR hidden) is returned unchanged instead
- * of throwing.
+ * difference: a ref or UUID that doesn't resolve (unknown OR hidden) returns an
+ * `unresolved:`-prefixed value instead of throwing.
  *
- * A raw ref string can never equal an issue UUID, so a filter on it matches nothing (an
- * empty list), and a caller that goes on to look the issue up (register_agent) still gets
- * its own "Issue not found". Unknown and hidden refs therefore answer identically, and so
- * does an unknown UUID — a list call can't tell "no such ref" from "no results".
+ * That value can never equal an issue UUID, so a filter on it matches nothing (an empty
+ * list), and a caller that goes on to look the issue up (register_agent) still gets its own
+ * "Issue not found". Unknown and hidden ids therefore answer identically — a list call
+ * can't tell "no such issue" from "no results".
  */
 export async function resolveOptionalIssueId(
 	ctx: ServiceCtx,
@@ -108,7 +123,7 @@ export async function resolveOptionalIssueId(
 	try {
 		return await resolveVisibleIssueIdParam(ctx, param);
 	} catch (e) {
-		if (e instanceof NotFoundError) return param;
+		if (e instanceof NotFoundError) return `unresolved:${param}`;
 		throw e;
 	}
 }
