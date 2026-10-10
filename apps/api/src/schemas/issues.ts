@@ -21,20 +21,22 @@ export const CreateIssueSchema = z
 // PROJ-254: completion report an agent (or human) submits when entering review /
 // before an issue can be marked done. Exported (PROJ-929) so finish_work's schema can
 // reuse it rather than duplicating the shape.
-export const CompletionReportSchema = z.object({
-	summary: z.string().min(1),
-	verification: z.string().min(1),
-	prLink: z
-		.string()
-		.transform((val) => (z.string().url().safeParse(val).success ? val : undefined))
-		.optional(),
-	// PROJ-961: what is NOT done. When the issue is marked done, a follow-up issue
-	// (same parent, same labels, linked follows_from) is created carrying this text.
-	remainder: z.preprocess(
-		(v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
-		z.string().trim().min(1).max(20000).optional()
-	),
-}).strict();
+export const CompletionReportSchema = z
+	.object({
+		summary: z.string().min(1),
+		verification: z.string().min(1),
+		prLink: z
+			.string()
+			.transform((val) => (z.string().url().safeParse(val).success ? val : undefined))
+			.optional(),
+		// PROJ-961: what is NOT done. When the issue is marked done, a follow-up issue
+		// (same parent, same labels, linked follows_from) is created carrying this text.
+		remainder: z.preprocess(
+			(v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+			z.string().trim().min(1).max(20000).optional()
+		),
+	})
+	.strict();
 
 export const UpdateIssueSchema = z
 	.object({

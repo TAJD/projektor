@@ -30,7 +30,7 @@ import {
 	validateCustomFields,
 } from "./custom-fields";
 import { dorColumns } from "./definition-of-ready";
-import { flattenWithPaths, ForbiddenError, NotFoundError, ValidationError } from "./errors";
+import { ForbiddenError, flattenWithPaths, NotFoundError, ValidationError } from "./errors";
 import { isExternallyVerifiableEvidence } from "./evidence-classification";
 import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
@@ -1379,9 +1379,10 @@ function now(): number {
 // been written); the batched insert doesn't re-validate, so check it here, before the
 // batch, and fail the whole update with a 400 instead of storing an oversize comment.
 function completionReportCommentBody(
-	report: Parameters<typeof formatCompletionReportComment>[0]
+	report: Parameters<typeof formatCompletionReportComment>[0],
+	revised = false
 ): string {
-	const body = formatCompletionReportComment(report);
+	const body = formatCompletionReportComment(report, revised);
 	const max = AddCommentSchema.shape.body.maxLength;
 	if (max !== null && body.length > max) {
 		throw new ValidationError({
@@ -1402,10 +1403,11 @@ function formatCompletionReportComment(
 		verification: string;
 		prLink?: string;
 		remainder?: string;
-	}>
+	}>,
+	revised = false
 ): string {
 	const lines = [
-		"**Completion report**",
+		revised ? "**Completion report (revised)**" : "**Completion report**",
 		"",
 		`**Summary:** ${report.summary}`,
 		"",
@@ -1462,6 +1464,7 @@ async function buildUpdateSetValues(
 ): Promise<{
 	setValues: SetValues;
 	recordCompletionReport: boolean;
+	reviseCompletionReport: boolean;
 	enteringDone: boolean;
 	enteringClosed: boolean;
 	gateRejectionStatement: D1PreparedStatement | null;
@@ -1483,9 +1486,29 @@ async function buildUpdateSetValues(
 	if (recordCompletionReport) {
 		setValues.completionReportAt = now();
 	}
+	const reviseCompletionReport =
+		Boolean(data.completionReport) &&
+		!reviewOrDoneTransition &&
+		(isDoneState(existing.statusCategory, existing.status) || existing.statusIsReviewStep);
+	if (
+		data.completionReport &&
+		!recordCompletionReport &&
+		!reviseCompletionReport &&
+		!statusFields.enteringClosed
+	) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: {
+				completionReport: [
+					"completionReport only applies when entering in_review/done, or revising a finished issue",
+				],
+			},
+		});
+	}
 	return {
 		setValues,
 		recordCompletionReport,
+		reviseCompletionReport,
 		enteringDone: statusFields.enteringDone,
 		enteringClosed: statusFields.enteringClosed,
 		gateRejectionStatement: statusFields.gateRejectionStatement,
@@ -1626,6 +1649,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	const {
 		setValues,
 		recordCompletionReport,
+		reviseCompletionReport,
 		enteringDone,
 		enteringClosed,
 		gateRejectionStatement,
@@ -1672,12 +1696,12 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	statements.push(...buildCustomFieldUpsertStatements(ctx.db, id, cfWrites));
 
-	if (recordCompletionReport && data.completionReport) {
+	if ((recordCompletionReport || reviseCompletionReport) && data.completionReport) {
 		statements.push(
 			buildAddCommentInsertStatement(ctx, orm, {
 				id: commentId,
 				issueId: id,
-				body: completionReportCommentBody(data.completionReport),
+				body: completionReportCommentBody(data.completionReport, reviseCompletionReport),
 				now: commentNow,
 			})
 		);
@@ -1718,7 +1742,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	await ctx.db.batch(statements);
 
-	if (recordCompletionReport && data.completionReport) {
+	if ((recordCompletionReport || reviseCompletionReport) && data.completionReport) {
 		await broadcastWorkspaceEvent(ctx, {
 			type: "comment.created",
 			projectId: existing.projectId,

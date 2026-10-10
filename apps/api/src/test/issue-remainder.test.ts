@@ -237,6 +237,26 @@ describe("PROJ-961: completionReport.remainder", () => {
 		expect(JSON.stringify(data)).not.toContain("followUp");
 	});
 
+	it("PROJ-995: a corrected report on a done issue is posted as a revised comment", async () => {
+		await call("update_issue", { id: ref, status: "done", completionReport: report });
+		const { err } = await call("update_issue", {
+			id: ref,
+			status: "done",
+			completionReport: { ...report, prLink: "https://github.com/acme/repo/pull/7" },
+		});
+		expect(err).toBeUndefined();
+		const { data } = await call("list_comments", { issueId: ref });
+		const bodies = (data.items as Array<{ body: string }>).map((c) => c.body);
+		expect(bodies.filter((b) => b.includes("Completion report (revised)"))).toHaveLength(1);
+		expect(bodies.some((b) => b.includes("pull/7"))).toBe(true);
+	});
+
+	it("PROJ-995: a report with no applicable transition is an error, not a silent drop", async () => {
+		const { err } = await call("update_issue", { id: ref, completionReport: report });
+		expect(err?.code).toBe("validation");
+		expect(JSON.stringify(err)).toContain("completionReport");
+	});
+
 	it("PROJ-997: a missing completionReport subfield is named by its path", async () => {
 		const { err } = await call("update_issue", {
 			id: ref,
