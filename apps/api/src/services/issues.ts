@@ -971,6 +971,37 @@ async function resolveCreateIssueDeps(ctx: ServiceCtx, data: CreateIssueData) {
 	return { resolvedTypeId, resolvedStatusId, resolvedStatusKey, resolvedStatusCategory, cfWrites };
 }
 
+async function resolveTypeNameParam(
+	ctx: ServiceCtx,
+	type: string | undefined,
+	typeId: string | null | undefined
+): Promise<string | null | undefined> {
+	if (type === undefined) return typeId;
+	const orm = drizzle(ctx.db, { schema });
+	const types = await orm
+		.select({ id: schema.taskTypes.id, key: schema.taskTypes.key, name: schema.taskTypes.name })
+		.from(schema.taskTypes)
+		.where(eq(schema.taskTypes.workspaceId, ctx.workspaceId));
+	const wanted = type.trim().toLowerCase();
+	const match = types.find(
+		(t) => t.key.toLowerCase() === wanted || t.name.toLowerCase() === wanted
+	);
+	if (!match) {
+		const valid = types.map((t) => t.key).sort();
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { type: [`Unknown type "${type}". Valid: ${valid.join(", ")}`] },
+		});
+	}
+	if (typeId && typeId !== match.id) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: { type: [`type "${type}" conflicts with typeId; pass only one`] },
+		});
+	}
+	return match.id;
+}
+
 export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = CreateIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -978,7 +1009,8 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 	const parentId = result.data.parentId
 		? await resolveIssueIdParam(ctx, result.data.parentId)
 		: result.data.parentId;
-	const data = { ...result.data, projectId, parentId };
+	const typeId = await resolveTypeNameParam(ctx, result.data.type, result.data.typeId);
+	const data = { ...result.data, projectId, parentId, typeId };
 	const { title, body, priority, assigneeId, labels } = data;
 
 	// PROJ-389: confirm projectId belongs to this workspace BEFORE the admin-bypass

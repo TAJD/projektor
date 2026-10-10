@@ -2967,6 +2967,34 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(JSON.stringify(conflict)).toContain("open cannot be combined with category");
 	});
 
+	it("PROJ-999: create_issue takes a type by key/name; unknown or conflicting types are errors", async () => {
+		const bug = await seedTaskType(workspaceId, { key: "bug", name: "Bug" });
+		const epic = await seedTaskType(workspaceId, { key: "epic", name: "Epic" });
+
+		const created = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Typed", type: "BUG" },
+		});
+		expect(created.error).toBeUndefined();
+		const issue = JSON.parse(created.result!.content[0].text) as { id: string };
+		const row = await env.DB.prepare("SELECT type_id FROM issues WHERE id = ?")
+			.bind(issue.id)
+			.first<{ type_id: string }>();
+		expect(row?.type_id).toBe(bug.id);
+
+		const unknown = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Typo", type: "bgu" },
+		});
+		expect(unknown.result!.content[0].text).toContain("Valid: bug, epic");
+
+		const conflict = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Clash", type: "bug", typeId: epic.id },
+		});
+		expect(JSON.stringify(conflict)).toContain("conflicts with typeId");
+	});
+
 	it("PROJ-994: get_issues accepts refs in ids, in order, and reports misses as given", async () => {
 		const key = await projectKey();
 		const a = await seedIssue(workspaceId, projectId, userId, { title: "In ids A" });

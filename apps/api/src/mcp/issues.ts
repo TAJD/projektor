@@ -317,6 +317,11 @@ export const issuesTools: MCPTool[] = [
 					description: "UUID of the parent issue, or a ref like PROJ-42 (optional; max depth 5)",
 				},
 				typeId: { type: "string", description: "UUID of the task type to assign" },
+				type: {
+					type: "string",
+					description:
+						"Task type by key or name, case-insensitive (e.g. bug, epic) — the same value list_issues/get_issue return as `type`. Alternative to typeId.",
+				},
 			},
 		},
 		annotations: CREATE,

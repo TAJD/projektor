@@ -11,6 +11,7 @@ export const CreateIssueSchema = z
 		statusId: TaxonomyIdSchema.nullable().optional(),
 		priority: PriorityEnum.optional(),
 		assigneeId: z.string().uuid().optional(),
+		type: z.string().min(1).optional(),
 		labels: z.array(z.string().max(50)).max(20).optional(),
 		parentId: z.string().nullable().optional(),
 		typeId: TaxonomyIdSchema.nullable().optional(),
