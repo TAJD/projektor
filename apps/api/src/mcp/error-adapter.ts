@@ -189,7 +189,7 @@ function definedFields(
 ): Record<string, string[]> | undefined {
 	const out: Record<string, string[]> = {};
 	for (const [field, messages] of Object.entries(fieldErrors)) {
-		if (messages && messages.length > 0) out[field] = messages;
+		if (messages && messages.length > 0) out[field] = [...new Set(messages)];
 	}
 	return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -245,7 +245,6 @@ export function toToolError(err: unknown, ctx: ToolErrorContext = {}): ToolError
 			code: "validation",
 			message,
 			...(fields ? { fields } : {}),
-			...(fields ? { hint: `Fix ${Object.keys(fields).join(", ")} and retry.` } : {}),
 		});
 	}
 	if (!(err instanceof ServiceError)) return null;

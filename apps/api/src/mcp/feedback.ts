@@ -26,11 +26,16 @@ export const feedbackTools: MCPTool[] = [
 			type: "object",
 			required: ["projectId", "name"],
 			properties: {
-				projectId: { type: "string", description: "UUID of the project this source belongs to" },
+				projectId: {
+					type: "string",
+					minLength: 1,
+					description: "UUID of the project this source belongs to",
+				},
 				name: { type: "string", minLength: 1, maxLength: 100 },
 				description: { type: "string", maxLength: 500 },
 				allowedOrigins: {
 					type: "array",
+					maxItems: 50,
 					items: { type: "string", maxLength: 2000 },
 					description: "Allowed CORS origins for browser submission; omit for no restriction",
 				},
@@ -50,7 +55,7 @@ export const feedbackTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			required: ["projectId"],
-			properties: { projectId: { type: "string" } },
+			properties: { projectId: { type: "string", minLength: 1 } },
 		},
 		annotations: READ,
 		async handler(input, ctx) {
@@ -65,7 +70,7 @@ export const feedbackTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			required: ["sourceId"],
-			properties: { sourceId: { type: "string" } },
+			properties: { sourceId: { type: "string", minLength: 1 } },
 		},
 		annotations: READ,
 		async handler(input, ctx) {
@@ -139,7 +144,7 @@ export const feedbackTools: MCPTool[] = [
 			type: "object",
 			required: ["projectId"],
 			properties: {
-				projectId: { type: "string" },
+				projectId: { type: "string", minLength: 1 },
 				status: { type: "string", enum: ["new", "reviewed", "actioned"] },
 				sourceId: { type: "string" },
 			},

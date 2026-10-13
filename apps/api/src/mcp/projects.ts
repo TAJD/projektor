@@ -34,12 +34,30 @@ export const projectsTools: MCPTool[] = [
 			type: "object",
 			required: ["name", "key"],
 			properties: {
-				name: { type: "string", description: "Project name, max 100 characters" },
+				name: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "Project name, max 100 characters",
+				},
 				key: {
 					type: "string",
+					minLength: 1,
+					maxLength: 10,
 					description: "Short uppercase identifier, e.g. PROJ (max 10 chars, A-Z0-9)",
 				},
-				description: { type: "string", description: "Optional description, max 500 characters" },
+				description: {
+					type: "string",
+					maxLength: 500,
+					description: "Optional description, max 500 characters",
+				},
+				agentWipLimit: {
+					type: "integer",
+					nullable: true,
+					minimum: 1,
+					maximum: 100,
+					description: "Max issues one agent may hold in this project (null = workspace default)",
+				},
 			},
 		},
 		annotations: CREATE,
@@ -71,8 +89,21 @@ export const projectsTools: MCPTool[] = [
 			required: ["id"],
 			properties: {
 				id: { type: "string", description: "Project ID" },
-				name: { type: "string", description: "New project name" },
-				description: { type: "string", description: "New description" },
+				name: { type: "string", minLength: 1, maxLength: 100, description: "New project name" },
+				key: {
+					type: "string",
+					minLength: 1,
+					maxLength: 10,
+					description: "New project key (changes the prefix of the project's issue refs)",
+				},
+				description: { type: "string", maxLength: 500, description: "New description" },
+				agentWipLimit: {
+					type: "integer",
+					nullable: true,
+					minimum: 1,
+					maximum: 100,
+					description: "Max issues one agent may hold in this project (null = workspace default)",
+				},
 				archived: { type: "boolean", description: "Archive (true) or unarchive (false)" },
 				epicAutoClose: {
 					type: "boolean",
@@ -93,7 +124,7 @@ export const projectsTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			required: ["id"],
-			properties: { id: { type: "string", description: "Project ID" } },
+			properties: { id: { type: "string", minLength: 1, description: "Project ID" } },
 		},
 		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {

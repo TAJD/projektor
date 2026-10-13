@@ -79,11 +79,11 @@ describe("PROJ-893: MCP tool failures are isError results", () => {
 		expect(e.hint).toContain("register_agent");
 	});
 
-	it("validation: the offending fields are named in `fields` and in the hint", async () => {
+	it("validation: the offending fields are named in `fields`, not restated in a hint", async () => {
 		const e = await failure("create_wiki_page", { title: "", content: "x" });
 		expect(e.code).toBe("validation");
 		expect(Object.keys(e.fields ?? {})).toContain("title");
-		expect(e.hint).toContain("title");
+		expect(e.hint).toBeUndefined();
 	});
 
 	it("validation: a missing required argument is named", async () => {
@@ -91,7 +91,7 @@ describe("PROJ-893: MCP tool failures are isError results", () => {
 		expect(e.code).toBe("validation");
 		expect(e.message).toMatch(/Missing required argument/);
 		expect(e.fields).toBeDefined();
-		expect(e.hint).toMatch(/^Fix /);
+		expect(e.hint).toBeUndefined();
 	});
 
 	it("validation: a wrongly-typed argument is caught before the handler runs", async () => {

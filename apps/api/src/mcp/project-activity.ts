@@ -16,11 +16,13 @@ export const projectActivityTools: MCPTool[] = [
 			properties: {
 				projectId: { type: "string", description: "The project UUID to fetch activity for" },
 				since: {
-					type: "number",
+					type: "integer",
 					description: "Unix timestamp - only return events created at or after this time",
 				},
 				limit: {
-					type: "number",
+					type: "integer",
+					minimum: 1,
+					maximum: 200,
 					default: 50,
 					description: "Maximum number of events to return (default 50, max 200)",
 				},

@@ -104,7 +104,7 @@ describe("PROJ-920: MCP tool arguments are type-checked before the handler runs"
 		}
 		expect(checked).toBeGreaterThan(50);
 		expect(failures).toEqual([]);
-	});
+	}, 120_000);
 
 	it("puts the failing field in fields like a service ValidationError", async () => {
 		const f = await seedFixture({ role: "owner" });
@@ -133,6 +133,80 @@ describe("PROJ-920: MCP tool arguments are type-checked before the handler runs"
 	});
 });
 
+describe("PROJ-1007: every argument problem is reported in one pass", () => {
+	const prevMax = env.RATE_LIMIT_API_MAX;
+	beforeAll(() => {
+		env.RATE_LIMIT_API_MAX = "10000";
+	});
+	afterAll(() => {
+		env.RATE_LIMIT_API_MAX = prevMax;
+	});
+
+	async function callTool(name: string, args: Record<string, unknown>) {
+		const f = await seedFixture({ role: "owner" });
+		const headers = authHeaders(f.token, f.workspace.slug);
+		return toolError(await rpc(f.workspace.id, headers, "tools/call", { name, arguments: args }));
+	}
+
+	it("reports an unknown key with a did-you-mean together with an invalid enum, and no hint", async () => {
+		const err = await callTool("update_issue", { id: "PROJ-1", priorty: "high", status: "doing" });
+		expect(err?.code).toBe("validation");
+		expect(err?.fields?.priorty).toEqual(['Unknown argument "priorty"; did you mean "priority"?']);
+		expect(err?.fields?.status?.[0]).toMatch(/must be one of/);
+		expect(err?.hint).toBeUndefined();
+	});
+
+	it("catches a length Zod enforces in the first pass, alongside an unknown key", async () => {
+		const err = await callTool("create_issue", { projectId: "PROJ", title: "", priorty: "high" });
+		expect(err?.code).toBe("validation");
+		expect(Object.keys(err?.fields ?? {}).sort()).toEqual(["priorty", "title"]);
+	});
+
+	it("prints the allowed values once when several array items are invalid", async () => {
+		const err = await callTool("get_issue", { id: "PROJ-1", fields: ["foo", "bar"] });
+		expect(err?.code).toBe("validation");
+		expect(err?.fields?.fields).toHaveLength(1);
+		expect(JSON.stringify(err).match(/workspace_id/g)).toHaveLength(1);
+	});
+
+	it("ignores a __proto__ key rather than taking arguments from it", async () => {
+		const err = await callTool("get_project", JSON.parse('{"__proto__":{"id":"PROJ"}}'));
+		expect(err?.code).toBe("validation");
+		expect(err?.message).toBe("Missing required argument(s): id");
+	});
+
+	it("every tool reports an unknown key, with a did-you-mean, before its handler runs", async () => {
+		const f = await seedFixture({ role: "owner" });
+		const headers = authHeaders(f.token, f.workspace.slug);
+		const tools = (await rpc(f.workspace.id, headers, "tools/list", {})).result?.tools ?? [];
+		expect(tools.length).toBeGreaterThan(50);
+
+		const failures: string[] = [];
+		for (const tool of tools) {
+			const props = (tool.inputSchema.properties ?? {}) as Record<string, Schema>;
+			const required = ((tool.inputSchema.required ?? []) as string[]).filter((k) => props[k]);
+			const args: Record<string, unknown> = {};
+			for (const k of required) args[k] = validValue(props[k]);
+			const first = Object.keys(props)[0];
+			const typo = first ? `${first}x` : "bogusArg";
+			args[typo] = "x";
+			const expected = first
+				? `Unknown argument "${typo}"; did you mean "${first}"?`
+				: `Unknown argument "${typo}"`;
+
+			const err = toolError(
+				await rpc(f.workspace.id, headers, "tools/call", { name: tool.name, arguments: args })
+			);
+			if (err?.fields?.[typo]?.[0] !== expected) {
+				failures.push(
+					`${tool.name}: ${err?.code ?? "ok"} ${JSON.stringify(err?.fields ?? err?.message)}`
+				);
+			}
+		}
+		expect(failures).toEqual([]);
+	}, 120_000);
+});
+
 describe("validateToolArgs", () => {
 	const schema: Schema = {
 		type: "object",
@@ -146,15 +220,51 @@ describe("validateToolArgs", () => {
 		required: ["status"],
 	};
 
-	it("accepts valid args, null for nullable fields, and undeclared extras", () => {
+	it("accepts valid args and null for nullable fields", () => {
 		expect(
 			validateToolArgs(schema, {
 				status: "todo",
 				assigneeId: null,
 				labels: ["a"],
 				limit: 3,
-				extra: 1,
 			})
+		).toEqual([]);
+	});
+
+	it("reports undeclared keys, suggesting a declared property within edit distance 2", () => {
+		expect(validateToolArgs(schema, { status: "todo", lables: ["a"] })).toEqual([
+			{ path: "lables", message: 'Unknown argument "lables"; did you mean "labels"?' },
+		]);
+		expect(validateToolArgs(schema, { status: "todo", Limit: 2 })).toEqual([
+			{ path: "Limit", message: 'Unknown argument "Limit"; did you mean "limit"?' },
+		]);
+		expect(validateToolArgs(schema, { status: "todo", extra: 1 })).toEqual([
+			{ path: "extra", message: 'Unknown argument "extra"' },
+		]);
+	});
+
+	it("reports undeclared keys inside nested objects at their full path", () => {
+		const nested: Schema = {
+			type: "object",
+			properties: { report: { type: "object", properties: { prLink: { type: "string" } } } },
+		};
+		expect(validateToolArgs(nested, { report: { prLnk: "x" } })).toEqual([
+			{ path: "report.prLnk", message: 'Unknown argument "prLnk"; did you mean "prLink"?' },
+		]);
+	});
+
+	it("leaves objects open that allow additionalProperties or declare no properties", () => {
+		expect(
+			validateToolArgs(
+				{ type: "object", properties: { a: { type: "string" } }, additionalProperties: true },
+				{ b: 1 }
+			)
+		).toEqual([]);
+		expect(
+			validateToolArgs(
+				{ type: "object", properties: { values: { type: "object" } } },
+				{ values: { anything: 1 } }
+			)
 		).toEqual([]);
 	});
 

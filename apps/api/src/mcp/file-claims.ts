@@ -44,7 +44,9 @@ export const fileClaimsTools: MCPTool[] = [
 				},
 				paths: {
 					type: "array",
-					items: { type: "string" },
+					minItems: 1,
+					maxItems: 100,
+					items: { type: "string", minLength: 1, maxLength: 400 },
 					description: "File paths to claim (1–100 paths, each max 400 chars)",
 				},
 				force: {
@@ -80,6 +82,7 @@ export const fileClaimsTools: MCPTool[] = [
 			properties: {
 				paths: {
 					type: "array",
+					minItems: 1,
 					items: { type: "string" },
 					description: "File paths to release; omit to release by agentId / issueId / session",
 				},

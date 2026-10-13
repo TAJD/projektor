@@ -23,7 +23,9 @@ import { bodyPreview, ISSUE_BODY_MAX_CHARS, LIST_BODY_MAX_CHARS, windowText } fr
 
 const BODY_CHARS_PROP = {
 	bodyChars: {
-		type: "number",
+		type: "integer",
+		minimum: 0,
+		maximum: LIST_BODY_MAX_CHARS,
 		default: 0,
 		description:
 			`Include the first N characters of each item's body (0-${LIST_BODY_MAX_CHARS}, default 0 = ` +
@@ -176,9 +178,10 @@ export const issuesTools: MCPTool[] = [
 				},
 				cursor: {
 					type: ["string", "integer"],
+					minimum: 0,
 					description: "Pagination cursor: pass the previous page's `next` unchanged",
 				},
-				limit: { type: "number", default: 50, description: "Max 100" },
+				limit: { type: "number", minimum: 1, maximum: 100, default: 50, description: "Max 100" },
 				...BODY_CHARS_PROP,
 				...VIEW_FIELDS_PROPS,
 			},
@@ -303,8 +306,8 @@ export const issuesTools: MCPTool[] = [
 					type: "string",
 					description: "UUID of the project, or a project key like PROJ",
 				},
-				title: { type: "string" },
-				body: { type: "string" },
+				title: { type: "string", minLength: 1, maxLength: 500 },
+				body: { type: "string", maxLength: 50000 },
 				priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
 				status: {
 					type: "string",
@@ -312,7 +315,7 @@ export const issuesTools: MCPTool[] = [
 				},
 				statusId: { type: "string", description: "UUID of the task status to assign" },
 				assigneeId: { type: "string", description: "UUID of the user to assign" },
-				labels: { type: "array", items: { type: "string" } },
+				labels: { type: "array", maxItems: 20, items: { type: "string", maxLength: 50 } },
 				parentId: {
 					type: "string",
 					description: "UUID of the parent issue, or a ref like PROJ-42 (optional; max depth 5)",
@@ -320,8 +323,13 @@ export const issuesTools: MCPTool[] = [
 				typeId: { type: "string", description: "UUID of the task type to assign" },
 				type: {
 					type: "string",
+					minLength: 1,
 					description:
 						"Task type by key or name, case-insensitive (e.g. bug, epic) — the same value list_issues/get_issue return as `type`. Alternative to typeId.",
+				},
+				customFields: {
+					type: "object",
+					description: "Custom field values keyed by field key (see list_custom_field_defs)",
 				},
 			},
 		},
@@ -344,10 +352,14 @@ export const issuesTools: MCPTool[] = [
 			type: "object",
 			required: ["id"],
 			properties: {
-				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
+				id: {
+					type: "string",
+					minLength: 1,
+					description: "UUID of the issue, or a ref like PROJ-42",
+				},
 				issueId: { type: "string", description: "Alias of id" },
-				title: { type: "string" },
-				body: { type: "string" },
+				title: { type: "string", minLength: 1, maxLength: 500 },
+				body: { type: "string", maxLength: 50000 },
 				status: {
 					type: "string",
 					enum: ["backlog", "todo", "in_progress", "in_review", "done", "cancelled"],
@@ -359,13 +371,17 @@ export const issuesTools: MCPTool[] = [
 				},
 				priority: { type: "string", enum: ["urgent", "high", "medium", "low", "none"] },
 				assigneeId: { type: "string", nullable: true },
-				labels: { type: "array", items: { type: "string" } },
+				labels: { type: "array", maxItems: 20, items: { type: "string", maxLength: 50 } },
 				parentId: {
 					type: "string",
 					nullable: true,
 					description: "Set or clear the parent issue — UUID or ref like PROJ-42 (null to remove)",
 				},
 				typeId: { type: "string", nullable: true },
+				customFields: {
+					type: "object",
+					description: "Custom field values keyed by field key (see list_custom_field_defs)",
+				},
 				agentSessionId: {
 					type: "string",
 					description:
@@ -378,8 +394,8 @@ export const issuesTools: MCPTool[] = [
 						"Shape: {summary, verification, prLink?, remainder?} — summary and verification are required.",
 					required: ["summary", "verification"],
 					properties: {
-						summary: { type: "string" },
-						verification: { type: "string" },
+						summary: { type: "string", minLength: 1 },
+						verification: { type: "string", minLength: 1 },
 						prLink: { type: "string" },
 						remainder: {
 							type: "string",
@@ -430,7 +446,7 @@ export const issuesTools: MCPTool[] = [
 					default: "all",
 					description: "How `labels` combine: all (default) or any",
 				},
-				limit: { type: "number", default: 20, description: "Max 50" },
+				limit: { type: "integer", minimum: 1, maximum: 50, default: 20, description: "Max 50" },
 			},
 		},
 		annotations: READ,
@@ -445,7 +461,11 @@ export const issuesTools: MCPTool[] = [
 			type: "object",
 			required: ["id"],
 			properties: {
-				id: { type: "string", description: "UUID of the issue, or a ref like PROJ-42" },
+				id: {
+					type: "string",
+					minLength: 1,
+					description: "UUID of the issue, or a ref like PROJ-42",
+				},
 				issueId: { type: "string", description: "Alias of id" },
 			},
 		},

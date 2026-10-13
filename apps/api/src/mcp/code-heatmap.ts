@@ -19,13 +19,15 @@ export const codeHeatmapTools: MCPTool[] = [
 			type: "object",
 			required: ["projectId"],
 			properties: {
-				projectId: { type: "string", description: "Project UUID" },
+				projectId: { type: "string", minLength: 1, description: "Project UUID" },
 				since: {
-					type: "number",
+					type: "integer",
+					minimum: 0,
 					description: "Only claims claimed at/after this epoch-seconds time",
 				},
 				until: {
-					type: "number",
+					type: "integer",
+					minimum: 0,
 					description: "Only claims claimed at/before this epoch-seconds time",
 				},
 				prefix: {

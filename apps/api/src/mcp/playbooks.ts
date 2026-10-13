@@ -25,7 +25,7 @@ export const playbooksTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			properties: {
-				name: { type: "string", description: 'Playbook name, e.g. "epic-goal"' },
+				name: { type: "string", minLength: 1, description: 'Playbook name, e.g. "epic-goal"' },
 			},
 			required: ["name"],
 		},
@@ -52,10 +52,15 @@ export const playbooksTools: MCPTool[] = [
 				params: {
 					type: "object",
 					properties: {
-						epicRef: { type: "string", description: 'Epic ref, e.g. "PROJ-596"' },
+						epicRef: { type: "string", minLength: 1, description: 'Epic ref, e.g. "PROJ-596"' },
 						variant: { type: "string", enum: ["bounded", "full"] },
 						reviewModel: { type: "string" },
 						cadence: { type: "integer", minimum: 1 },
+						checkpointInterval: {
+							type: "integer",
+							minimum: 1,
+							description: "Completed tickets between human checkpoints (default 10)",
+						},
 					},
 					required: ["epicRef"],
 				},

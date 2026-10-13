@@ -33,7 +33,12 @@ export const agentMessagesTools: MCPTool[] = [
 					type: "string",
 					description: "Agent session UUID posting the message (optional)",
 				},
-				body: { type: "string", description: "Message body (1–5000 characters)" },
+				body: {
+					type: "string",
+					minLength: 1,
+					maxLength: 5000,
+					description: "Message body (1–5000 characters)",
+				},
 				verbose: {
 					type: "boolean",
 					description:
@@ -81,7 +86,12 @@ export const agentMessagesTools: MCPTool[] = [
 					type: "string",
 					description: "Pagination cursor: pass the previous page's `nextCursor` unchanged",
 				},
-				limit: { type: "number", description: "Max messages to return (1–100, default 20)" },
+				limit: {
+					type: "number",
+					minimum: 1,
+					maximum: 100,
+					description: "Max messages to return (1–100, default 20)",
+				},
 				verbose: {
 					type: "boolean",
 					description:

@@ -429,12 +429,27 @@ failure and can correct itself. The single text content item is JSON:
 
 Each hint is a next step, not a restatement of the message: a `not_found` on an issue ref
 names the ref format and `search_issues`; on a wiki page it names `search_wiki`; a
-`validation` failure names the fields to fix; a `conflict` on a wiki save says to re-read
-with `get_wiki_page` and apply the change with `patch_wiki_page`; `forbidden` says which
-role is missing. `fields`, `hint` and `details` are omitted when they don't apply.
+`conflict` on a wiki save says to re-read with `get_wiki_page` and apply the change with
+`patch_wiki_page`; `forbidden` says which role is missing. A `validation` failure has no
+hint, because `fields` already names each problem. `fields`, `hint` and `details` are
+omitted when they don't apply.
 
 A call whose arguments fail the tool's input schema (a missing required argument, a wrong
-type, an unknown parameter) is a `validation` tool error, checked before the tool runs.
+type, a value out of bounds, an unknown argument) is a `validation` tool error, checked
+before the tool runs. Every problem comes back in the same response, and an unknown
+argument names the closest declared one: `Unknown argument "priorty"; did you mean "priority"?`
+
+Before that check, common spellings are mapped onto the declared argument names. This
+happens on MCP only; the REST API stays strict.
+
+- A snake_case key such as `project_id` becomes the declared camelCase one, `projectId`.
+- On a tool that declares `body` but not the key you sent, `description`, `content`,
+  `text` and `message` become `body`. On one that declares `paths`, `files` becomes `paths`.
+- A tool that addresses one issue accepts it as `id`, `issueId`, `ref`, `issue` or
+  `issue_id`.
+
+Two spellings of the same argument with different values are a `validation` error on that
+argument.
 
 #### JSON-RPC errors (protocol faults only)
 
