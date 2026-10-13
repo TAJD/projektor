@@ -1,8 +1,9 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { PostMessageSchema } from "../schemas/agent-messages";
 import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../schemas/file-claims";
 import { visibleProjectPredicate } from "./access";
+import { resolveAgentSessionId } from "./agent-identity";
 import { buildPostMessageStatements } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
@@ -455,24 +456,58 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	return { created, overridden, reclaimed };
 }
 
+async function heldByCaller(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	agentId: string | undefined,
+	issueId: string | undefined
+) {
+	const heldBy = schema.issueFileClaims.agentId;
+	if (agentId) {
+		await assertAgentInWorkspace(orm, ctx.workspaceId, agentId);
+		return eq(heldBy, agentId);
+	}
+	if (issueId) {
+		const credentialId = ctx.auth?.credentialId;
+		if (!credentialId) return isNull(heldBy);
+		const callerSessions = orm
+			.select({ id: schema.agentSessions.id })
+			.from(schema.agentSessions)
+			.where(
+				and(
+					eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+					eq(schema.agentSessions.credentialId, credentialId)
+				)
+			);
+		return or(isNull(heldBy), inArray(heldBy, callerSessions));
+	}
+	const sessionId = await resolveAgentSessionId(ctx, undefined, {
+		includeStale: true,
+		nameSessions: true,
+	});
+	return eq(heldBy, sessionId);
+}
+
 export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 	const result = ReleaseFilesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { paths } = result.data;
+	const { paths, agentId } = result.data;
 	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
 
 	const orm = drizzle(ctx.db, { schema });
 	const now = Math.floor(Date.now() / 1000);
+	const holder = paths ? undefined : await heldByCaller(ctx, orm, agentId, issueId);
 
 	// inChunks keeps each read under D1's 100-bound-parameter cap (paths are caller-scaled).
 	// projectId is joined in directly (PROJ-864) so the broadcast below needs no follow-up
 	// query, whether or not issueId was given.
-	const toRelease = await inChunks(paths, (pathChunk) => {
+	const selectClaims = (pathChunk?: string[]) => {
 		const conditions = [
 			eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-			inArray(schema.issueFileClaims.path, pathChunk),
 			isNull(schema.issueFileClaims.releasedAt),
 		];
+		if (pathChunk) conditions.push(inArray(schema.issueFileClaims.path, pathChunk));
+		if (holder) conditions.push(holder);
 		if (issueId) {
 			conditions.push(eq(schema.issueFileClaims.issueId, issueId));
 		}
@@ -493,7 +528,8 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 			.from(schema.issueFileClaims)
 			.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
 			.where(and(...conditions));
-	});
+	};
+	const toRelease = paths ? await inChunks(paths, selectClaims) : await selectClaims();
 
 	if (toRelease.length === 0) {
 		return { released: [], count: 0 };
@@ -523,7 +559,7 @@ export async function releaseFiles(ctx: ServiceCtx, raw: unknown) {
 		await broadcastWorkspaceEvent(ctx, {
 			type: "claims.released",
 			projectId: releasedRows[0].projectId,
-			data: { issueId, paths, count: released.length },
+			data: { issueId, paths: paths ?? releasedRows.map((r) => r.path), count: released.length },
 		});
 	} else {
 		const grouped = new Map<string, string[]>();

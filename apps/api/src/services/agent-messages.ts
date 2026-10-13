@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, gt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, type SQL, sql } from "drizzle-orm";
 import { ListMessagesSchema, PostMessageSchema } from "../schemas/agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
 import { resolveMessageScope } from "./issue-ref";
@@ -82,7 +82,7 @@ export async function postMessage(ctx: ServiceCtx, raw: unknown) {
 	const { agentId, body } = result.data;
 	// PROJ-959: "issue:PROJ-42" is stored (and read) as "issue:<uuid>", so a ref and a UUID
 	// name the same channel.
-	const scope = await resolveMessageScope(ctx, result.data.scope);
+	const scope = await resolveMessageScope(ctx, result.data);
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -142,39 +142,31 @@ export async function postMessage(ctx: ServiceCtx, raw: unknown) {
 export async function listMessages(ctx: ServiceCtx, raw: unknown) {
 	const result = ListMessagesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
-	const { cursor, limit } = result.data;
-	const scope = await resolveMessageScope(ctx, result.data.scope, { lenient: true });
+	const { cursor, limit, order, since } = result.data;
+	const scope = await resolveMessageScope(ctx, result.data, { lenient: true });
 
 	const orm = drizzle(ctx.db, { schema });
+	const messages = schema.agentMessages;
 
-	// Composite cursor: "createdAt:id" — stable even when multiple messages share
-	// the same second-precision timestamp.
-	let cursorFilter: ReturnType<typeof and> | undefined;
+	const conditions: SQL[] = [eq(messages.workspaceId, ctx.workspaceId), eq(messages.scope, scope)];
+	// created_at is milliseconds; `since` is unix seconds.
+	if (since !== undefined) conditions.push(gte(messages.createdAt, since * 1000));
 	if (cursor !== undefined) {
 		const sep = cursor.lastIndexOf(":");
 		const cursorTime = parseInt(cursor.slice(0, sep), 10);
 		const cursorId = cursor.slice(sep + 1);
-		cursorFilter = and(
-			eq(schema.agentMessages.workspaceId, ctx.workspaceId),
-			eq(schema.agentMessages.scope, scope),
-			// Next page: rows strictly after (cursorTime, cursorId) in ASC order
-			// (createdAt > cursorTime) OR (createdAt = cursorTime AND id > cursorId)
-			sql`(${schema.agentMessages.createdAt} > ${cursorTime} OR
-				(${schema.agentMessages.createdAt} = ${cursorTime} AND ${schema.agentMessages.id} > ${cursorId}))`
+		const compare = sql.raw(order === "asc" ? ">" : "<");
+		conditions.push(
+			sql`(${messages.createdAt}, ${messages.id}) ${compare} (${cursorTime}, ${cursorId})`
 		);
 	}
 
+	const direction = order === "asc" ? asc : desc;
 	const rows = await orm
 		.select()
-		.from(schema.agentMessages)
-		.where(
-			cursorFilter ??
-				and(
-					eq(schema.agentMessages.workspaceId, ctx.workspaceId),
-					eq(schema.agentMessages.scope, scope)
-				)
-		)
-		.orderBy(asc(schema.agentMessages.createdAt), asc(schema.agentMessages.id))
+		.from(messages)
+		.where(and(...conditions))
+		.orderBy(direction(messages.createdAt), direction(messages.id))
 		.limit(limit + 1);
 
 	const hasMore = rows.length > limit;

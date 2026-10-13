@@ -9,9 +9,9 @@ const router = new Hono<HonoEnv>();
 
 router.get("/", async (c) => {
 	const ctx = ctxFromHono(c);
-	const { scope, cursor, limit } = c.req.query();
+	const { scope, projectId, cursor, limit, order, since } = c.req.query();
 	try {
-		return c.json(await listMessages(ctx, { scope, cursor, limit }));
+		return c.json(await listMessages(ctx, { scope, projectId, cursor, limit, order, since }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

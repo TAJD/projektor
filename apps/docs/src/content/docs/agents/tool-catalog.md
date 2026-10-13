@@ -31,9 +31,9 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `claim_files` | Claim one or more repo file paths for an issue so the parallel fleet can see what is taken | write |
-| `release_files` | Release active file claims in the workspace, optionally scoped to an issue | destructive |
-| `list_file_claims` | List active file claims in the workspace, optionally filtered by issue, path or project. Live entries only by default — a claim whose holder has ended, stopped heartbeating, or (for an agentless claim) sat past its TTL is excluded; pass includeStale:true for all. Each entry carries the linked issue's ref (e.g. "PROJ-857") as issueRef, and a `live` flag (false when the claim is reclaimable — only possible with includeStale:true). | read-only |
+| `claim_files` | Claim one or more repo file paths for an issue so the parallel fleet can see what is taken. Returns {created, overridden, reclaimed}, each a list of {path, agentId, claimedAt, expiresAt?}; expiresAt is set only on an agentless claim, which lapses after its TTL. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | write |
+| `release_files` | Release file claims. With paths: releases those paths (optionally only those held by an issue). Without paths it releases everything held by agentId; else, with only issueId, the caller's claims on that issue; else everything held by the credential's single agent session (several live sessions: pass agentId). Returns {released: n, paths: [...]}. | destructive |
+| `list_file_claims` | List active file claims in the workspace, optionally filtered by issue, path or project. Live entries only by default — a claim whose holder has ended, stopped heartbeating, or (for an agentless claim) sat past its TTL is excluded; pass includeStale:true for all. Returns {items} of {path, agentId, issueRef, claimedAt, expiresAt?}; expiresAt is set only on an agentless claim, and stale:true marks a reclaimable claim (only possible with includeStale:true). Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 
 ### Issue leases
 
@@ -47,8 +47,8 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `post_message` | Post a coordination message to a workspace or issue channel so the agent fleet can communicate | write |
-| `list_messages` | List coordination messages for a workspace or issue channel, in chronological order | read-only |
+| `post_message` | Post a coordination message to a channel so the agent fleet can communicate: the workspace (default when scope is omitted), an issue, or a project (readable only by members who can see that project). Returns {id, scope, createdAt}; pass verbose:true for the whole stored row. | write |
+| `list_messages` | List coordination messages for a channel (workspace by default, an issue, or a project), newest first by default. Returns {items, nextCursor}; rows omit workspaceId and null keys. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 
 ### Workflow spec
 

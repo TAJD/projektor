@@ -105,9 +105,15 @@ backed by MCP tools:
   must pass the id from `register_agent`.
 - **File claims** — `claim_files` / `release_files` / `list_file_claims`. Claim the paths you're
   about to edit; check who else holds a file before you start; release on completion.
+  `release_files` with no `paths` releases what you hold — everything held by `agentId`, else
+  your claims on `issueId`, else everything held by your credential's single session — and
+  returns `{released, paths}`. Over MCP, claim rows are slim (`{path, agentId, issueRef,
+  claimedAt, expiresAt?}`); pass `verbose: true` for the raw rows.
 - **Coordination messages** — `post_message` / `list_messages`. Post to an *issue channel* when
   you start, hit a blocker, or finish; post to the *workspace channel* for fleet-wide
-  announcements ("rebasing `mcp.ts`, hold off"). Poll with a cursor to read what's new.
+  announcements ("rebasing `mcp.ts`, hold off"), or to a *project channel* (`project:KEY`) for
+  everyone who can see that project. `list_messages` returns the newest first over MCP; poll
+  with `since` (unix seconds) to read what's new.
 
 The **step-by-step protocol** — exact call order, payloads, and the file-ownership rules
 that keep agents on disjoint file sets — lives in
