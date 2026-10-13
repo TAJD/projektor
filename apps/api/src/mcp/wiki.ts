@@ -136,8 +136,9 @@ export const wikiTools: MCPTool[] = [
 			}
 			const items = (await wikiService.searchWiki(ctx, rest)) as unknown[];
 			// A full page means there may be more: the cursor is the next offset.
-			const limit = typeof rest.limit === "number" ? rest.limit : 10;
-			const offset = typeof rest.offset === "number" ? rest.offset : 0;
+			// PROJ-1035: numeric strings are coerced by the service, so coerce them here too.
+			const limit = rest.limit === undefined ? 10 : Number(rest.limit);
+			const offset = rest.offset === undefined ? 0 : Number(rest.offset);
 			const page = toPage(items, items.length >= limit ? offset + limit : null);
 			// A cut page resumes at the first dropped result.
 			return capPage(page, { cursorOf: (i) => String(offset + i + 1) });

@@ -87,7 +87,7 @@ export const agentMessagesTools: MCPTool[] = [
 					description: "Pagination cursor: pass the previous page's `nextCursor` unchanged",
 				},
 				limit: {
-					type: "number",
+					type: "integer",
 					minimum: 1,
 					maximum: 100,
 					description: "Max messages to return (1–100, default 20)",

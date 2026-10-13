@@ -61,7 +61,7 @@ export const ListMessagesSchema = z
 		...channelFields,
 		// Opaque composite cursor: "createdAt:id" — stable across same-second inserts
 		cursor: z.string().optional(),
-		limit: z.coerce.number().min(1).max(100).default(50),
+		limit: z.coerce.number().int().min(1).max(100).default(50),
 		order: z.enum(["asc", "desc"]).default("asc"),
 		since: z.coerce.number().int().nonnegative().optional(),
 	})
