@@ -9,6 +9,7 @@ import {
 	seedIssueFixture,
 	seedProject,
 	seedToken,
+	seedWorkspaceRoles,
 	toolError,
 } from "./helpers";
 
@@ -151,7 +152,7 @@ describe("Agent Messages API", () => {
 		const p2 = JSON.parse(p2Body.result?.content[0].text ?? "{}") as {
 			items: Array<{ body: string }>;
 		};
-		expect(p2.items.map((m) => m.body)).toEqual(["message three"]);
+		expect(p2.items.map((m) => m.body)).toEqual(["message one"]);
 	});
 
 	// C2: workspace scope; messages visible via workspace scope; not returned under issue scope
@@ -256,6 +257,7 @@ describe("Agent Messages API", () => {
 				issueId: issue2.id,
 				agentId: agent2.id,
 				paths: ["src/coord.ts"],
+				verbose: true,
 			},
 			token2,
 			slug
@@ -393,5 +395,390 @@ describe("Agent Messages API", () => {
 		});
 		expect(res2.status).toBe(201);
 		expect(await heartbeatOf(dead)).toBe(deadBefore);
+	});
+});
+
+describe("Agent messages: default scope, project channels, newest-first reads (PROJ-1008)", () => {
+	type Principal = { user: { id: string } };
+	type Project = { id: string; key: string };
+	type Posted = { id: string; scope: string; createdAt: number };
+	type Page = {
+		items: Array<Record<string, unknown> & { id: string; body: string }>;
+		nextCursor: string | null;
+	};
+
+	let ws: Awaited<ReturnType<typeof seedWorkspaceRoles>>;
+	let visible: Project;
+	let hidden: Project;
+	let visibleIssue: { id: string; number: number };
+	let idPrefix: string;
+
+	beforeEach(async () => {
+		idPrefix = `${crypto.randomUUID().slice(0, 8)}-`;
+		ws = await seedWorkspaceRoles();
+		visible = await seedProject(ws.workspace.id, "VIS");
+		hidden = await seedProject(ws.workspace.id, "HID");
+		await seedGroupGrant(ws.workspace.id, ws.member.user.id, visible.id, "member");
+		visibleIssue = await seedIssue(ws.workspace.id, visible.id, ws.owner.user.id);
+	});
+
+	async function tool<T = Record<string, unknown>>(
+		name: string,
+		args: Record<string, unknown>,
+		who: Principal = ws.owner
+	) {
+		const token = await seedToken(ws.workspace.id, who.user.id);
+		const res = await SELF.fetch(`http://localhost/mcp/${ws.workspace.id}`, {
+			method: "POST",
+			headers: authHeaders(token, ws.workspace.slug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name, arguments: args },
+			}),
+		});
+		const json = (await res.json()) as { result: { content: Array<{ text: string }> } };
+		const err = toolError(json);
+		return { err, data: (err ? {} : JSON.parse(json.result.content[0].text)) as T };
+	}
+
+	async function rest(path: string, who: Principal = ws.owner, init: RequestInit = {}) {
+		const token = await seedToken(ws.workspace.id, who.user.id);
+		return SELF.fetch(`http://localhost/api/agent-messages${path}`, {
+			...init,
+			headers: authHeaders(token, ws.workspace.slug),
+		});
+	}
+
+	async function seedMessages(
+		scope: string,
+		rows: ReadonlyArray<{ id: string; createdAt: number; agentId?: string }>
+	) {
+		await env.DB.batch(
+			rows.map((r) =>
+				env.DB.prepare(
+					"INSERT INTO agent_messages (id, workspace_id, scope, agent_id, body, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+				).bind(
+					`${idPrefix}${r.id}`,
+					ws.workspace.id,
+					scope,
+					r.agentId ?? null,
+					`body ${r.id}`,
+					r.createdAt
+				)
+			)
+		);
+	}
+
+	const ids = (page: { data: Page }) => page.data.items.map((m) => m.id.replace(idPrefix, ""));
+	const bodies = (page: { data: Page }) => page.data.items.map((m) => m.body);
+
+	const projectSpellings: Array<[string, (p: Project) => Record<string, unknown>]> = [
+		["scope:project + projectId uuid", (p) => ({ scope: "project", projectId: p.id })],
+		["scope:project + projectId key", (p) => ({ scope: "project", projectId: p.key })],
+		["project:<uuid>", (p) => ({ scope: `project:${p.id}` })],
+		["project:<key>", (p) => ({ scope: `project:${p.key}` })],
+		["projectId alone", (p) => ({ projectId: p.id })],
+	];
+
+	describe("scope defaults", () => {
+		it("posts to the workspace channel when scope is omitted, and reads it back the same way", async () => {
+			const posted = await tool<Posted>("post_message", { body: "fleet notice" });
+			expect(posted.err).toBeUndefined();
+			expect(posted.data.scope).toBe("workspace");
+
+			const list = await tool<Page>("list_messages", {});
+			expect(list.err).toBeUndefined();
+			expect(bodies(list)).toEqual(["fleet notice"]);
+		});
+
+		it("reads a bare issue UUID or ref as issue:<that>", async () => {
+			const ref = `${visible.key}-${visibleIssue.number}`;
+			const canonical = `issue:${visibleIssue.id}`;
+
+			const byUuid = await tool<Posted>("post_message", {
+				scope: visibleIssue.id,
+				body: "by uuid",
+			});
+			const byRef = await tool<Posted>("post_message", { scope: ref, body: "by ref" });
+			expect(byUuid.data.scope).toBe(canonical);
+			expect(byRef.data.scope).toBe(canonical);
+
+			for (const scope of [canonical, visibleIssue.id, ref]) {
+				const list = await tool<Page>("list_messages", { scope, order: "asc" });
+				expect(bodies(list)).toEqual(["by uuid", "by ref"]);
+			}
+		});
+
+		it("answers a bare ref to a hidden issue like an unknown one", async () => {
+			const hiddenIssue = await seedIssue(ws.workspace.id, hidden.id, ws.owner.user.id);
+			const hiddenRef = await tool(
+				"post_message",
+				{ scope: `${hidden.key}-${hiddenIssue.number}`, body: "x" },
+				ws.member
+			);
+			const unknownRef = await tool("post_message", { scope: "HID-9999", body: "x" }, ws.member);
+			expect(hiddenRef.err?.code).toBe("not_found");
+			expect(hiddenRef.err?.message).toBe(unknownRef.err?.message);
+		});
+	});
+
+	describe("project channels", () => {
+		it.each(projectSpellings)("stores %s as project:<uuid>", async (_name, spelling) => {
+			const posted = await tool<Posted>("post_message", { ...spelling(visible), body: "note" });
+			expect(posted.err).toBeUndefined();
+			expect(posted.data.scope).toBe(`project:${visible.id}`);
+		});
+
+		it("lists a project channel under every spelling of its scope", async () => {
+			await tool("post_message", { scope: "project", projectId: visible.id, body: "project note" });
+			for (const [, spelling] of projectSpellings) {
+				const list = await tool<Page>("list_messages", spelling(visible));
+				expect(list.err).toBeUndefined();
+				expect(bodies(list)).toEqual(["project note"]);
+			}
+		});
+
+		it('rejects scope:"project" without a projectId, naming the field', async () => {
+			const post = await tool("post_message", { scope: "project", body: "x" });
+			expect(post.err?.code).toBe("validation");
+			expect(post.err?.fields?.projectId).toBeDefined();
+
+			const list = await tool("list_messages", { scope: "project" });
+			expect(list.err?.code).toBe("validation");
+			expect(list.err?.fields?.projectId).toBeDefined();
+		});
+
+		it("rejects a projectId that contradicts a non-project scope", async () => {
+			for (const scope of ["workspace", `issue:${visibleIssue.id}`, `project:${visible.key}`]) {
+				const post = await tool("post_message", { scope, projectId: visible.id, body: "x" });
+				expect(post.err?.code).toBe("validation");
+				expect(post.err?.fields?.projectId).toBeDefined();
+			}
+		});
+
+		it("keeps the project, workspace and issue channels apart", async () => {
+			await tool("post_message", { body: "workspace msg" });
+			await tool("post_message", { scope: `issue:${visibleIssue.id}`, body: "issue msg" });
+			await tool("post_message", { scope: "project", projectId: visible.id, body: "project msg" });
+			await tool("post_message", { scope: "project", projectId: hidden.id, body: "other project" });
+
+			expect(bodies(await tool<Page>("list_messages", {}))).toEqual(["workspace msg"]);
+			expect(
+				bodies(await tool<Page>("list_messages", { scope: `issue:${visibleIssue.id}` }))
+			).toEqual(["issue msg"]);
+			expect(
+				bodies(await tool<Page>("list_messages", { scope: "project", projectId: visible.id }))
+			).toEqual(["project msg"]);
+			expect(
+				bodies(await tool<Page>("list_messages", { scope: "project", projectId: hidden.id }))
+			).toEqual(["other project"]);
+		});
+	});
+
+	describe("project channel visibility", () => {
+		it("lets a member with a grant post to and read the channel", async () => {
+			const posted = await tool<Posted>(
+				"post_message",
+				{ scope: "project", projectId: visible.id, body: "from member" },
+				ws.member
+			);
+			expect(posted.err).toBeUndefined();
+
+			const list = await tool<Page>(
+				"list_messages",
+				{ scope: `project:${visible.key}` },
+				ws.member
+			);
+			expect(bodies(list)).toEqual(["from member"]);
+		});
+
+		it("hides a project the member has no grant on: posting 404s like an unknown project, reading is empty", async () => {
+			const secret = await tool("post_message", { scope: `project:${hidden.id}`, body: "secret" });
+			expect(secret.err).toBeUndefined();
+
+			for (const spelling of [
+				{ scope: "project", projectId: hidden.id },
+				{ scope: `project:${hidden.key}` },
+			]) {
+				const hiddenPost = await tool("post_message", { ...spelling, body: "probe" }, ws.member);
+				const unknownPost = await tool(
+					"post_message",
+					{ scope: `project:${crypto.randomUUID()}`, body: "probe" },
+					ws.member
+				);
+				expect(hiddenPost.err?.code).toBe("not_found");
+				expect(hiddenPost.err?.message).toBe(unknownPost.err?.message);
+
+				const memberList = await tool<Page>("list_messages", spelling, ws.member);
+				expect(memberList.err).toBeUndefined();
+				expect(memberList.data.items).toEqual([]);
+			}
+
+			const ownerList = await tool<Page>("list_messages", {
+				scope: "project",
+				projectId: hidden.id,
+			});
+			expect(bodies(ownerList)).toEqual(["secret"]);
+		});
+
+		it("does not reach a project in another workspace, even for an owner", async () => {
+			const other = await seedFixture();
+			const otherProject = await seedProject(other.workspace.id, "OTH");
+
+			const post = await tool("post_message", { scope: `project:${otherProject.id}`, body: "x" });
+			expect(post.err?.code).toBe("not_found");
+
+			const list = await tool<Page>("list_messages", { scope: `project:${otherProject.id}` });
+			expect(list.err).toBeUndefined();
+			expect(list.data.items).toEqual([]);
+		});
+
+		it("applies the same rules over REST", async () => {
+			const posted = await rest("", ws.member, {
+				method: "POST",
+				body: JSON.stringify({ scope: "project", projectId: visible.id, body: "rest note" }),
+			});
+			expect(posted.status).toBe(201);
+			expect(((await posted.json()) as Posted).scope).toBe(`project:${visible.id}`);
+
+			const denied = await rest("", ws.member, {
+				method: "POST",
+				body: JSON.stringify({ scope: `project:${hidden.key}`, body: "x" }),
+			});
+			expect(denied.status).toBe(404);
+
+			const list = await rest(`?scope=project&projectId=${visible.id}`, ws.member);
+			expect(list.status).toBe(200);
+			expect(((await list.json()) as Page).items.map((m) => m.body)).toEqual(["rest note"]);
+		});
+	});
+
+	describe("MCP response shape", () => {
+		it("post_message returns only {id, scope, createdAt}; verbose:true returns the row", async () => {
+			const slim = await tool<Posted>("post_message", { body: "hello" });
+			expect(Object.keys(slim.data).sort()).toEqual(["createdAt", "id", "scope"]);
+			expect(slim.data.scope).toBe("workspace");
+			expect(slim.data.createdAt).toEqual(expect.any(Number));
+
+			const raw = await tool("post_message", { body: "hello again", verbose: true });
+			expect(raw.data).toMatchObject({
+				workspaceId: ws.workspace.id,
+				scope: "workspace",
+				agentId: null,
+				body: "hello again",
+			});
+		});
+
+		it("list_messages rows drop workspaceId and null keys; verbose:true returns the raw rows", async () => {
+			await seedMessages("workspace", [{ id: "m1", createdAt: 1000 }]);
+
+			const slim = await tool<Page>("list_messages", {});
+			expect(Object.keys(slim.data.items[0]).sort()).toEqual(["body", "createdAt", "id", "scope"]);
+
+			const raw = await tool<Page>("list_messages", { verbose: true });
+			expect(raw.data.items[0]).toMatchObject({ workspaceId: ws.workspace.id, agentId: null });
+		});
+
+		it("list_messages keeps agentId when a session posted the message", async () => {
+			const { agentSessionId } = await seedAgentLease(ws.workspace.id, visibleIssue.id);
+			await seedMessages("workspace", [{ id: "m1", createdAt: 1000, agentId: agentSessionId }]);
+
+			const list = await tool<Page>("list_messages", {});
+			expect(list.data.items[0].agentId).toBe(agentSessionId);
+		});
+	});
+
+	describe("list_messages order, window and paging", () => {
+		it("defaults to newest first and 20 rows over MCP", async () => {
+			const pad = (i: number) => `m${String(i).padStart(2, "0")}`;
+			await seedMessages(
+				"workspace",
+				Array.from({ length: 25 }, (_, i) => ({ id: pad(i), createdAt: 1000 + i }))
+			);
+
+			const page = await tool<Page>("list_messages", {});
+			expect(ids(page)).toEqual(Array.from({ length: 20 }, (_, i) => pad(24 - i)));
+			expect(page.data.nextCursor).not.toBeNull();
+
+			const wide = await tool<Page>("list_messages", { limit: 25 });
+			expect(wide.data.items).toHaveLength(25);
+		});
+
+		it('returns oldest first for order:"asc"', async () => {
+			await seedMessages("workspace", [
+				{ id: "m1", createdAt: 1000 },
+				{ id: "m2", createdAt: 2000 },
+				{ id: "m3", createdAt: 3000 },
+			]);
+			expect(ids(await tool<Page>("list_messages", { order: "asc" }))).toEqual(["m1", "m2", "m3"]);
+			expect(ids(await tool<Page>("list_messages", { order: "desc" }))).toEqual(["m3", "m2", "m1"]);
+		});
+
+		it("since (unix seconds) keeps messages created at or after it", async () => {
+			await seedMessages("workspace", [
+				{ id: "old", createdAt: 1_700_000_100_000 },
+				{ id: "edge", createdAt: 1_700_000_200_000 },
+				{ id: "new", createdAt: 1_700_000_300_500 },
+			]);
+
+			expect(ids(await tool<Page>("list_messages", { since: 1_700_000_200 }))).toEqual([
+				"new",
+				"edge",
+			]);
+			expect(ids(await tool<Page>("list_messages", { since: 1_700_000_301 }))).toEqual([]);
+		});
+
+		it.each([
+			["desc", ["m3", "m2c", "m2b", "m2a", "m1"]],
+			["asc", ["m1", "m2a", "m2b", "m2c", "m3"]],
+		] as const)(
+			"pages through ties on createdAt without gaps or repeats, %s",
+			async (order, expected) => {
+				await seedMessages("workspace", [
+					{ id: "m1", createdAt: 1000 },
+					{ id: "m2a", createdAt: 2000 },
+					{ id: "m2b", createdAt: 2000 },
+					{ id: "m2c", createdAt: 2000 },
+					{ id: "m3", createdAt: 3000 },
+				]);
+
+				const seen: string[] = [];
+				let cursor: string | undefined;
+				for (let i = 0; i < 4; i++) {
+					const page = await tool<Page>("list_messages", {
+						order,
+						limit: 2,
+						...(cursor ? { cursor } : {}),
+					});
+					seen.push(...ids(page));
+					if (!page.data.nextCursor) break;
+					cursor = page.data.nextCursor;
+				}
+				expect(seen).toEqual(expected);
+			}
+		);
+
+		it("keeps REST oldest-first with the full row, and accepts order and since", async () => {
+			await seedMessages("workspace", [
+				{ id: "m1", createdAt: 1_700_000_100_000 },
+				{ id: "m2", createdAt: 1_700_000_200_000 },
+			]);
+
+			const restIds = async (path: string) =>
+				ids({ data: (await (await rest(path)).json()) as Page });
+
+			const asc = (await (await rest("?scope=workspace")).json()) as Page;
+			expect(ids({ data: asc })).toEqual(["m1", "m2"]);
+			expect(asc.items[0]).toMatchObject({
+				workspaceId: ws.workspace.id,
+				scope: "workspace",
+				agentId: null,
+			});
+
+			expect(await restIds("?order=desc")).toEqual(["m2", "m1"]);
+			expect(await restIds("?since=1700000200")).toEqual(["m2"]);
+		});
 	});
 });

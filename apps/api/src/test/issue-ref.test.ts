@@ -145,7 +145,7 @@ describe("PROJ-959: issue refs accepted by every issue-id tool", () => {
 			const claim = await call("claim_files", { issueId: ref, agentId, paths: ["src/a.ts"] });
 			expect(claim.err).toBeUndefined();
 
-			const list = await call("list_file_claims", { issueId: ref });
+			const list = await call("list_file_claims", { issueId: ref, verbose: true });
 			expect(list.err).toBeUndefined();
 			expect(list.data.items).toHaveLength(1);
 			expect(list.data.items[0].issueId).toBe(issueId);
@@ -205,8 +205,8 @@ describe("PROJ-959: issue refs accepted by every issue-id tool", () => {
 				const list = await call("list_messages", { scope });
 				expect(list.err).toBeUndefined();
 				expect(list.data.items.map((m: { body: string }) => m.body)).toEqual([
-					"posted by ref",
 					"posted by uuid",
+					"posted by ref",
 				]);
 			}
 		});

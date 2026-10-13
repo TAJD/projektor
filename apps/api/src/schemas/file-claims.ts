@@ -9,8 +9,9 @@ export const ClaimFilesSchema = z.object({
 });
 
 export const ReleaseFilesSchema = z.object({
-	paths: z.array(z.string()).min(1),
+	paths: z.array(z.string()).min(1).optional(),
 	issueId: IssueIdOrRefSchema.optional(),
+	agentId: z.string().uuid().optional(),
 });
 
 // PROJ-932: projectId accepts a UUID or a project key, resolved the same way list_issues

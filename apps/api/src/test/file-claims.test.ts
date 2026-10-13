@@ -1,11 +1,12 @@
 import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	authHeaders,
 	seedFixture,
 	seedIssue,
 	seedIssueFixture,
 	seedProject,
+	seedToken,
 	toolError,
 } from "./helpers";
 
@@ -854,5 +855,396 @@ describe("PROJ-932: list_file_claims projectId + visibility for a non-admin memb
 
 		const byUuid = await list({ projectId: hidden.id });
 		expect(((await byUuid.json()) as { items: unknown[] }).items).toHaveLength(0);
+	});
+});
+
+describe("PROJ-1009: release_files without paths, slim claim rows", () => {
+	type Row = Record<string, unknown>;
+
+	const prevApiMax = env.RATE_LIMIT_API_MAX;
+	beforeAll(() => {
+		env.RATE_LIMIT_API_MAX = "1000";
+	});
+	afterAll(() => {
+		env.RATE_LIMIT_API_MAX = prevApiMax;
+	});
+
+	let token: string;
+	let otherToken: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+	let userId: string;
+	let issueId: string;
+	let otherIssueId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId, projectId, userId, issueId } = await seedIssueFixture());
+		otherToken = await seedToken(workspaceId, userId);
+		otherIssueId = (await seedIssue(workspaceId, projectId, userId, { title: "Other issue" })).id;
+	});
+
+	async function tool(name: string, args: Record<string, unknown>, bearer = token) {
+		const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+			method: "POST",
+			headers: authHeaders(bearer, slug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name, arguments: args },
+			}),
+		});
+		const json = (await res.json()) as { result?: { content?: Array<{ text: string }> } };
+		const error = toolError(json);
+		const text = json.result?.content?.[0]?.text;
+		return { error, data: error || !text ? undefined : (JSON.parse(text) as Row) };
+	}
+
+	async function register(name: string, bearer = token): Promise<string> {
+		const { data, error } = await tool("register_agent", { name }, bearer);
+		expect(error).toBeUndefined();
+		return data?.id as string;
+	}
+
+	async function claim(forIssue: string, paths: string[], agentId?: string, bearer = token) {
+		const { error } = await tool(
+			"claim_files",
+			{ issueId: forIssue, paths, ...(agentId ? { agentId } : {}) },
+			bearer
+		);
+		expect(error).toBeUndefined();
+	}
+
+	async function held(): Promise<string[]> {
+		const { data } = await tool("list_file_claims", { includeStale: true });
+		return rowsOf(data, "items")
+			.map((r) => r.path as string)
+			.sort();
+	}
+
+	async function lapse(sessionId: string) {
+		await env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+			.bind(Math.floor(Date.now() / 1000) - 600, sessionId)
+			.run();
+	}
+
+	async function refOf(id: string): Promise<string> {
+		const row = await env.DB.prepare(
+			"SELECT p.key || '-' || i.number AS ref FROM issues i JOIN projects p ON p.id = i.project_id WHERE i.id = ?"
+		)
+			.bind(id)
+			.first<{ ref: string }>();
+		return row?.ref as string;
+	}
+
+	function rowsOf(data: Row | undefined, key: string): Row[] {
+		return (data?.[key] as Row[] | undefined) ?? [];
+	}
+
+	function outcome(data: Row | undefined) {
+		return { released: data?.released, paths: [...((data?.paths as string[]) ?? [])].sort() };
+	}
+
+	describe("release_files with paths omitted", () => {
+		it("issueId only releases the caller's claims on that issue, not other credentials' or other issues'", async () => {
+			const mine = await register("mine");
+			const theirs = await register("theirs", otherToken);
+			await claim(issueId, ["src/a.ts", "src/b.ts"], mine);
+			await claim(issueId, ["src/agentless.ts"]);
+			await claim(issueId, ["src/theirs.ts"], theirs, otherToken);
+			await claim(otherIssueId, ["src/elsewhere.ts"], mine);
+
+			const { data, error } = await tool("release_files", { issueId });
+
+			expect(error).toBeUndefined();
+			expect(outcome(data)).toEqual({
+				released: 3,
+				paths: ["src/a.ts", "src/agentless.ts", "src/b.ts"],
+			});
+			expect(await held()).toEqual(["src/elsewhere.ts", "src/theirs.ts"]);
+		});
+
+		it("issueId with several live sessions on the credential releases all of the credential's claims on it", async () => {
+			const a = await register("agent-a");
+			const b = await register("agent-b");
+			await claim(issueId, ["src/a.ts"], a);
+			await claim(issueId, ["src/b.ts"], b);
+
+			const { data, error } = await tool("release_files", { issueId });
+
+			expect(error).toBeUndefined();
+			expect(outcome(data)).toEqual({ released: 2, paths: ["src/a.ts", "src/b.ts"] });
+		});
+
+		it("agentId only releases every active claim that session holds, on any issue", async () => {
+			const mine = await register("mine");
+			const bystander = await register("bystander");
+			await claim(issueId, ["src/a.ts"], mine);
+			await claim(otherIssueId, ["src/b.ts"], mine);
+			await claim(issueId, ["src/c.ts"], bystander);
+
+			const { data, error } = await tool("release_files", { agentId: mine });
+
+			expect(error).toBeUndefined();
+			expect(outcome(data)).toEqual({ released: 2, paths: ["src/a.ts", "src/b.ts"] });
+			expect(await held()).toEqual(["src/c.ts"]);
+		});
+
+		it("agentId with issueId releases only that session's claims on that issue", async () => {
+			const mine = await register("mine");
+			await claim(issueId, ["src/a.ts"], mine);
+			await claim(otherIssueId, ["src/b.ts"], mine);
+
+			const { data, error } = await tool("release_files", { agentId: mine, issueId });
+
+			expect(error).toBeUndefined();
+			expect(outcome(data)).toEqual({ released: 1, paths: ["src/a.ts"] });
+			expect(await held()).toEqual(["src/b.ts"]);
+		});
+
+		it("no arguments releases everything the credential's single live session holds", async () => {
+			const mine = await register("mine");
+			const theirs = await register("theirs", otherToken);
+			await claim(issueId, ["src/a.ts"], mine);
+			await claim(otherIssueId, ["src/b.ts"], mine);
+			await claim(issueId, ["src/agentless.ts"]);
+			await claim(issueId, ["src/theirs.ts"], theirs, otherToken);
+
+			const { data, error } = await tool("release_files", {});
+
+			expect(error).toBeUndefined();
+			expect(outcome(data)).toEqual({ released: 2, paths: ["src/a.ts", "src/b.ts"] });
+			expect(await held()).toEqual(["src/agentless.ts", "src/theirs.ts"]);
+		});
+
+		it("releases nothing, without an error, when the session holds no claims", async () => {
+			await register("idle");
+
+			const { data, error } = await tool("release_files", {});
+
+			expect(error).toBeUndefined();
+			expect(data).toEqual({ released: 0, paths: [] });
+		});
+
+		it("several live sessions and no agentId errors naming them with a pass-agentId hint, releasing nothing", async () => {
+			const a = await register("agent-a");
+			const b = await register("agent-b");
+			await claim(issueId, ["src/a.ts"], a);
+
+			const { data, error } = await tool("release_files", {});
+
+			expect(data).toBeUndefined();
+			expect(error?.code).toBe("validation");
+			const message = (error?.fields?.agentId ?? []).join(" ");
+			for (const expected of [a, b, "agent-a", "agent-b", "pass agentId"]) {
+				expect(message).toContain(expected);
+			}
+			expect(await held()).toEqual(["src/a.ts"]);
+		});
+
+		it("no live session and no agentId errors with the agentId hint instead of releasing everything", async () => {
+			await claim(issueId, ["src/agentless.ts"]);
+
+			const { data, error } = await tool("release_files", {});
+
+			expect(data).toBeUndefined();
+			expect(error?.code).toBe("validation");
+			expect(error?.fields?.agentId?.join(" ")).toContain("pass agentId");
+			expect(await held()).toEqual(["src/agentless.ts"]);
+		});
+
+		it("a lone session whose heartbeat lapsed can still release its claims", async () => {
+			const mine = await register("mine");
+			await claim(issueId, ["src/a.ts"], mine);
+			await lapse(mine);
+
+			const { data, error } = await tool("release_files", {});
+
+			expect(error).toBeUndefined();
+			expect(outcome(data)).toEqual({ released: 1, paths: ["src/a.ts"] });
+		});
+
+		it("an empty paths array is rejected rather than read as everything", async () => {
+			const mine = await register("mine");
+			await claim(issueId, ["src/a.ts"], mine);
+
+			const { data, error } = await tool("release_files", { paths: [], issueId });
+
+			expect(data).toBeUndefined();
+			expect(error?.code).toBe("validation");
+			expect(await held()).toEqual(["src/a.ts"]);
+		});
+
+		it("explicit paths still release exactly those paths, optionally narrowed by issue", async () => {
+			await claim(issueId, ["src/a.ts", "src/b.ts"]);
+			await claim(otherIssueId, ["src/c.ts"]);
+
+			const wrongIssue = await tool("release_files", { paths: ["src/c.ts"], issueId });
+			expect(wrongIssue.data).toEqual({ released: 0, paths: [] });
+
+			const { data } = await tool("release_files", { paths: ["src/a.ts", "src/c.ts"] });
+			expect(outcome(data)).toEqual({ released: 2, paths: ["src/a.ts", "src/c.ts"] });
+			expect(await held()).toEqual(["src/b.ts"]);
+		});
+
+		it("REST accepts a body without paths and keeps its row-array response", async () => {
+			await claim(issueId, ["src/a.ts"]);
+
+			const res = await SELF.fetch("http://localhost/api/file-claims/release", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ issueId }),
+			});
+
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { released: Row[]; count: number };
+			expect(body.count).toBe(1);
+			expect(body.released.map((r) => r.path)).toEqual(["src/a.ts"]);
+			expect(body.released[0]).toHaveProperty("id");
+		});
+
+		it("leaves claims on a project the caller cannot see alone", async () => {
+			const mine = await register("mine");
+			const hidden = await seedProject(workspaceId, "HIDN");
+			const hiddenIssue = await seedIssue(workspaceId, hidden.id, userId, { title: "Hidden" });
+			await env.DB.prepare(
+				`INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, released_at)
+				 VALUES (?, ?, ?, ?, 'hidden/secret.ts', ?, NULL)`
+			)
+				.bind(crypto.randomUUID(), workspaceId, hiddenIssue.id, mine, Math.floor(Date.now() / 1000))
+				.run();
+			await claim(issueId, ["src/visible.ts"], mine);
+			const hiddenStillHeld = async () =>
+				(
+					await env.DB.prepare(
+						"SELECT COUNT(*) AS n FROM issue_file_claims WHERE workspace_id = ? AND path = 'hidden/secret.ts' AND released_at IS NULL"
+					)
+						.bind(workspaceId)
+						.first<{ n: number }>()
+				)?.n;
+
+			const byHiddenIssue = await tool("release_files", { agentId: mine, issueId: hiddenIssue.id });
+			expect(byHiddenIssue.data).toEqual({ released: 0, paths: [] });
+
+			const byAgent = await tool("release_files", { agentId: mine });
+			expect(byAgent.data).toEqual({ released: 1, paths: ["src/visible.ts"] });
+
+			const bySession = await tool("release_files", {});
+			expect(bySession.data).toEqual({ released: 0, paths: [] });
+			expect(await hiddenStillHeld()).toBe(1);
+		});
+	});
+
+	describe("slim claim rows", () => {
+		it("claim_files rows are {path, agentId, claimedAt}, plus expiresAt on an agentless claim", async () => {
+			const mine = await register("mine");
+
+			const linked = await tool("claim_files", { issueId, agentId: mine, paths: ["src/a.ts"] });
+			expect(linked.data?.created).toEqual([
+				{ path: "src/a.ts", agentId: mine, claimedAt: expect.any(Number) },
+			]);
+
+			const agentless = await tool("claim_files", { issueId, paths: ["src/b.ts"] });
+			const [row] = rowsOf(agentless.data, "created");
+			expect(row).toEqual({
+				path: "src/b.ts",
+				agentId: null,
+				claimedAt: expect.any(Number),
+				expiresAt: (row.claimedAt as number) + 24 * 60 * 60,
+			});
+		});
+
+		it("claim_files overridden and reclaimed rows are slim too", async () => {
+			const holder = await register("holder");
+			const dead = await register("dead");
+			const me = await register("me");
+			await claim(otherIssueId, ["src/held.ts"], holder);
+			await claim(otherIssueId, ["src/stale.ts"], dead);
+			await lapse(dead);
+
+			const { data, error } = await tool("claim_files", {
+				issueId,
+				agentId: me,
+				paths: ["src/held.ts", "src/stale.ts"],
+				force: true,
+			});
+
+			expect(error).toBeUndefined();
+			expect(data?.overridden).toEqual([
+				{ path: "src/held.ts", agentId: holder, claimedAt: expect.any(Number) },
+			]);
+			expect(data?.reclaimed).toEqual([
+				{ path: "src/stale.ts", agentId: dead, claimedAt: expect.any(Number) },
+			]);
+			expect(data?.created).toHaveLength(2);
+		});
+
+		it("claim_files verbose:true returns the raw rows", async () => {
+			const { data } = await tool("claim_files", { issueId, paths: ["src/a.ts"], verbose: true });
+
+			const [row] = rowsOf(data, "created");
+			expect(row).toMatchObject({
+				workspaceId,
+				issueId,
+				path: "src/a.ts",
+				agentId: null,
+				releasedAt: null,
+			});
+			expect(row).toHaveProperty("id");
+		});
+
+		it("list_file_claims rows are {path, agentId, issueRef, claimedAt}, plus expiresAt on an agentless claim", async () => {
+			const mine = await register("mine");
+			await claim(issueId, ["src/a.ts"], mine);
+			await claim(issueId, ["src/b.ts"]);
+			const issueRef = await refOf(issueId);
+
+			const { data } = await tool("list_file_claims", { issueId });
+
+			const items = data?.items as Row[];
+			expect(items.find((r) => r.path === "src/a.ts")).toEqual({
+				path: "src/a.ts",
+				agentId: mine,
+				issueRef,
+				claimedAt: expect.any(Number),
+			});
+			const agentless = items.find((r) => r.path === "src/b.ts") as Row;
+			expect(agentless).toEqual({
+				path: "src/b.ts",
+				agentId: null,
+				issueRef,
+				claimedAt: expect.any(Number),
+				expiresAt: (agentless.claimedAt as number) + 24 * 60 * 60,
+			});
+		});
+
+		it("list_file_claims marks a reclaimable claim stale when includeStale is set", async () => {
+			const live = await register("live");
+			const dead = await register("dead");
+			await claim(issueId, ["src/live.ts"], live);
+			await claim(issueId, ["src/dead.ts"], dead);
+			await lapse(dead);
+
+			const { data } = await tool("list_file_claims", { includeStale: true });
+
+			const byPath = Object.fromEntries(rowsOf(data, "items").map((r) => [r.path, r]));
+			expect(byPath["src/dead.ts"]).toMatchObject({ stale: true });
+			expect(byPath["src/live.ts"]).not.toHaveProperty("stale");
+		});
+
+		it("list_file_claims verbose:true returns the raw rows", async () => {
+			await claim(issueId, ["src/a.ts"]);
+
+			const { data } = await tool("list_file_claims", { issueId, verbose: true });
+
+			expect(rowsOf(data, "items")[0]).toMatchObject({
+				workspaceId,
+				issueId,
+				path: "src/a.ts",
+				releasedAt: null,
+				live: true,
+			});
+		});
 	});
 });

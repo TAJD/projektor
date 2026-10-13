@@ -138,7 +138,7 @@ describe("PROJ-998/PROJ-1007: MCP argument aliases", () => {
 			const value = spelling === "ref" ? `PROJ-${other.number}` : other.id;
 			const res = await call("release_files", { paths: ["src/a.ts"], [spelling]: value });
 			expect(res.err).toBeUndefined();
-			expect(res.data.count).toBe(0);
+			expect(res.data.released).toBe(0);
 		}
 	});
 
@@ -182,7 +182,7 @@ describe("PROJ-998/PROJ-1007: MCP argument aliases", () => {
 			await call("claim_files", { issueId, agentId: sessionId, paths: ["src/a.ts"] });
 			const res = await call("release_files", { files: ["src/a.ts"] });
 			expect(res.err).toBeUndefined();
-			expect(res.data.count).toBe(1);
+			expect(res.data.released).toBe(1);
 		});
 
 		it("finish_work: snake_case keys map at every level, including inside a renamed object", async () => {

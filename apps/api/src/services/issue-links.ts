@@ -8,7 +8,12 @@ import {
 	type LinkTypeStoredEnum,
 	ListIssueLinksSchema,
 } from "../schemas/issues";
-import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
+import {
+	canWriteProject,
+	effectiveProjectRole,
+	isWorkspaceAdmin,
+	visibleProjectPredicate,
+} from "./access";
 import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { resolveIssueIdParam } from "./issue-ref";
@@ -259,6 +264,7 @@ export async function listLinksForIssue(ctx: ServiceCtx, raw: unknown) {
 
 	// Batch-fetch linked issue metadata (title, number, project_key, status_category)
 	const linkedIds = [...new Set(enriched.map((e) => e.linkedIssueId))];
+	const visibleProject = visibleProjectPredicate(ctx, schema.issues.projectId);
 	// inChunks keeps the batch fetch under D1's 100-bound-parameter cap. See services/sql.ts.
 	const issueRows = await inChunks(linkedIds, (chunk) =>
 		orm
@@ -271,12 +277,22 @@ export async function listLinksForIssue(ctx: ServiceCtx, raw: unknown) {
 			})
 			.from(schema.issues)
 			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-			.where(and(inArray(schema.issues.id, chunk), eq(schema.issues.workspaceId, ctx.workspaceId)))
+			.where(
+				and(
+					inArray(schema.issues.id, chunk),
+					eq(schema.issues.workspaceId, ctx.workspaceId),
+					visibleProject
+				)
+			)
 	);
 
 	const issueMap = new Map((issueRows as LinkedIssueRow[]).map((r) => [r.id, r]));
 
-	return enriched.map((e) => {
+	const visibleLinks = visibleProject
+		? enriched.filter((e) => issueMap.has(e.linkedIssueId))
+		: enriched;
+
+	return visibleLinks.map((e) => {
 		const linked = issueMap.get(e.linkedIssueId);
 		return {
 			id: e.id,
