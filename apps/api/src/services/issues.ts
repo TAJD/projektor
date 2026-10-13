@@ -451,9 +451,8 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 // the raw `status` column, exactly like getIssue's child query, so the two surfaces
 // return identical rollups for the same parent — byStatus keys and the done/remaining
 // derivation in computeChildRollup must never diverge between them. Workspace-scoped
-// like every query; deliberately NOT project-visibility filtered, matching getIssue's
-// own child rollup (the visibility gate applies to the parent issue, not to counting its
-// children; PROJ-1029).
+// like every query, and (PROJ-1029) counting only children in projects the caller can
+// see, like getIssue's child rollup: a child may live in another project than its parent.
 async function computeChildRollupsForParents(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
@@ -471,7 +470,11 @@ async function computeChildRollupsForParents(
 			})
 			.from(schema.issues)
 			.where(
-				and(eq(schema.issues.workspaceId, ctx.workspaceId), inArray(schema.issues.parentId, chunk))
+				and(
+					eq(schema.issues.workspaceId, ctx.workspaceId),
+					inArray(schema.issues.parentId, chunk),
+					visibleProjectPredicate(ctx, schema.issues.projectId)
+				)
 			)
 			.groupBy(schema.issues.parentId, schema.issues.status)
 	)) as ChildRow[];
@@ -648,13 +651,16 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 	const issueRecord = issue as Record<string, unknown>;
 	const issueId = issueRecord.id as string;
 
+	const childVisible = visibleProjectSqlFragment(ctx, "c.project_id");
 	const [childResult, customFieldResult, linkResult] = await ctx.db.batch([
+		// PROJ-1029: only children in projects the caller can see are counted.
 		ctx.db
 			.prepare(
-				`SELECT status, COUNT(*) AS count FROM issues
-				WHERE parent_id = ? AND workspace_id = ? GROUP BY status`
+				`SELECT c.status, COUNT(*) AS count FROM issues c
+				WHERE c.parent_id = ? AND c.workspace_id = ? ${childVisible ? `AND ${childVisible.sql}` : ""}
+				GROUP BY c.status`
 			)
-			.bind(issueId, ctx.workspaceId),
+			.bind(issueId, ctx.workspaceId, ...(childVisible?.params ?? [])),
 		ctx.db
 			.prepare(
 				`SELECT d.key, d.label, d.type, v.value FROM custom_field_values v
