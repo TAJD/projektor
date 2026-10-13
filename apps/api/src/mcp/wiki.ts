@@ -41,6 +41,8 @@ export const wikiTools: MCPTool[] = [
 				projectId: { type: "string", description: "Filter to pages belonging to this project ID" },
 				type: {
 					type: "string",
+					minLength: 1,
+					maxLength: 50,
 					description: TYPE_FILTER_DESCRIPTION,
 				},
 				status: {
@@ -50,6 +52,7 @@ export const wikiTools: MCPTool[] = [
 				},
 				tags: {
 					type: ["array", "string"],
+					maxItems: 50,
 					items: { type: "string" },
 					description:
 						"Filter to pages carrying at least one of these frontmatter tags (array, or a comma-separated string)",
@@ -85,7 +88,7 @@ export const wikiTools: MCPTool[] = [
 			required: ["query"],
 			properties: {
 				query: { type: "string" },
-				limit: { type: "number", default: 10 },
+				limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
 				offset: { type: "number", default: 0 },
 				cursor: {
 					type: "string",
@@ -93,15 +96,19 @@ export const wikiTools: MCPTool[] = [
 				},
 				projectId: { type: "string", description: "Restrict search to this project ID" },
 				updatedSince: {
-					type: "number",
+					type: "integer",
+					minimum: 0,
 					description: "Unix seconds — only return pages updated at or after this time",
 				},
 				type: {
 					type: "string",
+					minLength: 1,
+					maxLength: 50,
 					description: TYPE_FILTER_DESCRIPTION,
 				},
 				tags: {
 					type: ["array", "string"],
+					maxItems: 50,
 					items: { type: "string" },
 					description:
 						"Filter to pages carrying at least one of these frontmatter tags (array, or a comma-separated string)",
@@ -153,7 +160,9 @@ export const wikiTools: MCPTool[] = [
 			properties: {
 				slug: { type: "string" },
 				maxChars: {
-					type: "number",
+					type: "integer",
+					minimum: 1,
+					maximum: WIKI_MAX_CHARS,
 					default: WIKI_DEFAULT_MAX_CHARS,
 					description: `Max characters of content per call (1-${WIKI_MAX_CHARS})`,
 				},
@@ -227,19 +236,24 @@ export const wikiTools: MCPTool[] = [
 			type: "object",
 			required: ["title"],
 			properties: {
-				title: { type: "string" },
+				title: { type: "string", minLength: 1, maxLength: 300 },
 				slug: {
 					type: "string",
+					minLength: 1,
+					maxLength: 200,
 					description: "URL-safe identifier; auto-generated from title if omitted",
 				},
 				content: {
 					type: "string",
+					maxLength: 500000,
 					description:
 						"Markdown content, optionally starting with a YAML frontmatter block. " +
 						"Mutually exclusive with templateSlug.",
 				},
 				templateSlug: {
 					type: "string",
+					minLength: 1,
+					maxLength: 200,
 					description:
 						"Seed this page's content from the template page at this slug/id (see " +
 						"list_wiki_templates). Mutually exclusive with content.",
@@ -274,9 +288,10 @@ export const wikiTools: MCPTool[] = [
 			properties: {
 				id: { type: "string", description: "Page ID" },
 				slug: { type: "string", description: "Page slug (alternative to id)" },
-				title: { type: "string" },
+				title: { type: "string", minLength: 1, maxLength: 300 },
 				content: {
 					type: "string",
+					maxLength: 500000,
 					description: "Markdown content, optionally starting with a YAML frontmatter block",
 				},
 				parentId: {
@@ -286,6 +301,8 @@ export const wikiTools: MCPTool[] = [
 				},
 				newSlug: {
 					type: "string",
+					minLength: 1,
+					maxLength: 200,
 					description:
 						"Rename the page's slug; the old slug becomes a redirect so existing links keep resolving",
 				},
@@ -297,6 +314,7 @@ export const wikiTools: MCPTool[] = [
 				},
 				summary: {
 					type: "string",
+					maxLength: 2000,
 					description: "Optional edit message/changelog note, recorded on the created revision",
 				},
 			},
@@ -395,6 +413,7 @@ export const wikiTools: MCPTool[] = [
 				},
 				summary: {
 					type: "string",
+					maxLength: 2000,
 					description: "Optional edit message/changelog note, recorded on the created revision",
 				},
 			},
@@ -421,7 +440,7 @@ export const wikiTools: MCPTool[] = [
 			type: "object",
 			required: ["slug"],
 			properties: {
-				slug: { type: "string" },
+				slug: { type: "string", minLength: 1 },
 				cascade: {
 					type: "boolean",
 					default: false,
@@ -506,16 +525,19 @@ export const wikiTools: MCPTool[] = [
 					description: "Resume point from a previous call's nextCursor",
 					required: ["updatedAt", "id"],
 					properties: {
-						updatedAt: { type: "number" },
-						id: { type: "string" },
+						updatedAt: { type: "integer", minimum: 0 },
+						id: { type: "string", minLength: 1 },
 					},
 				},
 				pageBudget: {
-					type: "number",
+					type: "integer",
+					minimum: 1,
+					maximum: 500,
 					description: "Max pages to process in this call (1-500, default 200)",
 				},
 				updatedSince: {
-					type: "number",
+					type: "integer",
+					minimum: 0,
 					description: "Only process pages updated at/after this unix-seconds timestamp",
 				},
 			},
@@ -572,6 +594,7 @@ export const wikiTools: MCPTool[] = [
 				revisionId: { type: "string" },
 				against: {
 					type: "string",
+					minLength: 1,
 					description: 'Another revision id, or "current" (default)',
 				},
 			},
@@ -621,8 +644,8 @@ export const wikiTools: MCPTool[] = [
 					type: "string",
 					description: "Restrict to pages belonging to this project ID",
 				},
-				limit: { type: "number", default: 50 },
-				offset: { type: "number", default: 0 },
+				limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+				offset: { type: "integer", minimum: 0, default: 0 },
 				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
 			},
 		},
@@ -716,8 +739,8 @@ export const wikiTools: MCPTool[] = [
 			type: "object",
 			properties: {
 				unreadOnly: { type: "boolean", default: false },
-				limit: { type: "number", default: 50 },
-				offset: { type: "number", default: 0 },
+				limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+				offset: { type: "integer", minimum: 0, default: 0 },
 			},
 		},
 		annotations: READ,
@@ -733,6 +756,7 @@ export const wikiTools: MCPTool[] = [
 			properties: {
 				ids: {
 					type: "array",
+					maxItems: 200,
 					items: { type: "string" },
 					description: "Notification IDs to mark read",
 				},
@@ -771,7 +795,7 @@ export const wikiTools: MCPTool[] = [
 					type: "string",
 					description: "Pass the previous page's `next` unchanged (replaces `since`)",
 				},
-				limit: { type: "number", default: 100 },
+				limit: { type: "integer", minimum: 1, maximum: 500, default: 100 },
 				projectId: { type: "string", description: "Restrict to changes on pages in this project" },
 				watchedOnly: {
 					type: "boolean",
@@ -840,8 +864,8 @@ export const wikiTools: MCPTool[] = [
 			required: ["slug", "title", "content"],
 			properties: {
 				slug: { type: "string", description: "Page ID or slug" },
-				title: { type: "string" },
-				content: { type: "string" },
+				title: { type: "string", minLength: 1, maxLength: 300 },
+				content: { type: "string", maxLength: 500000 },
 				baseRevisionId: {
 					type: "string",
 					nullable: true,
@@ -889,8 +913,8 @@ export const wikiTools: MCPTool[] = [
 					type: "string",
 					description: "Restrict to trashed pages belonging to this project ID",
 				},
-				limit: { type: "number", default: 50 },
-				offset: { type: "number", default: 0 },
+				limit: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+				offset: { type: "integer", minimum: 0, default: 0 },
 			},
 		},
 		annotations: READ,
@@ -914,7 +938,7 @@ export const wikiTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			required: ["id"],
-			properties: { id: { type: "string", description: "Trashed page ID" } },
+			properties: { id: { type: "string", minLength: 1, description: "Trashed page ID" } },
 		},
 		annotations: PLAIN_WRITE,
 		async handler(input, ctx) {

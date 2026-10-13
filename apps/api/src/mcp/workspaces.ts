@@ -48,9 +48,16 @@ export const workspacesTools: MCPTool[] = [
 			properties: {
 				slug: {
 					type: "string",
+					minLength: 2,
+					maxLength: 50,
 					description: 'URL-safe identifier for the workspace (e.g. "my-team")',
 				},
-				name: { type: "string", description: "Human-readable display name for the workspace" },
+				name: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "Human-readable display name for the workspace",
+				},
 			},
 		},
 		annotations: CREATE,
@@ -93,7 +100,12 @@ export const workspacesTools: MCPTool[] = [
 			type: "object",
 			required: ["name"],
 			properties: {
-				name: { type: "string", description: "New display name for the workspace" },
+				name: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "New display name for the workspace",
+				},
 			},
 		},
 		annotations: IDEMPOTENT_WRITE,
@@ -128,7 +140,7 @@ export const workspacesTools: MCPTool[] = [
 			"Invite a user to the workspace by email. Admin+ only. Creates the user record if they do not exist yet.",
 		inputSchema: {
 			type: "object",
-			required: ["email", "role"],
+			required: ["email"],
 			properties: {
 				email: { type: "string", description: "Email address of the user to invite" },
 				role: {
@@ -150,7 +162,7 @@ export const workspacesTools: MCPTool[] = [
 			type: "object",
 			required: ["userId"],
 			properties: {
-				userId: { type: "string", description: "ID of the user to remove" },
+				userId: { type: "string", minLength: 1, description: "ID of the user to remove" },
 			},
 		},
 		annotations: DESTRUCTIVE,
@@ -197,7 +209,12 @@ export const workspacesTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			properties: {
-				displayName: { type: ["string", "null"], description: "Workspace display name override" },
+				displayName: {
+					type: ["string", "null"],
+					minLength: 1,
+					maxLength: 100,
+					description: "Workspace display name override",
+				},
 				accent: {
 					type: ["string", "null"],
 					description: "Accent color as a hex string, e.g. #ff8800",
@@ -206,7 +223,12 @@ export const workspacesTools: MCPTool[] = [
 					type: ["string", "null"],
 					description: "Text/icon color to use on top of the accent color, as a hex string",
 				},
-				fontFamily: { type: ["string", "null"], description: "CSS font-family override" },
+				fontFamily: {
+					type: ["string", "null"],
+					minLength: 1,
+					maxLength: 100,
+					description: "CSS font-family override",
+				},
 				fontUrl: {
 					type: ["string", "null"],
 					description: "URL of a stylesheet defining fontFamily",

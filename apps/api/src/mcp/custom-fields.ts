@@ -35,8 +35,18 @@ export const customFieldsTools: MCPTool[] = [
 			type: "object",
 			required: ["key", "label", "type"],
 			properties: {
-				key: { type: "string", description: "Unique key (lowercase letters, digits, underscores)" },
-				label: { type: "string", description: "Human-readable label" },
+				key: {
+					type: "string",
+					minLength: 1,
+					maxLength: 50,
+					description: "Unique key (lowercase letters, digits, underscores)",
+				},
+				label: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "Human-readable label",
+				},
 				type: {
 					type: "string",
 					enum: ["text", "number", "select", "date", "user"],
@@ -44,7 +54,8 @@ export const customFieldsTools: MCPTool[] = [
 				},
 				options: {
 					type: "array",
-					items: { type: "string" },
+					maxItems: 100,
+					items: { type: "string", minLength: 1, maxLength: 100 },
 					description: "Allowed options (required for select type)",
 				},
 				projectId: {
@@ -66,9 +77,14 @@ export const customFieldsTools: MCPTool[] = [
 			type: "object",
 			required: ["id"],
 			properties: {
-				id: { type: "string" },
-				label: { type: "string" },
-				options: { type: "array", items: { type: "string" }, nullable: true },
+				id: { type: "string", minLength: 1 },
+				label: { type: "string", minLength: 1, maxLength: 100 },
+				options: {
+					type: "array",
+					maxItems: 100,
+					items: { type: "string", minLength: 1, maxLength: 100 },
+					nullable: true,
+				},
 			},
 		},
 		annotations: IDEMPOTENT_WRITE,
@@ -88,7 +104,7 @@ export const customFieldsTools: MCPTool[] = [
 			type: "object",
 			required: ["id"],
 			properties: {
-				id: { type: "string" },
+				id: { type: "string", minLength: 1 },
 			},
 		},
 		annotations: DESTRUCTIVE,

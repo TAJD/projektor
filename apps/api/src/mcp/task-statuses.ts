@@ -28,15 +28,20 @@ export const taskStatusesTools: MCPTool[] = [
 			type: "object",
 			required: ["key", "name", "category"],
 			properties: {
-				key: { type: "string", description: "Unique key (lowercase letters, digits, underscores)" },
-				name: { type: "string", description: "Display name" },
+				key: {
+					type: "string",
+					minLength: 1,
+					maxLength: 50,
+					description: "Unique key (lowercase letters, digits, underscores)",
+				},
+				name: { type: "string", minLength: 1, maxLength: 100, description: "Display name" },
 				category: {
 					type: "string",
 					enum: ["todo", "in_progress", "done", "cancelled"],
 					description: "Workflow bucket",
 				},
-				color: { type: "string", description: "Optional color (hex or named)" },
-				position: { type: "number", description: "Sort order position" },
+				color: { type: "string", maxLength: 50, description: "Optional color (hex or named)" },
+				position: { type: "integer", minimum: 0, description: "Sort order position" },
 				isDefault: { type: "boolean", description: "Set as the default status for new issues" },
 				isReviewStep: {
 					type: "boolean",
@@ -62,11 +67,11 @@ export const taskStatusesTools: MCPTool[] = [
 			type: "object",
 			required: ["id"],
 			properties: {
-				id: { type: "string" },
-				name: { type: "string" },
+				id: { type: "string", minLength: 1 },
+				name: { type: "string", minLength: 1, maxLength: 100 },
 				category: { type: "string", enum: ["todo", "in_progress", "done", "cancelled"] },
-				color: { type: "string", nullable: true },
-				position: { type: "number" },
+				color: { type: "string", nullable: true, maxLength: 50 },
+				position: { type: "integer", minimum: 0 },
 				isDefault: { type: "boolean", description: "Set as the default status for new issues" },
 				isReviewStep: {
 					type: "boolean",
@@ -97,7 +102,7 @@ export const taskStatusesTools: MCPTool[] = [
 			type: "object",
 			required: ["id"],
 			properties: {
-				id: { type: "string" },
+				id: { type: "string", minLength: 1 },
 			},
 		},
 		annotations: DESTRUCTIVE,

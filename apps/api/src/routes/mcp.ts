@@ -4,7 +4,7 @@ import { insufficientScopeChallenge } from "../auth/challenge";
 import { type Capability, capabilityForMcpTool, tokenAllows } from "../auth/scopes";
 import { agentMessagesTools } from "../mcp/agent-messages";
 import { agentsTools } from "../mcp/agents";
-import { applyIssueAlias } from "../mcp/aliases";
+import { normalizeToolArgs } from "../mcp/aliases";
 import { TOOL_DOMAIN_SLUGS, toolNamesForDomains } from "../mcp/catalog";
 import { codeHeatmapTools } from "../mcp/code-heatmap";
 import { commentsTools } from "../mcp/comments";
@@ -199,22 +199,21 @@ router.post("/:workspaceId", async (c) => {
 					jsonRpcError(body.id, -32602, "Invalid params: `arguments` must be an object")
 				);
 			}
-			const aliased = applyIssueAlias(name, rawArgs);
-			if ("conflict" in aliased) {
-				const conflictError = toToolError(
-					new ValidationError({ formErrors: [aliased.conflict], fieldErrors: {} })
-				);
-				// biome-ignore lint/style/noNonNullAssertion: a ValidationError always maps
-				return c.json(jsonRpcResult(body.id, conflictError!));
-			}
-			const args = aliased.args;
 			const tool = getAllTools(workspace.id).find((t) => t.name === name);
 			if (!tool) return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
 			// PROJ-877/920: required presence AND types/enums/lengths against the tool's
 			// inputSchema, before the handler runs. PROJ-893: a bad argument is a tool
 			// execution failure, so it comes back as an isError result naming each field
 			// (the model can fix and retry), not as a JSON-RPC protocol error.
-			const argIssues = validateToolArgs(tool.inputSchema, args);
+			const normalized = normalizeToolArgs(name, tool.inputSchema, rawArgs);
+			const args = normalized.args;
+			const argIssues = [
+				...normalized.issues,
+				...validateToolArgs(tool.inputSchema, args).map((i) => ({
+					...i,
+					path: normalized.sentPath(i.path),
+				})),
+			];
 			if (argIssues.length > 0) {
 				const fieldErrors: Record<string, string[]> = {};
 				for (const i of argIssues) {

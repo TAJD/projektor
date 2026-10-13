@@ -5,13 +5,12 @@
 // This covers the JSON Schema subset the hand-written tool schemas actually use: type
 // (string/number/integer/boolean/object/array, or a list of them), nullable, enum,
 // properties/required (recursively), items, min/maxLength, minimum/maximum and
-// min/maxItems. Any other keyword is ignored rather than guessed at. Properties a schema
-// doesn't declare are left alone: services still validate with their Zod schemas, which
-// remain the source of truth for business rules (PROJ-895 will generate these schemas
-// from them).
+// min/maxItems; other keywords are ignored rather than guessed at. Zod stays the source of
+// truth (PROJ-895 generates these schemas from it). An undeclared key is reported, with a
+// did-you-mean, unless its object allows additionalProperties or declares no properties.
 //
-// Deliberately lenient where the services already are, so this never rejects a call that
-// used to work: numeric strings pass for number/integer (the Zod schemas use z.coerce),
+// Types are checked as leniently as the services check them, so a type never fails a call
+// that used to work: numeric strings pass for number/integer (the Zod schemas use z.coerce),
 // "true"/"1"/"false"/"0"/"" pass for boolean (BooleanQueryParam), and null passes for any optional
 // property (Zod's .nullable().optional() "clear this field" idiom). Everything else that
 // doesn't match the declared type is rejected.
@@ -113,6 +112,37 @@ function validate(value: unknown, schema: Schema, path: string, issues: ArgIssue
 	}
 }
 
+const MAX_SUGGESTION_DISTANCE = 2;
+
+function editDistance(a: string, b: string): number {
+	const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+	for (let j = 1; j <= b.length; j++) d[0][j] = j;
+	for (let i = 1; i <= a.length; i++) {
+		for (let j = 1; j <= b.length; j++) {
+			const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+			d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+			if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+				d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+			}
+		}
+	}
+	return d[a.length][b.length];
+}
+
+function closest(key: string, candidates: string[]): string | undefined {
+	let best: string | undefined;
+	let bestDistance = MAX_SUGGESTION_DISTANCE + 1;
+	for (const candidate of candidates) {
+		if (Math.abs(candidate.length - key.length) >= bestDistance) continue;
+		const distance = editDistance(key.toLowerCase(), candidate.toLowerCase());
+		if (distance < bestDistance) {
+			best = candidate;
+			bestDistance = distance;
+		}
+	}
+	return best;
+}
+
 function validateObject(
 	obj: Record<string, unknown>,
 	schema: Schema,
@@ -122,7 +152,7 @@ function validateObject(
 	const props =
 		schema.properties && typeof schema.properties === "object"
 			? (schema.properties as Record<string, Schema>)
-			: {};
+			: undefined;
 	const prefix = path ? `${path}.` : "";
 	if (Array.isArray(schema.required)) {
 		for (const key of schema.required) {
@@ -132,11 +162,21 @@ function validateObject(
 		}
 	}
 	const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-	for (const [key, sub] of Object.entries(props)) {
+	for (const [key, sub] of Object.entries(props ?? {})) {
 		const v = obj[key];
 		if (v === undefined || !sub || typeof sub !== "object") continue;
 		if (v === null && !required.has(key)) continue; // optional field cleared
 		validate(v, sub, `${prefix}${key}`, issues);
+	}
+	if (!props || schema.additionalProperties) return;
+	const declared = Object.keys(props);
+	for (const key of Object.keys(obj)) {
+		if (Object.hasOwn(props, key)) continue;
+		const near = closest(key, declared);
+		issues.push({
+			path: `${prefix}${key}`,
+			message: `Unknown argument "${key}"${near ? `; did you mean "${near}"?` : ""}`,
+		});
 	}
 }
 

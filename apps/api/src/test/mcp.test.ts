@@ -252,7 +252,7 @@ describe("MCP endpoint", () => {
 		expect(err?.code).toBe("validation");
 		expect(err?.message).toBeTruthy();
 		expect(err?.fields?.title).toBeTruthy();
-		expect(err?.hint).toContain("title");
+		expect(err?.hint).toBeUndefined();
 	});
 
 	// A ServiceError with no structured `details` (e.g. a plain not-found)

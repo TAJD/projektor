@@ -40,10 +40,16 @@ export const agentsTools: MCPTool[] = [
 				issue: { type: "string", description: "Issue UUID or ref like PROJ-42, to claim" },
 				paths: {
 					type: "array",
-					items: { type: "string" },
+					maxItems: 100,
+					items: { type: "string", minLength: 1, maxLength: 400 },
 					description: "File paths to claim alongside the issue (optional)",
 				},
-				name: { type: "string", description: "Display name for the agent session (max 200)" },
+				name: {
+					type: "string",
+					minLength: 1,
+					maxLength: 200,
+					description: "Display name for the agent session (max 200)",
+				},
 			},
 		},
 		annotations: PLAIN_WRITE,
@@ -69,7 +75,11 @@ export const agentsTools: MCPTool[] = [
 					type: "string",
 					description: "Issue UUID or ref like PROJ-42, to optionally transition",
 				},
-				status: { type: "string", description: "New status for the issue (optional)" },
+				status: {
+					type: "string",
+					enum: ["backlog", "todo", "in_progress", "in_review", "done", "cancelled"],
+					description: "New status for the issue (optional)",
+				},
 				completionReport: {
 					type: "object",
 					description:
@@ -77,8 +87,8 @@ export const agentsTools: MCPTool[] = [
 						"Shape: {summary, verification, prLink?, remainder?} — summary and verification are required.",
 					required: ["summary", "verification"],
 					properties: {
-						summary: { type: "string" },
-						verification: { type: "string" },
+						summary: { type: "string", minLength: 1 },
+						verification: { type: "string", minLength: 1 },
 						prLink: { type: "string" },
 						remainder: {
 							type: "string",
@@ -103,7 +113,12 @@ export const agentsTools: MCPTool[] = [
 			type: "object",
 			required: ["name"],
 			properties: {
-				name: { type: "string", description: "Display name for the agent session (max 200)" },
+				name: {
+					type: "string",
+					minLength: 1,
+					maxLength: 200,
+					description: "Display name for the agent session (max 200)",
+				},
 				issueId: {
 					type: "string",
 					description: "Issue UUID or ref like PROJ-42, to link this session to (optional)",

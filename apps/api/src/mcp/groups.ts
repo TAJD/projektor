@@ -56,8 +56,17 @@ export const groupsTools: MCPTool[] = [
 			type: "object",
 			required: ["name"],
 			properties: {
-				name: { type: "string", description: "Group name, unique per workspace (max 100)" },
-				description: { type: "string", description: "Optional description (max 500)" },
+				name: {
+					type: "string",
+					minLength: 1,
+					maxLength: 100,
+					description: "Group name, unique per workspace (max 100)",
+				},
+				description: {
+					type: "string",
+					maxLength: 500,
+					description: "Optional description (max 500)",
+				},
 			},
 		},
 		annotations: CREATE,
@@ -73,8 +82,8 @@ export const groupsTools: MCPTool[] = [
 			required: ["id"],
 			properties: {
 				id: { type: "string", description: "Group ID" },
-				name: { type: "string", description: "New group name" },
-				description: { type: "string", description: "New description" },
+				name: { type: "string", minLength: 1, maxLength: 100, description: "New group name" },
+				description: { type: "string", maxLength: 500, description: "New description" },
 			},
 		},
 		annotations: IDEMPOTENT_WRITE,
@@ -106,7 +115,11 @@ export const groupsTools: MCPTool[] = [
 			required: ["groupId", "userId"],
 			properties: {
 				groupId: { type: "string", description: "Group ID" },
-				userId: { type: "string", description: "User ID (must be a workspace member)" },
+				userId: {
+					type: "string",
+					minLength: 1,
+					description: "User ID (must be a workspace member)",
+				},
 			},
 		},
 		annotations: PLAIN_WRITE,
@@ -141,7 +154,7 @@ export const groupsTools: MCPTool[] = [
 			required: ["groupId", "projectId", "role"],
 			properties: {
 				groupId: { type: "string", description: "Group ID" },
-				projectId: { type: "string", description: "Project ID" },
+				projectId: { type: "string", minLength: 1, description: "Project ID" },
 				role: {
 					type: "string",
 					enum: ["viewer", "member", "admin"],

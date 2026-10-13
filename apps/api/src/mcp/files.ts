@@ -22,6 +22,7 @@ export const filesTools: MCPTool[] = [
 				entityType: { type: "string", enum: ["issue", "wiki_page"] },
 				entityId: {
 					type: "string",
+					minLength: 1,
 					description: "Issue UUID or ref like PROJ-42 (when entityType is issue), or wiki page id",
 				},
 			},
@@ -39,7 +40,7 @@ export const filesTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			required: ["id"],
-			properties: { id: { type: "string" } },
+			properties: { id: { type: "string", minLength: 1 } },
 		},
 		annotations: READ,
 		async handler(input, ctx) {
@@ -57,6 +58,7 @@ export const filesTools: MCPTool[] = [
 				entityType: { type: "string", enum: ["issue", "wiki_page"] },
 				entityId: {
 					type: "string",
+					minLength: 1,
 					description: "Issue UUID or ref like PROJ-42 (when entityType is issue), or wiki page id",
 				},
 				wikiPageId: { type: "string", description: "Required when kind is 'wiki_ref'" },
@@ -75,7 +77,7 @@ export const filesTools: MCPTool[] = [
 		inputSchema: {
 			type: "object",
 			required: ["id"],
-			properties: { id: { type: "string" } },
+			properties: { id: { type: "string", minLength: 1 } },
 		},
 		annotations: DESTRUCTIVE,
 		async handler(input, ctx) {
