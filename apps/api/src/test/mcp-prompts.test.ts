@@ -15,8 +15,7 @@ describe("MCP prompts", () => {
 		slug = fixture.slug;
 		workspaceId = fixture.workspaceId;
 		epicId = fixture.issueId;
-		// Read the seeded number directly from D1, same reasoning as
-		// playbook-compose.test.ts: avoid warming getIssue's KV cache via REST.
+		// Read the seeded number directly from D1.
 		const row = await env.DB.prepare("SELECT number FROM issues WHERE id = ?")
 			.bind(epicId)
 			.first<{ number: number }>();

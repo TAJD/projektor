@@ -42,6 +42,25 @@ export async function listTaskStatuses(ctx: ServiceCtx) {
 	return result;
 }
 
+type CachedStatusRow = {
+	id: string;
+	key: string;
+	category: string | null;
+	is_default: number;
+	is_review_step: number;
+};
+
+// PROJ-1018: the status list as listTaskStatuses last cached it (isolate-local, then KV),
+// without falling back to D1. undefined when neither cache holds it.
+async function peekCachedTaskStatuses(ctx: ServiceCtx): Promise<CachedStatusRow[] | undefined> {
+	const cacheKey = TASK_STATUSES_CACHE_KEY(ctx.workspaceId);
+	const local = localCache.get(cacheKey);
+	if (local) return local as CachedStatusRow[];
+	const cached = await cache.get<CachedStatusRow[]>(ctx.kv, cacheKey);
+	if (cached) localCache.set(cacheKey, cached);
+	return cached ?? undefined;
+}
+
 async function invalidateTaskStatusesCache(ctx: ServiceCtx) {
 	const cacheKey = TASK_STATUSES_CACHE_KEY(ctx.workspaceId);
 	await cache.invalidate(ctx.kv, cacheKey);
@@ -252,6 +271,10 @@ export async function seedDefaultTaskStatuses(db: D1Database, workspaceId: strin
 // category is null when no task_statuses row backs the result (legacy key / fallback).
 // PROJ-749: isReviewStep is the status's explicit review-step flag (only the built-in
 // "in_review" key counts when there is no backing row).
+// PROJ-1018: a status found in the cached list (peekCachedTaskStatuses) skips D1; a miss
+// falls through to the queries below. The cache can be up to 60 s stale, so a status
+// deleted in that window can still resolve here: issues.status_id's foreign key rejects
+// the write, and the callers report that as "Task status not found".
 export async function resolveStatus(
 	ctx: ServiceCtx,
 	statusId: string | null | undefined,
@@ -276,6 +299,18 @@ export async function resolveStatus(
 
 	if (statusId === null) {
 		return fromKey(legacyStatus || "backlog");
+	}
+	const cachedList = await peekCachedTaskStatuses(ctx);
+	const cachedHit = cachedList?.find((r) =>
+		statusId ? r.id === statusId : legacyStatus ? r.key === legacyStatus : r.is_default === 1
+	);
+	if (cachedHit) {
+		return fromRow({
+			id: cachedHit.id,
+			key: cachedHit.key,
+			category: cachedHit.category,
+			isReviewStep: cachedHit.is_review_step,
+		});
 	}
 	if (statusId) {
 		const found = await orm

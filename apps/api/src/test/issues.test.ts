@@ -1116,7 +1116,7 @@ describe("Issues API", () => {
 	// ─── PROJ-212: completed_at + date-range filters ──────────────────────────
 	// The test rate limiter allows only RATE_LIMIT_API_MAX (5) API requests per
 	// window, so set up state via env.DB and assert via env.DB where possible —
-	// DB access bypasses both the rate limiter and the getIssue KV cache.
+	// DB access bypasses the rate limiter.
 	async function patch(id: string, body: Record<string, unknown>) {
 		return SELF.fetch(`http://localhost/api/issues/${id}`, {
 			method: "PATCH",
@@ -1750,7 +1750,7 @@ describe("Issues MCP — list_issues filter parity (PROJ-243)", () => {
 	});
 });
 
-describe("Issues KV cache", () => {
+describe("Issue reads are never cached (PROJ-1018)", () => {
 	let token: string;
 	let slug: string;
 	let projectId: string;
@@ -1759,7 +1759,7 @@ describe("Issues KV cache", () => {
 		({ token, slug, projectId } = await seedProjectFixture());
 	});
 
-	it("getIssue: row is always fresh; rollup/custom fields come from the KV cache (PROJ-863)", async () => {
+	it("getIssue: row and rollup are always read fresh from D1", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
 			headers: {
@@ -1771,7 +1771,7 @@ describe("Issues KV cache", () => {
 		});
 		const { id } = (await createRes.json()) as { id: string };
 
-		// First GET populates KV cache
+		// First GET
 		const first = await SELF.fetch(`http://localhost/api/issues/${id}`, {
 			headers: {
 				Authorization: `Bearer ${token}`,
@@ -1783,7 +1783,7 @@ describe("Issues KV cache", () => {
 		expect(firstIssue.title).toBe("Cache me");
 
 		// Change the row AND add a child behind the service's back: the row is re-read
-		// (fresh title), the rollup comes from the cache (child not counted yet).
+		// (fresh title), the rollup is re-read too (child counted).
 		await env.DB.prepare("UPDATE issues SET title = 'D1 was read' WHERE id = ?").bind(id).run();
 		await env.DB.prepare(
 			`INSERT INTO issues (id, workspace_id, project_id, number, title, status, priority, labels,
@@ -1794,7 +1794,7 @@ describe("Issues KV cache", () => {
 			.bind(crypto.randomUUID(), id)
 			.run();
 
-		// Second GET should return the cached value, not the corrupted D1 row
+		// Second GET reads D1 again
 		const second = await SELF.fetch(`http://localhost/api/issues/${id}`, {
 			headers: {
 				Authorization: `Bearer ${token}`,
@@ -1804,10 +1804,10 @@ describe("Issues KV cache", () => {
 		});
 		const secondIssue = (await second.json()) as { title: string; rollup: { total: number } };
 		expect(secondIssue.title).toBe("D1 was read");
-		expect(secondIssue.rollup.total).toBe(0);
+		expect(secondIssue.rollup.total).toBe(1);
 	});
 
-	it("updateIssue invalidates the cache so next getIssue re-fetches from D1", async () => {
+	it("getIssue after updateIssue returns the updated row", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
 			headers: {
@@ -1819,7 +1819,7 @@ describe("Issues KV cache", () => {
 		});
 		const { id } = (await createRes.json()) as { id: string };
 
-		// Warm the cache
+		// Read it once
 		await SELF.fetch(`http://localhost/api/issues/${id}`, {
 			headers: {
 				Authorization: `Bearer ${token}`,
@@ -1828,7 +1828,7 @@ describe("Issues KV cache", () => {
 			},
 		});
 
-		// PATCH should invalidate the cache
+		// PATCH it
 		await SELF.fetch(`http://localhost/api/issues/${id}`, {
 			method: "PATCH",
 			headers: {
@@ -1839,7 +1839,7 @@ describe("Issues KV cache", () => {
 			body: JSON.stringify({ title: "After update" }),
 		});
 
-		// Next GET must reflect the new value (fetched from D1, not stale cache)
+		// Next GET reflects the new value
 		const getRes = await SELF.fetch(`http://localhost/api/issues/${id}`, {
 			headers: {
 				Authorization: `Bearer ${token}`,
@@ -1854,7 +1854,7 @@ describe("Issues KV cache", () => {
 	// PROJ-359: ref lookups ("PROJ-42", the primary MCP agent read path) resolve
 	// via fetchIssueByRef rather than the id-keyed cache check at the top of
 	// getIssue, so they never got any cache benefit before this fix.
-	it("getIssue by ref: row is always fresh; rollup/custom fields come from the KV cache (PROJ-863)", async () => {
+	it("getIssue by ref: row and rollup are always read fresh from D1", async () => {
 		const createRes = await SELF.fetch("http://localhost/api/issues", {
 			method: "POST",
 			headers: {
@@ -1867,7 +1867,7 @@ describe("Issues KV cache", () => {
 		const { id, number } = (await createRes.json()) as { id: string; number: number };
 		const ref = `PROJ-${number}`;
 
-		// First GET by ref populates KV cache
+		// First GET by ref
 		const first = await SELF.fetch(`http://localhost/api/issues/${ref}`, {
 			headers: {
 				Authorization: `Bearer ${token}`,
@@ -1879,7 +1879,7 @@ describe("Issues KV cache", () => {
 		expect(firstIssue.title).toBe("Cache me by ref");
 
 		// Change the row AND add a child behind the service's back: the row is re-read
-		// (fresh title), the rollup comes from the cache (child not counted yet).
+		// (fresh title), the rollup is re-read too (child counted).
 		await env.DB.prepare("UPDATE issues SET title = 'D1 was read' WHERE id = ?").bind(id).run();
 		await env.DB.prepare(
 			`INSERT INTO issues (id, workspace_id, project_id, number, title, status, priority, labels,
@@ -1890,7 +1890,7 @@ describe("Issues KV cache", () => {
 			.bind(crypto.randomUUID(), id)
 			.run();
 
-		// Second GET by ref should return the cached value, not the corrupted D1 row
+		// Second GET by ref reads D1 again
 		const second = await SELF.fetch(`http://localhost/api/issues/${ref}`, {
 			headers: {
 				Authorization: `Bearer ${token}`,
@@ -1900,7 +1900,7 @@ describe("Issues KV cache", () => {
 		});
 		const secondIssue = (await second.json()) as { title: string; rollup: { total: number } };
 		expect(secondIssue.title).toBe("D1 was read");
-		expect(secondIssue.rollup.total).toBe(0);
+		expect(secondIssue.rollup.total).toBe(1);
 	});
 });
 
