@@ -109,7 +109,7 @@ describe("PROJ-976 coordination tools respect project visibility for UUIDs", () 
 		await seedHiddenHolder();
 		const res = await call("release_files", { paths: ["held/by-hidden.ts"] });
 		expect(toolError(res)).toBeUndefined();
-		expect(JSON.parse(res.result.content[0].text).count).toBe(0);
+		expect(JSON.parse(res.result.content[0].text).released).toBe(0);
 		expect(await activeClaims()).toBe(1);
 	});
 

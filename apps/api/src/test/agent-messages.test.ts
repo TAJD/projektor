@@ -257,6 +257,7 @@ describe("Agent Messages API", () => {
 				issueId: issue2.id,
 				agentId: agent2.id,
 				paths: ["src/coord.ts"],
+				verbose: true,
 			},
 			token2,
 			slug

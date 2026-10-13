@@ -8,6 +8,13 @@ import type { ServiceCtx } from "./types";
 // this one, so importing back would cycle.
 const LIVE_TTL_SECONDS = 120;
 
+const MAX_NAMED_SESSIONS = 5;
+
+function describeSessions(rows: readonly { id: string; name: string }[]): string {
+	const shown = rows.slice(0, MAX_NAMED_SESSIONS).map((r) => `${r.name} (${r.id})`);
+	return (rows.length > MAX_NAMED_SESSIONS ? [...shown, "…"] : shown).join(", ");
+}
+
 /**
  * PROJ-894: resolve the agent session a call acts as.
  *
@@ -27,7 +34,7 @@ const LIVE_TTL_SECONDS = 120;
 export async function resolveAgentSessionId(
 	ctx: ServiceCtx,
 	provided: string | undefined,
-	opts: { includeStale?: boolean } = {}
+	opts: { includeStale?: boolean; nameSessions?: boolean } = {}
 ): Promise<string> {
 	if (provided) return provided;
 
@@ -50,11 +57,11 @@ export async function resolveAgentSessionId(
 	// Two rows are enough to tell "exactly one" from "several".
 	const find = (extra: SQL[]) =>
 		orm
-			.select({ id: schema.agentSessions.id })
+			.select({ id: schema.agentSessions.id, name: schema.agentSessions.name })
 			.from(schema.agentSessions)
 			.where(and(...base, ...extra))
 			.orderBy(desc(schema.agentSessions.lastHeartbeatAt))
-			.limit(2);
+			.limit(opts.nameSessions ? MAX_NAMED_SESSIONS + 1 : 2);
 
 	const cutoff = Math.floor(Date.now() / 1000) - LIVE_TTL_SECONDS;
 	let rows = await find([gt(schema.agentSessions.lastHeartbeatAt, cutoff)]);
@@ -71,7 +78,7 @@ export async function resolveAgentSessionId(
 			agentId: [
 				rows.length === 0
 					? "no live session on this credential — pass agentId from register_agent"
-					: `several ${opts.includeStale ? "active" : "live"} sessions on this credential — pass agentId from register_agent`,
+					: `several ${opts.includeStale ? "active" : "live"} sessions on this credential${opts.nameSessions ? `: ${describeSessions(rows)}` : ""} — pass agentId from register_agent`,
 			],
 		},
 	});
