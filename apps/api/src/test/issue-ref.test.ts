@@ -205,8 +205,8 @@ describe("PROJ-959: issue refs accepted by every issue-id tool", () => {
 				const list = await call("list_messages", { scope });
 				expect(list.err).toBeUndefined();
 				expect(list.data.items.map((m: { body: string }) => m.body)).toEqual([
-					"posted by ref",
 					"posted by uuid",
+					"posted by ref",
 				]);
 			}
 		});

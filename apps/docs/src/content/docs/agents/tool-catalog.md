@@ -47,8 +47,8 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `post_message` | Post a coordination message to a workspace or issue channel so the agent fleet can communicate | write |
-| `list_messages` | List coordination messages for a workspace or issue channel, in chronological order | read-only |
+| `post_message` | Post a coordination message to a channel so the agent fleet can communicate: the workspace (default when scope is omitted), an issue, or a project (readable only by members who can see that project). Returns {id, scope, createdAt}; pass verbose:true for the whole stored row. | write |
+| `list_messages` | List coordination messages for a channel (workspace by default, an issue, or a project), newest first by default. Returns {items, nextCursor}; rows omit workspaceId and null keys. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 
 ### Workflow spec
 

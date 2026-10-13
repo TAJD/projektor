@@ -107,7 +107,9 @@ backed by MCP tools:
   about to edit; check who else holds a file before you start; release on completion.
 - **Coordination messages** — `post_message` / `list_messages`. Post to an *issue channel* when
   you start, hit a blocker, or finish; post to the *workspace channel* for fleet-wide
-  announcements ("rebasing `mcp.ts`, hold off"). Poll with a cursor to read what's new.
+  announcements ("rebasing `mcp.ts`, hold off"), or to a *project channel* (`project:KEY`) for
+  everyone who can see that project. `list_messages` returns the newest first over MCP; poll
+  with `since` (unix seconds) to read what's new.
 
 The **step-by-step protocol** — exact call order, payloads, and the file-ownership rules
 that keep agents on disjoint file sets — lives in

@@ -1,8 +1,14 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, or } from "drizzle-orm";
 import { ISSUE_REF_PATTERN } from "../schemas/common";
-import { effectiveProjectRole, isWorkspaceAdmin, visibleProjectPredicate } from "./access";
+import {
+	assertProjectAccess,
+	effectiveProjectRole,
+	isWorkspaceAdmin,
+	visibleProjectPredicate,
+} from "./access";
 import { NotFoundError } from "./errors";
+import { resolveProjectIdParam } from "./projects";
 import type { ServiceCtx } from "./types";
 
 export { ISSUE_REF_PATTERN };
@@ -193,22 +199,35 @@ export async function resolveIssueIdsParam(ctx: ServiceCtx, params: string[]): P
 }
 
 /**
- * Normalise an agent-message channel scope. "issue:PROJ-42" becomes "issue:<uuid>" so a
- * message posted by ref and one posted by UUID land in — and are read from — the same
- * channel; "workspace" and already-canonical scopes pass through unchanged.
+ * Canonical agent-message channel: "issue:<uuid>" for an issue ref or UUID (prefixed or
+ * bare), "project:<uuid>" for a project key or UUID, "workspace" when nothing names one.
  *
- * Visibility-aware like every ref resolution here: a hidden ref is "Issue not found".
- * `lenient` (the read path) instead returns the scope unchanged for a ref that doesn't
- * resolve — no channel is ever stored under a raw ref, so the listing is empty, exactly as
- * an unknown UUID scope already is.
+ * A hidden or unknown issue/project is NotFound. `lenient` (the read path) returns a scope
+ * no row can have instead, so the listing is empty.
  */
 export async function resolveMessageScope(
 	ctx: ServiceCtx,
-	scope: string,
+	input: Readonly<{ scope?: string; projectId?: string }>,
 	opts: Readonly<{ lenient?: boolean }> = {}
 ): Promise<string> {
-	if (!scope.startsWith("issue:")) return scope;
-	const target = scope.slice("issue:".length);
+	const scope = input.scope ?? (input.projectId === undefined ? "workspace" : "project");
+	if (scope === "workspace") return scope;
+
+	let projectTarget: string | undefined;
+	if (scope === "project") projectTarget = input.projectId;
+	else if (scope.startsWith("project:")) projectTarget = scope.slice("project:".length);
+	if (projectTarget !== undefined) {
+		try {
+			const projectId = await resolveProjectIdParam(ctx, projectTarget);
+			await assertProjectAccess(ctx, projectId, "read", { notFoundMessage: "Project not found" });
+			return `project:${projectId}`;
+		} catch (e) {
+			if (opts.lenient && e instanceof NotFoundError) return `project:unresolved:${projectTarget}`;
+			throw e;
+		}
+	}
+
+	const target = scope.startsWith("issue:") ? scope.slice("issue:".length) : scope;
 	if (opts.lenient) {
 		const resolved = await resolveOptionalIssueId(ctx, target);
 		return `issue:${resolved}`;
