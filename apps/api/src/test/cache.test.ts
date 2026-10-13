@@ -283,7 +283,7 @@ describe("KV caching", () => {
 			expect(local.get("k")).toBeUndefined();
 		});
 
-		it("update_issue's D1 write still lands and is reported as success when the cache invalidate fails", async () => {
+		it("update_issue never touches KV, so a failing KV cannot fail it (PROJ-1018)", async () => {
 			const { token, slug, workspaceId, projectId, userId } = await seedProjectFixture({
 				role: "owner",
 			});
@@ -303,7 +303,7 @@ describe("KV caching", () => {
 					params: { name: "update_issue", arguments: { id: issue.id, title: "After" } },
 				}),
 			});
-			expect(spy).toHaveBeenCalled();
+			expect(spy).not.toHaveBeenCalled();
 			expect(res.status).toBe(200);
 			const rpc = (await res.json()) as { result?: unknown; error?: unknown };
 			expect(rpc.error).toBeUndefined();

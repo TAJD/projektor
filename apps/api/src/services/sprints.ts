@@ -252,12 +252,7 @@ export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 		return [];
 	});
 
-	// PROJ-871: no KV invalidation needed here. PROJ-863 narrowed the per-issue KV cache
-	// (services/issues.ts's CachedIssueExtras) to only `rollup` and `customFields` —
-	// sprint_id is read live from the issues row on every getIssue/listIssues call, never
-	// served from that cache, so there is nothing to invalidate. This used to be
-	// `Promise.all(issueIds.map(id => cache.invalidate(...)))`, one KV subrequest per issue
-	// (up to 500, 10x the free-plan subrequest limit) invalidating a field the cache no
-	// longer even stores.
+	// PROJ-871/PROJ-1018: no KV invalidation needed here; issues have no per-issue KV
+	// cache (getIssue reads everything live from D1).
 	return { ok: true, count: issueIds.length };
 }

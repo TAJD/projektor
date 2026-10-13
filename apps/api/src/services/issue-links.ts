@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
 import {
 	CreateIssueLinkSchema,
@@ -12,12 +12,10 @@ import {
 	canWriteProject,
 	effectiveProjectRole,
 	isWorkspaceAdmin,
-	visibleProjectPredicate,
+	visibleProjectSqlFragment,
 } from "./access";
-import * as cache from "./cache";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
 import { resolveIssueIdParam } from "./issue-ref";
-import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 // PROJ-311: linking touches two issues; a non-admin must be able to write to the
@@ -35,16 +33,6 @@ async function requireIssueProjectWrite(
 
 type StoredLinkType = z.infer<typeof LinkTypeStoredEnum>;
 type EffectiveLinkType = z.infer<typeof LinkTypeEffectiveEnum>;
-
-interface LinkRow {
-	id: string;
-	workspaceId: string;
-	sourceIssueId: string;
-	targetIssueId: string;
-	type: StoredLinkType;
-	createdById: string;
-	createdAt: number;
-}
 
 // Normalise the (source, target, type) triple to its canonical stored form.
 // 'blocked_by' (A blocked_by B) becomes 'blocks' (B blocks A).
@@ -138,9 +126,6 @@ export async function createLink(ctx: ServiceCtx, raw: unknown) {
 		createdAt: now,
 	});
 
-	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${canon.source}`);
-	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${canon.target}`);
-
 	return { id };
 }
 
@@ -181,18 +166,68 @@ export async function deleteLink(ctx: ServiceCtx, raw: unknown) {
 		.delete(schema.issueLinks)
 		.where(and(eq(schema.issueLinks.id, id), eq(schema.issueLinks.workspaceId, ctx.workspaceId)));
 
-	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.sourceIssueId}`);
-	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.targetIssueId}`);
-
 	return { ok: true };
 }
 
-interface LinkedIssueRow {
+// PROJ-1018: one statement returns every link of an issue together with the other end's
+// metadata, so getIssue can fold it into its single D1 batch. The other end is joined
+// on workspace and, for non-admins, on project visibility (PROJ-1026): a link whose
+// other end the caller can't see is dropped, in either orientation.
+type LinkJoinRow = {
 	id: string;
-	title: string;
-	number: number;
-	statusCategory: string | null;
-	projectKey: string | null;
+	source_issue_id: string;
+	target_issue_id: string;
+	type: StoredLinkType;
+	created_by_id: string;
+	created_at: number;
+	linked_id: string | null;
+	linked_title: string | null;
+	linked_number: number | null;
+	linked_status_category: string | null;
+	linked_project_key: string | null;
+};
+
+export function buildLinksForIssueStatement(ctx: ServiceCtx, issueId: string): D1PreparedStatement {
+	const visible = visibleProjectSqlFragment(ctx, "li.project_id");
+	return ctx.db
+		.prepare(
+			`SELECT l.id, l.source_issue_id, l.target_issue_id, l.type, l.created_by_id, l.created_at,
+				li.id AS linked_id, li.title AS linked_title, li.number AS linked_number,
+				li.status_category AS linked_status_category, p.key AS linked_project_key
+			FROM issue_links l
+			LEFT JOIN issues li ON li.workspace_id = ?
+				AND li.id = CASE WHEN l.source_issue_id = ? THEN l.target_issue_id ELSE l.source_issue_id END
+			LEFT JOIN projects p ON p.id = li.project_id
+			WHERE l.workspace_id = ? AND (l.source_issue_id = ? OR l.target_issue_id = ?)
+			${visible ? `AND li.id IS NOT NULL AND ${visible.sql}` : ""}
+			ORDER BY l.created_at ASC`
+		)
+		.bind(ctx.workspaceId, issueId, ctx.workspaceId, issueId, issueId, ...(visible?.params ?? []));
+}
+
+export function mapLinksForIssue(issueId: string, rows: ReadonlyArray<LinkJoinRow>) {
+	return rows.map((row) => {
+		let type: EffectiveLinkType = row.type;
+		let linkedIssueId: string;
+		if (row.source_issue_id === issueId) {
+			linkedIssueId = row.target_issue_id;
+		} else {
+			linkedIssueId = row.source_issue_id;
+			if (row.type === "blocks") type = "blocked_by";
+			else if (row.type === "follows_from") type = "followed_by";
+		}
+		return {
+			id: row.id,
+			type,
+			linkedIssueId,
+			linkedIssueTitle: row.linked_title ?? "",
+			linkedIssueNumber: row.linked_number ?? 0,
+			linkedIssueProjectKey: row.linked_project_key ?? "",
+			linkedIssueStatusCategory: row.linked_status_category ?? "",
+			createdById: row.created_by_id,
+			createdAt: row.created_at,
+		};
+	});
 }
 
 export async function listLinksForIssue(ctx: ServiceCtx, raw: unknown) {
@@ -200,10 +235,9 @@ export async function listLinksForIssue(ctx: ServiceCtx, raw: unknown) {
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const issueId = await resolveIssueIdParam(ctx, result.data.issueId);
 
-	const orm = drizzle(ctx.db, { schema });
-
 	// PROJ-311: don't leak links for an issue in a project the user can't see.
 	if (!isWorkspaceAdmin(ctx.role)) {
+		const orm = drizzle(ctx.db, { schema });
 		const issue = await orm
 			.select({ projectId: schema.issues.projectId })
 			.from(schema.issues)
@@ -214,96 +248,6 @@ export async function listLinksForIssue(ctx: ServiceCtx, raw: unknown) {
 		}
 	}
 
-	const rows = await orm
-		.select({
-			id: schema.issueLinks.id,
-			workspaceId: schema.issueLinks.workspaceId,
-			sourceIssueId: schema.issueLinks.sourceIssueId,
-			targetIssueId: schema.issueLinks.targetIssueId,
-			type: schema.issueLinks.type,
-			createdById: schema.issueLinks.createdById,
-			createdAt: schema.issueLinks.createdAt,
-		})
-		.from(schema.issueLinks)
-		.where(
-			and(
-				eq(schema.issueLinks.workspaceId, ctx.workspaceId),
-				or(
-					eq(schema.issueLinks.sourceIssueId, issueId),
-					eq(schema.issueLinks.targetIssueId, issueId)
-				)
-			)
-		)
-		.orderBy(asc(schema.issueLinks.createdAt));
-
-	const results = rows as LinkRow[];
-
-	if (results.length === 0) return [];
-
-	// Resolve effective type and linked issue id for each row
-	const enriched = results.map((row) => {
-		let effectiveType: EffectiveLinkType = row.type;
-		let linkedIssueId: string;
-
-		if (row.sourceIssueId === issueId) {
-			linkedIssueId = row.targetIssueId;
-		} else {
-			linkedIssueId = row.sourceIssueId;
-			if (row.type === "blocks") effectiveType = "blocked_by";
-			else if (row.type === "follows_from") effectiveType = "followed_by";
-		}
-
-		return {
-			id: row.id,
-			type: effectiveType,
-			linkedIssueId,
-			createdById: row.createdById,
-			createdAt: row.createdAt,
-		};
-	});
-
-	// Batch-fetch linked issue metadata (title, number, project_key, status_category)
-	const linkedIds = [...new Set(enriched.map((e) => e.linkedIssueId))];
-	const visibleProject = visibleProjectPredicate(ctx, schema.issues.projectId);
-	// inChunks keeps the batch fetch under D1's 100-bound-parameter cap. See services/sql.ts.
-	const issueRows = await inChunks(linkedIds, (chunk) =>
-		orm
-			.select({
-				id: schema.issues.id,
-				title: schema.issues.title,
-				number: schema.issues.number,
-				statusCategory: schema.issues.statusCategory,
-				projectKey: schema.projects.key,
-			})
-			.from(schema.issues)
-			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-			.where(
-				and(
-					inArray(schema.issues.id, chunk),
-					eq(schema.issues.workspaceId, ctx.workspaceId),
-					visibleProject
-				)
-			)
-	);
-
-	const issueMap = new Map((issueRows as LinkedIssueRow[]).map((r) => [r.id, r]));
-
-	const visibleLinks = visibleProject
-		? enriched.filter((e) => issueMap.has(e.linkedIssueId))
-		: enriched;
-
-	return visibleLinks.map((e) => {
-		const linked = issueMap.get(e.linkedIssueId);
-		return {
-			id: e.id,
-			type: e.type,
-			linkedIssueId: e.linkedIssueId,
-			linkedIssueTitle: linked?.title ?? "",
-			linkedIssueNumber: linked?.number ?? 0,
-			linkedIssueProjectKey: linked?.projectKey ?? "",
-			linkedIssueStatusCategory: linked?.statusCategory ?? "",
-			createdById: e.createdById,
-			createdAt: e.createdAt,
-		};
-	});
+	const { results } = await buildLinksForIssueStatement(ctx, issueId).all<LinkJoinRow>();
+	return mapLinksForIssue(issueId, results);
 }

@@ -22,7 +22,6 @@ import {
 	visibleProjectSqlFragment,
 } from "./access";
 import { recordActivity } from "./activity";
-import * as cache from "./cache";
 import { buildAddCommentInsertStatement } from "./comments";
 import {
 	batchLoadCustomFields,
@@ -41,15 +40,13 @@ import {
 	issueHasLiveAgentLease,
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
-import { createLink, listLinksForIssue } from "./issue-links";
+import { buildLinksForIssueStatement, createLink, mapLinksForIssue } from "./issue-links";
 import { ISSUE_REF_PATTERN, resolveIssueIdParam, resolveVisibleIssueIdParam } from "./issue-ref";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks, sanitizeFtsQuery } from "./sql";
 import { resolveStatus } from "./task-statuses";
 import type { ServiceCtx } from "./types";
-
-const ISSUE_TTL = 300;
 
 // PROJ-870: turns a drizzle-built query into a D1PreparedStatement without executing it, so
 // it can be folded into a caller's own ctx.db.batch() array — same pattern as
@@ -455,8 +452,8 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 // return identical rollups for the same parent — byStatus keys and the done/remaining
 // derivation in computeChildRollup must never diverge between them. Workspace-scoped
 // like every query; deliberately NOT project-visibility filtered, matching getIssue's
-// own child rollup (see assertIssueProjectVisible — that gate applies to the parent
-// issue, not to counting its children).
+// own child rollup (the visibility gate applies to the parent issue, not to counting its
+// children; PROJ-1029).
 async function computeChildRollupsForParents(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
@@ -533,7 +530,14 @@ const issueColumns = (ctx: ServiceCtx) => ({
 	status_name: schema.taskStatuses.name,
 });
 
-async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, id: string) {
+type FetchIssueOpts = { visibleOnly?: boolean };
+
+async function fetchIssueById(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	id: string,
+	opts: FetchIssueOpts = {}
+) {
 	return (
 		(await orm
 			.select(issueColumns(ctx))
@@ -541,7 +545,13 @@ async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, 
 			.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
 			.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
 			.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
-			.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+			.where(
+				and(
+					eq(schema.issues.id, id),
+					eq(schema.issues.workspaceId, ctx.workspaceId),
+					opts.visibleOnly ? visibleProjectPredicate(ctx, schema.issues.projectId) : undefined
+				)
+			)
 			.get()) ?? null
 	);
 }
@@ -551,7 +561,12 @@ async function fetchIssueById(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, 
 // import cycle. Re-exported here so existing callers keep their import path.
 export { ISSUE_REF_PATTERN, resolveIssueIdParam };
 
-async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx, ref: string) {
+async function fetchIssueByRef(
+	orm: ReturnType<typeof drizzle>,
+	ctx: ServiceCtx,
+	ref: string,
+	opts: FetchIssueOpts = {}
+) {
 	const m = ref.match(ISSUE_REF_PATTERN);
 	if (!m)
 		throw new ValidationError({
@@ -569,7 +584,8 @@ async function fetchIssueByRef(orm: ReturnType<typeof drizzle>, ctx: ServiceCtx,
 				and(
 					eq(schema.projects.key, m[1]),
 					eq(schema.issues.number, parseInt(m[2], 10)),
-					eq(schema.issues.workspaceId, ctx.workspaceId)
+					eq(schema.issues.workspaceId, ctx.workspaceId),
+					opts.visibleOnly ? visibleProjectPredicate(ctx, schema.issues.projectId) : undefined
 				)
 			)
 			.get()) ?? null
@@ -588,28 +604,19 @@ function computeChildRollup(childRows: ReadonlyArray<{ status: string; count: nu
 	return { total, byStatus, done, remaining };
 }
 
-// PROJ-311: an issue is only visible if its project is granted to one of the
-// user's groups (owner/admin bypass). Throw the issue-not-found error rather than a
-// project one so an invisible issue's existence never leaks.
-async function assertIssueProjectVisible(ctx: ServiceCtx, projectId: string): Promise<void> {
-	if (isWorkspaceAdmin(ctx.role)) return;
-	if ((await effectiveProjectRole(ctx, projectId)) === null) {
-		throw new NotFoundError("Issue not found");
-	}
-}
-
 async function fetchIssueByIdOrRef(
 	orm: ReturnType<typeof drizzle>,
 	ctx: ServiceCtx,
 	id: string | undefined,
-	ref: string | undefined
+	ref: string | undefined,
+	opts: FetchIssueOpts = {}
 ) {
 	if (id) {
 		return ISSUE_REF_PATTERN.test(id)
-			? fetchIssueByRef(orm, ctx, id)
-			: fetchIssueById(orm, ctx, id);
+			? fetchIssueByRef(orm, ctx, id, opts)
+			: fetchIssueById(orm, ctx, id, opts);
 	}
-	if (ref) return fetchIssueByRef(orm, ctx, ref);
+	if (ref) return fetchIssueByRef(orm, ctx, ref, opts);
 	return null;
 }
 
@@ -623,41 +630,11 @@ function buildIssueUrl(issueRecord: Record<string, unknown>): string | null {
 		: null;
 }
 
-// PROJ-863: what the KV cache holds for an issue — only data owned by the issue itself
-// and invalidated by its own writes (child rollup via the parent invalidation, custom
-// field values via the issue update). Everything that embeds OTHER entities — linked
-// issues' titles/statuses, status/type names, project key, sprint — is read live on
-// every request (the row fetch is one joined query, links one more), so renaming or
-// deleting those can never leave a stale copy behind. Entries written in the old
-// full-payload shape still carry these two keys, so they stay readable.
-type CachedIssueExtras = { rollup: ReturnType<typeof computeChildRollup>; customFields: unknown[] };
-
-async function loadIssueExtras(
-	ctx: ServiceCtx,
-	orm: ReturnType<typeof drizzle>,
-	issueId: string
-): Promise<CachedIssueExtras> {
-	const key = `issue:${ctx.workspaceId}:${issueId}`;
-	const cached = await cache.get<CachedIssueExtras>(ctx.kv, key);
-	if (cached?.rollup && cached.customFields) {
-		return { rollup: cached.rollup, customFields: cached.customFields };
-	}
-
-	type ChildCount = { status: string; count: number };
-	const childRows = (await orm.all(
-		sql`SELECT status, COUNT(*) as count FROM issues
-			WHERE parent_id = ${issueId} AND workspace_id = ${ctx.workspaceId}
-			GROUP BY status`
-	)) as ChildCount[];
-	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, [issueId]);
-	const extras: CachedIssueExtras = {
-		rollup: computeChildRollup(childRows),
-		customFields: customFieldsByIssue[issueId] ?? [],
-	};
-	await cache.set(ctx.kv, key, extras, ISSUE_TTL);
-	return extras;
-}
-
+// PROJ-1018: getIssue is two D1 round trips. The first reads the issue row, scoped by
+// project visibility so an issue the caller can't see reads as not found. The second is
+// one batch: child rollup, custom field values, and links with the other end's metadata.
+// Nothing is cached: the per-issue KV cache (PROJ-863) cost a KV get, put and deletes
+// on every read and write, and had served stale data before.
 export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 	const result = GetIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
@@ -665,24 +642,36 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 
 	const orm = drizzle(ctx.db, { schema });
 
-	const issue = await fetchIssueByIdOrRef(orm, ctx, id, ref);
+	const issue = await fetchIssueByIdOrRef(orm, ctx, id, ref, { visibleOnly: true });
 	if (!issue) throw new NotFoundError("Issue not found");
 
 	const issueRecord = issue as Record<string, unknown>;
-	await assertIssueProjectVisible(ctx, issueRecord.project_id as string);
 	const issueId = issueRecord.id as string;
 
-	const { rollup, customFields } = await loadIssueExtras(ctx, orm, issueId);
-	const links = await listLinksForIssue(ctx, { issueId });
+	const [childResult, customFieldResult, linkResult] = await ctx.db.batch([
+		ctx.db
+			.prepare(
+				`SELECT status, COUNT(*) AS count FROM issues
+				WHERE parent_id = ? AND workspace_id = ? GROUP BY status`
+			)
+			.bind(issueId, ctx.workspaceId),
+		ctx.db
+			.prepare(
+				`SELECT d.key, d.label, d.type, v.value FROM custom_field_values v
+				JOIN custom_field_definitions d ON d.id = v.field_id
+				WHERE v.issue_id = ? AND d.workspace_id = ?`
+			)
+			.bind(issueId, ctx.workspaceId),
+		buildLinksForIssueStatement(ctx, issueId),
+	]);
 
-	const full: Record<string, unknown> = {
+	return {
 		...issueRecord,
-		rollup,
-		links,
-		customFields,
+		rollup: computeChildRollup(childResult.results as Array<{ status: string; count: number }>),
+		links: mapLinksForIssue(issueId, linkResult.results as Parameters<typeof mapLinksForIssue>[1]),
+		customFields: customFieldResult.results,
 		url: buildIssueUrl(issueRecord),
-	};
-	return full;
+	} as Record<string, unknown>;
 }
 
 // PROJ-931: fetch up to 50 issues in one call, by ref (KEY-NUMBER) and/or id, for agents
@@ -1071,12 +1060,8 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 		}),
 	];
 
-	const results = await ctx.db.batch(statements);
+	const results = await runIssueWriteBatch(ctx, statements);
 	const number = (results[0]?.results as Array<{ number: number }> | undefined)?.[0]?.number;
-
-	if (parentId) {
-		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${parentId}`);
-	}
 
 	await broadcastWorkspaceEvent(ctx, {
 		type: "issue.created",
@@ -1627,40 +1612,10 @@ function buildUpdateDiffRefs(data: UpdateIssueData): Record<string, unknown> {
 	return diff;
 }
 
-async function invalidateUpdateCaches(
-	ctx: ServiceCtx,
-	id: string,
-	data: UpdateIssueData,
-	existing: ExistingIssue
-): Promise<void> {
-	await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${id}`);
-
-	// Invalidate the old parent's rollup cache
-	if (existing.parentId) {
-		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${existing.parentId}`);
-	}
-	// If parentId is being changed to a new parent, also invalidate that one
-	if ("parentId" in data && data.parentId && data.parentId !== existing.parentId) {
-		await cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${data.parentId}`);
-	}
-}
-
-export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) {
-	const id = await resolveIssueIdParam(ctx, rawId);
-	const result = UpdateIssueSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(flattenWithPaths(result.error));
-	const data =
-		"parentId" in result.data && result.data.parentId
-			? { ...result.data, parentId: await resolveIssueIdParam(ctx, result.data.parentId) }
-			: result.data;
-
-	if ("parentId" in data && data.parentId) {
-		await validateParent(ctx, data.parentId, id);
-	}
-
-	const orm = drizzle(ctx.db, { schema });
-
-	const existingRow = await orm
+// The issue fields updateIssue's checks and writes need, plus its current status's
+// review-step flag.
+function fetchExistingForUpdate(ctx: ServiceCtx, orm: ReturnType<typeof drizzle>, id: string) {
+	return orm
 		.select({
 			id: schema.issues.id,
 			projectId: schema.issues.projectId,
@@ -1688,6 +1643,69 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		)
 		.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 		.get();
+}
+
+// PROJ-1018: resolveStatus may answer from a cached status list that is up to 60 s stale.
+// If the status was deleted in that window, issues.status_id's foreign key rejects the
+// write; report it like any other unknown status rather than as an internal error.
+async function runIssueWriteBatch(ctx: ServiceCtx, statements: D1PreparedStatement[]) {
+	try {
+		return await ctx.db.batch(statements);
+	} catch (err) {
+		if (String(err).includes("FOREIGN KEY constraint failed")) {
+			throw new ValidationError({
+				formErrors: ["A referenced record no longer exists (e.g. a task status just deleted)"],
+				fieldErrors: {},
+			});
+		}
+		throw err;
+	}
+}
+
+// A settled read's value, or its error rethrown. updateIssue settles its parallel reads
+// first and unwraps them in the order the checks used to run one by one, so the error a
+// caller gets when several checks fail is the same as before.
+function settledValue<T>(r: PromiseSettledResult<T>): T {
+	if (r.status === "rejected") throw r.reason;
+	return r.value;
+}
+
+export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) {
+	const result = UpdateIssueSchema.safeParse(raw);
+	const [idRead, parentIdRead] = await Promise.allSettled([
+		resolveIssueIdParam(ctx, rawId),
+		result.success && "parentId" in result.data && result.data.parentId
+			? resolveIssueIdParam(ctx, result.data.parentId)
+			: undefined,
+	]);
+	const id = settledValue(idRead);
+	if (!result.success) throw new ValidationError(flattenWithPaths(result.error));
+	const parentId = settledValue(parentIdRead);
+	const data = parentId ? { ...result.data, parentId } : result.data;
+
+	const orm = drizzle(ctx.db, { schema });
+
+	// PROJ-1018: these reads don't depend on each other, so they run concurrently instead
+	// of one round trip after another.
+	const [parentCheck, existingRead, assigneeCheck, customFieldsRead, liveSessionRead] =
+		await Promise.allSettled([
+			"parentId" in data && data.parentId ? validateParent(ctx, data.parentId, id) : undefined,
+			fetchExistingForUpdate(ctx, orm, id),
+			// PROJ-785: a non-null assigneeId must be a member of this workspace —
+			// otherwise we'd persist a dangling or wrong-workspace user reference. `null`
+			// (clearing the assignee) and "not provided" (key absent) both skip this.
+			"assigneeId" in data && data.assigneeId
+				? requireWorkspaceMember(ctx, data.assigneeId)
+				: undefined,
+			// PROJ-870: custom-field writes are validated (read) before the batch; the upserts
+			// themselves are built as statements and folded into it below.
+			data.customFields && Object.keys(data.customFields).length > 0
+				? validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
+				: [],
+			data.agentSessionId ? isLiveAgentSessionId(ctx, data.agentSessionId) : false,
+		]);
+	settledValue(parentCheck);
+	const existingRow = settledValue(existingRead);
 	if (!existingRow) throw new NotFoundError("Issue not found");
 	// PROJ-749: a status row's flag decides; without one only the built-in "in_review" counts.
 	const { statusReviewFlag, ...existingFields } = existingRow;
@@ -1705,12 +1723,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
 	}
 
-	// PROJ-785: a non-null assigneeId must be a member of this workspace —
-	// otherwise we'd persist a dangling or wrong-workspace user reference. `null`
-	// (clearing the assignee) and "not provided" (key absent) both skip this.
-	if ("assigneeId" in data && data.assigneeId) {
-		await requireWorkspaceMember(ctx, data.assigneeId);
-	}
+	settledValue(assigneeCheck);
 
 	const {
 		setValues,
@@ -1722,13 +1735,8 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		closing,
 	} = await buildUpdateSetValues(ctx, orm, data, existing);
 
-	// PROJ-870: custom-field writes are validated (read) before the batch, same as before,
-	// but the upserts themselves are now built as statements and folded in below instead of
-	// looping one round trip per field.
-	const cfWrites =
-		data.customFields && Object.keys(data.customFields).length > 0
-			? await validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
-			: [];
+	const cfWrites = settledValue(customFieldsRead);
+	const liveSession = settledValue(liveSessionRead);
 
 	const commentId = crypto.randomUUID();
 	const commentNow = now();
@@ -1802,11 +1810,11 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	// same batch (PROJ-870 convention) rather than a separate round trip; the statement's
 	// own WHERE guard (status='active' AND heartbeat > cutoff) makes it a no-op if the
 	// session went stale between this check and the batch executing.
-	if (data.agentSessionId && (await isLiveAgentSessionId(ctx, data.agentSessionId))) {
+	if (data.agentSessionId && liveSession) {
 		statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, data.agentSessionId));
 	}
 
-	await ctx.db.batch(statements);
+	await runIssueWriteBatch(ctx, statements);
 
 	if ((recordCompletionReport || reviseCompletionReport) && data.completionReport) {
 		await broadcastWorkspaceEvent(ctx, {
@@ -1815,8 +1823,6 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 			data: { id: commentId, issueId: id, authorId: ctx.userId },
 		});
 	}
-
-	await invalidateUpdateCaches(ctx, id, data, existing);
 
 	const isStatusChange = data.status !== undefined || data.statusId !== undefined;
 	await broadcastWorkspaceEvent(ctx, {
@@ -2010,17 +2016,6 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 				eq(schema.attachments.kind, "file")
 			)
 		);
-	// Issues whose cached payload mentions this one (link targets/sources, children) —
-	// invalidated after the batch so they stop showing a deleted issue.
-	const affected = await ctx.db
-		.prepare(
-			`SELECT target_issue_id AS id FROM issue_links WHERE source_issue_id = ?1
-			 UNION SELECT source_issue_id FROM issue_links WHERE target_issue_id = ?1
-			 UNION SELECT id FROM issues WHERE parent_id = ?1 AND workspace_id = ?2`
-		)
-		.bind(id, ctx.workspaceId)
-		.all<{ id: string }>();
-
 	const deleteStatements: D1PreparedStatement[] = [
 		toD1Statement(
 			ctx,
@@ -2149,11 +2144,6 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 	}
 
 	await recordActivity(ctx, { entityType: "issue", entityId: id, action: "deleted" });
-	const toInvalidate = new Set([id, ...affected.results.map((r) => r.id)]);
-	if (existing.parentId) toInvalidate.add(existing.parentId);
-	await Promise.all(
-		[...toInvalidate].map((iid) => cache.invalidate(ctx.kv, `issue:${ctx.workspaceId}:${iid}`))
-	);
 
 	await broadcastWorkspaceEvent(ctx, {
 		type: "issue.deleted",

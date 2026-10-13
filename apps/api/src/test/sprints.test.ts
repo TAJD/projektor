@@ -207,13 +207,13 @@ describe("Sprints API", () => {
 		expect(issueData.sprint_id).toBeNull();
 	});
 
-	it("PROJ-356: move-issues invalidates the issue KV cache — an immediate GET reflects the new sprint_id", async () => {
+	it("PROJ-356: an immediate GET after move-issues reflects the new sprint_id", async () => {
 		const sprintRes = await createSprint({ projectId, name: "Cache Target Sprint" });
 		const { id: sprintId } = (await sprintRes.json()) as { id: string };
 
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Cache issue" });
 
-		// Warm the issue KV cache with the pre-move (sprint_id: null) shape.
+		// Read the pre-move (sprint_id: null) shape.
 		const before = await SELF.fetch(`http://localhost/api/issues/${issue.id}`, {
 			headers: authHeaders(token, slug),
 		});
@@ -273,15 +273,12 @@ describe("Sprints API", () => {
 				issueIds.push(issue.id);
 			}
 
-			// Warm the per-issue KV cache first, so the GET after the move proves sprint_id
-			// isn't served stale from it (it's read live from the row; the cache only holds
-			// rollup/customFields).
+			// Read it once before the move, so the GET after it proves sprint_id is read live.
 			const warmRes = await SELF.fetch(`http://localhost/api/issues/${issueIds[0]}`, {
 				headers: authHeaders(token, slug),
 			});
 			expect(warmRes.status).toBe(200);
 			expect(((await warmRes.json()) as { sprint_id: string | null }).sprint_id).toBeNull();
-			expect(await env.KV.get(`issue:${workspaceId}:${issueIds[0]}`)).not.toBeNull();
 
 			let kvDeletes = 0;
 			const origDelete = env.KV.delete.bind(env.KV);
@@ -303,9 +300,7 @@ describe("Sprints API", () => {
 			expect(result.count).toBe(500);
 			expect(kvDeletes).toBeLessThanOrEqual(50);
 
-			// The cache entry is still there (nothing invalidated it), yet the GET shows the
-			// new sprint.
-			expect(await env.KV.get(`issue:${workspaceId}:${issueIds[0]}`)).not.toBeNull();
+			// The GET shows the new sprint.
 			const getRes = await SELF.fetch(`http://localhost/api/issues/${issueIds[0]}`, {
 				headers: authHeaders(token, slug),
 			});
