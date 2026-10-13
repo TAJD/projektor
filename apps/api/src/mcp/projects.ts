@@ -1,4 +1,5 @@
 import type { MCPTool } from "@projektor/types";
+import { BooleanQueryParam } from "../schemas/common";
 import {
 	createProject,
 	deleteProject,
@@ -23,8 +24,11 @@ export const projectsTools: MCPTool[] = [
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			const { includeArchived } = (input ?? {}) as { includeArchived?: boolean };
-			return listProjects(ctx, { includeArchived });
+			const { includeArchived } = (input ?? {}) as { includeArchived?: unknown };
+			// PROJ-1030: the first pass admits "false"/"0", which are truthy as strings.
+			return listProjects(ctx, {
+				includeArchived: BooleanQueryParam.optional().parse(includeArchived),
+			});
 		},
 	},
 	{

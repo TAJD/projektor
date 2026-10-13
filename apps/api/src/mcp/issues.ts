@@ -181,7 +181,7 @@ export const issuesTools: MCPTool[] = [
 					minimum: 0,
 					description: "Pagination cursor: pass the previous page's `next` unchanged",
 				},
-				limit: { type: "number", minimum: 1, maximum: 100, default: 50, description: "Max 100" },
+				limit: { type: "number", minimum: 1, maximum: 100, default: 30, description: "Max 100" },
 				...BODY_CHARS_PROP,
 				...VIEW_FIELDS_PROPS,
 			},

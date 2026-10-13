@@ -36,6 +36,7 @@ export const ISSUE_FIELD_NAMES = [
 	"assignee_name",
 	"labels",
 	"parent_id",
+	"parent_ref",
 	"type_id",
 	"status_id",
 	"status_category",
