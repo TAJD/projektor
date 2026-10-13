@@ -7,6 +7,7 @@ import {
 	seedIssue,
 	seedProject,
 	seedWorkspaceRoles,
+	toolError,
 } from "./helpers";
 
 describe("Issue Links API", () => {
@@ -370,5 +371,155 @@ describe("createLink target-visibility existence oracle", () => {
 		expect(missingRes.status).toBe(404);
 		expect(unwritableRes.status).toBe(404);
 		expect(await missingRes.json()).toEqual(await unwritableRes.json());
+	});
+});
+
+describe("PROJ-1026 — links to projects the caller can't see", () => {
+	let roles: Awaited<ReturnType<typeof seedWorkspaceRoles>>;
+	let projectA: { id: string };
+	let projectB: { id: string };
+
+	async function link(sourceId: string, targetIssueId: string, type: string) {
+		const res = await SELF.fetch(`http://localhost/api/issues/${sourceId}/links`, {
+			method: "POST",
+			headers: authHeaders(roles.owner.token, roles.workspace.slug),
+			body: JSON.stringify({ targetIssueId, type }),
+		});
+		expect(res.status).toBe(201);
+	}
+
+	async function restGet(path: string, token: string) {
+		const res = await SELF.fetch(`http://localhost${path}`, {
+			headers: authHeaders(token, roles.workspace.slug),
+		});
+		expect(res.status).toBe(200);
+		return res.json();
+	}
+
+	async function mcp(name: string, args: Record<string, unknown>, token: string) {
+		const res = await SELF.fetch(`http://localhost/mcp/${roles.workspace.id}`, {
+			method: "POST",
+			headers: authHeaders(token, roles.workspace.slug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name, arguments: args },
+			}),
+		});
+		const json = (await res.json()) as { result: { content: Array<{ text: string }> } };
+		expect(toolError(json)).toBeUndefined();
+		return JSON.parse(json.result.content[0].text);
+	}
+
+	beforeEach(async () => {
+		roles = await seedWorkspaceRoles();
+		projectA = await seedProject(roles.workspace.id, "PUBA");
+		projectB = await seedProject(roles.workspace.id, "SECB");
+		await seedGroupGrant(roles.workspace.id, roles.member.user.id, projectA.id, "member");
+	});
+
+	describe("link listings", () => {
+		type LinkEntry = { linkedIssueId: string };
+
+		let a1: { id: string };
+		let a2: { id: string };
+		let b1: { id: string };
+		let b2: { id: string };
+
+		const surfaces: Array<[string, (token: string) => Promise<LinkEntry[]>]> = [
+			[
+				"REST list links",
+				async (t) => restGet(`/api/issues/${a1.id}/links`, t) as Promise<LinkEntry[]>,
+			],
+			[
+				"REST get issue",
+				async (t) => ((await restGet(`/api/issues/${a1.id}`, t)) as { links: LinkEntry[] }).links,
+			],
+			[
+				"MCP list_issue_links",
+				async (t) => {
+					const data = await mcp("list_issue_links", { issueId: a1.id }, t);
+					return data.items ?? data;
+				},
+			],
+			["MCP get_issue", async (t) => (await mcp("get_issue", { id: a1.id }, t)).links ?? []],
+		];
+
+		beforeEach(async () => {
+			const ws = roles.workspace.id;
+			const owner = roles.owner.user.id;
+			a1 = await seedIssue(ws, projectA.id, owner, { title: "A one" });
+			a2 = await seedIssue(ws, projectA.id, owner, { title: "Visible neighbour" });
+			b1 = await seedIssue(ws, projectB.id, owner, { title: "Hidden roadmap item" });
+			b2 = await seedIssue(ws, projectB.id, owner, { title: "Hidden launch plan" });
+
+			await link(a1.id, b1.id, "blocks");
+			await link(b2.id, a1.id, "blocks");
+			await link(a1.id, a2.id, "relates_to");
+		});
+
+		describe.each(surfaces)("%s", (_name, linksFor) => {
+			it("omits links whose other end is in a project the caller can't see", async () => {
+				const links = await linksFor(roles.member.token);
+
+				expect(links.map((l) => l.linkedIssueId)).toEqual([a2.id]);
+				expect(JSON.stringify(links)).not.toMatch(/Hidden|SECB/);
+			});
+
+			it("still shows every link to a workspace admin", async () => {
+				const links = await linksFor(roles.owner.token);
+
+				expect(links.map((l) => l.linkedIssueId).sort()).toEqual([a2.id, b1.id, b2.id].sort());
+			});
+
+			it("still shows cross-project links to a caller who can see both projects", async () => {
+				await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, projectA.id, "viewer");
+				await seedGroupGrant(roles.workspace.id, roles.viewer.user.id, projectB.id, "viewer");
+
+				const links = await linksFor(roles.viewer.token);
+
+				expect(links.map((l) => l.linkedIssueId).sort()).toEqual([a2.id, b1.id, b2.id].sort());
+			});
+		});
+	});
+
+	describe("get_prioritized_issues centrality", () => {
+		beforeEach(async () => {
+			const ws = roles.workspace.id;
+			const owner = roles.owner.user.id;
+			const blockedByHidden = await seedIssue(ws, projectA.id, owner, {
+				title: "Blocked by hidden",
+			});
+			const blockedByVisible = await seedIssue(ws, projectA.id, owner, {
+				title: "Blocked by visible",
+			});
+			const hiddenBlocker = await seedIssue(ws, projectB.id, owner, { title: "Hidden blocker" });
+			const visibleBlocker = await seedIssue(ws, projectA.id, owner, { title: "Visible blocker" });
+
+			await link(hiddenBlocker.id, blockedByHidden.id, "blocks");
+			await link(visibleBlocker.id, blockedByVisible.id, "blocks");
+		});
+
+		async function centralityByTitle(token: string) {
+			const data = (await mcp("get_prioritized_issues", { includeNotReady: true }, token)) as {
+				issues: Array<{ title: string; _score_breakdown: { centrality: number } }>;
+			};
+			return Object.fromEntries(data.issues.map((i) => [i.title, i._score_breakdown.centrality]));
+		}
+
+		it("counts only inbound links from issues the caller can see", async () => {
+			const centrality = await centralityByTitle(roles.member.token);
+
+			expect(centrality["Blocked by visible"]).toBe(1);
+			expect(centrality["Blocked by hidden"]).toBe(0);
+		});
+
+		it("still counts every inbound link for a workspace admin", async () => {
+			const centrality = await centralityByTitle(roles.owner.token);
+
+			expect(centrality["Blocked by visible"]).toBe(1);
+			expect(centrality["Blocked by hidden"]).toBe(1);
+		});
 	});
 });

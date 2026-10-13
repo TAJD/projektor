@@ -2273,7 +2273,13 @@ async function queryPrioritized(
 		`((i.status_id IS NULL AND i.status NOT IN ('done', 'cancelled'))
 		  OR (i.status_id IS NOT NULL AND ts.category NOT IN ('done', 'cancelled')))`,
 	];
-	const params: unknown[] = [ctx.workspaceId];
+	const linkSource = visibleProjectSqlFragment(ctx, "src.project_id");
+	const inboundLinkVisible = linkSource
+		? `AND EXISTS (SELECT 1 FROM issues src
+		     WHERE src.id = l.source_issue_id AND src.workspace_id = l.workspace_id
+		       AND ${linkSource.sql})`
+		: "";
+	const params: unknown[] = [...(linkSource?.params ?? []), ctx.workspaceId];
 	if (opts.projectId) {
 		where.push("i.project_id = ?");
 		params.push(opts.projectId);
@@ -2299,7 +2305,8 @@ async function queryPrioritized(
 			SELECT i.id, i.title, i.status, i.priority, i.project_id, i.number, i.status_id,
 			       ts.category AS status_category, i.dor_ready, i.dor_missing, i.rowid AS rid,
 			       (SELECT COUNT(*) FROM issue_links l
-			         WHERE l.workspace_id = i.workspace_id AND l.target_issue_id = i.id) AS indeg,
+			         WHERE l.workspace_id = i.workspace_id AND l.target_issue_id = i.id
+			           ${inboundLinkVisible}) AS indeg,
 			       (SELECT CAST(v.value AS REAL) FROM custom_field_values v
 			          JOIN custom_field_definitions d ON d.id = v.field_id
 			         WHERE v.issue_id = i.id AND CAST(v.value AS REAL) > 0
