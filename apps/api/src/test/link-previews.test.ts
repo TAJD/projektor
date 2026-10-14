@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
 	excerpt,
 	getLinkPreview,
+	getLinkPreviewImage,
+	headingForFragment,
 	isBlockedHost,
 	type LinkPreview,
 	parseHtmlMetadata,
@@ -17,6 +19,7 @@ import {
 	seedIssue,
 	seedIssueFixture,
 	seedProject,
+	seedProjectFixture,
 	toolError,
 } from "./helpers";
 
@@ -265,7 +268,7 @@ describe("GET /api/link-preview", () => {
 		expect(await res.json()).toMatchObject({
 			kind: "wiki",
 			title: "Runbook",
-			description: "Runbook How to deploy.",
+			description: "How to deploy.",
 		});
 	});
 
@@ -296,5 +299,171 @@ describe("get_link_preview (MCP)", () => {
 		const { workspace, token } = await seedFixture();
 		const res = await mcpCall(workspace.id, token, workspace.slug, { url: "http://10.0.0.1/" });
 		expect(toolError(res)?.code).toBe("validation");
+	});
+});
+
+// ─── PROJ-1037 ────────────────────────────────────────────────────────────────
+
+describe("headingForFragment", () => {
+	const md = [
+		"---",
+		"type: doc",
+		"---",
+		"# Intro",
+		"## Set **up**",
+		"```",
+		"# not a heading",
+		"```",
+		"## Set up",
+		"#### Too deep",
+		"## !!!",
+	].join("\n");
+
+	it("finds a heading by the id the wiki page gives it", () => {
+		expect(headingForFragment(md, "intro")).toBe("Intro");
+		expect(headingForFragment(md, "set-up")).toBe("Set up");
+		expect(headingForFragment(md, "set-up-1")).toBe("Set up");
+		expect(headingForFragment(md, "section-4")).toBe("!!!");
+	});
+
+	it("ignores code blocks, deep headings and unknown ids", () => {
+		expect(headingForFragment(md, "not-a-heading")).toBeNull();
+		expect(headingForFragment(md, "too-deep")).toBeNull();
+		expect(headingForFragment(md, "nope")).toBeNull();
+		expect(headingForFragment(md, "%E0%A4%A")).toBeNull();
+	});
+});
+
+describe("internal previews — details (PROJ-1037)", () => {
+	it("returns an issue's type, priority, assignee and update time", async () => {
+		const { token, slug, workspaceId, projectId, userId } = await seedProjectFixture();
+		await env.DB.prepare("UPDATE users SET name = ? WHERE id = ?").bind("Ada", userId).run();
+		const issue = await seedIssue(workspaceId, projectId, userId, {
+			title: "Detailed",
+			priority: "high",
+			assigneeId: userId,
+		});
+		const res = await SELF.fetch(previewUrl(`/projects/PROJ/issues/${issue.number}`), {
+			headers: authHeaders(token, slug),
+		});
+		expect(await res.json()).toMatchObject({
+			kind: "issue",
+			priority: "high",
+			assignee: "Ada",
+			updatedAt: issue.createdAt,
+			section: null,
+		});
+	});
+
+	it("leaves priority and assignee null when unset", async () => {
+		const { token, slug, workspaceId, projectId, userId } = await seedProjectFixture();
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Bare" });
+		const res = await SELF.fetch(previewUrl(`/projects/PROJ/issues/${issue.number}`), {
+			headers: authHeaders(token, slug),
+		});
+		expect(await res.json()).toMatchObject({ priority: null, assignee: null });
+	});
+
+	it("names the wiki section a #fragment points at", async () => {
+		const { workspace, token } = await seedFixture();
+		const created = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(token, workspace.slug),
+			body: JSON.stringify({ title: "Guide", content: "# Guide\n\n## Install steps\n\nRun it." }),
+		});
+		const page = (await created.json()) as { slug: string };
+		const res = await SELF.fetch(previewUrl(`/wiki/${page.slug}#install-steps`), {
+			headers: authHeaders(token, workspace.slug),
+		});
+		const body = (await res.json()) as LinkPreview;
+		expect(body).toMatchObject({ kind: "wiki", title: "Guide", section: "Install steps" });
+		expect(body.updatedAt).toEqual(expect.any(Number));
+
+		const unknown = await SELF.fetch(previewUrl(`/wiki/${page.slug}#missing`), {
+			headers: authHeaders(token, workspace.slug),
+		});
+		expect(((await unknown.json()) as LinkPreview).section).toBeNull();
+	});
+});
+
+describe("getLinkPreviewImage (PROJ-1037)", () => {
+	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4]);
+
+	// Each call gets its own image URL: images are cached by URL across tests.
+	function site(image: () => Response) {
+		const id = crypto.randomUUID();
+		return vi.fn(async (input: string) =>
+			input.includes("/img/")
+				? image()
+				: htmlResponse(
+						`<meta property="og:title" content="Page"><meta property="og:image" content="/img/${id}">`
+					)
+		);
+	}
+
+	it("serves the page's preview image, then from cache", async () => {
+		const { workspace, user } = await seedFixture();
+		const ctx = ctxFor(workspace.id, user.id);
+		const fetchImpl = site(() => new Response(PNG, { headers: { "content-type": "image/png" } }));
+		const url = `https://example.com/${crypto.randomUUID()}`;
+		const deps = { fetch: fetchImpl as unknown as typeof fetch };
+
+		const first = await getLinkPreviewImage(ctx, { url }, deps);
+		expect(first.contentType).toBe("image/png");
+		expect(new Uint8Array(first.body)).toEqual(PNG);
+		const second = await getLinkPreviewImage(ctx, { url }, deps);
+		expect(new Uint8Array(second.body)).toEqual(PNG);
+		expect(fetchImpl).toHaveBeenCalledTimes(2); // page + image, once each
+	});
+
+	it("refuses SVG, oversized and non-image responses", async () => {
+		const { workspace, user } = await seedFixture();
+		const ctx = ctxFor(workspace.id, user.id);
+		const cases: Array<[string, () => Response]> = [
+			["svg", () => new Response("<svg/>", { headers: { "content-type": "image/svg+xml" } })],
+			[
+				"big",
+				() =>
+					new Response(new Uint8Array(3 * 1024 * 1024), {
+						headers: { "content-type": "image/png" },
+					}),
+			],
+			["html", () => htmlResponse("<p>not an image</p>")],
+		];
+		for (const [name, image] of cases) {
+			const url = `https://example.com/${name}-${crypto.randomUUID()}`;
+			await expect(
+				getLinkPreviewImage(ctx, { url }, { fetch: site(image) as unknown as typeof fetch })
+			).rejects.toMatchObject({ kind: "not_found" });
+		}
+	});
+
+	it("404s for a page with no image and for app paths", async () => {
+		const { workspace, user, token } = await seedFixture();
+		const ctx = ctxFor(workspace.id, user.id);
+		const fetchImpl = (async () => htmlResponse("<title>No image</title>")) as typeof fetch;
+		await expect(
+			getLinkPreviewImage(
+				ctx,
+				{ url: `https://example.com/${crypto.randomUUID()}` },
+				{ fetch: fetchImpl }
+			)
+		).rejects.toMatchObject({ kind: "not_found" });
+
+		const res = await SELF.fetch(
+			`http://localhost/api/link-preview/image?url=${encodeURIComponent("/wiki/x")}`,
+			{ headers: authHeaders(token, workspace.slug) }
+		);
+		expect(res.status).toBe(404);
+	});
+
+	it("resolves the workspace from ?workspace= for <img> loads", async () => {
+		const { workspace, token } = await seedFixture();
+		const res = await SELF.fetch(
+			`http://localhost/api/link-preview/image?url=${encodeURIComponent("/wiki/x")}&workspace=${workspace.slug}`,
+			{ headers: { Authorization: `Bearer ${token}` } }
+		);
+		// 404 from the service, not 400 "workspace required" from the middleware.
+		expect(res.status).toBe(404);
 	});
 });

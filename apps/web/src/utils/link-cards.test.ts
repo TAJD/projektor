@@ -18,6 +18,11 @@ const external = {
 	siteName: "Example",
 	ref: null,
 	status: null,
+	type: null,
+	priority: null,
+	assignee: null,
+	updatedAt: null,
+	section: null,
 };
 
 describe("previewRequestUrl", () => {
@@ -25,6 +30,9 @@ describe("previewRequestUrl", () => {
 		expect(
 			previewRequestUrl("https://app.test/projects/PROJ/issues/4/x?y=1", "https://app.test")
 		).toBe("/projects/PROJ/issues/4/x?y=1");
+		expect(previewRequestUrl("https://app.test/wiki/guide#install", "https://app.test")).toBe(
+			"/wiki/guide#install"
+		);
 		expect(previewRequestUrl("https://example.com/a", "https://app.test")).toBe(
 			"https://example.com/a"
 		);
@@ -61,7 +69,10 @@ describe("hydrateLinkCards", () => {
 		expect(card?.querySelector(".link-card__title")?.textContent).toBe("A <b>post</b>");
 		expect(card?.querySelector("b")).toBeNull();
 		expect(card?.querySelector(".link-card__site")?.textContent).toBe("Example");
-		expect(card?.querySelector("img")?.getAttribute("src")).toBe("https://example.com/card.png");
+		// PROJ-1037: the image goes through the Worker, keyed by the page URL.
+		expect(card?.querySelector("img")?.getAttribute("src")).toBe(
+			`/api/link-preview/image?url=${encodeURIComponent("https://example.com/post")}`
+		);
 		expect(String(fetchMock.mock.calls[0][0])).toContain(
 			`/api/link-preview?url=${encodeURIComponent("https://example.com/post")}`
 		);
@@ -116,5 +127,47 @@ describe("hydrateLinkCards", () => {
 		await hydrateLinkCards(div);
 		expect(div.querySelector(".link-card__link")).toBeNull();
 		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("passes the workspace to the image proxy, which an <img> can't send as a header", async () => {
+		fetchMock.mockResolvedValue(jsonResponse(external));
+		const div = mount("https://example.com/post");
+		await hydrateLinkCards(div, "my ws");
+		expect(div.querySelector("img")?.getAttribute("src")).toContain("&workspace=my%20ws");
+	});
+
+	it("shows a wiki card's section and last update", async () => {
+		fetchMock.mockResolvedValue(
+			jsonResponse({
+				...external,
+				kind: "wiki",
+				title: "Guide",
+				image: null,
+				siteName: "Wiki",
+				section: "Install steps",
+				updatedAt: Math.floor(Date.now() / 1000) - 120,
+			})
+		);
+		const div = mount(`${window.location.origin}/wiki/guide#install-steps`);
+		await hydrateLinkCards(div);
+		expect(div.querySelector(".link-card__section")?.textContent).toBe("§ Install steps");
+		expect(div.querySelector(".link-card__detail")?.textContent).toBe("Updated 2m ago");
+		expect(String(fetchMock.mock.calls[0][0])).toContain(
+			encodeURIComponent("/wiki/guide#install-steps")
+		);
+	});
+
+	it("cachedOnly applies fetched previews synchronously and fetches nothing new", async () => {
+		fetchMock.mockResolvedValue(jsonResponse(external));
+		await hydrateLinkCards(mount("https://example.com/post"));
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+
+		const again = mount("https://example.com/post\n\nhttps://example.com/new");
+		void hydrateLinkCards(again, undefined, { cachedOnly: true });
+		// Synchronously, before any await: the known URL is already a card.
+		expect(again.querySelectorAll(".link-card__link")).toHaveLength(1);
+		const unknown = again.querySelectorAll<HTMLElement>("[data-link-card]")[1];
+		expect(unknown.dataset.linkCardState).toBeUndefined();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });

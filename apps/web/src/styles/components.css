@@ -442,7 +442,8 @@
 
 .prose .link-card__meta {
 	display: flex;
-	gap: 0.5rem;
+	flex-wrap: wrap;
+	gap: 0.25rem 0.5rem;
 	align-items: center;
 	font-size: 0.75rem;
 	color: var(--text-muted);
@@ -456,6 +457,19 @@
 	padding: 0 0.375rem;
 	border: 1px solid var(--border);
 	border-radius: var(--radius-full);
+}
+
+.prose .link-card__section {
+	font-weight: 600;
+	color: var(--text);
+}
+
+.prose .link-card__detail {
+	display: inline-block;
+}
+
+.prose .link-card__detail::first-letter {
+	text-transform: uppercase;
 }
 
 .prose .link-card__title {

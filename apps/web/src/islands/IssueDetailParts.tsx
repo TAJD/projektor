@@ -1569,12 +1569,16 @@ function CommentItem({
 							{editError}
 						</p>
 					)}
-					<textarea
-						value={editBody}
-						onInput={(e) => onChangeBody((e.target as HTMLTextAreaElement).value)}
-						rows={4}
-						class="w-full px-3 py-2 border border-border rounded text-sm resize-y box-border mb-2 bg-bg text-text-base"
-					/>
+					{/* PROJ-1037: the markdown editor, so a pasted link becomes a card here too. */}
+					<div class="mb-2">
+						<MarkdownEditor
+							value={editBody}
+							onChange={onChangeBody}
+							minHeight="120px"
+							ariaLabel="Edit comment"
+							workspaceSlug={workspaceSlug}
+						/>
+					</div>
 					<div class="flex gap-2">
 						<Button onClick={onSave} disabled={saving} variant="primary">
 							{saving ? "Saving…" : "Save"}
@@ -1768,18 +1772,17 @@ export function CommentsSection({
 						{commentError}
 					</p>
 				)}
-				<textarea
-					value={newComment}
-					onInput={(e) => setNewComment((e.target as HTMLTextAreaElement).value)}
-					placeholder="Add a comment…"
-					rows={4}
-					// text-base (16px) on phones: below 16px iOS Safari zooms the viewport
-					// when the field takes focus. sm:text-sm keeps desktop as it was.
-					class={
-						"w-full px-3 py-2 border border-border rounded text-base sm:text-sm " +
-						"resize-y box-border mb-2 bg-bg text-text-base"
-					}
-				/>
+				{/* PROJ-1037: the markdown editor (16px text on phones, like the textarea it
+				    replaced), so a pasted link becomes a card here too. */}
+				<div class="mb-2">
+					<MarkdownEditor
+						value={newComment}
+						onChange={setNewComment}
+						minHeight="120px"
+						ariaLabel="Add a comment"
+						workspaceSlug={workspaceSlug}
+					/>
+				</div>
 				<Button
 					type="submit"
 					disabled={postingComment || !newComment.trim()}

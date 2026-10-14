@@ -115,6 +115,9 @@ audits:
   REST-only. Binary/multipart upload and streamed download can't cross JSON-RPC.
   Metadata operations (list, get metadata, link-create, delete) have full MCP parity
   via `mcp/files.ts`.
+- **Link card image (`GET /api/link-preview/image`)** — REST-only, same reason: it
+  streams image bytes for an `<img>`. The preview metadata is on both surfaces
+  (`get_link_preview`).
 - **Auth (`routes/auth.ts`): login redirect, API token minting/revocation** — REST-only.
   CF Access login is a browser redirect flow; token minting/revocation is a sensitive
   credential operation kept off the MCP surface.

@@ -2,7 +2,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { fetchLinkPreview, hydrateLinkCards } from "../utils/link-cards";
 import {
 	type CardInsert,
@@ -259,13 +259,24 @@ function PreviewPane({
 	workspaceSlug: string | undefined;
 }) {
 	const bodyRef = useRef<HTMLDivElement>(null);
+	// PROJ-1037: every keystroke replaces this pane's HTML, which drops hydrated cards.
+	// Put the ones already fetched back before paint (no flicker); look up new URLs only
+	// once typing pauses, so a half-typed URL is never fetched.
+	useLayoutEffect(() => {
+		if (bodyRef.current)
+			void hydrateLinkCards(bodyRef.current, workspaceSlug, { cachedOnly: true });
+	}, [preview, mobilePreview, workspaceSlug]);
 	useEffect(() => {
 		const timer = setTimeout(() => {
-			if (!bodyRef.current) return;
-			void renderMermaidDiagrams(bodyRef.current);
-			void hydrateLinkCards(bodyRef.current, workspaceSlug);
+			if (bodyRef.current) void renderMermaidDiagrams(bodyRef.current);
 		}, 300);
-		return () => clearTimeout(timer);
+		const cardTimer = setTimeout(() => {
+			if (bodyRef.current) void hydrateLinkCards(bodyRef.current, workspaceSlug);
+		}, 800);
+		return () => {
+			clearTimeout(timer);
+			clearTimeout(cardTimer);
+		};
 	}, [preview, mobilePreview, workspaceSlug]);
 
 	return (

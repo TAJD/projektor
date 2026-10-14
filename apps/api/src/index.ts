@@ -262,7 +262,6 @@ app.use("/api/projects/*", authMiddleware, workspaceMiddleware);
 app.use("/api/issues/*", authMiddleware, workspaceMiddleware);
 app.use("/api/issue-links/*", authMiddleware, workspaceMiddleware);
 app.use("/api/wiki/*", authMiddleware, workspaceMiddleware);
-app.use("/api/link-preview/*", authMiddleware, workspaceMiddleware);
 app.use("/mcp/*", authMiddleware, workspaceMiddleware);
 // PROJ-494: an inline image embedded in rendered wiki content (`<img src="/api/files/:id?workspace=...">`)
 // is a plain browser subresource load — it can't attach the X-Workspace-Slug header apiFetch
@@ -274,6 +273,10 @@ const allowFilesQueryWorkspaceFallback = async (c: Context<HonoEnv>, next: Next)
 	await next();
 };
 app.use("/api/files/*", allowFilesQueryWorkspaceFallback);
+// PROJ-1037: the card image is loaded by an <img>, which can't send X-Workspace-Slug,
+// so that one GET path gets the same `?workspace=` fallback as /api/files.
+app.use("/api/link-preview/image", allowFilesQueryWorkspaceFallback);
+app.use("/api/link-preview/*", authMiddleware, workspaceMiddleware);
 app.use("/api/files/*", authMiddleware, workspaceMiddleware);
 app.use("/api/task-types/*", authMiddleware, workspaceMiddleware);
 app.use("/api/task-statuses/*", authMiddleware, workspaceMiddleware);

@@ -1,3 +1,5 @@
+import { drizzle, schema } from "@projektor/db";
+import { eq } from "drizzle-orm";
 import { GetLinkPreviewSchema } from "../schemas/link-previews";
 import { get as cacheGet, set as cacheSet } from "./cache";
 import { NotFoundError, ValidationError } from "./errors";
@@ -14,7 +16,7 @@ import { getWikiPage } from "./wiki";
  *   from our own data. A hidden or missing target is a 404, exactly like reading it.
  *
  * `title: null` means "nothing worth a card" (fetch failed, not HTML, no title); the
- * browser falls back to a plain link.
+ * browser falls back to a plain link. Fields that don't apply to a kind are null.
  */
 export interface LinkPreview {
 	url: string;
@@ -25,6 +27,14 @@ export interface LinkPreview {
 	siteName: string | null;
 	ref: string | null;
 	status: string | null;
+	/** Issue only (PROJ-1037): task type name, priority (null for "none") and assignee name. */
+	type: string | null;
+	priority: string | null;
+	assignee: string | null;
+	/** Issue and wiki: last update, unix seconds. */
+	updatedAt: number | null;
+	/** Wiki only: the heading a `#fragment` link points at, when it matches one. */
+	section: string | null;
 }
 
 export interface LinkPreviewDeps {
@@ -32,7 +42,9 @@ export interface LinkPreviewDeps {
 	fetch?: typeof fetch;
 }
 
-const CACHE_PREFIX = "link-preview:v1:";
+// v2: PROJ-1037 added fields, so v1 entries (missing them) are never read back.
+const CACHE_PREFIX = "link-preview:v2:";
+const IMAGE_CACHE_PREFIX = "link-preview-image:v1:";
 const CACHE_TTL_SECONDS = 24 * 60 * 60;
 const FAILURE_CACHE_TTL_SECONDS = 60 * 60;
 const FETCH_TIMEOUT_MS = 5000;
@@ -40,6 +52,9 @@ const MAX_REDIRECTS = 3;
 // <head> is almost always inside the first few KB; 256 KB covers pages that inline a
 // lot of CSS/JS before their meta tags without reading whole documents.
 const MAX_HTML_BYTES = 256 * 1024;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+// Raster only: an SVG can carry script, and these are the types every browser renders.
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
 const USER_AGENT = "ProjektorLinkPreview/1.0 (+https://github.com/TAJD/projektor)";
 
 const ISSUE_PATH = /^\/projects\/([A-Za-z][A-Za-z0-9]*)\/issues\/(\d{1,9})(?:\/[^/]*)?\/?$/;
@@ -96,7 +111,7 @@ async function internalPreview(ctx: ServiceCtx, path: string): Promise<LinkPrevi
 		} catch {
 			throw new NotFoundError("Wiki page not found");
 		}
-		return wikiPreview(ctx, path, slug);
+		return wikiPreview(ctx, path, slug, parsed.hash.slice(1));
 	}
 	throw new NotFoundError("No preview for this link");
 }
@@ -108,30 +123,94 @@ async function issuePreview(
 ): Promise<LinkPreview> {
 	const issue = (await getIssue(ctx, lookup)) as Record<string, unknown>;
 	const key = issue.project_key as string | null;
+	const priority = issue.priority as string | null;
 	return {
-		url,
+		...emptyPreview(url),
 		kind: "issue",
 		title: (issue.title as string) ?? null,
 		description: excerpt((issue.body as string | null) ?? ""),
-		image: null,
-		siteName: null,
 		ref: key ? `${key}-${issue.number}` : null,
 		status: (issue.status_name as string | null) ?? (issue.status as string | null) ?? null,
+		type: (issue.type_name as string | null) ?? null,
+		priority: priority && priority !== "none" ? priority : null,
+		assignee: await userName(ctx, issue.assignee_id as string | null),
+		updatedAt: (issue.updated_at as number | null) ?? null,
 	};
 }
 
-async function wikiPreview(ctx: ServiceCtx, url: string, slug: string): Promise<LinkPreview> {
+async function userName(ctx: ServiceCtx, userId: string | null): Promise<string | null> {
+	if (!userId) return null;
+	const row = await drizzle(ctx.db, { schema })
+		.select({ name: schema.users.name, email: schema.users.email })
+		.from(schema.users)
+		.where(eq(schema.users.id, userId))
+		.get();
+	return row?.name || row?.email || null;
+}
+
+async function wikiPreview(
+	ctx: ServiceCtx,
+	url: string,
+	slug: string,
+	fragment: string
+): Promise<LinkPreview> {
 	const page = await getWikiPage(ctx, slug);
 	return {
-		url,
+		...emptyPreview(url),
 		kind: "wiki",
 		title: page.title,
-		description: excerpt(page.content ?? ""),
-		image: null,
+		description: excerpt(withoutTitleHeading(page.content ?? "", page.title)),
 		siteName: "Wiki",
-		ref: null,
-		status: null,
+		updatedAt: page.updated_at ?? null,
+		section: fragment ? headingForFragment(page.content ?? "", fragment) : null,
 	};
+}
+
+/** Drop a first heading that just repeats the page title, so the excerpt starts with prose. */
+function withoutTitleHeading(markdown: string, title: string): string {
+	const body = markdown.replace(FRONTMATTER, "");
+	const m = body.match(/^\s*#{1,6}[ \t]+(.+?)[ \t#]*(?:\r?\n|$)/);
+	return m && m[1].trim().toLowerCase() === title.trim().toLowerCase()
+		? body.slice(m[0].length)
+		: body;
+}
+
+/**
+ * The text of the heading whose anchor id is `fragment`. Ids are assigned the way the
+ * wiki page does it (WikiPage.tsx#assignHeadingIds): h1–h3, slugified text, `-1`, `-2`…
+ * suffixes for repeats, `section-N` for a heading with no slug-able text.
+ */
+export function headingForFragment(markdown: string, fragment: string): string | null {
+	let id: string;
+	try {
+		id = decodeURIComponent(fragment);
+	} catch {
+		return null;
+	}
+	const used = new Set<string>();
+	let inFence = false;
+	let index = 0;
+	for (const line of markdown.replace(FRONTMATTER, "").split(/\r?\n/)) {
+		if (/^[ \t]*(```|~~~)/.test(line)) inFence = !inFence;
+		if (inFence) continue;
+		const m = line.match(/^ {0,3}#{1,3}[ \t]+(.+?)[ \t#]*$/);
+		if (!m) continue;
+		index++;
+		const text = m[1]
+			.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+			.replace(/[*_`~]/g, "")
+			.trim();
+		const slug = text
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-|-$/g, "");
+		const base = slug || `section-${index}`;
+		let candidate = base;
+		for (let n = 1; used.has(candidate); n++) candidate = `${base}-${n}`;
+		used.add(candidate);
+		if (candidate === id) return truncate(text, 200);
+	}
+	return null;
 }
 
 const FRONTMATTER = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
@@ -206,34 +285,51 @@ function emptyPreview(url: string): LinkPreview {
 		siteName: null,
 		ref: null,
 		status: null,
+		type: null,
+		priority: null,
+		assignee: null,
+		updatedAt: null,
+		section: null,
 	};
+}
+
+/**
+ * GET `target`, following up to MAX_REDIRECTS redirects and re-validating every hop (a
+ * public page must not redirect us somewhere private). Null on any failure or non-2xx.
+ */
+async function fetchPublic(
+	target: URL,
+	fetchImpl: typeof fetch,
+	accept: string
+): Promise<{ res: Response; url: URL } | null> {
+	let current = target;
+	try {
+		for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+			const res = await fetchImpl(current.href, {
+				redirect: "manual",
+				headers: { "User-Agent": USER_AGENT, Accept: accept },
+				signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+			});
+			const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+			if (!location) {
+				if (res.ok) return { res, url: current };
+				await res.body?.cancel();
+				return null;
+			}
+			await res.body?.cancel();
+			current = parseExternalUrl(new URL(location, current).href);
+		}
+	} catch {
+		return null;
+	}
+	return null;
 }
 
 async function fetchExternalPreview(target: URL, fetchImpl: typeof fetch): Promise<LinkPreview> {
 	const empty = emptyPreview(target.href);
-	let current = target;
-	let res: Response | undefined;
-	try {
-		for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-			res = await fetchImpl(current.href, {
-				redirect: "manual",
-				headers: { "User-Agent": USER_AGENT, Accept: "text/html,application/xhtml+xml" },
-				signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-			});
-			const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-			if (!location) break;
-			await res.body?.cancel();
-			res = undefined;
-			// Every hop is re-validated: a public page must not redirect us somewhere private.
-			current = parseExternalUrl(new URL(location, current).href);
-		}
-	} catch {
-		return empty;
-	}
-	if (!res?.ok) {
-		await res?.body?.cancel();
-		return empty;
-	}
+	const fetched = await fetchPublic(target, fetchImpl, "text/html,application/xhtml+xml");
+	if (!fetched) return empty;
+	const { res, url: current } = fetched;
 	const type = res.headers.get("content-type") ?? "";
 	if (!/text\/html|application\/xhtml\+xml/i.test(type)) {
 		await res.body?.cancel();
@@ -246,6 +342,102 @@ async function fetchExternalPreview(target: URL, fetchImpl: typeof fetch): Promi
 		return empty;
 	}
 	return { ...empty, ...parseHtmlMetadata(html, current) };
+}
+
+// ---------------------------------------------------------------------------
+// Card images (PROJ-1037), proxied so the viewer's browser never contacts the linked site.
+// ---------------------------------------------------------------------------
+
+export interface LinkPreviewImage {
+	body: ArrayBuffer;
+	contentType: string;
+}
+
+/**
+ * The image of an external page's preview, fetched by the Worker. `url` is the *page*
+ * URL, not the image URL, so this can only ever fetch an image some preview advertised:
+ * it is not a general-purpose proxy. Any failure is a 404; the card then drops its image.
+ */
+export async function getLinkPreviewImage(
+	ctx: ServiceCtx,
+	raw: unknown,
+	deps: LinkPreviewDeps = {}
+): Promise<LinkPreviewImage> {
+	const result = GetLinkPreviewSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	if (result.data.url.startsWith("/")) throw new NotFoundError("Link preview image not found");
+	const preview = await getLinkPreview(ctx, { url: result.data.url }, deps);
+	if (!preview.image) throw new NotFoundError("Link preview image not found");
+
+	let imageUrl: URL;
+	try {
+		imageUrl = parseExternalUrl(preview.image);
+	} catch {
+		throw new NotFoundError("Link preview image not found");
+	}
+	const key = IMAGE_CACHE_PREFIX + (await sha256hex(imageUrl.href));
+	try {
+		const hit = await ctx.kv.getWithMetadata<{ contentType: string }>(key, "arrayBuffer");
+		if (hit.value && hit.metadata)
+			return { body: hit.value, contentType: hit.metadata.contentType };
+	} catch (err) {
+		console.error("[link-preview] image cache read failed, refetching:", err);
+	}
+
+	const image = await fetchImage(imageUrl, deps.fetch ?? fetch);
+	if (!image) throw new NotFoundError("Link preview image not found");
+	try {
+		await ctx.kv.put(key, image.body, {
+			expirationTtl: CACHE_TTL_SECONDS,
+			metadata: { contentType: image.contentType },
+		});
+	} catch (err) {
+		console.error("[link-preview] image cache write failed, continuing:", err);
+	}
+	return image;
+}
+
+async function fetchImage(target: URL, fetchImpl: typeof fetch): Promise<LinkPreviewImage | null> {
+	const fetched = await fetchPublic(target, fetchImpl, [...IMAGE_TYPES].join(","));
+	if (!fetched) return null;
+	const { res } = fetched;
+	const contentType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+	const declared = Number(res.headers.get("content-length") ?? "0");
+	if (!IMAGE_TYPES.has(contentType) || declared > MAX_IMAGE_BYTES) {
+		await res.body?.cancel();
+		return null;
+	}
+	try {
+		const body = await readBytesCapped(res, MAX_IMAGE_BYTES);
+		return body ? { body, contentType } : null;
+	} catch {
+		return null;
+	}
+}
+
+/** The whole body, or null if it is longer than `maxBytes`. */
+async function readBytesCapped(res: Response, maxBytes: number): Promise<ArrayBuffer | null> {
+	const reader = res.body?.getReader();
+	if (!reader) return null;
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		size += value.byteLength;
+		if (size > maxBytes) {
+			await reader.cancel();
+			return null;
+		}
+		chunks.push(value);
+	}
+	const out = new Uint8Array(size);
+	let offset = 0;
+	for (const chunk of chunks) {
+		out.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return out.buffer;
 }
 
 async function readCapped(res: Response, maxBytes: number): Promise<string> {

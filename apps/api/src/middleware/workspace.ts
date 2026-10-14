@@ -90,7 +90,8 @@ async function missingWorkspaceResponse(
 // subresource load (an inline `<img src="/api/files/:id?workspace=...">` in rendered
 // wiki content) — those can't attach a custom header the way apiFetch does. It's the
 // lowest-precedence source and only consulted when index.ts has explicitly opted the
-// route in via allowQueryWorkspaceFallback (GET on /api/files* only) — see AGENTS.md's
+// route in via allowQueryWorkspaceFallback (GET on /api/files* and the PROJ-1037 link
+// card image, /api/link-preview/image, only) — see AGENTS.md's
 // workspace-scoping invariant and the PROJ-494 PR description for why this is scoped
 // that narrowly rather than applied to workspaceMiddleware generally.
 function resolveWorkspaceTarget(
