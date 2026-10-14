@@ -5,6 +5,7 @@ import { apiFetch } from "../utils/api-client";
 import { clearDraft, draftKey, loadDraft, saveDraft } from "../utils/drafts";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
+import { hydrateLinkCards } from "../utils/link-cards";
 import { renderMd, renderMermaidDiagrams } from "../utils/markdown";
 import { categoryColor } from "./board-utils";
 import type {
@@ -369,7 +370,8 @@ function useBodyEditor(
 		const container = bodyRef.current;
 		if (!container) return;
 		void renderMermaidDiagrams(container);
-	}, [issue.body, editingBody]);
+		void hydrateLinkCards(container, workspaceSlug);
+	}, [issue.body, editingBody, workspaceSlug]);
 
 	function startEditBody(fromDraft = false) {
 		setEditBody((fromDraft ? loadDraft(key) : null) ?? issue.body ?? "");
@@ -431,17 +433,24 @@ function BodyEditForm({
 	saveBody,
 	cancelEditBody,
 	savingBody,
+	workspaceSlug,
 }: {
 	editBody: string;
 	updateBody: (value: string) => void;
 	saveBody: () => void;
 	cancelEditBody: () => void;
 	savingBody: boolean;
+	workspaceSlug: string | undefined;
 }) {
 	return (
 		<div>
 			<div class="mb-2">
-				<MarkdownEditor value={editBody} onChange={updateBody} minHeight="240px" />
+				<MarkdownEditor
+					value={editBody}
+					onChange={updateBody}
+					minHeight="240px"
+					workspaceSlug={workspaceSlug}
+				/>
 			</div>
 			<div class="flex gap-2">
 				<Button onClick={saveBody} disabled={savingBody} variant="primary">
@@ -524,6 +533,7 @@ export function BodySection({
 					saveBody={saveBody}
 					cancelEditBody={cancelEditBody}
 					savingBody={savingBody}
+					workspaceSlug={workspaceSlug}
 				/>
 			) : issue.body ? (
 				<div
@@ -1488,6 +1498,7 @@ export function AttachmentsSection({
 
 function CommentItem({
 	comment,
+	workspaceSlug,
 	isEditing,
 	editBody,
 	editError,
@@ -1500,6 +1511,7 @@ function CommentItem({
 	onDelete,
 }: {
 	comment: Comment;
+	workspaceSlug?: string;
 	isEditing: boolean;
 	editBody: string;
 	editError: string | null;
@@ -1521,7 +1533,8 @@ function CommentItem({
 		const container = bodyRef.current;
 		if (!container) return;
 		void renderMermaidDiagrams(container);
-	}, [comment.body, isEditing]);
+		void hydrateLinkCards(container, workspaceSlug);
+	}, [comment.body, isEditing, workspaceSlug]);
 
 	return (
 		<div class="px-4 py-3 border border-border rounded-lg mb-3 bg-surface shadow-elevation-sm">
@@ -1556,12 +1569,16 @@ function CommentItem({
 							{editError}
 						</p>
 					)}
-					<textarea
-						value={editBody}
-						onInput={(e) => onChangeBody((e.target as HTMLTextAreaElement).value)}
-						rows={4}
-						class="w-full px-3 py-2 border border-border rounded text-sm resize-y box-border mb-2 bg-bg text-text-base"
-					/>
+					{/* PROJ-1037: the markdown editor, so a pasted link becomes a card here too. */}
+					<div class="mb-2">
+						<MarkdownEditor
+							value={editBody}
+							onChange={onChangeBody}
+							minHeight="120px"
+							ariaLabel="Edit comment"
+							workspaceSlug={workspaceSlug}
+						/>
+					</div>
 					<div class="flex gap-2">
 						<Button onClick={onSave} disabled={saving} variant="primary">
 							{saving ? "Saving…" : "Save"}
@@ -1733,6 +1750,7 @@ export function CommentsSection({
 						<CommentItem
 							key={c.id}
 							comment={c}
+							workspaceSlug={workspaceSlug}
 							isEditing={editingCommentId === c.id}
 							editBody={editCommentBody}
 							editError={editCommentError}
@@ -1754,18 +1772,17 @@ export function CommentsSection({
 						{commentError}
 					</p>
 				)}
-				<textarea
-					value={newComment}
-					onInput={(e) => setNewComment((e.target as HTMLTextAreaElement).value)}
-					placeholder="Add a comment…"
-					rows={4}
-					// text-base (16px) on phones: below 16px iOS Safari zooms the viewport
-					// when the field takes focus. sm:text-sm keeps desktop as it was.
-					class={
-						"w-full px-3 py-2 border border-border rounded text-base sm:text-sm " +
-						"resize-y box-border mb-2 bg-bg text-text-base"
-					}
-				/>
+				{/* PROJ-1037: the markdown editor (16px text on phones, like the textarea it
+				    replaced), so a pasted link becomes a card here too. */}
+				<div class="mb-2">
+					<MarkdownEditor
+						value={newComment}
+						onChange={setNewComment}
+						minHeight="120px"
+						ariaLabel="Add a comment"
+						workspaceSlug={workspaceSlug}
+					/>
+				</div>
 				<Button
 					type="submit"
 					disabled={postingComment || !newComment.trim()}

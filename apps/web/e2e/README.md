@@ -197,6 +197,17 @@ member-scoped `APIRequestContext` and asserts:
 
 ---
 
+### Test: Link preview cards (`link-cards.spec.ts`, PROJ-1036/1037)
+
+Uses only internal links, so it never depends on a third-party site.
+
+1. A bare issue URL on its own line in an issue body renders as a card showing the
+   target's ref and title.
+2. A wiki URL with a `#fragment` renders a card naming that section.
+3. Pasting an issue URL into the comment editor shows the **Card | Link** popover;
+   **Link** rewrites it to `[title](url)`, and the posted comment shows an inline link,
+   not a card.
+
 ## What was executed vs. what needs a live run
 
 | Check | Status |

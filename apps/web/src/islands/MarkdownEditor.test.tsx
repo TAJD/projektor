@@ -5,8 +5,9 @@
 // toolbar buttons and preview pane content. cleanup runs via setup.ts afterEach.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/preact";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearLinkPreviewCache } from "../utils/link-cards";
 import MarkdownEditor, { PASTE_IMAGE_TYPES } from "./MarkdownEditor";
 
 describe("MarkdownEditor", () => {
@@ -337,5 +338,90 @@ describe("MarkdownEditor — inline image paste/drop (PROJ-494)", () => {
 
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(onImageFile).not.toHaveBeenCalled();
+	});
+});
+
+// ─── PROJ-1036: paste a URL → link card, with a popover to make it a link ──
+
+describe("MarkdownEditor — pasted links (PROJ-1036)", () => {
+	const url = "https://example.com/post";
+
+	function pasteText(container: Element, text: string) {
+		const clipboardData = { items: [], files: [], getData: () => text };
+		fireEvent.paste(findCmContent(container), { clipboardData });
+	}
+
+	beforeEach(() => {
+		clearLinkPreviewCache();
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						url,
+						kind: "external",
+						title: "A Post",
+						description: null,
+						image: null,
+						siteName: "Example",
+						ref: null,
+						status: null,
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } }
+				)
+			)
+		);
+	});
+
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("inserts a pasted URL as a card and offers to make it a link", async () => {
+		const onChange = vi.fn();
+		const { container } = render(<MarkdownEditor value="" onChange={onChange} />);
+		pasteText(container, url);
+
+		expect(onChange).toHaveBeenLastCalledWith(url);
+		const toolbar = await screen.findByRole("toolbar", { name: "Pasted link" });
+		expect(toolbar.textContent).toContain("Card");
+
+		fireEvent.click(within(toolbar).getByRole("button", { name: "Link" }));
+		await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(`[A Post](${url})`));
+		expect(screen.queryByRole("toolbar", { name: "Pasted link" })).toBeNull();
+	});
+
+	it("puts the card on its own paragraph and restores the sentence when made a link", async () => {
+		const onChange = vi.fn();
+		const { container } = render(<MarkdownEditor value="see " onChange={onChange} />);
+		fireEvent.keyDown(findCmContent(container), { key: "End", ctrlKey: true });
+		pasteText(container, url);
+		expect(onChange).toHaveBeenLastCalledWith(`see \n\n${url}`);
+
+		const toolbar = await screen.findByRole("toolbar", { name: "Pasted link" });
+		fireEvent.click(within(toolbar).getByRole("button", { name: "Link" }));
+		await waitFor(() => expect(onChange).toHaveBeenLastCalledWith(`see [A Post](${url})`));
+	});
+
+	it("keeps the card when the popover is dismissed with Card or Escape", async () => {
+		const onChange = vi.fn();
+		const { container } = render(<MarkdownEditor value="" onChange={onChange} />);
+		pasteText(container, url);
+		fireEvent.click(await screen.findByRole("button", { name: "Card" }));
+		expect(screen.queryByRole("toolbar", { name: "Pasted link" })).toBeNull();
+
+		pasteText(container, url);
+		await screen.findByRole("toolbar", { name: "Pasted link" });
+		fireEvent.keyDown(findCmContent(container), { key: "Escape" });
+		await waitFor(() => expect(screen.queryByRole("toolbar", { name: "Pasted link" })).toBeNull());
+		expect(String(onChange.mock.lastCall?.[0])).not.toContain("](");
+	});
+
+	it("leaves a URL pasted inside a code block alone", () => {
+		const onChange = vi.fn();
+		const { container } = render(<MarkdownEditor value={"```\n"} onChange={onChange} />);
+		fireEvent.keyDown(findCmContent(container), { key: "End", ctrlKey: true });
+		pasteText(container, url);
+		expect(screen.queryByRole("toolbar", { name: "Pasted link" })).toBeNull();
 	});
 });

@@ -64,6 +64,8 @@ const REST_ONLY: Record<string, string> = {
 	"files.ts:recordUpload": "second half of the multipart upload handshake",
 	"files.ts:getAttachmentForDownload":
 		"streams bytes for the browser; the metadata-shaped read is getAttachment, on both surfaces",
+	"link-previews.ts:getLinkPreviewImage":
+		"streams a link card's image bytes for an <img>; the preview itself is get_link_preview",
 	// Feedback: public ingest is anonymous, triage is a human review queue.
 	"feedback.ts:hashFeedbackToken": "ingest token hashing",
 	"feedback.ts:submitFeedback": "anonymous public ingest, no workspace auth",

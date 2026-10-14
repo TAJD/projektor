@@ -4,8 +4,9 @@ import type { MCPToolAnnotations } from "@projektor/types";
  * Shared MCP tool annotation constants/helpers (PROJ-887), so the 119 tools in
  * apps/api/src/mcp/*.ts don't each hand-write the same literal shape.
  *
- * `openWorldHint: false` on every tool: every core tool only ever talks to this
- * workspace's own D1/KV/R2 data, never an external ("open world") system.
+ * `openWorldHint: false` on every tool but those in OPEN_WORLD_TOOLS: every other core
+ * tool only ever talks to this workspace's own D1/KV/R2 data, never an external ("open
+ * world") system.
  *
  * The 22-tool destructive set (DESTRUCTIVE_TOOLS below) mirrors the destructive
  * tier from the wiki page mcp-context-auth-design-2026-09-23 and the fallback
@@ -15,6 +16,12 @@ import type { MCPToolAnnotations } from "@projektor/types";
 
 /** Annotations for a read-only tool (list_/get_/search_/wiki_tree). */
 export const READ: MCPToolAnnotations = { readOnlyHint: true, openWorldHint: false };
+
+/** A read-only tool that reaches outside the workspace (fetches a public web page). */
+export const READ_OPEN_WORLD: MCPToolAnnotations = { readOnlyHint: true, openWorldHint: true };
+
+/** The tools annotated READ_OPEN_WORLD; the annotations test pins this exact set. */
+export const OPEN_WORLD_TOOLS: readonly string[] = ["get_link_preview"];
 
 /**
  * Annotations for a non-read (mutating) tool.

@@ -18,7 +18,13 @@
 // measured overflow.
 import { render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AttachmentsSection, BodySection, RelationsSection } from "./IssueDetailParts";
+import { clearLinkPreviewCache } from "../utils/link-cards";
+import {
+	AttachmentsSection,
+	BodySection,
+	CommentsSection,
+	RelationsSection,
+} from "./IssueDetailParts";
 import type { Comment, IssueData } from "./issue-detail-helpers";
 
 const WIDE_TABLE_BODY = `
@@ -190,6 +196,73 @@ describe("CommentsSection — mermaid hydration", () => {
 		await waitFor(() => {
 			expect(run).toHaveBeenCalled();
 		});
+	});
+});
+
+// PROJ-1037: comments get the markdown editor (so a pasted link becomes a card) and a
+// bare link in a posted comment renders as a card.
+describe("CommentsSection — link cards (PROJ-1037)", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		clearLinkPreviewCache();
+	});
+
+	it("uses the markdown editor for a new comment", async () => {
+		render(
+			<CommentsSection
+				issueId="i1"
+				workspaceSlug="ws"
+				comments={[]}
+				currentUserId={null}
+				fetchComments={async () => {}}
+			/>
+		);
+		expect(await screen.findByLabelText("Add a comment")).toBeTruthy();
+		await waitFor(() =>
+			expect(document.querySelector('.cm-content[aria-label="Add a comment"]')).not.toBeNull()
+		);
+	});
+
+	it("renders a bare issue link in a comment as a card", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn().mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						url: "/projects/PROJ/issues/7",
+						kind: "issue",
+						title: "Linked issue",
+						description: null,
+						image: null,
+						siteName: null,
+						ref: "PROJ-7",
+						status: "Todo",
+						type: "Bug",
+						priority: "high",
+						assignee: "Ada",
+						updatedAt: 1000,
+						section: null,
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } }
+				)
+			)
+		);
+		const { container } = render(
+			<CommentsSection
+				issueId="i1"
+				workspaceSlug="ws"
+				comments={[
+					{ ...COMMENT, body: `${window.location.origin}/projects/PROJ/issues/7/linked-issue` },
+				]}
+				currentUserId={null}
+				fetchComments={async () => {}}
+			/>
+		);
+		await waitFor(() =>
+			expect(container.querySelector(".link-card__ref")?.textContent).toBe("PROJ-7")
+		);
+		const details = [...container.querySelectorAll(".link-card__detail")].map((n) => n.textContent);
+		expect(details).toEqual(["Bug", "high priority", "Ada"]);
 	});
 });
 

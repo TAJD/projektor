@@ -34,6 +34,7 @@ import { groupsRouter } from "./routes/groups";
 import { issueLeasesRouter } from "./routes/issue-leases";
 import { issueLinksRouter } from "./routes/issue-links";
 import { issuesRouter } from "./routes/issues";
+import { linkPreviewsRouter } from "./routes/link-previews";
 import { mcpRouter } from "./routes/mcp";
 import { oauthRouter } from "./routes/oauth";
 import { oauthMetadataRouter } from "./routes/oauth-metadata";
@@ -272,6 +273,10 @@ const allowFilesQueryWorkspaceFallback = async (c: Context<HonoEnv>, next: Next)
 	await next();
 };
 app.use("/api/files/*", allowFilesQueryWorkspaceFallback);
+// PROJ-1037: the card image is loaded by an <img>, which can't send X-Workspace-Slug,
+// so that one GET path gets the same `?workspace=` fallback as /api/files.
+app.use("/api/link-preview/image", allowFilesQueryWorkspaceFallback);
+app.use("/api/link-preview/*", authMiddleware, workspaceMiddleware);
 app.use("/api/files/*", authMiddleware, workspaceMiddleware);
 app.use("/api/task-types/*", authMiddleware, workspaceMiddleware);
 app.use("/api/task-statuses/*", authMiddleware, workspaceMiddleware);
@@ -317,6 +322,7 @@ app.route("/api/issues", issueLinksRouter);
 app.route("/api/issues", commentsRouter);
 app.route("/api/issues", shareIssuesRouter);
 app.route("/api/wiki", wikiRouter);
+app.route("/api/link-preview", linkPreviewsRouter);
 app.route("/mcp", mcpRouter);
 app.route("/api/files", filesRouter);
 app.route("/api/task-types", taskTypesRouter);
