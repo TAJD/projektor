@@ -6,6 +6,7 @@ import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch, undeleteWikiPage } from "../utils/api-client";
 import { getBrandName } from "../utils/brand";
+import { hydrateLinkCards } from "../utils/link-cards";
 import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
 import { usePublicViewer } from "../utils/public-viewer";
 import AccessPending from "./AccessPending";
@@ -2577,7 +2578,8 @@ function useTableOfContents(
 	// PROJ-803: bumped by the content div's callback ref every time it mounts, so
 	// Cancel/Verify/Move (which remount the div without page.content changing) still
 	// re-run these effects against the new DOM node.
-	contentMountToken: number
+	contentMountToken: number,
+	workspaceSlug: string | undefined
 ) {
 	const [toc, setToc] = useState<TocItem[]>([]);
 	const [activeHeadingId, setActiveHeadingId] = useState("");
@@ -2613,7 +2615,8 @@ function useTableOfContents(
 		const container = contentRef.current;
 		if (!container || !page) return;
 		void renderMermaidDiagrams(container);
-	}, [renderedHtml, contentMountToken]);
+		void hydrateLinkCards(container, workspaceSlug);
+	}, [renderedHtml, contentMountToken, workspaceSlug]);
 
 	// PROJ-113: IntersectionObserver for active heading
 	useEffect(() => {
@@ -4101,7 +4104,8 @@ function useWikiPageState(
 		pageData.page,
 		pageData.contentRef,
 		renderedHtml,
-		pageData.contentMountToken
+		pageData.contentMountToken,
+		workspaceSlug
 	);
 	useHashScroll(toc, pageData.contentRef, pageData.page?.slug);
 	const attach = useWikiAttachments(workspaceSlug, pageData.page);

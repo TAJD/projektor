@@ -34,6 +34,7 @@ import { groupsRouter } from "./routes/groups";
 import { issueLeasesRouter } from "./routes/issue-leases";
 import { issueLinksRouter } from "./routes/issue-links";
 import { issuesRouter } from "./routes/issues";
+import { linkPreviewsRouter } from "./routes/link-previews";
 import { mcpRouter } from "./routes/mcp";
 import { oauthRouter } from "./routes/oauth";
 import { oauthMetadataRouter } from "./routes/oauth-metadata";
@@ -261,6 +262,7 @@ app.use("/api/projects/*", authMiddleware, workspaceMiddleware);
 app.use("/api/issues/*", authMiddleware, workspaceMiddleware);
 app.use("/api/issue-links/*", authMiddleware, workspaceMiddleware);
 app.use("/api/wiki/*", authMiddleware, workspaceMiddleware);
+app.use("/api/link-preview/*", authMiddleware, workspaceMiddleware);
 app.use("/mcp/*", authMiddleware, workspaceMiddleware);
 // PROJ-494: an inline image embedded in rendered wiki content (`<img src="/api/files/:id?workspace=...">`)
 // is a plain browser subresource load — it can't attach the X-Workspace-Slug header apiFetch
@@ -317,6 +319,7 @@ app.route("/api/issues", issueLinksRouter);
 app.route("/api/issues", commentsRouter);
 app.route("/api/issues", shareIssuesRouter);
 app.route("/api/wiki", wikiRouter);
+app.route("/api/link-preview", linkPreviewsRouter);
 app.route("/mcp", mcpRouter);
 app.route("/api/files", filesRouter);
 app.route("/api/task-types", taskTypesRouter);

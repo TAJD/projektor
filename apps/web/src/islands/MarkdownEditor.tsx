@@ -1,8 +1,17 @@
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { EditorSelection, EditorState } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
+import { EditorView, keymap, type ViewUpdate } from "@codemirror/view";
 import { useEffect, useRef, useState } from "preact/hooks";
+import { fetchLinkPreview, hydrateLinkCards } from "../utils/link-cards";
+import {
+	type CardInsert,
+	isLiteralContext,
+	linkReplacement,
+	markdownLink,
+	pastedUrl,
+	planCardInsert,
+} from "../utils/link-paste";
 import { renderMarkdown, renderMermaidDiagrams } from "../utils/markdown";
 
 export interface Props {
@@ -20,6 +29,9 @@ export interface Props {
 	// caption next to the editor (rather than a wrapping <label>, see PROJ-566) pass
 	// that caption's text here.
 	ariaLabel?: string;
+	// Sent with link preview lookups (pasted links, preview-pane cards). Optional: without
+	// it the API resolves the workspace from the Host header, as for every other call.
+	workspaceSlug?: string;
 }
 
 // Mirrors services/files.ts's INLINE_TYPES on the API side — the set of image types the
@@ -237,14 +249,24 @@ function EditorToolbar({
 	);
 }
 
-function PreviewPane({ preview, mobilePreview }: { preview: string; mobilePreview: boolean }) {
+function PreviewPane({
+	preview,
+	mobilePreview,
+	workspaceSlug,
+}: {
+	preview: string;
+	mobilePreview: boolean;
+	workspaceSlug: string | undefined;
+}) {
 	const bodyRef = useRef<HTMLDivElement>(null);
 	useEffect(() => {
 		const timer = setTimeout(() => {
-			if (bodyRef.current) void renderMermaidDiagrams(bodyRef.current);
+			if (!bodyRef.current) return;
+			void renderMermaidDiagrams(bodyRef.current);
+			void hydrateLinkCards(bodyRef.current, workspaceSlug);
 		}, 300);
 		return () => clearTimeout(timer);
-	}, [preview, mobilePreview]);
+	}, [preview, mobilePreview, workspaceSlug]);
 
 	return (
 		<div
@@ -277,12 +299,168 @@ function PreviewPane({ preview, mobilePreview }: { preview: string; mobilePrevie
 	);
 }
 
+// PROJ-1036: a pasted URL becomes a link card (its own paragraph) with a small popover
+// offering to turn it into an inline `[title](url)` link instead. The popover never takes
+// focus: typing, Esc or leaving the editor dismisses it and the card stays.
+interface PendingCard {
+	view: EditorView;
+	url: string;
+	plan: CardInsert;
+	/** Range of plan.insert in the doc, mapped through edits while a conversion is in flight. */
+	from: number;
+	to: number;
+	converting: boolean;
+}
+
+export interface LinkPasteHandlers {
+	onPaste: (event: ClipboardEvent, view: EditorView) => boolean;
+	onUpdate: (update: ViewUpdate) => void;
+	onEscape: () => boolean;
+}
+
+function useLinkPaste(workspaceSlug: string | undefined) {
+	const pendingRef = useRef<PendingCard | null>(null);
+	const anchorRef = useRef<HTMLDivElement>(null);
+	const [popover, setPopover] = useState<{ top: number; left: number } | null>(null);
+	const slugRef = useRef(workspaceSlug);
+	slugRef.current = workspaceSlug;
+
+	function dismiss() {
+		pendingRef.current = null;
+		setPopover(null);
+	}
+
+	function place(view: EditorView, pos: number) {
+		let top = 0;
+		let left = 0;
+		try {
+			const coords = view.coordsAtPos(pos);
+			const anchor = anchorRef.current?.getBoundingClientRect();
+			if (coords && anchor) {
+				top = coords.bottom - anchor.top + 4;
+				left = Math.max(0, coords.left - anchor.left - 40);
+			}
+		} catch {
+			// No layout (e.g. jsdom): the popover still shows, at the editor's corner.
+		}
+		setPopover({ top, left });
+	}
+
+	function onPaste(event: ClipboardEvent, view: EditorView): boolean {
+		const url = pastedUrl(event.clipboardData?.getData?.("text/plain") ?? "");
+		if (!url) return false;
+		const { state } = view;
+		const sel = state.selection.main;
+		if (!sel.empty) {
+			const insert = markdownLink(state.sliceDoc(sel.from, sel.to), url);
+			event.preventDefault();
+			view.dispatch({
+				changes: { from: sel.from, to: sel.to, insert },
+				selection: EditorSelection.cursor(sel.from + insert.length),
+				userEvent: "input.paste",
+			});
+			return true;
+		}
+		const doc = state.doc.toString();
+		if (isLiteralContext(doc, sel.from)) return false;
+		const plan = planCardInsert(doc, sel.from, url);
+		event.preventDefault();
+		// Warm the preview cache: the card in the preview pane and a later "Link" both need it.
+		void fetchLinkPreview(url, slugRef.current);
+		view.dispatch({
+			changes: { from: sel.from, insert: plan.insert },
+			selection: EditorSelection.cursor(sel.from + plan.insert.length),
+			userEvent: "input.paste",
+			scrollIntoView: true,
+		});
+		pendingRef.current = {
+			view,
+			url,
+			plan,
+			from: sel.from,
+			to: sel.from + plan.insert.length,
+			converting: false,
+		};
+		place(view, sel.from + plan.prefix.length + url.length);
+		return true;
+	}
+
+	function onUpdate(update: ViewUpdate) {
+		const pending = pendingRef.current;
+		if (!pending) return;
+		if (pending.converting) {
+			if (update.docChanged) {
+				pending.from = update.changes.mapPos(pending.from, 1);
+				pending.to = update.changes.mapPos(pending.to, -1);
+			}
+			return;
+		}
+		if (update.docChanged || (update.focusChanged && !update.view.hasFocus)) dismiss();
+	}
+
+	function onEscape(): boolean {
+		if (!pendingRef.current || pendingRef.current.converting) return false;
+		dismiss();
+		return true;
+	}
+
+	async function convertToLink() {
+		const pending = pendingRef.current;
+		if (!pending) return;
+		pending.converting = true;
+		setPopover(null);
+		const preview = await fetchLinkPreview(pending.url, slugRef.current);
+		if (pendingRef.current !== pending) return;
+		pendingRef.current = null;
+		const { view, from, to, plan, url } = pending;
+		// Edited away in the meantime: leave the author's text alone.
+		if (view.state.sliceDoc(from, to) !== plan.insert) return;
+		view.dispatch({
+			changes: { from, to, insert: linkReplacement(plan, url, preview?.title ?? null) },
+			userEvent: "input",
+		});
+		view.focus();
+	}
+
+	const handlers: LinkPasteHandlers = { onPaste, onUpdate, onEscape };
+	return { handlers, anchorRef, popover, dismiss, convertToLink };
+}
+
+function LinkPastePopover({
+	position,
+	onKeepCard,
+	onConvert,
+}: {
+	position: { top: number; left: number };
+	onKeepCard: () => void;
+	onConvert: () => void;
+}) {
+	// mousedown is cancelled so clicking a choice doesn't blur the editor first.
+	const keepFocus = (e: MouseEvent) => e.preventDefault();
+	return (
+		<div
+			class="link-paste-popover"
+			role="toolbar"
+			aria-label="Pasted link"
+			style={{ top: `${position.top}px`, left: `${position.left}px` }}
+		>
+			<button type="button" aria-pressed="true" onMouseDown={keepFocus} onClick={onKeepCard}>
+				Card
+			</button>
+			<button type="button" aria-pressed="false" onMouseDown={keepFocus} onClick={onConvert}>
+				Link
+			</button>
+		</div>
+	);
+}
+
 function useMarkdownEditorView(
 	value: string,
 	onChange: (value: string) => void,
 	minHeight: string,
 	onImageFile: ((file: File) => Promise<string | null>) | undefined,
-	ariaLabel: string
+	ariaLabel: string,
+	linkPaste: LinkPasteHandlers
 ) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const viewRef = useRef<EditorView | null>(null);
@@ -291,6 +469,8 @@ function useMarkdownEditorView(
 	// onImageFile the latest render passed, rather than closing over the first one forever.
 	const onImageFileRef = useRef(onImageFile);
 	onImageFileRef.current = onImageFile;
+	const linkPasteRef = useRef(linkPaste);
+	linkPasteRef.current = linkPaste;
 	// The last doc content WE emitted via onChange. The "sync externally-driven value"
 	// effect below compares the incoming `value` prop against this — not against the
 	// live doc — so a same-tick echo of our own change (however delayed by Preact's
@@ -317,6 +497,7 @@ function useMarkdownEditorView(
 		const customKeymap = [
 			{ key: "Mod-b", run: (v: EditorView) => wrapSelection(v, "**", "**") },
 			{ key: "Mod-i", run: (v: EditorView) => wrapSelection(v, "_", "_") },
+			{ key: "Escape", run: () => linkPasteRef.current.onEscape() },
 		];
 
 		const state = EditorState.create({
@@ -326,6 +507,7 @@ function useMarkdownEditorView(
 				markdown(),
 				keymap.of([...customKeymap, ...historyKeymap, ...defaultKeymap]),
 				EditorView.updateListener.of((update) => {
+					linkPasteRef.current.onUpdate(update);
 					if (update.docChanged && !applyingExternal.current) {
 						const next = update.state.doc.toString();
 						lastEmitted.current = next;
@@ -361,7 +543,7 @@ function useMarkdownEditorView(
 					paste(event, view) {
 						const handler = onImageFileRef.current;
 						const files = imageFilesFromClipboard(event.clipboardData);
-						if (!handler || files.length === 0) return false;
+						if (!handler || files.length === 0) return linkPasteRef.current.onPaste(event, view);
 						event.preventDefault();
 						insertUploadedImages(view, files, view.state.selection.main.from, handler);
 						return true;
@@ -460,6 +642,7 @@ export default function MarkdownEditor({
 	minHeight = "240px",
 	onImageFile,
 	ariaLabel = "Markdown editor",
+	workspaceSlug,
 }: Props) {
 	const [mobilePreview, setMobilePreview] = useState(false);
 	const [preview, setPreview] = useState("");
@@ -471,12 +654,14 @@ export default function MarkdownEditor({
 		return () => clearTimeout(timer);
 	}, [value]);
 
+	const linkPaste = useLinkPaste(workspaceSlug);
 	const { containerRef, viewRef } = useMarkdownEditorView(
 		value,
 		onChange,
 		minHeight,
 		onImageFile,
-		ariaLabel
+		ariaLabel,
+		linkPaste.handlers
 	);
 	const { bold, italic, heading, link, codeBlock, bulletList, numberedList } =
 		useMarkdownCommands(viewRef);
@@ -511,12 +696,23 @@ export default function MarkdownEditor({
 				</button>
 			</div>
 
-			<div class="flex flex-1" style={{ minHeight }}>
+			<div class="flex flex-1 relative" style={{ minHeight }} ref={linkPaste.anchorRef}>
 				<div
 					class={`flex-1 min-w-0 flex flex-col${mobilePreview ? " max-sm:hidden" : ""}`}
 					ref={containerRef}
 				/>
-				<PreviewPane preview={preview} mobilePreview={mobilePreview} />
+				<PreviewPane
+					preview={preview}
+					mobilePreview={mobilePreview}
+					workspaceSlug={workspaceSlug}
+				/>
+				{linkPaste.popover && (
+					<LinkPastePopover
+						position={linkPaste.popover}
+						onKeepCard={linkPaste.dismiss}
+						onConvert={() => void linkPaste.convertToLink()}
+					/>
+				)}
 			</div>
 		</div>
 	);

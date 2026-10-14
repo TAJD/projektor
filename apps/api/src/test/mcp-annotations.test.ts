@@ -5,7 +5,7 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { capabilityForMcpTool } from "../auth/scopes";
-import { DESTRUCTIVE_TOOLS } from "../mcp/annotations";
+import { DESTRUCTIVE_TOOLS, OPEN_WORLD_TOOLS } from "../mcp/annotations";
 import { coreMCPTools } from "../routes/mcp";
 import { authHeaders, type JsonRpcResult, seedFixture } from "./helpers";
 
@@ -17,8 +17,10 @@ describe("MCP tool annotations (PROJ-887)", () => {
 		expect(missing.map((t) => t.name)).toEqual([]);
 	});
 
-	it("openWorldHint is false on every core tool", () => {
-		const wrong = coreMCPTools.filter((t) => t.annotations?.openWorldHint !== false);
+	it("openWorldHint is true exactly on OPEN_WORLD_TOOLS", () => {
+		const wrong = coreMCPTools.filter(
+			(t) => t.annotations?.openWorldHint !== OPEN_WORLD_TOOLS.includes(t.name)
+		);
 		expect(wrong.map((t) => t.name)).toEqual([]);
 	});
 

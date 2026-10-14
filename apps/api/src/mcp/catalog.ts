@@ -12,6 +12,7 @@ import { groupsTools } from "./groups";
 import { issueLeasesTools } from "./issue-leases";
 import { issueLinksTools } from "./issue-links";
 import { issuesTools } from "./issues";
+import { linkPreviewsTools } from "./link-previews";
 import { playbooksTools } from "./playbooks";
 import { projectActivityTools } from "./project-activity";
 import { projectsTools } from "./projects";
@@ -61,6 +62,12 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 	{ domain: "comments", title: "Comments", group: "Project data", tools: commentsTools },
 	{ domain: "wiki", title: "Wiki", group: "Project data", tools: wikiTools },
 	{ domain: "files", title: "Attachments", group: "Project data", tools: filesTools },
+	{
+		domain: "link-previews",
+		title: "Link previews",
+		group: "Project data",
+		tools: linkPreviewsTools,
+	},
 	{ domain: "task-types", title: "Task types", group: "Project data", tools: taskTypesTools },
 	{
 		domain: "task-statuses",

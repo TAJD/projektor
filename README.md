@@ -16,7 +16,7 @@
 
 Projektor is an issue tracker and wiki that an AI coding agent runs as well as you do.
 Issues, boards, sprints and a wiki are exposed over MCP
-(<!-- gen-mcp-stats:start -->122 tools across 22 domains<!-- gen-mcp-stats:end -->), so the
+(<!-- gen-mcp-stats:start -->123 tools across 23 domains<!-- gen-mcp-stats:end -->), so the
 agent files the ticket, moves it and writes the page instead of asking you to. The whole thing is one
 Cloudflare Worker (Hono, D1, KV, R2) in your own account. No servers, no containers.
 

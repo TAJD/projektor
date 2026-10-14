@@ -26,6 +26,26 @@ renderer.code = (token: Tokens.Code) => {
 const defaultTable = renderer.table.bind(renderer);
 renderer.table = (token: Tokens.Table) => `<div class="table-scroll">${defaultTable(token)}</div>`;
 
+// PROJ-1036: a paragraph that is nothing but a bare URL (GFM autolink or `<url>`) is a
+// link-card placeholder. It renders as the plain link inside a marked div, so it reads
+// fine before (or without) hydrateLinkCards() turning it into a preview card.
+const defaultParagraph = renderer.paragraph.bind(renderer);
+renderer.paragraph = (token: Tokens.Paragraph) => {
+	const href = bareUrlOf(token);
+	const html = defaultParagraph(token);
+	if (!href) return html;
+	return `<div class="link-card" data-link-card="${escapeHtml(href).replace(/"/g, "&quot;")}">${html}</div>`;
+};
+
+function bareUrlOf(token: Tokens.Paragraph): string | null {
+	const only = token.tokens.length === 1 ? token.tokens[0] : null;
+	if (only?.type !== "link") return null;
+	const link = only as Tokens.Link;
+	const raw = link.raw.trim();
+	if (raw !== link.href && raw !== `<${link.href}>`) return null;
+	return /^https?:\/\//i.test(link.href) ? link.href : null;
+}
+
 /**
  * Render untrusted markdown to sanitized HTML.
  *

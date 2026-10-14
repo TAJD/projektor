@@ -18,6 +18,7 @@ import { groupsTools } from "../mcp/groups";
 import { issueLeasesTools } from "../mcp/issue-leases";
 import { issueLinksTools } from "../mcp/issue-links";
 import { issuesTools } from "../mcp/issues";
+import { linkPreviewsTools } from "../mcp/link-previews";
 import { playbooksTools } from "../mcp/playbooks";
 import { projectActivityTools } from "../mcp/project-activity";
 import { projectsTools } from "../mcp/projects";
@@ -335,6 +336,7 @@ export const coreMCPTools: MCPTool[] = [
 	...commentsTools,
 	...wikiTools,
 	...filesTools,
+	...linkPreviewsTools,
 	...taskTypesTools,
 	...taskStatusesTools,
 	...customFieldsTools,

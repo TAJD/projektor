@@ -271,3 +271,27 @@ describe("renderMermaidDiagrams", () => {
 		vi.resetModules();
 	});
 });
+
+describe("renderMd — link card placeholders (PROJ-1036)", () => {
+	it("marks a paragraph that is only a bare URL", () => {
+		const div = document.createElement("div");
+		div.innerHTML = renderMd("https://example.com/a?b=1&c=2");
+		const card = div.querySelector<HTMLElement>("[data-link-card]");
+		expect(card?.dataset.linkCard).toBe("https://example.com/a?b=1&c=2");
+		expect(card?.querySelector("a")?.getAttribute("href")).toBe("https://example.com/a?b=1&c=2");
+	});
+
+	it("marks an angle-bracket autolink too", () => {
+		expect(renderMd("<https://example.com>")).toContain("data-link-card");
+	});
+
+	it.each([
+		"see https://example.com for more",
+		"[Example](https://example.com)",
+		"- https://example.com",
+		"`https://example.com`",
+		"mailto:me@example.com",
+	])("leaves %j as an ordinary link or text", (md) => {
+		expect(renderMd(md)).not.toContain("data-link-card");
+	});
+});

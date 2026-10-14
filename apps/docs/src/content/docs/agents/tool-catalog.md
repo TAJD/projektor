@@ -12,7 +12,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**122 tools across 22 domains.**
+**123 tools across 23 domains.**
 
 ## Coordination
 
@@ -184,6 +184,12 @@ running server.
 | `get_attachment` | Get attachment metadata by id. For kind 'file' the bytes themselves are only available over REST (GET /api/files/:id) — binary content can't cross JSON-RPC. | read-only |
 | `create_link_attachment` | Attach a wiki-page reference or an external URL to an issue or wiki page | write |
 | `delete_attachment` | Delete an attachment by id | destructive |
+
+### Link previews
+
+| Tool | Description | Kind |
+|------|-------------|------|
+| `get_link_preview` | Preview a link: title, description, image and site name. `url` is either an absolute http(s) URL (its OpenGraph / title-tag metadata is fetched and cached for 24h) or an app path to an issue or wiki page in this workspace (e.g. /projects/PROJ/issues/42 or /wiki/my-page), which also returns the issue's ref and status. `title: null` means the page had nothing to preview. Private, loopback and non-http(s) URLs are refused. | read-only |
 
 ### Task types
 
