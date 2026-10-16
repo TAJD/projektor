@@ -1,0 +1,22 @@
+name: Question
+description: Ask how something works, or how to set it up.
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Questions are welcome here. The [docs site](https://tajd.github.io/projektor/) may
+        already have the answer, but if it didn't help, that's worth knowing too.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What you're trying to do, what you've tried, and which docs page (if any) you were reading.
+    validations:
+      required: false

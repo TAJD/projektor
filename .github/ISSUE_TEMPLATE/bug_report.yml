@@ -1,0 +1,62 @@
+name: Bug report
+description: Something in projektor isn't working the way it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. For a security vulnerability,
+        please don't open a public issue: follow [SECURITY.md](https://github.com/TAJD/projektor/blob/main/SECURITY.md) instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you saw, and what you expected to see instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that shows the problem.
+      placeholder: |
+        1. Open a project's board
+        2. Drag an issue to "Done"
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options:
+        - Web app (browser)
+        - MCP server (agent / MCP client)
+        - REST API
+        - Docs site
+        - Self-hosting / deploy
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The release (e.g. v0.7.6) or commit SHA you're running. The MCP server reports its version in `serverInfo.version`.
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser and OS, MCP client (Claude Code, Cursor, ...), or local dev vs. a deployed instance, as relevant.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, errors or screenshots
+      description: Error messages, MCP tool results, `wrangler tail` output, console errors. Please remove tokens and other secrets first.
+      render: shell
+    validations:
+      required: false
