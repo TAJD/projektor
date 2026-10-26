@@ -173,6 +173,89 @@ describe("MyIssues — cross-project fetch and grouping", () => {
 	});
 });
 
+// Issue #417: the list used to fetch one default-sized page (30) and never follow
+// nextCursor, so assigned issues beyond the newest page were silently missing.
+describe("MyIssues — paging (#417)", () => {
+	function issueN(n: number, overrides: Partial<Issue> = {}): Issue {
+		return {
+			...OPEN_ISSUE_PROJ_A,
+			id: `paged-${n}`,
+			number: n,
+			title: `Paged issue ${n}`,
+			...overrides,
+		};
+	}
+
+	function pagedFetch(pages: Issue[][]) {
+		return vi.fn().mockImplementation((url: string) => {
+			const u = new URL(String(url), "http://localhost");
+			const cursor = u.searchParams.get("cursor");
+			const idx = cursor == null ? 0 : Number(cursor);
+			const items = pages[idx] ?? [];
+			const nextCursor = idx + 1 < pages.length ? String(idx + 1) : null;
+			return Promise.resolve({
+				ok: true,
+				json: () => Promise.resolve({ items, nextCursor, total: null }),
+			});
+		});
+	}
+
+	it("follows nextCursor until exhausted so older issues appear", async () => {
+		const mockFetch = pagedFetch([
+			[issueN(1), issueN(2)],
+			[issueN(3)],
+			[issueN(4, { title: "Oldest in progress", status_category: "in_progress" })],
+		]);
+		vi.stubGlobal("fetch", mockFetch);
+		render(<MyIssues />);
+		await waitForLoaded();
+
+		await waitFor(() =>
+			expect(screen.getAllByText("Oldest in progress").length).toBeGreaterThan(0)
+		);
+		expect(screen.getByText("4 issues")).toBeTruthy();
+		expect(mockFetch).toHaveBeenCalledTimes(3);
+	});
+
+	it("requests the maximum page size and only open issues by default", async () => {
+		const mockFetch = pagedFetch([[issueN(1)]]);
+		vi.stubGlobal("fetch", mockFetch);
+		render(<MyIssues />);
+		await waitForLoaded();
+
+		const first = new URL(String(mockFetch.mock.calls[0][0]), "http://localhost");
+		expect(first.searchParams.get("assignee")).toBe("me");
+		expect(first.searchParams.get("limit")).toBe("100");
+		expect(first.searchParams.get("open")).toBe("true");
+	});
+
+	it("refetches without the open filter once 'Include done' is checked", async () => {
+		const mockFetch = pagedFetch([
+			[issueN(1), issueN(2, { title: "Finished", status_category: "done" })],
+		]);
+		vi.stubGlobal("fetch", mockFetch);
+		render(<MyIssues />);
+		await waitForLoaded();
+		expect(screen.queryAllByText("Finished")).toHaveLength(0);
+
+		fireEvent.click(screen.getByLabelText(/Include done/i));
+
+		await waitFor(() => expect(screen.getAllByText("Finished").length).toBeGreaterThan(0));
+		const last = new URL(String(mockFetch.mock.calls.at(-1)?.[0]), "http://localhost");
+		expect(last.searchParams.has("open")).toBe(false);
+	});
+
+	it("keeps the 'Include done' checkbox mounted while refetching", async () => {
+		vi.stubGlobal("fetch", pagedFetch([[issueN(1)]]));
+		render(<MyIssues />);
+		await waitForLoaded();
+
+		fireEvent.click(screen.getByLabelText(/Include done/i));
+
+		expect(screen.getByLabelText(/Include done/i)).toBeTruthy();
+	});
+});
+
 describe("MyIssues — empty states", () => {
 	it("shows the open-issues empty state when there are no assigned issues", async () => {
 		vi.stubGlobal("fetch", setupFetch([]));
