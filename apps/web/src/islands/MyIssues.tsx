@@ -166,32 +166,71 @@ function ProjectIssuesSection({ name, issues }: { name: string; issues: Issue[] 
 	);
 }
 
+// The API caps a page at 100 rows. Issue #417: a single un-paged request silently dropped
+// every assigned issue beyond the newest page, so we follow nextCursor until it is exhausted.
+const PAGE_SIZE = 100;
+const MAX_PAGES = 50;
+
+interface IssuePage {
+	items: Issue[];
+	nextCursor?: string | number | null;
+}
+
+async function fetchAllAssigned(
+	includeDone: boolean,
+	workspaceSlug: string | undefined
+): Promise<Issue[]> {
+	const all: Issue[] = [];
+	let cursor: string | number | null = null;
+	for (let page = 0; page < MAX_PAGES; page++) {
+		// PROJ-444: "me" resolves server-side to the calling user — no more
+		// /auth/me round trip before this fetch can even start.
+		const qs = new URLSearchParams({ assignee: "me", limit: String(PAGE_SIZE) });
+		// Filter on the server so done/cancelled rows don't spend page slots when hidden.
+		if (!includeDone) qs.set("open", "true");
+		if (cursor != null) qs.set("cursor", String(cursor));
+		const data: IssuePage = await apiFetch<IssuePage>(`/api/issues?${qs.toString()}`, {
+			workspaceSlug,
+		});
+		if (Array.isArray(data.items)) all.push(...data.items);
+		cursor = data.nextCursor ?? null;
+		if (cursor == null) break;
+	}
+	return all;
+}
+
 export default function MyIssues({ workspaceSlug }: Props) {
 	const [issues, setIssues] = useState<Issue[]>([]);
 	const [loading, setLoading] = useState(true);
+	const [hasLoaded, setHasLoaded] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [includeDone, setIncludeDone] = useState(false);
 
 	useEffect(() => {
+		let cancelled = false;
 		(async () => {
 			setLoading(true);
 			setError(null);
 			try {
-				// PROJ-444: "me" resolves server-side to the calling user — no more
-				// /auth/me round trip before this fetch can even start.
-				const data = await apiFetch<{ items: Issue[] }>("/api/issues?assignee=me", {
-					workspaceSlug,
-				});
-				setIssues(Array.isArray(data.items) ? data.items : []);
+				const items = await fetchAllAssigned(includeDone, workspaceSlug);
+				if (cancelled) return;
+				setIssues(items);
+				setHasLoaded(true);
 			} catch (e) {
+				if (cancelled) return;
 				setError(String(e));
 			} finally {
-				setLoading(false);
+				if (!cancelled) setLoading(false);
 			}
 		})();
-	}, [workspaceSlug]);
+		return () => {
+			cancelled = true;
+		};
+	}, [workspaceSlug, includeDone]);
 
-	if (loading) return <p aria-live="polite">Loading…</p>;
+	// Only the first load replaces the page; toggling "Include done" refetches in place so
+	// the checkbox stays put.
+	if (loading && !hasLoaded) return <p aria-live="polite">Loading…</p>;
 	if (error)
 		return (
 			<p role="alert" class="text-danger-text">
