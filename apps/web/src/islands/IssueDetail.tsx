@@ -3,6 +3,7 @@ import { formatIssueRef } from "../lib/issue-ref";
 import { ApiError, apiFetch } from "../utils/api-client";
 import { claimPrefetchedIssue } from "../utils/issue-prefetch";
 import { issueUrl } from "../utils/issue-url";
+import { fetchAllIssues } from "../utils/paginate";
 import {
 	AttachmentsSection,
 	BodySection,
@@ -196,9 +197,8 @@ function useEpicRelations(issue: IssueData | null, workspaceSlug: string | undef
 		if (issue.type_key === "epic") {
 			const qs = new URLSearchParams({ parentId: issue.id });
 			if (workspaceSlug) qs.set("workspace", workspaceSlug);
-			apiFetch<{ items: IssueData[] }>(`/api/issues?${qs}`, { workspaceSlug })
-				.then((data) => {
-					const items = data?.items ?? [];
+			fetchAllIssues<IssueData>(qs, workspaceSlug)
+				.then((items) => {
 					setChildIssues([...items].sort((a, b) => a.number - b.number));
 				})
 				.catch(() => {});

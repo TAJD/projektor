@@ -1,5 +1,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { apiFetch } from "../../utils/api-client";
+import { fetchAllIssues } from "../../utils/paginate";
 import type { Issue, TaskStatus } from "../board-utils";
 import type { SprintDetail } from "./SprintBannerSection";
 import type { ProjectMeta } from "./types";
@@ -159,12 +160,12 @@ export function useIssueLookups(
 		if (!epicsReady) return;
 		(async () => {
 			try {
-				const qs = new URLSearchParams({ typeId: epicTypeId, limit: "100" });
-				if (epicProjectId) qs.set("project", epicProjectId);
-				const data = await apiFetch<{ items: Issue[] }>(`/api/issues?${qs.toString()}`, {
-					workspaceSlug,
-				});
-				setEpics(Array.isArray(data.items) ? data.items : []);
+				setEpics(
+					await fetchAllIssues<Issue>(
+						epicProjectId ? { typeId: epicTypeId, project: epicProjectId } : { typeId: epicTypeId },
+						workspaceSlug
+					)
+				);
 			} catch {
 				// non-fatal — epic dropdown just won't populate
 			}

@@ -4,6 +4,7 @@ import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
 import { PRIORITY_OPTIONS } from "../utils/issue-utils";
+import { fetchAllIssues } from "../utils/paginate";
 import {
 	CATEGORY_COLORS,
 	type Issue,
@@ -288,14 +289,12 @@ function useEpicsData({
 			const qs = new URLSearchParams({
 				project: projectId,
 				typeId: epicTypeId,
-				limit: "100",
 				// PROJ-441: child rollups computed server-side in one grouped query,
 				// attached per item — replaces the old per-epic getIssue fan-out.
 				includeRollups: "1",
 			});
 			applyDateRangeParams(qs, filterDateField, filterDateFrom, filterDateTo);
-			const data = await apiFetch<{ items: EpicItem[] }>(`/api/issues?${qs}`, { workspaceSlug });
-			setEpics(data.items ?? []);
+			setEpics(await fetchAllIssues<EpicItem>(qs, workspaceSlug));
 		} catch (e) {
 			setError(String(e));
 		} finally {

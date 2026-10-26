@@ -8,6 +8,7 @@ import {
 import { apiFetch } from "../utils/api-client";
 import { dateInputToUnix, formatUnixDate } from "../utils/date-input";
 import { issueUrl } from "../utils/issue-url";
+import { fetchAllIssues } from "../utils/paginate";
 import type { CustomFieldValue, ProjectLookup as Project } from "./board-utils";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
@@ -78,11 +79,7 @@ async function fetchSprintIssues(
 	sprintId: string,
 	workspaceSlug: string | undefined
 ): Promise<Issue[]> {
-	const data = await apiFetch<{ items: Issue[] }>(
-		`/api/issues?sprintId=${encodeURIComponent(sprintId)}&limit=100`,
-		{ workspaceSlug }
-	).catch(() => ({ items: [] as Issue[] }));
-	return data.items;
+	return fetchAllIssues<Issue>({ sprintId }, workspaceSlug).catch(() => []);
 }
 
 function computeVelocity(sprint: Sprint, issues: readonly Issue[]): SprintVelocity {
