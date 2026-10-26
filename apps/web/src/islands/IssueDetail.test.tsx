@@ -789,3 +789,36 @@ describe("PROJ-567 — issue type change in the sidebar", () => {
 		});
 	});
 });
+
+// ─── Epic children paging (#417 class of bug) ────────────────────────────────
+
+describe("epic children", () => {
+	it("follows nextCursor so children beyond the first page are listed", async () => {
+		const child = (n: number) => ({
+			...CHILD_ISSUE_DATA,
+			id: `child-${n}`,
+			number: 100 + n,
+			title: `Paged child ${n}`,
+		});
+		const fetchMock = vi.fn().mockImplementation((url: string) => {
+			const u = String(url);
+			const respond = (body: unknown) =>
+				Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+			if (u.includes("/comments") || u.includes("/links")) return respond([]);
+			if (u.includes("task-statuses") || u.includes("task-types")) return respond([]);
+			if (u.includes("?parentId=")) {
+				const cursor = new URL(u, "http://localhost").searchParams.get("cursor");
+				return cursor === null
+					? respond({ items: [child(1)], nextCursor: "page-2" })
+					: respond({ items: [child(2)], nextCursor: null });
+			}
+			return respond(EPIC_DATA);
+		});
+		vi.stubGlobal("fetch", fetchMock);
+
+		render(<IssueDetail issueId="epic-1" />);
+
+		expect((await screen.findAllByText("Paged child 1")).length).toBeGreaterThan(0);
+		expect((await screen.findAllByText("Paged child 2")).length).toBeGreaterThan(0);
+	});
+});

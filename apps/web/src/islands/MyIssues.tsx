@@ -1,8 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { formatIssueRef } from "../lib/issue-ref";
 import { statusDisplayName } from "../lib/status";
-import { apiFetch } from "../utils/api-client";
 import { issueUrl } from "../utils/issue-url";
+import { fetchAllIssues } from "../utils/paginate";
 import { categoryColor, type Issue } from "./board-utils";
 
 interface Props {
@@ -166,39 +166,6 @@ function ProjectIssuesSection({ name, issues }: { name: string; issues: Issue[] 
 	);
 }
 
-// The API caps a page at 100 rows. Issue #417: a single un-paged request silently dropped
-// every assigned issue beyond the newest page, so we follow nextCursor until it is exhausted.
-const PAGE_SIZE = 100;
-const MAX_PAGES = 50;
-
-interface IssuePage {
-	items: Issue[];
-	nextCursor?: string | number | null;
-}
-
-async function fetchAllAssigned(
-	includeDone: boolean,
-	workspaceSlug: string | undefined
-): Promise<Issue[]> {
-	const all: Issue[] = [];
-	let cursor: string | number | null = null;
-	for (let page = 0; page < MAX_PAGES; page++) {
-		// PROJ-444: "me" resolves server-side to the calling user — no more
-		// /auth/me round trip before this fetch can even start.
-		const qs = new URLSearchParams({ assignee: "me", limit: String(PAGE_SIZE) });
-		// Filter on the server so done/cancelled rows don't spend page slots when hidden.
-		if (!includeDone) qs.set("open", "true");
-		if (cursor != null) qs.set("cursor", String(cursor));
-		const data: IssuePage = await apiFetch<IssuePage>(`/api/issues?${qs.toString()}`, {
-			workspaceSlug,
-		});
-		if (Array.isArray(data.items)) all.push(...data.items);
-		cursor = data.nextCursor ?? null;
-		if (cursor == null) break;
-	}
-	return all;
-}
-
 export default function MyIssues({ workspaceSlug }: Props) {
 	const [issues, setIssues] = useState<Issue[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -212,7 +179,12 @@ export default function MyIssues({ workspaceSlug }: Props) {
 			setLoading(true);
 			setError(null);
 			try {
-				const items = await fetchAllAssigned(includeDone, workspaceSlug);
+				// PROJ-444: "me" resolves server-side to the calling user. Filter on the server so
+				// hidden done/cancelled rows don't spend page slots.
+				const items = await fetchAllIssues<Issue>(
+					includeDone ? { assignee: "me" } : { assignee: "me", open: "true" },
+					workspaceSlug
+				);
 				if (cancelled) return;
 				setIssues(items);
 				setHasLoaded(true);
