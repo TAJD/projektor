@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import {
 	AddCommentSchema,
 	DeleteCommentSchema,
@@ -65,7 +65,9 @@ export async function listComments(ctx: ServiceCtx, input: unknown): Promise<Com
 		.from(schema.issueComments)
 		.innerJoin(schema.users, eq(schema.issueComments.authorId, schema.users.id))
 		.where(eq(schema.issueComments.issueId, issueId))
-		.orderBy(asc(schema.issueComments.createdAt));
+		// rowid breaks same-second ties in insertion order, so the order is stable across
+		// calls — MCP list_comments pages by offset (PROJ-1053).
+		.orderBy(asc(schema.issueComments.createdAt), sql`${schema.issueComments}.rowid`);
 
 	return rows as CommentRow[];
 }
