@@ -153,7 +153,7 @@ describe("Flow metrics (PROJ-252)", () => {
 				jsonrpc: "2.0",
 				id: 1,
 				method: "tools/call",
-				params: { name: "get_flow_metrics", arguments: { projectId } },
+				params: { name: "get_flow_metrics", arguments: { projectId, verbose: true } },
 			}),
 		});
 		const mcpJson = (await mcpRes.json()) as JsonRpcResult<{ content: Array<{ text: string }> }>;

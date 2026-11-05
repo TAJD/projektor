@@ -64,7 +64,8 @@ for (const group of groups) {
 	body.push(`## ${group}`);
 	body.push("");
 	for (const d of domains) {
-		body.push(`### ${d.title}`);
+		// PROJ-1056: the slug is what `?domains=` takes, so show it next to the title.
+		body.push(`### ${d.title} (\`${d.domain}\`)`);
 		body.push("");
 		body.push("| Tool | Description | Kind |");
 		body.push("|------|-------------|------|");

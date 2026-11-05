@@ -53,6 +53,8 @@ const REST_ONLY: Record<string, string> = {
 	"workspaces.ts:listTokens": "token inventory is a human audit view",
 	"workspaces.ts:revokeToken": "revoking a workspace token is a human action",
 	"workspaces.ts:getWorkspaceMcpInfo": "connection instructions for a human setting up a client",
+	// PROJ-1055: the MCP dispatcher (routes/mcp.ts) records its own calls; not an operation.
+	"tool-usage.ts:recordToolCall": "telemetry write made by the MCP dispatcher per tools/call",
 	// Public share links — issued by a human, consumed anonymously.
 	"share.ts:createShareToken": "public share links are issued by a human",
 	"share.ts:getSharedIssue": "anonymous read path, no workspace auth",

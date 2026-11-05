@@ -314,6 +314,7 @@ const WORKSPACE_CLEANUP_SQL: readonly string[] = [
 	"DELETE FROM task_types WHERE workspace_id = ?1",
 	"DELETE FROM enabled_plugins WHERE workspace_id = ?1",
 	"DELETE FROM activity WHERE workspace_id = ?1",
+	"DELETE FROM mcp_tool_usage WHERE workspace_id = ?1",
 	"DELETE FROM api_tokens WHERE workspace_id = ?1",
 	"DELETE FROM provisioning_removals WHERE workspace_id = ?1",
 	"DELETE FROM workspace_members WHERE workspace_id = ?1",

@@ -1995,7 +1995,7 @@ describe("get_prioritized_issues MCP tool", () => {
 				jsonrpc: "2.0",
 				id: 1,
 				method: "tools/call",
-				params: { name: "get_prioritized_issues", arguments: args },
+				params: { name: "get_prioritized_issues", arguments: { verbose: true, ...args } },
 			}),
 		});
 		return res.json() as Promise<{

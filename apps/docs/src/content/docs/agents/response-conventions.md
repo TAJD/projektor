@@ -45,8 +45,9 @@ back unchanged as `cursor` to get the following page. When it is absent there ar
 | `list_issues` | `cursor` (a `(created_at,id)` compound cursor); `total` is included |
 | `search_wiki` | `cursor` (the next offset) |
 | `list_wiki_changes` | `cursor` (in place of `since`); `next` is absent when there were no changes |
+| `list_comments` | `cursor` (the next offset); `total` is included; `latest:N` for the newest N |
 | `list_project_activity`, `search_issues` | `{items}` only; use `limit`/`since` |
-| `list_comments`, `wiki_tree` | `{items}` only, never cut |
+| `wiki_tree` | `{items}` only, never cut |
 
 Before and after for `list_issues` (50 issues): ~54 KB before; with `view=summary`, ~7 KB.
 
@@ -66,14 +67,14 @@ Before and after for `list_issues` (50 issues): ~54 KB before; with `view=summar
 
 ## The 20,000-character cap
 
-`list_issues`, `search_wiki`, `list_wiki_changes` and `list_project_activity` cap a single
+`list_issues`, `list_comments`, `search_wiki`, `list_wiki_changes` and `list_project_activity` cap a single
 result at about 20,000 characters, cut on an item boundary so it is always valid JSON. When
 it fires the result carries `truncated:true`:
 
-- `list_issues`, `search_wiki` and `list_wiki_changes` set `next` to resume right after the last item returned, so nothing is skipped. (`list_wiki_changes` never cuts in the middle of one second, because `since` is exclusive.)
+- `list_issues`, `list_comments`, `search_wiki` and `list_wiki_changes` set `next` to resume right after the last item returned, so nothing is skipped. (`list_wiki_changes` never cuts in the middle of one second, because `since` is exclusive.)
 - `list_project_activity` has no cursor: a `hint` says to lower `limit` or raise `since`.
 
-`list_comments` and `wiki_tree` are not cut, because a dropped tail could not be recovered.
+`wiki_tree` is not cut, because a dropped tail could not be recovered.
 A result is never a partial JSON document.
 
 ## Reading long content

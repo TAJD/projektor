@@ -19,6 +19,7 @@ import { projectsTools } from "./projects";
 import { sprintsTools } from "./sprints";
 import { taskStatusesTools } from "./task-statuses";
 import { taskTypesTools } from "./task-types";
+import { toolUsageTools } from "./tool-usage";
 import { wikiTools } from "./wiki";
 import { workflowTools } from "./workflow";
 import { workspacesTools } from "./workspaces";
@@ -101,6 +102,7 @@ export const TOOL_DOMAINS: ToolDomain[] = [
 		group: "Project data",
 		tools: codeHeatmapTools,
 	},
+	{ domain: "tool-usage", title: "Tool usage", group: "Project data", tools: toolUsageTools },
 ];
 
 /** Total number of MCP tools across all domains. */

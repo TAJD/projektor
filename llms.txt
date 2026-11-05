@@ -18,6 +18,10 @@ claude mcp add --transport http projektor "https://<host>/mcp/<workspace-uuid>" 
 
 Name and URL go before --header (--header is variadic).
 
+Load only the tools you need: add `?domains=<slug>,<slug>` to the URL (for example
+`?domains=agents,issues,comments,issue-links,workflow` for an issue-working agent). It filters
+tools/list; slugs are listed in the tool catalog (https://tajd.github.io/projektor/agents/tool-catalog/).
+
 ## MCP endpoint
 
 POST /mcp/<workspace-uuid>

@@ -324,16 +324,27 @@ describe("PROJ-891: MCP tools", () => {
 		const tree = await tool<{ items: unknown[] }>("wiki_tree", {});
 		expect(tree.items.length).toBeGreaterThan(0);
 	});
-	it("list_comments is never cut: every comment is returned", async () => {
+	it("list_comments: a capped page resumes via `next`, so no comment is lost (PROJ-1053)", async () => {
 		const issue = await seedIssue(f.workspaceId, f.projectId, f.userId, { title: "Chatty" });
 		for (let i = 0; i < 30; i++) {
 			await tool("add_comment", { issueId: issue.id, body: `${i} ${"c".repeat(1000)}` });
 		}
-		const res = await tool<{ items: unknown[]; truncated?: boolean }>("list_comments", {
-			issueId: issue.id,
-		});
-		expect(res.items).toHaveLength(30);
-		expect(res.truncated).toBeUndefined();
+		const bodies: string[] = [];
+		let cursor: string | undefined;
+		for (let guard = 0; guard < 10; guard++) {
+			const res = await tool<{ items: Array<{ body: string }>; next?: string; total: number }>(
+				"list_comments",
+				{ issueId: issue.id, ...(cursor ? { cursor } : {}) }
+			);
+			expect(res.total).toBe(30);
+			bodies.push(...res.items.map((c) => c.body));
+			if (!res.next) break;
+			cursor = res.next;
+		}
+		expect(bodies).toHaveLength(30);
+		expect(bodies.map((b) => Number(b.split(" ")[0])).sort((a, b) => a - b)).toEqual(
+			Array.from({ length: 30 }, (_, i) => i)
+		);
 	});
 
 	it("list_wiki_changes: no changes means no `next`; an empty cursor does not replay from the epoch", async () => {
