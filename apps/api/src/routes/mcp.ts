@@ -26,12 +26,14 @@ import { getPrompt, listPrompts } from "../mcp/prompts";
 import { sprintsTools } from "../mcp/sprints";
 import { taskStatusesTools } from "../mcp/task-statuses";
 import { taskTypesTools } from "../mcp/task-types";
+import { toolUsageTools } from "../mcp/tool-usage";
 import { validateToolArgs } from "../mcp/validate-args";
 import { wikiTools } from "../mcp/wiki";
 import { workflowTools } from "../mcp/workflow";
 import { workspacesTools } from "../mcp/workspaces";
 import { pluginRegistry } from "../plugins/registry";
 import { ValidationError } from "../services/errors";
+import { recordToolCall } from "../services/tool-usage";
 import { ctxFromHono } from "../services/types";
 import { getWorkflow } from "../services/workflow";
 
@@ -230,6 +232,7 @@ router.post("/:workspaceId", async (c) => {
 						fieldErrors,
 					})
 				);
+				recordUsage(ctx, workspace.id, name, toolError, true);
 				// biome-ignore lint/style/noNonNullAssertion: a ValidationError always maps
 				return c.json(jsonRpcResult(body.id, toolError!));
 			}
@@ -247,18 +250,17 @@ router.post("/:workspaceId", async (c) => {
 
 			try {
 				const result = await tool.handler(args, ctx);
-				return c.json(
-					jsonRpcResult(body.id, {
-						// PROJ-931: minified — pretty-printing roughly doubled token cost
-						// for agents reading tool results. REST responses are unaffected.
-						content: [{ type: "text", text: JSON.stringify(result) }],
-					})
-				);
+				// PROJ-931: minified — pretty-printing roughly doubled token cost
+				// for agents reading tool results. REST responses are unaffected.
+				const text = JSON.stringify(result);
+				recordUsage(ctx, workspace.id, name, text, false);
+				return c.json(jsonRpcResult(body.id, { content: [{ type: "text", text }] }));
 			} catch (err) {
 				// PROJ-893: service errors (validation, not_found, forbidden, conflict, …) are
 				// tool results the model can act on. Only an unexpected internal failure stays a
 				// JSON-RPC error, carrying just a request id.
 				const toolError = toToolError(err, { toolName: name, role: ctx.role });
+				recordUsage(ctx, workspace.id, name, toolError ?? null, true);
 				if (toolError) return c.json(jsonRpcResult(body.id, toolError));
 				const { code, message, data } = toMcpError(err, crypto.randomUUID());
 				return c.json(jsonRpcError(body.id, code, message, data));
@@ -315,6 +317,29 @@ function insufficientScope(
 	return c.json(jsonRpcError(id, -32003, `Token lacks '${required}' scope`), 403);
 }
 
+// PROJ-1055: count every tools/call (result or error) toward the workspace's per-tool,
+// per-day usage row. Off the response path via waitUntil and best-effort: telemetry must
+// never fail or slow a tool call. `payload` is the result text, or the error result object.
+const utf8 = new TextEncoder();
+function recordUsage(
+	ctx: { db: D1Database; waitUntil?: (p: Promise<unknown>) => void },
+	workspaceId: string,
+	tool: string,
+	payload: unknown,
+	isError: boolean
+): void {
+	const text = typeof payload === "string" ? payload : JSON.stringify(payload ?? null);
+	const write = recordToolCall(ctx.db, workspaceId, tool, utf8.encode(text).length, isError).catch(
+		(err) => {
+			console.error("mcp tool usage write failed (PROJ-1055)", {
+				tool,
+				err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+			});
+		}
+	);
+	ctx.waitUntil?.(write);
+}
+
 function dedupe(values: string[]): string[] {
 	return [...new Set(values)];
 }
@@ -350,6 +375,7 @@ export const coreMCPTools: MCPTool[] = [
 	...playbooksTools,
 	...flowMetricsTools,
 	...codeHeatmapTools,
+	...toolUsageTools,
 ];
 
 function jsonRpcResult(id: unknown, result: unknown) {

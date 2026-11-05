@@ -63,6 +63,44 @@ function withBodyPreview(
 	return { ...item, ...bodyPreview(item.body, bodyChars) };
 }
 
+// PROJ-1052: same view/fields/verbose options as list_issues, but summary is the default —
+// a search hit is for triage, and get_issue (which accepts the ref) has the rest.
+const SUMMARY_DEFAULT_VIEW_PROPS = {
+	...VIEW_FIELDS_PROPS,
+	view: {
+		...VIEW_FIELDS_PROPS.view,
+		description:
+			"summary (default) = {ref,title,status,priority} per hit; full = every non-empty field",
+	},
+} as const;
+
+type PrioritizedRaw = {
+	id: string;
+	title: string;
+	status: string;
+	priority: string;
+	project_key: string | null;
+	number: number;
+	_score: number;
+	needsGrooming?: true;
+	missingCriteria?: string[];
+};
+
+/**
+ * PROJ-1051: the compact "what next?" row. `ref` replaces the UUID (get_issue accepts it)
+ * and the score keeps 3 decimals; ids, status ids and the breakdown are verbose-only.
+ */
+function shapePrioritized(r: PrioritizedRaw): Record<string, unknown> {
+	return {
+		...(r.project_key ? { ref: `${r.project_key}-${r.number}` } : { id: r.id }),
+		title: r.title,
+		status: r.status,
+		priority: r.priority,
+		score: Math.round(r._score * 1000) / 1000,
+		...(r.needsGrooming ? { needsGrooming: true, missingCriteria: r.missingCriteria } : {}),
+	};
+}
+
 export const issuesTools: MCPTool[] = [
 	{
 		name: "list_issues",
@@ -447,11 +485,18 @@ export const issuesTools: MCPTool[] = [
 					description: "How `labels` combine: all (default) or any",
 				},
 				limit: { type: "integer", minimum: 1, maximum: 50, default: 20, description: "Max 50" },
+				...SUMMARY_DEFAULT_VIEW_PROPS,
 			},
 		},
 		annotations: READ,
 		async handler(input, ctx) {
-			return toPage((await searchIssues(ctx, input)) as unknown[]);
+			// PROJ-1052: rows default to the summary view ({ref,title,status,priority}); the raw
+			// rows repeated id + project_id/key/name on every hit.
+			const { rest, ...shape } = splitShapeOpts(input);
+			const rows = (await searchIssues(ctx, rest)) as Record<string, unknown>[];
+			const opts =
+				shape.view || shape.fields || shape.verbose ? shape : { view: "summary" as const };
+			return toPage(rows.map((r) => shapeIssue(r, opts)));
 		},
 	},
 	{
@@ -486,7 +531,9 @@ export const issuesTools: MCPTool[] = [
 			"definition-of-ready check (missing acceptance criteria or scope/files) are excluded. " +
 			"If none of the open issues pass, the ranked (not-ready) list is returned anyway with " +
 			"`degraded: true` on the response and `needsGrooming`/`missingCriteria` on each issue, rather than " +
-			'an empty array — empty otherwise means "no open work", which would be a lie.',
+			'an empty array — empty otherwise means "no open work", which would be a lie. ' +
+			"Each issue is {ref,title,status,priority,score,needsGrooming?,missingCriteria?}; " +
+			"pass verbose:true for ids and the score breakdown.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -517,11 +564,21 @@ export const issuesTools: MCPTool[] = [
 					description:
 						"Scope ranking to a single project's issues (default: workspace-wide, all visible projects)",
 				},
+				verbose: {
+					type: "boolean",
+					description:
+						"Return the raw rows (ids, status ids, _score and _score_breakdown) instead of the compact shape",
+				},
 			},
 		},
 		annotations: READ,
-		handler(input, ctx) {
-			return getPrioritizedIssues(ctx, input);
+		async handler(input, ctx) {
+			const { verbose, ...rest } = (input ?? {}) as Record<string, unknown>;
+			const result = (await getPrioritizedIssues(ctx, rest)) as {
+				issues: PrioritizedRaw[];
+			} & Record<string, unknown>;
+			if (verbose === true) return result;
+			return { ...result, issues: result.issues.map(shapePrioritized) };
 		},
 	},
 ];

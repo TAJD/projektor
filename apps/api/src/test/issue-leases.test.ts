@@ -181,7 +181,7 @@ describe("get_prioritized_issues excludeClaimed (PROJ-184)", () => {
 				jsonrpc: "2.0",
 				id: 1,
 				method: "tools/call",
-				params: { name: "get_prioritized_issues", arguments: args },
+				params: { name: "get_prioritized_issues", arguments: { ...args, verbose: true } },
 			}),
 		});
 		const json = (await res.json()) as {

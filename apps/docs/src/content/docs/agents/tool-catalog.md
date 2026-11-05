@@ -12,11 +12,11 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**123 tools across 23 domains.**
+**124 tools across 24 domains.**
 
 ## Coordination
 
-### Agent sessions
+### Agent sessions (`agents`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -27,7 +27,7 @@ running server.
 | `end_agent` | End an agent session | write |
 | `list_active_agents` | List agent sessions in the workspace, optionally filtered by issue or project. An ended session is never returned. Live entries only by default — a session that has stopped heartbeating is also excluded; pass includeStale:true to include those too. Each entry carries a `live` flag (false when its heartbeat has gone stale) and, when tied to an issue, that issue's ref (e.g. "PROJ-857") as issueRef. | read-only |
 
-### File claims
+### File claims (`file-claims`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -35,7 +35,7 @@ running server.
 | `release_files` | Release file claims. With paths: releases those paths (optionally only those held by an issue). Without paths it releases everything held by agentId; else, with only issueId, the caller's claims on that issue; else everything held by the credential's single agent session (several live sessions: pass agentId). Returns {released: n, paths: [...]}. | destructive |
 | `list_file_claims` | List active file claims in the workspace, optionally filtered by issue, path or project. Live entries only by default — a claim whose holder has ended, stopped heartbeating, or (for an agentless claim) sat past its TTL is excluded; pass includeStale:true for all. Returns {items} of {path, agentId, issueRef, claimedAt, expiresAt?}; expiresAt is set only on an agentless claim, and stale:true marks a reclaimable claim (only possible with includeStale:true). Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 
-### Issue leases
+### Issue leases (`issue-leases`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -43,20 +43,20 @@ running server.
 | `release_issue` | Release the active lease on an issue, optionally only if held by a given agent session | destructive |
 | `list_issue_leases` | List active issue leases in the workspace, optionally filtered by issue, agent or project. Live entries only by default — a lease whose agent session has ended or stopped heartbeating is excluded; pass includeStale:true for all. Each entry carries the linked issue's ref (e.g. "PROJ-857") as issueRef, and a `live` flag (false when the holder stopped heartbeating and the lease is reclaimable — only possible with includeStale:true). | read-only |
 
-### Agent messages
+### Agent messages (`agent-messages`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
 | `post_message` | Post a coordination message to a channel so the agent fleet can communicate: the workspace (default when scope is omitted), an issue, or a project (readable only by members who can see that project). Returns {id, scope, createdAt}; pass verbose:true for the whole stored row. | write |
 | `list_messages` | List coordination messages for a channel (workspace by default, an issue, or a project), newest first by default. Returns {items, nextCursor}; rows omit workspaceId and null keys. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 
-### Workflow spec
+### Workflow spec (`workflow`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
 | `get_workflow` | Fetch the canonical agent workflow spec: definition of ready, state machine, human gates, completion report requirements, and WIP limits. Call this before claiming work. Returns a content `version` (a stable hash — unchanged unless the spec content changes). Pass a previously-returned version back as `ifVersion` to skip re-reading an unchanged spec: a match returns just `{ unchanged: true, version }` instead of the full content. | read-only |
 
-### Playbooks
+### Playbooks (`playbooks`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -66,7 +66,7 @@ running server.
 
 ## Project data
 
-### Workspaces & members
+### Workspaces & members (`workspaces`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -81,7 +81,7 @@ running server.
 | `get_workspace_brand` | Get the current workspace's white-label branding overrides (display name, accent colors, logo, font). Unset fields are null. | read-only |
 | `update_workspace_brand` | Update the current workspace's white-label branding overrides. Admin+ only. Pass a field as null to clear it back to the deploy-level default; omit a field to leave it unchanged. | write |
 
-### Groups & access
+### Groups & access (`groups`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -96,7 +96,7 @@ running server.
 | `set_group_grant` | Grant an access group a role on a project (upsert — changes the role if a grant already exists). Owner/admin only. | write |
 | `remove_group_grant` | Remove an access group's grant on a project (owner/admin only) | destructive |
 
-### Projects
+### Projects (`projects`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -106,13 +106,13 @@ running server.
 | `update_project` | Update a project name, description, archived state, or epic-closing behaviour (owner/admin only). Set archived: true to hide it from the default project list, false to restore it. epicAutoClose: true closes an epic automatically when its last child is done/cancelled; false (default) makes update_issue/finish_work return parentReadyToClose:{ref} instead. | write |
 | `delete_project` | Delete a project and all its issues (owner only) | destructive |
 
-### Project activity
+### Project activity (`project-activity`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
 | `list_project_activity` | List recent activity events for a project across issues, comments, wiki pages, and sprints. Returns `{items}` ordered most-recent first; a result over ~20,000 chars is cut to fit with `truncated:true` (lower `limit` or raise `since`). See /projektor/agents/response-conventions/. | read-only |
 
-### Issues
+### Issues (`issues`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -123,9 +123,9 @@ running server.
 | `update_issue` | Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. If the work is only partly done, pass completionReport.remainder when marking done: a follow-up issue (same parent and labels, linked follows_from) is created and its ref returned as followUp.ref. | write |
 | `search_issues` | Search issues by keyword in title or body, or by exact label text (an issue whose label equals the whole query is a hit, listed first; case-insensitive for ASCII only). Pass `labels` to narrow keyword hits to issues carrying those labels. To list every issue with a label — with pagination — use list_issues with `labels` instead; search returns at most 50. | read-only |
 | `delete_issue` | Delete an issue by ID or ref (e.g. PROJ-42) | destructive |
-| `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria or scope/files) are excluded. If none of the open issues pass, the ranked (not-ready) list is returned anyway with `degraded: true` on the response and `needsGrooming`/`missingCriteria` on each issue, rather than an empty array — empty otherwise means "no open work", which would be a lie. | read-only |
+| `get_prioritized_issues` | Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + inverse story points. Useful for deciding what to work on next. By default, issues that fail the definition-of-ready check (missing acceptance criteria or scope/files) are excluded. If none of the open issues pass, the ranked (not-ready) list is returned anyway with `degraded: true` on the response and `needsGrooming`/`missingCriteria` on each issue, rather than an empty array — empty otherwise means "no open work", which would be a lie. Each issue is {ref,title,status,priority,score,needsGrooming?,missingCriteria?}; pass verbose:true for ids and the score breakdown. | read-only |
 
-### Issue links
+### Issue links (`issue-links`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -133,16 +133,16 @@ running server.
 | `delete_issue_link` | Delete an issue link by ID | destructive |
 | `list_issue_links` | List all links for an issue (shows effective type from this issue's perspective) | read-only |
 
-### Comments
+### Comments (`comments`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `list_comments` | List comments on an issue (UUID or ref like PROJ-42). Returns `{items}` (see /projektor/agents/response-conventions/). | read-only |
+| `list_comments` | List comments on an issue (UUID or ref like PROJ-42), oldest first. Paged: `limit` (default 50) with `next`/`total`; `latest:N` returns just the newest N. Each item is {id, author, created, body, edited?}; bodyChars:N previews long bodies; verbose:true returns the raw rows. See /projektor/agents/response-conventions/. | read-only |
 | `add_comment` | Add a comment to an issue (UUID or ref like PROJ-42) | write |
 | `update_comment` | Update the body of a comment (author only) | write |
 | `delete_comment` | Delete a comment (author, admin, or owner) | destructive |
 
-### Wiki
+### Wiki (`wiki`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -176,7 +176,7 @@ running server.
 | `undelete_wiki_page` | Restore a trashed wiki page by ID (not slug — trashed pages can share a now-recycled slug; use list_wiki_trash to find the ID). Requires the same permission as delete_wiki_page. If this page was cascade-trashed together with descendants, the whole subtree is restored as one batch — the response's restoredCount reports how many pages came back. Rejected with a structured conflict (no partial restore) if the ID's own slug OR any descendant's slug has since been taken by another live page — the conflict names the colliding slug; rename that page first, then retry. The restored page's parent may itself still be trashed; if so the page appears as a root until the parent is also restored. | write |
 | `purge_wiki_trash` | Permanently remove every wiki page in the workspace that's been trashed for at least 30 days — deletes R2 attachment objects, wiki_revisions/wiki_links/wiki_watchers/wiki_drafts/wiki_redirects rows, and the page row itself, re-parenting any live child left pointing at a purged page. Irreversible. Owner/admin only. Also runs automatically once daily via a Workers Cron Trigger — call this manually only to force an off-cycle purge. | destructive |
 
-### Attachments
+### Attachments (`files`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -185,13 +185,13 @@ running server.
 | `create_link_attachment` | Attach a wiki-page reference or an external URL to an issue or wiki page | write |
 | `delete_attachment` | Delete an attachment by id | destructive |
 
-### Link previews
+### Link previews (`link-previews`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
 | `get_link_preview` | Preview a link: title, description, image and site name. `url` is either an absolute http(s) URL (its OpenGraph / title-tag metadata is fetched and cached for 24h) or an app path to an issue or wiki page in this workspace (e.g. /projects/PROJ/issues/42 or /wiki/my-page), which also returns the issue's ref, status, type, priority and assignee (or, for a wiki link with a #fragment, the heading it points at). `title: null` means the page had nothing to preview. Private, loopback and non-http(s) URLs are refused. | read-only |
 
-### Task types
+### Task types (`task-types`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -200,7 +200,7 @@ running server.
 | `update_task_type` | Update a task type (owner/admin only) | write |
 | `delete_task_type` | Delete a task type (owner/admin only). Fails if the type is in use by any issues. | destructive |
 
-### Task statuses
+### Task statuses (`task-statuses`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -209,7 +209,7 @@ running server.
 | `update_task_status` | Update a task status (owner/admin only) | write |
 | `delete_task_status` | Delete a task status (owner/admin only). Fails if the status is in use or is the default. | destructive |
 
-### Custom fields
+### Custom fields (`custom-fields`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -218,7 +218,7 @@ running server.
 | `update_custom_field_def` | Update a custom field definition label or options (owner/admin only) | write |
 | `delete_custom_field_def` | Delete a custom field definition (owner/admin only). Fails if any issues have values for this field. | destructive |
 
-### Sprints
+### Sprints (`sprints`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -230,7 +230,7 @@ running server.
 | `delete_sprint` | Delete a sprint (issues in the sprint will have their sprint_id cleared) | destructive |
 | `move_issues_to_sprint` | Bulk move issues into a sprint by setting their sprint_id | write |
 
-### Feedback
+### Feedback (`feedback`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
@@ -244,16 +244,22 @@ running server.
 | `update_feedback_status` | Update a feedback item's triage status ('new'/'reviewed'/'actioned'). Member+ (not viewer). | write |
 | `convert_feedback_to_issue` | Convert a feedback item into a tracked issue. The issue title comes from the feedback body (or a rating-based fallback when there's no body); the feedback item is stamped linkedIssueId and its status set to 'actioned'. Rejects (409) if the item was already converted. Member+ (not viewer). | write |
 
-### Flow metrics
+### Flow metrics (`flow-metrics`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `get_flow_metrics` | Time-in-state (leadTime, cycleTime, timeInProgress, reviewLatency, agingWip), collaboration-shape (humanInterventions, autonomyRatio, flowEfficiency — human attention, not an agent-vs-human split), volume-over-time (wipOverTime, throughputOverTime, cfdOverTime, arrivalVsCompletionOverTime, bugShareOverTime, bugTypeTracked), and factoryHealth (leaseExpiries, abandonedClaims, gateRejections, wipCapPressure) metrics for a project. Full definitions: /projektor/agents/flow-metrics/. Two easily-confused pairs: autonomyRatio divides by cycleTime (claimed→done) while flowEfficiency divides by leadTime (ready→done), so flowEfficiency is always ≤ autonomyRatio when there's a ready→claimed queue; and bugTypeTracked:false (no 'bug' task type in the workspace) is distinct from a genuine 0% bug share. Bucketing defaults to weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' for daily buckets. | read-only |
+| `get_flow_metrics` | Time-in-state (leadTime, cycleTime, timeInProgress, reviewLatency, agingWip), collaboration-shape (humanInterventions, autonomyRatio, flowEfficiency — human attention, not an agent-vs-human split), volume-over-time (wipOverTime, throughputOverTime, cfdOverTime, arrivalVsCompletionOverTime, bugShareOverTime, bugTypeTracked), and factoryHealth (leaseExpiries, abandonedClaims, gateRejections, wipCapPressure) metrics for a project. Full definitions: /projektor/agents/flow-metrics/. Two easily-confused pairs: autonomyRatio divides by cycleTime (claimed→done) while flowEfficiency divides by leadTime (ready→done), so flowEfficiency is always ≤ autonomyRatio when there's a ready→claimed queue; and bugTypeTracked:false (no 'bug' task type in the workspace) is distinct from a genuine 0% bug share. Bucketing defaults to weekly (current ISO week plus the preceding 5 weeks); pass granularity: 'day' for daily buckets. agingWip lists only the oldest 10 open items as {ref,title,status,ageDays} (agingWipLimit for more, agingWipTotal for the count); verbose:true returns the raw response. | read-only |
 
-### Code heatmap
+### Code heatmap (`code-heatmap`)
 
 | Tool | Description | Kind |
 |------|-------------|------|
 | `get_code_heatmap` | Where work lands in the codebase, from file-claim history — no git integration needed. Aggregates claims one path segment below `prefix` (omit for the top level), sized by distinctIssueCount (distinct issues that claimed a path under that segment, claimedAt within [since, until]) plus claimCount (raw claim count, including released ones). Each entry's `path` is the drill-down cursor: re-call with `prefix` set to it to see what's under a directory; `isLeaf` marks an entry that is itself a claimed file path, not a directory. Defaults to the current ISO week plus the preceding 5 weeks, matching get_flow_metrics. `mode` switches sizing between claim volume and claim contention (claim_conflicts). | read-only |
+
+### Tool usage (`tool-usage`)
+
+| Tool | Description | Kind |
+|------|-------------|------|
+| `get_tool_usage` | MCP tool-call telemetry for this workspace: per tool, the calls, error results and total/average response bytes (a proxy for the tokens agents spend reading results), sorted by bytes. Counted per UTC day; defaults to the last 7 days. Use it to find the tools whose results cost agents the most. | read-only |
 
 <!-- gen-mcp-catalog:end -->

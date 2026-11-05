@@ -2232,6 +2232,7 @@ interface PrioritizedRow {
 	status: string;
 	priority: string;
 	project_id: string;
+	project_key: string | null;
 	number: number;
 	status_id: string | null;
 	status_category: string | null;
@@ -2299,6 +2300,7 @@ async function queryPrioritized(
 	const sqlText = `
 		WITH open AS (
 			SELECT i.id, i.title, i.status, i.priority, i.project_id, i.number, i.status_id,
+			       (SELECT p.key FROM projects p WHERE p.id = i.project_id) AS project_key,
 			       ts.category AS status_category, i.dor_ready, i.dor_missing, i.rowid AS rid,
 			       (SELECT COUNT(*) FROM issue_links l
 			         WHERE l.workspace_id = i.workspace_id AND l.target_issue_id = i.id
@@ -2343,6 +2345,8 @@ function toPrioritizedIssue(r: PrioritizedRow) {
 		status: r.status,
 		priority: r.priority,
 		project_id: r.project_id,
+		// PROJ-1051: lets the MCP layer emit a `ref` agents can pass straight to get_issue.
+		project_key: r.project_key,
 		number: r.number,
 		status_id: r.status_id,
 		status_category: r.status_category,

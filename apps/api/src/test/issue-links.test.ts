@@ -502,7 +502,11 @@ describe("PROJ-1026 — links to projects the caller can't see", () => {
 		});
 
 		async function centralityByTitle(token: string) {
-			const data = (await mcp("get_prioritized_issues", { includeNotReady: true }, token)) as {
+			const data = (await mcp(
+				"get_prioritized_issues",
+				{ includeNotReady: true, verbose: true },
+				token
+			)) as {
 				issues: Array<{ title: string; _score_breakdown: { centrality: number } }>;
 			};
 			return Object.fromEntries(data.issues.map((i) => [i.title, i._score_breakdown.centrality]));

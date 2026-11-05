@@ -85,6 +85,21 @@ form the token dialog and `/bootstrap` print.
 `X-Workspace-Slug` is optional on the MCP endpoint, because the UUID in the URL already
 names the workspace.
 
+**Load only the tools you need.** The full tool list is about 93KB of definitions. An agent
+that only works issues doesn't need the wiki or admin tools in its context, so add
+`?domains=` to the URL with the domain slugs it uses:
+
+```bash
+claude mcp add --transport http projektor \
+  "https://<your-host>/mcp/<workspace-id>?domains=agents,issues,comments,issue-links,workflow" \
+  --header "Authorization: Bearer pk_<token>"
+```
+
+`?domains=` filters `tools/list` only; an unknown slug is rejected with the valid list.
+Each domain's slug is in brackets after its heading in the
+[MCP tool catalog](/projektor/agents/tool-catalog/). Use `get_tool_usage` to see which
+tools your agents actually call and how many bytes they read.
+
 The server is added for the current project only. Add `--scope user` to use it in every
 project, or `--scope project` to write a shared [`.mcp.json`](#project-mcpjson-claude-code-shared-with-your-team).
 
