@@ -1,39 +1,15 @@
 import type { HonoEnv } from "@projektor/types";
 import type { Context } from "hono";
-import { Hono } from "hono";
 import { z } from "zod";
-import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
+import { operationsRouter } from "../operations/define";
+import { fileOperations } from "../operations/files";
 import * as filesService from "../services/files";
 import { ctxFromHono } from "../services/types";
 
-const router = new Hono<HonoEnv>();
+const router = operationsRouter("/api/files", fileOperations);
 
 const EntityTypeEnum = z.enum(["issue", "wiki_page"]);
-
-router.get("/", async (c) => {
-	const ctx = ctxFromHono(c);
-	try {
-		const list = await filesService.listAttachments(ctx, {
-			entityType: c.req.query("entityType"),
-			entityId: c.req.query("entityId"),
-		});
-		return c.json(list);
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.post("/links", async (c) => {
-	const ctx = ctxFromHono(c);
-	const body = await jsonBody(c).catch(() => null);
-	try {
-		const result = await filesService.createLinkAttachment(ctx, body);
-		return c.json(result, 201);
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
 
 async function parseUploadFormData(c: Context<HonoEnv>) {
 	try {
@@ -107,15 +83,6 @@ router.post("/", async (c) => {
 	return c.json({ id, filename: file.name, contentType, size: file.size }, 201);
 });
 
-router.get("/:id/metadata", async (c) => {
-	const ctx = ctxFromHono(c);
-	try {
-		return c.json(await filesService.getAttachment(ctx, { id: c.req.param("id") }));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
 router.get("/:id", async (c) => {
 	const ctx = ctxFromHono(c);
 	const { id } = c.req.param();
@@ -150,22 +117,6 @@ router.get("/:id", async (c) => {
 			"Content-Security-Policy": "sandbox; default-src 'none'",
 		},
 	});
-});
-
-router.delete("/:id", async (c) => {
-	const ctx = ctxFromHono(c);
-	const { id } = c.req.param();
-
-	let r2Key: string;
-	try {
-		({ r2Key } = await filesService.deleteAttachment(ctx, { id }));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-
-	if (r2Key) await c.env.R2.delete(r2Key);
-
-	return new Response(null, { status: 204 });
 });
 
 export { router as filesRouter };
