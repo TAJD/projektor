@@ -20,6 +20,9 @@ compatibility_flags = [
   "cache_option_enabled",
 ]
 
+[placement]
+mode = "smart"
+
 # ─── Static Assets (pre-built Astro frontend, shipped in the artifact) ─────────
 #   - /api/*, /mcp/*  → always the Worker (run_worker_first)
 #   - /wiki (exact)    → always the Worker too (PROJ-487): it's a static asset
