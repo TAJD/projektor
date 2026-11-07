@@ -73,6 +73,8 @@ import m0069 from "../../../../packages/db/migrations/0069_project_epic_auto_clo
 import m0070 from "../../../../packages/db/migrations/0070_task_status_backlog.sql?raw";
 import m0071 from "../../../../packages/db/migrations/0071_mcp_tool_usage.sql?raw";
 import m0072 from "../../../../packages/db/migrations/0072_dor_ready_null_index.sql?raw";
+import m0073 from "../../../../packages/db/migrations/0073_retention_indexes.sql?raw";
+import m0074 from "../../../../packages/db/migrations/0074_wiki_fts_workspace_scope.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -148,4 +150,6 @@ export const MIGRATIONS = [
 	m0070,
 	m0071,
 	m0072,
+	m0073,
+	m0074,
 ];
