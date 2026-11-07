@@ -184,9 +184,14 @@ export function buildLeaseClaimStatements(
 			ctx.db
 				.prepare(
 					`UPDATE issue_leases SET released_at = ?, release_reason = 'expired'
-					 WHERE id = ? AND workspace_id = ? AND released_at IS NULL`
+					 WHERE id = ? AND workspace_id = ? AND released_at IS NULL
+					   AND NOT EXISTS (
+					     SELECT 1 FROM agent_sessions s
+					     WHERE s.id = issue_leases.agent_session_id
+					       AND s.status = 'active' AND s.last_heartbeat_at > ?
+					   )`
 				)
-				.bind(now, state.holder.leaseId, ctx.workspaceId)
+				.bind(now, state.holder.leaseId, ctx.workspaceId, cutoff)
 		);
 	}
 

@@ -252,6 +252,39 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 		expect(await q("SELECT id FROM wip_cap_denials WHERE issue_id = ?", issue.id)).toEqual([]);
 	});
 
+	it("a stale holder that heartbeats between the read and the write keeps its lease", async () => {
+		const issue = await newIssue();
+		const holder = await seedAgentLease(f.workspaceId, issue.id, { live: true });
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+			.bind(now - 500, holder.agentSessionId)
+			.run();
+		const rival = await registerAgent(ctx, { name: "rival" });
+
+		const cutoff = now - 120;
+		const state = await readLeaseClaimState(ctx, { issueId: issue.id, agentId: rival.id, cutoff });
+		expect(state.holder?.live).toBe(false);
+		await heartbeatAgent(ctx, { id: holder.agentSessionId });
+
+		const plan = buildLeaseClaimStatements(ctx, {
+			issueId: issue.id,
+			agentId: rival.id,
+			state,
+			cutoff,
+			now,
+			touchHeartbeat: true,
+		});
+		const results = await env.DB.batch(plan.statements);
+		await expect(settleLeaseClaim(ctx, plan, results[plan.insertIndex])).rejects.toThrow(
+			"Issue was just leased by another agent"
+		);
+		const [lease] = await q<{ released_at: number | null }>(
+			"SELECT released_at FROM issue_leases WHERE id = ?",
+			holder.leaseId
+		);
+		expect(lease.released_at).toBeNull();
+	});
+
 	it("a cap race lost after the read is a WIP-limit conflict and is recorded", async () => {
 		await env.DB.prepare("UPDATE projects SET agent_wip_limit = 1 WHERE id = ?")
 			.bind(f.projectId)
@@ -284,8 +317,15 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 		const tracker = trackD1RoundTrips();
 		const ended = await endAgent(ctx, { id: started.sessionId });
 		expect(tracker.count()).toBe(1);
-		expect(ended).toMatchObject({ id: started.sessionId, status: "ended" });
+		expect(ended).toMatchObject({
+			id: started.sessionId,
+			status: "ended",
+			workspaceId: f.workspaceId,
+			issueId: issue.id,
+			name: "w",
+		});
 		expect(ended.endedAt).toBeGreaterThan(0);
+		expect(ended.startedAt).toBeGreaterThan(0);
 		expect(Object.keys(ended).sort()).toEqual(
 			[
 				"endedAt",
