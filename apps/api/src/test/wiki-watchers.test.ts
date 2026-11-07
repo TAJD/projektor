@@ -61,6 +61,7 @@ describe("wiki watch notifications respect current access (PROJ-821)", () => {
 	}
 
 	async function notificationCount(): Promise<number> {
+		await new Promise((resolve) => setTimeout(resolve, 200));
 		const row = await env.DB.prepare(
 			"SELECT COUNT(*) AS n FROM wiki_notifications WHERE user_id = ? AND workspace_id = ?"
 		)

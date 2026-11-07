@@ -52,8 +52,8 @@ import {
 	buildWikiLinksReindexStatements,
 	countBacklinkSources,
 	deleteWikiLinksForPages,
+	ensureTitleFoldsHealed,
 	foldWikiTitle,
-	healTitleFolds,
 	repointIncomingLinks,
 	type WikiBacklink,
 } from "./wiki-links";
@@ -986,6 +986,44 @@ async function writeCreateWikiPageBatch(
 	}
 }
 
+function buildWikiActivityStatement(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle<typeof schema>>,
+	opts: Readonly<{
+		entityId: string;
+		action: "created" | "updated";
+		diff?: Record<string, unknown>;
+	}>
+): D1PreparedStatement {
+	return toD1Statement(
+		ctx,
+		orm
+			.insert(schema.activity)
+			.values({
+				id: crypto.randomUUID(),
+				workspaceId: ctx.workspaceId,
+				entityType: "wiki_page",
+				entityId: opts.entityId,
+				actorId: ctx.userId,
+				action: opts.action,
+				diff: opts.diff ?? null,
+				createdAt: Math.floor(Date.now() / 1000),
+			})
+			.toSQL()
+	);
+}
+
+async function notifyAfterCommit(
+	ctx: ServiceCtx,
+	opts: Parameters<typeof notifyWikiWatchers>[1]
+): Promise<void> {
+	const work = notifyWikiWatchers(ctx, opts).catch((e) => {
+		console.error("wiki watcher notification failed", e);
+	});
+	if (ctx.waitUntil) ctx.waitUntil(work);
+	else await work;
+}
+
 // PROJ-493 (R11): a subtree watcher on an ancestor is notified of a page newly created
 // underneath them (there's no possible DIRECT watch on `id` yet — it didn't exist until
 // this insert). Template pages never notify (see wiki-watchers.ts).
@@ -1000,9 +1038,8 @@ async function finalizeWikiPageCreate(
 	}>
 ): Promise<void> {
 	const { id, parentId, slug, title, meta } = fields;
-	await recordActivity(ctx, { entityType: "wiki_page", entityId: id, action: "created" });
 	if (!meta.isTemplate) {
-		await notifyWikiWatchers(ctx, { pageId: id, parentId, slug, title, action: "created" });
+		await notifyAfterCommit(ctx, { pageId: id, parentId, slug, title, action: "created" });
 	}
 }
 
@@ -1057,6 +1094,7 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 			...buildFtsInsertStatements(ctx, id, title, content, meta.tags),
 			...linkStatements,
 			incomingLinkStatement,
+			buildWikiActivityStatement(ctx, orm, { entityId: id, action: "created" }),
 		],
 		slug
 	);
@@ -1621,17 +1659,10 @@ async function finalizeWikiPageUpdate(
 		meta: ReturnType<typeof parseWikiFrontmatter> | undefined;
 	}>
 ): Promise<void> {
-	const { title, content, parentId, slug, meta } = fields;
-	await recordActivity(ctx, {
-		entityType: "wiki_page",
-		entityId: page.id,
-		action: "updated",
-		diff: buildWikiPageUpdateDiff({ title, content }),
-	});
-
+	const { title, parentId, slug, meta } = fields;
 	const isTemplate = meta?.isTemplate ?? page.isTemplate;
 	if (!isTemplate) {
-		await notifyWikiWatchers(ctx, {
+		await notifyAfterCommit(ctx, {
 			pageId: page.id,
 			parentId: parentId !== undefined ? parentId : page.parentId,
 			slug: slug ?? page.slug,
@@ -1704,8 +1735,15 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// matching) other pages' raw link text — re-resolve both directions in the same
 	// batch as the rename itself.
 	const titleChanged = title !== undefined && title !== page.title;
+	statements.push(
+		buildWikiActivityStatement(ctx, orm, {
+			entityId: page.id,
+			action: "updated",
+			diff: buildWikiPageUpdateDiff({ title, content }),
+		})
+	);
 	if (titleChanged || isRename) {
-		await healTitleFolds(ctx); // PROJ-818: link folds must be filled before matching
+		await ensureTitleFoldsHealed(ctx);
 		const finalTitle = title ?? page.title;
 		const finalSlug = slug ?? page.slug;
 		statements.push(
@@ -2201,20 +2239,18 @@ async function patchWikiPageOnce(
 		updateStatement,
 		...ftsStatements,
 		...linkStatements,
+		buildWikiActivityStatement(ctx, orm, {
+			entityId: page.id,
+			action: "updated",
+			diff: buildWikiPageUpdateDiff({ content: newContent }),
+		}),
 	]);
-
-	await recordActivity(ctx, {
-		entityType: "wiki_page",
-		entityId: page.id,
-		action: "updated",
-		diff: buildWikiPageUpdateDiff({ content: newContent }),
-	});
 
 	// PROJ-493 (R11): meta is always reparsed from newContent above (patches only touch
 	// section bodies, so template status can't itself change here, but the check stays
 	// consistent with the other write paths).
 	if (!meta.isTemplate) {
-		await notifyWikiWatchers(ctx, {
+		await notifyAfterCommit(ctx, {
 			pageId: page.id,
 			parentId: page.parentId,
 			slug: page.slug,
@@ -2799,7 +2835,7 @@ export async function undeleteWikiPage(ctx: ServiceCtx, id: string) {
 
 	// PROJ-814: every restored page (root and cascade-restored descendants) can be the
 	// target other pages' still-unresolved links were waiting on — re-resolve for each.
-	await healTitleFolds(ctx); // PROJ-818
+	await ensureTitleFoldsHealed(ctx);
 	await ctx.db.batch([
 		buildResolveIncomingLinksStatement(ctx, { id: page.id, title: page.title, slug: page.slug }),
 		...descendantRows.map((d) =>

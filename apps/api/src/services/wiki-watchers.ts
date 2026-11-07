@@ -6,7 +6,7 @@
 // duplicated in miniature here rather than imported, mirroring services/wiki-links.ts's
 // resolveSlugTargets precedent.
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import { wikiPagePath } from "../lib/urls";
 import {
 	ListWikiChangesInputSchema,
@@ -171,32 +171,28 @@ export async function listWikiWatches(ctx: ServiceCtx) {
 	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug) }));
 }
 
-// PROJ-493/PROJ-820: walks UP from `pageId` through parent_id, bounded by the wiki's
-// own max nesting depth (WIKI_MAX_NESTING_DEPTH — services/wiki.ts's
-// validateParentDepth) plus one for headroom. Takes `parentId` explicitly (rather than
-// re-reading pageId's own row) so callers can use it for a page that's about to be
-// created (parentId known, pageId's row doesn't exist yet) or one that's mid-delete
-// (parentId captured before the row is removed).
-async function resolveAncestorChain(
+async function findWatcherUserIds(
 	db: D1Database,
 	pageId: string,
 	parentId: string | null,
 	workspaceId: string
 ): Promise<string[]> {
-	const chain = [pageId];
-	let cur = parentId;
-	let depth = 0;
-	while (cur && depth < WIKI_MAX_NESTING_DEPTH + 1) {
-		chain.push(cur);
-		const row = await db
-			.prepare("SELECT parent_id FROM wiki_pages WHERE id = ? AND workspace_id = ?")
-			.bind(cur, workspaceId)
-			.first<{ parent_id: string | null }>();
-		if (!row?.parent_id) break;
-		cur = row.parent_id;
-		depth++;
-	}
-	return chain;
+	const { results } = await db
+		.prepare(
+			`WITH RECURSIVE anc(id, depth) AS (
+			   SELECT ?, 0
+			   UNION ALL
+			   SELECT p.parent_id, a.depth + 1 FROM anc a
+			   JOIN wiki_pages p ON p.id = a.id AND p.workspace_id = ?
+			   WHERE p.parent_id IS NOT NULL AND a.depth < ?
+			 )
+			 SELECT DISTINCT user_id FROM wiki_watchers
+			 WHERE workspace_id = ?
+			   AND (page_id = ? OR (subtree = 1 AND page_id IN (SELECT id FROM anc)))`
+		)
+		.bind(parentId, workspaceId, WIKI_MAX_NESTING_DEPTH, workspaceId, pageId)
+		.all<{ user_id: string }>();
+	return results.map((r) => r.user_id);
 }
 
 const ACTION_LABEL: Record<"created" | "updated" | "deleted", string> = {
@@ -222,26 +218,10 @@ export async function notifyWikiWatchers(
 		action: "created" | "updated" | "deleted";
 	}>
 ): Promise<void> {
-	const ancestorIds = await resolveAncestorChain(
-		ctx.db,
-		opts.pageId,
-		opts.parentId,
-		ctx.workspaceId
-	);
-	const orm = drizzle(ctx.db, { schema });
-	const rows = await orm
-		.select({ userId: schema.wikiWatchers.userId })
-		.from(schema.wikiWatchers)
-		.where(
-			and(
-				eq(schema.wikiWatchers.workspaceId, ctx.workspaceId),
-				inArray(schema.wikiWatchers.pageId, ancestorIds),
-				or(eq(schema.wikiWatchers.pageId, opts.pageId), eq(schema.wikiWatchers.subtree, true))
-			)
-		);
-
-	const userIds = [...new Set(rows.map((r) => r.userId))].filter((id) => id !== ctx.userId);
+	const watcherIds = await findWatcherUserIds(ctx.db, opts.pageId, opts.parentId, ctx.workspaceId);
+	const userIds = watcherIds.filter((id) => id !== ctx.userId);
 	if (userIds.length === 0) return;
+	const orm = drizzle(ctx.db, { schema });
 
 	await insertNotifications(
 		ctx,
@@ -329,11 +309,15 @@ async function insertNotifications(
 	// (services/sql.ts#inChunks is calibrated for single-param-per-item IN-lists, not
 	// multi-column inserts — same rationale as wiki-links.ts's LINK_INSERT_CHUNK_SIZE).
 	const NOTIFICATION_INSERT_CHUNK_SIZE = 8;
+	const statements: D1PreparedStatement[] = [];
 	for (let i = 0; i < values.length; i += NOTIFICATION_INSERT_CHUNK_SIZE) {
-		await orm
+		const query = orm
 			.insert(schema.wikiNotifications)
-			.values(values.slice(i, i + NOTIFICATION_INSERT_CHUNK_SIZE));
+			.values(values.slice(i, i + NOTIFICATION_INSERT_CHUNK_SIZE))
+			.toSQL();
+		statements.push(ctx.db.prepare(query.sql).bind(...query.params));
 	}
+	await ctx.db.batch(statements);
 }
 
 // PROJ-493: a cascade delete also removes every descendant page. Watchers rooted at (or
