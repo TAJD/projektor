@@ -13,6 +13,10 @@ const base = {
 	keywords: ["lease", "lock", "claim", "own", "reserve", "double work"],
 };
 
+const verbose = z.boolean().optional().meta({
+	description: "Return the raw stored rows instead of the slim shape (default false)",
+});
+
 export const issueLeaseOperations = [
 	defineOperation({
 		...base,
@@ -24,9 +28,14 @@ export const issueLeaseOperations = [
 		status: 201,
 		summary:
 			"Atomically lease an issue to an agent session so the parallel fleet doesn't double-work it. " +
-			"Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating.",
-		input: ClaimIssueSchema,
-		run: (ctx, input) => claimIssue(ctx, input),
+			"Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating. " +
+			"Returns {leaseId, issueRef}; verbose:true returns the lease row.",
+		input: ClaimIssueSchema.extend({ verbose }),
+		run: (ctx, { verbose: _, ...input }) => claimIssue(ctx, input),
+		mcpResult: (result, { verbose }) => {
+			const lease = result as Awaited<ReturnType<typeof claimIssue>>;
+			return verbose ? lease : { leaseId: lease.id, issueRef: lease.issueRef };
+		},
 	}),
 	defineOperation({
 		...base,
@@ -50,13 +59,20 @@ export const issueLeaseOperations = [
 			"Live entries only by default — a lease whose agent session has ended or stopped " +
 			"heartbeating is excluded; pass includeStale:true for all. Each entry carries the linked " +
 			'issue\'s ref (e.g. "PROJ-857") as issueRef, and a `live` flag (false when the holder ' +
-			"stopped heartbeating and the lease is reclaimable — only possible with includeStale:true).",
+			"stopped heartbeating and the lease is reclaimable — only possible with includeStale:true). " +
+			"Rows omit issueId; verbose:true returns the raw rows.",
 		input: ListIssueLeasesSchema.extend({
 			includeStale: z.boolean().optional().meta({
 				description:
 					"Include leases whose agent session has ended or gone stale (default: false — live entries only)",
 			}),
+			verbose,
 		}),
-		run: (ctx, input) => listIssueLeases(ctx, input),
+		run: (ctx, { verbose: _, ...input }) => listIssueLeases(ctx, input),
+		mcpResult: (result, { verbose }) => {
+			const page = result as Awaited<ReturnType<typeof listIssueLeases>>;
+			if (verbose) return page;
+			return { items: page.items.map(({ issueId: _id, ...row }) => row) };
+		},
 	}),
 ];

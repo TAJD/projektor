@@ -385,7 +385,8 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 		touchHeartbeat: true,
 	});
 	const results = await ctx.db.batch(plan.statements);
-	return settleLeaseClaim(ctx, plan, results[plan.insertIndex]);
+	const lease = await settleLeaseClaim(ctx, plan, results[plan.insertIndex]);
+	return { ...lease, issueRef: state.issueRef };
 }
 
 /** Release the active lease on an issue, optionally only if held by `agentId`. */

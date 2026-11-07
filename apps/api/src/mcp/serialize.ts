@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ValidationError } from "../services/errors";
+import { ISSUE_BODY_MAX_CHARS, windowText } from "./windowing";
 
 // PROJ-891 (builds on PROJ-931): MCP-only response shaping. Applied in the MCP layer, not
 // the service, so REST keeps returning the full shape — the service is the single source
@@ -298,4 +299,21 @@ export function capPage<P extends { items: unknown[]; next?: string }>(
 	while (k > 1 && opts.canCutAt && !opts.canCutAt(k)) k--;
 	if (opts.canCutAt && !opts.canCutAt(k)) return page;
 	return build(k);
+}
+
+export function issueMcpView(
+	issue: unknown,
+	input: { cursor?: string; view?: unknown; verbose?: unknown; fields?: unknown } = {}
+): Record<string, unknown> {
+	const { rest: _, ...shape } = splitShapeOpts(input);
+	const shaped = shapeIssue(issue as Record<string, unknown>, shape);
+	if (typeof shaped.body !== "string") return shaped;
+	const w = windowText(shaped.body, { max: ISSUE_BODY_MAX_CHARS, cursor: input.cursor });
+	if (!w.next && input.cursor === undefined) return shaped;
+	return {
+		...shaped,
+		body: w.text,
+		bodyTotalChars: w.totalChars,
+		...(w.next ? { bodyTruncated: true, next: w.next } : {}),
+	};
 }

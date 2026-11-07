@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { agentOperations } from "../operations/agents";
 import { postMessage } from "../services/agent-messages";
 import { endAgent, finishWork, heartbeatAgent, registerAgent, startWork } from "../services/agents";
 import {
@@ -81,6 +82,18 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 	async function newIssue(title = "Lifecycle") {
 		return seedIssue(f.workspaceId, f.projectId, f.userId, { title });
 	}
+
+	it("start_work's tool reads the issue alongside the claim, not after it (PROJ-1013)", async () => {
+		const issue = await newIssue();
+		const op = agentOperations.find((o) => o.id === "start_work");
+		const tracker = trackD1RoundTrips();
+		const res = (await op?.run(ctx, { issue: issue.id, name: "w" } as never)) as {
+			issue?: { id: string };
+		};
+		expect(res.issue?.id).toBe(issue.id);
+		expect(tracker.count()).toBeLessThanOrEqual(4);
+		expect(tracker.waves()).toBeLessThanOrEqual(3);
+	});
 
 	it("start_work without paths is 2 round trips (was ~19)", async () => {
 		const issue = await newIssue();

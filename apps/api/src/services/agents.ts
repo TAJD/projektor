@@ -242,7 +242,25 @@ export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 	return endSessionById(ctx, id);
 }
 
+function buildIssueRefStatement(ctx: ServiceCtx, issueId: string): D1PreparedStatement {
+	return ctx.db
+		.prepare(
+			`SELECT p.key || '-' || i.number AS ref FROM issues i
+			 JOIN projects p ON p.id = i.project_id
+			 WHERE i.id = ? AND i.workspace_id = ?`
+		)
+		.bind(issueId, ctx.workspaceId);
+}
+
 async function endSessionById(ctx: ServiceCtx, id: string): Promise<AgentSessionRow> {
+	return (await endSessionWith(ctx, id, [])).session;
+}
+
+async function endSessionWith(
+	ctx: ServiceCtx,
+	id: string,
+	extra: D1PreparedStatement[]
+): Promise<{ session: AgentSessionRow; extra: D1Result[] }> {
 	const visibleSession = sql`EXISTS (
 		SELECT 1 FROM agent_sessions s
 		WHERE s.id = ${id} AND s.workspace_id = ${ctx.workspaceId}
@@ -264,10 +282,11 @@ async function endSessionById(ctx: ServiceCtx, id: string): Promise<AgentSession
 		buildReleaseClaimsForAgentStatement(ctx, id, visibleSession),
 		buildReleaseLeasesForAgentStatement(ctx, id, visibleSession),
 		ctx.db.prepare(update.sql).bind(...update.params),
+		...extra,
 	]);
 	const raw = results[2].results[0] as Record<string, unknown> | undefined;
 	if (!raw) throw new NotFoundError("Agent session not found");
-	return sessionRowFromRaw(raw);
+	return { session: sessionRowFromRaw(raw), extra: results.slice(3) };
 }
 
 /**
@@ -299,8 +318,17 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 		await resolveVisibleIssueIdParam(ctx, result.data.issue);
 	}
 
-	const ended = await endSessionById(ctx, sessionId);
-	return Object.keys(extra).length > 0 ? { ...ended, ...extra } : ended;
+	const issue = result.data.issue;
+	const isRef = ISSUE_REF_PATTERN.test(issue);
+	const ended = await endSessionWith(
+		ctx,
+		sessionId,
+		isRef ? [] : [buildIssueRefStatement(ctx, issue)]
+	);
+	const issueRef = isRef
+		? issue
+		: ((ended.extra[0].results[0] as { ref: string } | undefined)?.ref ?? issue);
+	return { ...ended.session, issueRef, ...extra };
 }
 
 /**

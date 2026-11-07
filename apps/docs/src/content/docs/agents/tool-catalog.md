@@ -20,12 +20,12 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `start_work` | Register an agent session and claim an issue (plus files, if given) in one call — replaces register_agent + claim_issue + claim_files + post_message. All-or-nothing with compensating cleanup: on any conflict (same errors as claim_issue/claim_files) the session is ended and nothing is left claimed. If the process crashes mid-call, the same claims become reclaimable once the session's heartbeat goes stale (120s). | write |
-| `finish_work` | Optionally transition an issue (completion-report rules apply, same as update_issue), then release every claim/lease the session holds and end it — replaces update_issue + release_issue + release_files + end_agent. completionReport.remainder on a done transition creates a linked follow-up issue; its ref comes back as followUp.ref. A completionReport needs a status that moves the issue to in_review/done (or an issue already there); otherwise the call fails before anything changes, so the session stays live to retry. | write |
-| `register_agent` | Register an agent session, optionally linked to an issue | write |
+| `start_work` | Register an agent session and claim an issue (plus files, if given) in one call — replaces register_agent + claim_issue + claim_files + post_message. All-or-nothing with compensating cleanup: on any conflict (same errors as claim_issue/claim_files) the session is ended and nothing is left claimed. If the process crashes mid-call, the same claims become reclaimable once the session's heartbeat goes stale (120s). Returns {sessionId, leaseId, paths, issue}, with issue in get_issue's default shape, so no separate get_issue is needed; verbose:true returns the raw rows. | write |
+| `finish_work` | Optionally transition an issue (completion-report rules apply, same as update_issue), then release every claim/lease the session holds and end it — replaces update_issue + release_issue + release_files + end_agent. completionReport.remainder on a done transition creates a linked follow-up issue; its ref comes back as followUp.ref. A completionReport needs a status that moves the issue to in_review/done (or an issue already there); otherwise the call fails before anything changes, so the session stays live to retry. Returns {sessionId, issueRef, status?, followUp?}; verbose:true returns the ended session row. | write |
+| `register_agent` | Register an agent session, optionally linked to an issue. Returns {id, name}; verbose:true returns the stored row. | write |
 | `heartbeat_agent` | Send a heartbeat to keep an agent session active | write |
 | `end_agent` | End an agent session | write |
-| `list_active_agents` | List agent sessions in the workspace, optionally filtered by issue or project. An ended session is never returned. Live entries only by default — a session that has stopped heartbeating is also excluded; pass includeStale:true to include those too. Each entry carries a `live` flag (false when its heartbeat has gone stale) and, when tied to an issue, that issue's ref (e.g. "PROJ-857") as issueRef. | read-only |
+| `list_active_agents` | List agent sessions in the workspace, optionally filtered by issue or project. An ended session is never returned. Live entries only by default — a session that has stopped heartbeating is also excluded; pass includeStale:true to include those too. Each entry carries a `live` flag (false when its heartbeat has gone stale) and, when tied to an issue, that issue's ref (e.g. "PROJ-857") as issueRef. Rows are {id, name, issueRef?, live, startedAt, lastHeartbeatAt}; verbose:true returns the raw rows. | read-only |
 
 ### File claims (`file-claims`)
 
@@ -39,9 +39,9 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `claim_issue` | Atomically lease an issue to an agent session so the parallel fleet doesn't double-work it. Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating. | write |
+| `claim_issue` | Atomically lease an issue to an agent session so the parallel fleet doesn't double-work it. Fails if another live session already holds it; reclaims a lease whose session stopped heartbeating. Returns {leaseId, issueRef}; verbose:true returns the lease row. | write |
 | `release_issue` | Release the active lease on an issue, optionally only if held by a given agent session | destructive |
-| `list_issue_leases` | List active issue leases in the workspace, optionally filtered by issue, agent or project. Live entries only by default — a lease whose agent session has ended or stopped heartbeating is excluded; pass includeStale:true for all. Each entry carries the linked issue's ref (e.g. "PROJ-857") as issueRef, and a `live` flag (false when the holder stopped heartbeating and the lease is reclaimable — only possible with includeStale:true). | read-only |
+| `list_issue_leases` | List active issue leases in the workspace, optionally filtered by issue, agent or project. Live entries only by default — a lease whose agent session has ended or stopped heartbeating is excluded; pass includeStale:true for all. Each entry carries the linked issue's ref (e.g. "PROJ-857") as issueRef, and a `live` flag (false when the holder stopped heartbeating and the lease is reclaimable — only possible with includeStale:true). Rows omit issueId; verbose:true returns the raw rows. | read-only |
 
 ### Agent messages (`agent-messages`)
 

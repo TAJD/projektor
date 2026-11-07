@@ -89,7 +89,7 @@ describe("PROJ-894: stateless agent identity", () => {
 		const sessionId = await register();
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Claim me" });
 
-		const claim = await call(token, "claim_issue", { issueId: issue.id });
+		const claim = await call(token, "claim_issue", { issueId: issue.id, verbose: true });
 		expect(claim.ok).toBe(true);
 		expect(claim.value.agentSessionId).toBe(sessionId);
 
@@ -117,7 +117,11 @@ describe("PROJ-894: stateless agent identity", () => {
 			expect(r.message, tool).toContain("pass agentId from register_agent");
 		}
 
-		const claim = await call(token, "claim_issue", { issueId: issue.id, agentId: a });
+		const claim = await call(token, "claim_issue", {
+			issueId: issue.id,
+			agentId: a,
+			verbose: true,
+		});
 		expect(claim.ok).toBe(true);
 		expect(claim.value.agentSessionId).toBe(a);
 	});

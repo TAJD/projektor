@@ -125,7 +125,11 @@ describe("PROJ-998/PROJ-1007: MCP argument aliases", () => {
 	it("register_agent: links the session to the issue under any spelling", async () => {
 		for (const spelling of SPELLINGS) {
 			const value = spelling === "ref" ? issueRef : issueId;
-			const res = await call("register_agent", { name: `reg-${spelling}`, [spelling]: value });
+			const res = await call("register_agent", {
+				name: `reg-${spelling}`,
+				[spelling]: value,
+				verbose: true,
+			});
 			expect(res.err).toBeUndefined();
 			expect(res.data.issueId).toBe(issueId);
 		}
