@@ -47,7 +47,9 @@ describe("wiki search is scoped to the workspace inside MATCH (PROJ-926)", () =>
 		const b = await seedFixture({ role: "admin" });
 		await createPage(a, "Axolotl", "axolotl");
 		await createPage(b, "Axolotl", "axolotl");
-		const { results } = await env.DB.prepare("SELECT workspace_id FROM wiki_fts WHERE wiki_fts MATCH ?")
+		const { results } = await env.DB.prepare(
+			"SELECT workspace_id FROM wiki_fts WHERE wiki_fts MATCH ?"
+		)
 			.bind(`workspace_id : "${a.workspace.id}" AND ("axolotl")`)
 			.all<{ workspace_id: string }>();
 		expect(results.map((r) => r.workspace_id)).toEqual([a.workspace.id]);
