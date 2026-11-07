@@ -647,7 +647,8 @@ export async function purgeExpiredOAuthData(env: Env): Promise<void> {
 				if (state.phase === "grant") {
 					const clientId = String(data.clientId);
 					let purge = typeof data.expiresAt === "number" && now >= data.expiresAt;
-					if (!purge && !/^https:\/\/[^/]+\/./.test(clientId)) {
+					const isMetadataUrl = /^https:\/\/[^/?#]*\//i.test(clientId) && URL.canParse(clientId);
+					if (!purge && !isMetadataUrl) {
 						if (knownMissingClients.has(clientId)) purge = true;
 						else if (!knownGoodClients.has(clientId)) {
 							if (await env.OAUTH_KV.get(`client:${clientId}`)) knownGoodClients.add(clientId);
@@ -663,7 +664,8 @@ export async function purgeExpiredOAuthData(env: Env): Promise<void> {
 					}
 				} else {
 					const grantKey = `grant:${data.userId}:${data.grantId}`;
-					if (!knownMissingGrants.has(grantKey) && !knownGoodGrants.has(grantKey)) {
+					if (knownGoodGrants.has(grantKey)) continue;
+					if (!knownMissingGrants.has(grantKey)) {
 						if (await env.OAUTH_KV.get(grantKey)) {
 							knownGoodGrants.add(grantKey);
 							continue;
@@ -937,7 +939,7 @@ export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void
 	}
 
 	for (const [id, entry] of Object.entries(failures)) {
-		if (!entry.skipUntil && !remaining.includes(id)) delete failures[id];
+		if ((entry.skipUntil ?? 0) <= nowSeconds && !remaining.includes(id)) delete failures[id];
 	}
 	await saveWikiTrashPurgeCursor(budgetedKv, { workspaceIds: remaining, failures });
 

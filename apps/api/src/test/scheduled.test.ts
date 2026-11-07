@@ -513,9 +513,13 @@ describe("scheduled OAuth purge resumability (PROJ-926)", () => {
 			"grant:u2:expired",
 			JSON.stringify({ id: "expired", userId: "u2", clientId, expiresAt: 1 })
 		);
-		await env.OAUTH_KV.put("token:u2:expired:t1", JSON.stringify({ userId: "u2", grantId: "expired" }));
+		await env.OAUTH_KV.put(
+			"token:u2:expired:t1",
+			JSON.stringify({ userId: "u2", grantId: "expired" })
+		);
 		await env.OAUTH_KV.put("token:u1:gone:t2", JSON.stringify({ userId: "u1", grantId: "gone" }));
 		await env.OAUTH_KV.put("token:u1:g000:t3", JSON.stringify({ userId: "u1", grantId: "g000" }));
+		await env.OAUTH_KV.put("token:u1:g000:t4", JSON.stringify({ userId: "u1", grantId: "g000" }));
 
 		await purgeExpiredOAuthData(env);
 		expect(await env.OAUTH_KV.get("grant:u2:expired")).not.toBeNull();
@@ -527,6 +531,7 @@ describe("scheduled OAuth purge resumability (PROJ-926)", () => {
 		expect(await env.OAUTH_KV.get("token:u2:expired:t1")).toBeNull();
 		expect(await env.OAUTH_KV.get("token:u1:gone:t2")).toBeNull();
 		expect(await env.OAUTH_KV.get("token:u1:g000:t3")).not.toBeNull();
+		expect(await env.OAUTH_KV.get("token:u1:g000:t4")).not.toBeNull();
 		expect(await env.OAUTH_KV.get("grant:u1:g000")).not.toBeNull();
 		expect((await env.OAUTH_KV.list({ prefix: "grant:u1:" })).keys).toHaveLength(150);
 		await clearOAuthKv();
@@ -536,10 +541,25 @@ describe("scheduled OAuth purge resumability (PROJ-926)", () => {
 		await clearOAuthKv();
 		await env.OAUTH_KV.put(
 			"grant:u1:orphan",
-			JSON.stringify({ id: "orphan", userId: "u1", clientId: `missing-${stamp}`, expiresAt: farFuture() })
+			JSON.stringify({
+				id: "orphan",
+				userId: "u1",
+				clientId: `missing-${stamp}`,
+				expiresAt: farFuture(),
+			})
+		);
+		await env.OAUTH_KV.put(
+			"grant:u1:cimd",
+			JSON.stringify({
+				id: "cimd",
+				userId: "u1",
+				clientId: "https://cimd.example/",
+				expiresAt: farFuture(),
+			})
 		);
 		await purgeExpiredOAuthData(env);
 		expect(await env.OAUTH_KV.get("grant:u1:orphan")).toBeNull();
+		expect(await env.OAUTH_KV.get("grant:u1:cimd")).not.toBeNull();
 		expect(await env.KV.get("cron:oauth-purge:cursor")).toBeNull();
 		await clearOAuthKv();
 	});
@@ -605,6 +625,18 @@ describe("scheduled wiki trash failure backoff (PROJ-926)", () => {
 			await env.DB.prepare("SELECT id FROM wiki_pages WHERE id = ?").bind(page.id).first()
 		).toBeNull();
 		errors.mockRestore();
+	});
+
+	it("drops a lapsed cool-down entry once its workspace has nothing left to purge", async () => {
+		const ghost = crypto.randomUUID();
+		await env.KV.put(
+			"cron:wiki-trash-purge:cursor",
+			JSON.stringify({ workspaceIds: [], failures: { [ghost]: { count: 3, skipUntil: 1 } } })
+		);
+		await purgeAllWorkspacesExpiredWikiPages(env);
+		const raw = await env.KV.get("cron:wiki-trash-purge:cursor");
+		const failures = raw ? (JSON.parse(raw).failures as Record<string, unknown>) : {};
+		expect(failures[ghost]).toBeUndefined();
 	});
 });
 
