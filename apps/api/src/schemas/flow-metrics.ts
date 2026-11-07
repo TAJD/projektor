@@ -29,10 +29,16 @@ const MAX_WEEK_WINDOW_SECONDS = 5 * 365 * DAY;
 
 export const GetFlowMetricsSchema = z
 	.object({
-		projectId: z.string().min(1),
-		since: z.number().int().nonnegative().optional(),
-		until: z.number().int().nonnegative().optional(),
-		granularity: z.enum(["day", "week"]).default("week"),
+		projectId: z.string().min(1).meta({ description: "Project UUID" }),
+		since: z.number().int().nonnegative().optional().meta({
+			description: "Only issues completed/active at/after this epoch-seconds time",
+		}),
+		until: z.number().int().nonnegative().optional().meta({
+			description: "Only issues completed/active at/before this epoch-seconds time",
+		}),
+		granularity: z.enum(["day", "week"]).default("week").meta({
+			description: "Throughput bucket granularity, 'day' or 'week' (default 'week')",
+		}),
 	})
 	.superRefine((data, ctx) => {
 		if (data.since === undefined && data.until === undefined) return;

@@ -21,7 +21,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	input: S;
 	status?: 200 | 201;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
-	mcpResult?: (result: unknown, input: z.output<S>) => unknown;
+	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
 
 export function defineOperation<S extends z.ZodObject>(op: Operation<S>): Operation {
@@ -67,11 +67,22 @@ export function toMcpTool(op: Operation): MCPTool {
 		inputSchema,
 		annotations: annotationsFor(op),
 		handler: async (raw, ctx) => {
-			const input = parseInput(op, ctx, raw);
+			const input = parseInput(op, ctx, dropRejectedNulls(op.input, raw));
 			const result = await op.run(ctx, input);
-			return op.mcpResult ? op.mcpResult(result, input) : result;
+			return op.mcpResult ? op.mcpResult(result, input, ctx) : result;
 		},
 	};
+}
+
+function dropRejectedNulls(schema: z.ZodObject, raw: unknown) {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(raw)) {
+		const field = schema.shape[key] as z.ZodType | undefined;
+		if (value === null && field && !field.safeParse(null).success) continue;
+		out[key] = value;
+	}
+	return out;
 }
 
 function baseType(field: z.ZodType): string {

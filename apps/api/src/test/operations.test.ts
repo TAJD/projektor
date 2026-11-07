@@ -1,6 +1,7 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { operationsRouter, toMcpTool } from "../operations/define";
+import { z } from "zod";
+import { defineOperation, operationsRouter, toMcpTool } from "../operations/define";
 import { taskTypeOperations } from "../operations/task-types";
 import {
 	authHeaders,
@@ -102,5 +103,29 @@ describe("PROJ-895: operations registry REST adapter", () => {
 
 	it("refuses to mount an operation outside the router's base path", () => {
 		expect(() => operationsRouter("/api/projects", taskTypeOperations)).toThrow(/outside/);
+	});
+
+	it("treats an MCP null as absent unless the field accepts null", async () => {
+		const tool = toMcpTool(
+			defineOperation({
+				id: "probe",
+				method: "GET",
+				path: "/api/probe",
+				domain: "probe",
+				tier: "read",
+				summary: "probe",
+				keywords: [],
+				input: z.object({
+					limit: z.number().default(10),
+					label: z.string().nullable().optional(),
+				}),
+				run: async (_ctx, input) => input,
+			})
+		);
+		const ctx = { role: "owner" } as never;
+		expect(await tool.handler({ limit: null, label: null }, ctx)).toEqual({
+			limit: 10,
+			label: null,
+		});
 	});
 });
