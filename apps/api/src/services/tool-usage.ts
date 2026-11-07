@@ -15,10 +15,10 @@ export async function getToolUsage(ctx: ServiceCtx, raw: unknown) {
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	const now = Math.floor(Date.now() / 1000);
 	const until = parsed.data.until ?? now;
-	const since = utcDayStart(parsed.data.since ?? until - DEFAULT_WINDOW_DAYS * DAY);
-	if (since > until) {
+	if (parsed.data.since !== undefined && parsed.data.since > until) {
 		throw new ValidationError({ formErrors: [], fieldErrors: { since: ["must be <= until"] } });
 	}
+	const since = utcDayStart(parsed.data.since ?? until - DEFAULT_WINDOW_DAYS * DAY);
 	const limit = parsed.data.limit ?? DEFAULT_LIMIT;
 
 	const query = ctx.config?.mcpUsage;
@@ -33,7 +33,18 @@ export async function getToolUsage(ctx: ServiceCtx, raw: unknown) {
 		};
 	}
 
-	const rows = (await query({ since, until, tool: parsed.data.tool })).sort(
+	let fetched: Awaited<ReturnType<typeof query>>;
+	try {
+		fetched = await query({ since, until, tool: parsed.data.tool });
+	} catch (err) {
+		return {
+			available: false as const,
+			reason: `Reading Analytics Engine failed: ${err instanceof Error ? err.message : String(err)}`,
+			since,
+			until,
+		};
+	}
+	const rows = fetched.sort(
 		(a, b) => b.responseBytes - a.responseBytes || a.tool.localeCompare(b.tool)
 	);
 	const total = { calls: 0, errors: 0, responseBytes: 0 };

@@ -254,7 +254,8 @@ limiting.
 Every MCP `tools/call` and `prompts/get` writes one structured `{"evt":"mcp_call", …}`
 line to Workers Logs (turn on `[observability] enabled = true` to keep them). It
 records the tool, outcome, latency, response and argument sizes, and the caller's auth
-method and credential id. Argument values and results are never logged. To also count
+method, credential id, OAuth client id and user id. Argument values and results are
+never logged. To also count
 calls in Workers Analytics Engine (no D1 write per call), add a dataset binding:
 
 ```toml
@@ -272,7 +273,8 @@ Engine SQL API. That needs an account API token with **Account Analytics: Read**
 as a secret: `wrangler secret put CF_ANALYTICS_TOKEN`. Without all three settings, they
 return `{"available": false, …}`, and calls are still logged.
 
-Each data point is indexed by workspace id. `blob1` is the tool, `blob3` the surface,
+Each data point is indexed by workspace id. `blob1` is the tool (`blob2` is reserved for
+an operation id), `blob3` the surface,
 `blob4` the auth method, `blob5` the credential id, `blob6` the OAuth client id, `blob7`
 the user id, `blob8` the outcome, `blob9` the server version and `blob10` the MCP method.
 `double1` is latency in ms, `double2` response bytes, `double3` argument bytes and

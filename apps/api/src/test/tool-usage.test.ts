@@ -1,6 +1,8 @@
 import { SELF } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emitCallEvent, mcpUsageQuery } from "../lib/usage";
+import { ValidationError } from "../services/errors";
+import { getToolUsage } from "../services/tool-usage";
 import { authHeaders, seedProjectFixture, seedToken } from "./helpers";
 
 type Rpc = { result?: { content?: Array<{ text: string }>; isError?: boolean } };
@@ -206,5 +208,68 @@ describe("PROJ-886: get_tool_usage reads Analytics Engine", () => {
 		expect(
 			mcpUsageQuery({ CF_ACCOUNT_ID: "acct", MCP_USAGE_DATASET: "d" }, "ws-1")
 		).toBeUndefined();
+	});
+
+	it("refuses a dataset name that is not a bare SQL identifier", async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		const query = mcpUsageQuery(
+			{ CF_ACCOUNT_ID: "acct", CF_ANALYTICS_TOKEN: "tok", MCP_USAGE_DATASET: "mcp-usage" },
+			"ws-1"
+		);
+		expect(await query?.({ since: 0, until: 1 })).toEqual([]);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe("PROJ-886: get_tool_usage aggregation", () => {
+	const ctxWith = (mcpUsage: () => Promise<unknown>) => ({ config: { mcpUsage } }) as never;
+	const rows = [
+		{ tool: "a", calls: 2, errors: 0, responseBytes: 100 },
+		{ tool: "b", calls: 4, errors: 1, responseBytes: 900 },
+		{ tool: "c", calls: 1, errors: 0, responseBytes: 300 },
+	];
+
+	it("sorts by bytes, totals every tool and reports what the limit omitted", async () => {
+		const out = await getToolUsage(
+			ctxWith(async () => rows.map((r) => ({ ...r }))),
+			{ limit: 2 }
+		);
+		expect(out).toMatchObject({
+			available: true,
+			total: { calls: 7, errors: 1, responseBytes: 1300 },
+			tools: [
+				{ tool: "b", avgResponseBytes: 225 },
+				{ tool: "c", avgResponseBytes: 300 },
+			],
+			omittedTools: 1,
+		});
+	});
+
+	it("rejects since after until even within the same UTC day", async () => {
+		await expect(
+			getToolUsage(
+				ctxWith(async () => []),
+				{ since: 86_400 * 10 + 50, until: 86_400 * 10 + 10 }
+			)
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("reports unavailable instead of failing when the query errors", async () => {
+		const out = await getToolUsage(
+			ctxWith(async () => {
+				throw new Error("analytics engine query failed: 403");
+			}),
+			{}
+		);
+		expect(out).toMatchObject({ available: false, reason: expect.stringContaining("403") });
+	});
+
+	it("records an unknown tool as outcome=not_found", async () => {
+		const events = captureEvents();
+		await call("no_such_tool", {});
+		expect(events()).toEqual([
+			expect.objectContaining({ name: "no_such_tool", outcome: "not_found" }),
+		]);
 	});
 });

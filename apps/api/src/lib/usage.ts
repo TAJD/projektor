@@ -2,6 +2,7 @@ import type { Env, HonoEnv, McpUsageFilter, McpUsageRow } from "@projektor/types
 import type { Context } from "hono";
 
 const SQL_SAFE = /^[A-Za-z0-9_.:-]+$/;
+const SQL_IDENTIFIER = /^[A-Za-z0-9_]+$/;
 
 export function mcpUsageQuery(
 	env: Pick<Env, "CF_ACCOUNT_ID" | "CF_ANALYTICS_TOKEN" | "MCP_USAGE_DATASET">,
@@ -10,7 +11,7 @@ export function mcpUsageQuery(
 	const { CF_ACCOUNT_ID: account, CF_ANALYTICS_TOKEN: token, MCP_USAGE_DATASET: dataset } = env;
 	if (!account || !token || !dataset) return undefined;
 	return async ({ since, until, tool }) => {
-		if (!SQL_SAFE.test(dataset) || !SQL_SAFE.test(workspaceId)) return [];
+		if (!SQL_IDENTIFIER.test(dataset) || !SQL_SAFE.test(workspaceId)) return [];
 		if (tool !== undefined && !SQL_SAFE.test(tool)) return [];
 		const sql = `SELECT blob1 AS tool, SUM(_sample_interval) AS calls,
   SUM(_sample_interval * double4) AS errors, SUM(_sample_interval * double2) AS response_bytes
@@ -21,7 +22,12 @@ GROUP BY tool
 FORMAT JSON`;
 		const res = await fetch(
 			`https://api.cloudflare.com/client/v4/accounts/${account}/analytics_engine/sql`,
-			{ method: "POST", headers: { Authorization: `Bearer ${token}` }, body: sql }
+			{
+				method: "POST",
+				headers: { Authorization: `Bearer ${token}` },
+				body: sql,
+				signal: AbortSignal.timeout(10_000),
+			}
 		);
 		if (!res.ok) throw new Error(`analytics engine query failed: ${res.status}`);
 		const { data } = (await res.json()) as {

@@ -202,14 +202,17 @@ router.post("/:workspaceId", async (c) => {
 					jsonRpcError(body.id, -32602, "Invalid params: `arguments` must be an object")
 				);
 			}
-			const tool = findTool(workspace.id, name);
-			if (!tool) return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
 			const call = {
 				workspaceId: workspace.id,
 				method: "tools/call" as const,
-				name,
+				name: name.slice(0, 128),
 				startedAt: Date.now(),
 			};
+			const tool = findTool(workspace.id, name);
+			if (!tool) {
+				recordUsage(c, call, rawArgs, undefined, "not_found");
+				return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
+			}
 			// PROJ-877/920: required presence AND types/enums/lengths against the tool's
 			// inputSchema, before the handler runs. PROJ-893: a bad argument is a tool
 			// execution failure, so it comes back as an isError result naming each field
@@ -288,7 +291,7 @@ router.post("/:workspaceId", async (c) => {
 			const promptCall = {
 				workspaceId: workspace.id,
 				method: "prompts/get" as const,
-				name: String(name),
+				name: typeof name === "string" ? name.slice(0, 128) : "",
 				startedAt: Date.now(),
 			};
 			const scopes = c.get("tokenScopes");
