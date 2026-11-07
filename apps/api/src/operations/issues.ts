@@ -116,7 +116,7 @@ export const issueOperations = [
 		method: "GET",
 		path: "/api/issues",
 		tier: "read",
-		queryAliases: { project: "projectId" },
+		restAliases: { project: "projectId" },
 		summary:
 			"List issues in the workspace, optionally filtered by status, priority, project, or assignee. " +
 			"Items omit `body` by default — pass bodyChars:N (max 1000) for a preview, or includeBody:true for whole bodies. Pass includeRollups:true " +
@@ -265,7 +265,7 @@ export const issueOperations = [
 		method: "GET",
 		path: "/api/issues/search",
 		tier: "read",
-		queryAliases: { q: "query" },
+		restAliases: { q: "query" },
 		summary:
 			"Search issues by keyword in title or body, or by exact label text (an issue whose label " +
 			"equals the whole query is a hit, listed first; case-insensitive for ASCII only). Pass `labels` to narrow keyword hits to " +

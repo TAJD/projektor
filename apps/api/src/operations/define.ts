@@ -24,7 +24,8 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	workspace?: false;
 	bodyKey?: string;
 	mcpDefaults?: Record<string, unknown>;
-	queryAliases?: Record<string, string>;
+	restAliases?: Record<string, string>;
+	headers?: (result: unknown) => Record<string, string>;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
 	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
@@ -145,6 +146,11 @@ function fromQuery(
 	return out;
 }
 
+function renameKeys(body: unknown, aliases: Record<string, string> | undefined) {
+	if (!aliases || typeof body !== "object" || body === null || Array.isArray(body)) return body;
+	return Object.fromEntries(Object.entries(body).map(([k, v]) => [aliases[k] ?? k, v]));
+}
+
 export function operationsRouter(base: string, ops: Operation[]) {
 	const router = new Hono<HonoEnv>();
 	for (const op of ops) {
@@ -162,10 +168,10 @@ export function operationsRouter(base: string, ops: Operation[]) {
 				const json = async () => ((await c.req.text()).trim() === "" ? {} : await jsonBody(c));
 				const body =
 					op.method === "GET" || op.method === "DELETE"
-						? fromQuery(op.input, c.req.queries(), op.queryAliases)
+						? fromQuery(op.input, c.req.queries(), op.restAliases)
 						: op.bodyKey
 							? { [op.bodyKey]: await json() }
-							: await json();
+							: renameKeys(await json(), op.restAliases);
 				const params = Object.fromEntries(
 					Object.entries(c.req.param()).filter(([key]) => key in op.input.shape)
 				);
@@ -175,6 +181,9 @@ export function operationsRouter(base: string, ops: Operation[]) {
 						: body;
 				const result = await op.run(ctx, parseInput(op, ctx, raw));
 				if (op.status === 204) return c.body(null, 204);
+				for (const [name, value] of Object.entries(op.headers?.(result) ?? {})) {
+					c.header(name, value);
+				}
 				return c.json(result, op.status ?? 200);
 			} catch (e) {
 				return serviceErrToResponse(c, e);

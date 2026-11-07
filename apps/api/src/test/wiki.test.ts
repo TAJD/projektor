@@ -388,7 +388,7 @@ describe("Wiki API", () => {
 		expect(pages).toHaveLength(2);
 	});
 
-	it("GET /api/wiki/search with no query returns empty array", async () => {
+	it("GET /api/wiki/search with no query is a 400", async () => {
 		await SELF.fetch("http://localhost/api/wiki", {
 			method: "POST",
 			headers: authHeaders(token, slug),
@@ -397,8 +397,7 @@ describe("Wiki API", () => {
 		const res = await SELF.fetch("http://localhost/api/wiki/search", {
 			headers: authHeaders(token, slug),
 		});
-		expect(res.status).toBe(200);
-		expect(await res.json()).toEqual([]);
+		expect(res.status).toBe(400);
 	});
 
 	// PROJ-486: replaces the old "first 250 chars" excerpt with an FTS5 snippet()
