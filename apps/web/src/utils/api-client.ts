@@ -113,27 +113,32 @@ export async function apiFetch<T = unknown>(path: string, opts: ApiFetchOpts = {
 	const dedupeKey = dedupeKeyFor(path, method, opts);
 	if (dedupeKey === null) return apiFetchUncached<T>(path, opts, method);
 
-	const pending = inFlightGets.get(dedupeKey);
-	if (pending) return pending as Promise<T>;
-	const promise: Promise<unknown> = apiFetchUncached<T>(path, opts, method);
-	inFlightGets.set(dedupeKey, promise);
-	promise.then(
-		() => clearInFlightEntry(dedupeKey, promise),
-		() => clearInFlightEntry(dedupeKey, promise)
+	let promise = inFlightGets.get(dedupeKey);
+	if (!promise) {
+		const created: Promise<unknown> = apiFetchUncached<T>(path, opts, method, true);
+		promise = created;
+		inFlightGets.set(dedupeKey, created);
+		created.then(
+			() => clearInFlightEntry(dedupeKey, created),
+			() => clearInFlightEntry(dedupeKey, created)
+		);
+	}
+	return (promise as Promise<T>).catch((e) =>
+		e instanceof SharedUnauthorized
+			? handleUnauthorized<T>(path, method, opts.on401)
+			: Promise.reject(e)
 	);
-	return promise as Promise<T>;
 }
 
-// Callers passing extra headers are excluded — same path with different headers is
-// not the same request. on401 is part of the key: a joiner must get the 401
-// behaviour it asked for (throw vs reload), not whichever caller registered first.
+class SharedUnauthorized extends Error {}
+
 function dedupeKeyFor(path: string, method: string, opts: ApiFetchOpts): string | null {
 	const dedupeable =
 		method === "GET" &&
 		opts.body === undefined &&
 		opts.headers === undefined &&
 		(path.startsWith("/api/") || path.startsWith("/auth/"));
-	return dedupeable ? `${path}\x00${opts.workspaceSlug ?? ""}\x00${opts.on401 ?? "reload"}` : null;
+	return dedupeable ? `${path}\x00${opts.workspaceSlug ?? ""}` : null;
 }
 
 function clearInFlightEntry(dedupeKey: string, promise: Promise<unknown>): void {
@@ -195,7 +200,12 @@ async function describeApiError(res: Response): Promise<string> {
 	return String(res.status);
 }
 
-async function apiFetchUncached<T>(path: string, opts: ApiFetchOpts, method: string): Promise<T> {
+async function apiFetchUncached<T>(
+	path: string,
+	opts: ApiFetchOpts,
+	method: string,
+	shared = false
+): Promise<T> {
 	const isFormData = opts.body instanceof FormData;
 	let res: Response;
 	try {
@@ -205,7 +215,10 @@ async function apiFetchUncached<T>(path: string, opts: ApiFetchOpts, method: str
 		throw new ApiOfflineError(path, method);
 	}
 	if (!res.ok) {
-		if (res.status === 401) return handleUnauthorized<T>(path, method, opts.on401);
+		if (res.status === 401) {
+			if (shared) throw new SharedUnauthorized();
+			return handleUnauthorized<T>(path, method, opts.on401);
+		}
 		if (reauthReloadInFlight) return new Promise<T>(() => {});
 		throw new ApiError(path, method, res.status, await describeApiError(res));
 	}

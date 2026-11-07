@@ -338,7 +338,7 @@ describe("apiFetch — in-flight GET dedupe (PROJ-443)", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(3);
 	});
 
-	it("does not share fetches across different on401 behaviours", async () => {
+	it("shares one fetch across different on401 behaviours", async () => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValue({ ok: true, json: () => Promise.resolve({ id: "i1" }) });
@@ -346,7 +346,26 @@ describe("apiFetch — in-flight GET dedupe (PROJ-443)", () => {
 
 		await Promise.all([apiFetch("/auth/me", { on401: "throw" }), apiFetch("/auth/me")]);
 
-		expect(fetchMock).toHaveBeenCalledTimes(2);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("applies each joiner's own on401 handling to a shared 401", async () => {
+		const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+		vi.stubGlobal("fetch", fetchMock);
+
+		const thrower = apiFetch("/auth/me", { on401: "throw" });
+		const reloader = apiFetch("/auth/me").then(
+			() => "resolved",
+			() => "rejected"
+		);
+		const throwerOutcome = await thrower.then(
+			() => "resolved",
+			(e: Error) => e.message
+		);
+
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(throwerOutcome).toContain("401");
+		expect(await Promise.race([reloader, Promise.resolve("pending")])).toBe("pending");
 	});
 
 	it("never dedupes a GET with custom headers", async () => {

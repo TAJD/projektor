@@ -698,14 +698,15 @@ function useProjects(workspaceSlug: string | undefined) {
 }
 
 // PROJ-491 (R9): fetched once for the create-form's template picker.
-function useWikiTemplates(workspaceSlug: string | undefined) {
+function useWikiTemplates(workspaceSlug: string | undefined, enabled: boolean) {
 	const [templates, setTemplates] = useState<TemplateOption[]>([]);
 
 	useEffect(() => {
+		if (!enabled) return;
 		apiFetch<TemplateOption[]>("/api/wiki/templates", { workspaceSlug })
 			.then((list) => setTemplates(Array.isArray(list) ? list : []))
 			.catch(() => {});
-	}, [workspaceSlug]);
+	}, [workspaceSlug, enabled]);
 
 	return templates;
 }
@@ -4117,7 +4118,7 @@ function useWikiPageState(
 		pageData.revisionsLoaded ? (pageData.revisions[0]?.id ?? null) : undefined
 	);
 	const createForm = useCreatePageForm(workspaceSlug, projectId, fetchTree);
-	const wikiTemplates = useWikiTemplates(workspaceSlug);
+	const wikiTemplates = useWikiTemplates(workspaceSlug, createForm.creating);
 	const move = useMovePage(workspaceSlug, pageData.page, pageData.fetchPage, fetchTree);
 	const verify = useWikiVerify(workspaceSlug, pageData.page, pageData.fetchPage);
 	const restoreState = useWikiRestore(
