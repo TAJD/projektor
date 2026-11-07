@@ -16,6 +16,7 @@ describe("injectWikiMetadata", () => {
 				title: "Deploy Runbook",
 				content: "Steps to deploy the service.",
 				url: "/wiki/deploy-runbook",
+				handoff: { requested: "deploy-runbook", workspaceSlug: "acme", page: {} },
 			},
 			"https://example.test/wiki/deploy-runbook"
 		);
@@ -35,6 +36,7 @@ describe("injectWikiMetadata", () => {
 				title: "Notes",
 				content: "# Heading\n\nSee [[Other Page|here]] and [a link](https://example.com).",
 				url: "/wiki/notes",
+				handoff: { requested: "notes", workspaceSlug: "acme", page: {} },
 			},
 			"https://example.test/wiki/notes"
 		);
@@ -44,5 +46,44 @@ describe("injectWikiMetadata", () => {
 		expect(html).not.toContain("](https://example.com)");
 		expect(html).toContain("Other Page");
 		expect(html).toContain("a link");
+	});
+
+	it("hands the page JSON to the island in a data block that page content cannot break out of", async () => {
+		const response = new Response(SHELL_HTML, {
+			headers: {
+				"content-type": "text/html",
+				"cache-control": "public, max-age=3600",
+				etag: '"x"',
+			},
+		});
+		const page = {
+			id: "p1",
+			slug: "evil",
+			title: "Evil",
+			content: "</script><script>alert(1)</script> & <!-- -->",
+		};
+		const rewritten = injectWikiMetadata(
+			response,
+			{
+				title: page.title,
+				content: page.content,
+				url: "/wiki/evil",
+				handoff: { requested: "evil", workspaceSlug: "acme", page },
+			},
+			"https://example.test/wiki/evil"
+		);
+		const html = await rewritten.text();
+
+		const blocks = [
+			...html.matchAll(
+				/<script type="application\/json" id="wiki-ssr-handoff">([\s\S]*?)<\/script>/g
+			),
+		];
+		expect(blocks).toHaveLength(1);
+		expect(html.replace(/content="[^"]*"/g, "").match(/<script/g)).toHaveLength(1);
+		expect(blocks[0][1]).not.toMatch(/[<>&]/);
+		expect(JSON.parse(blocks[0][1])).toEqual({ requested: "evil", workspaceSlug: "acme", page });
+		expect(rewritten.headers.get("cache-control")).toBe("private, no-store");
+		expect(rewritten.headers.get("etag")).toBeNull();
 	});
 });

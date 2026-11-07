@@ -95,9 +95,10 @@ async function loadProjectData(
 		apiFetch<{ items: RecentIssue[] }>(`/api/issues?project=${proj.id}`, { workspaceSlug }).catch(
 			() => null
 		),
-		apiFetch<RecentWikiPage[]>(`/api/wiki?projectId=${encodeURIComponent(proj.id)}`, {
-			workspaceSlug,
-		}).catch(() => null),
+		apiFetch<RecentWikiPage[]>(
+			`/api/wiki?projectId=${encodeURIComponent(proj.id)}&sort=updated&limit=5`,
+			{ workspaceSlug }
+		).catch(() => null),
 	]);
 
 	if (issuesData) setters.setRecentIssues(sortByRecency<RecentIssue>(issuesData?.items, 5));

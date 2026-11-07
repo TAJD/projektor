@@ -65,6 +65,18 @@ export const wikiTools: MCPTool[] = [
 						"list_stale_pages). Use list_wiki_templates for the template-picker use case instead.",
 				},
 				includeWorkspacePages: INCLUDE_WORKSPACE_PAGES_PROPERTY,
+				sort: {
+					type: "string",
+					enum: ["title", "updated"],
+					default: "title",
+					description: "Order by title (default) or most recently updated first",
+				},
+				limit: {
+					type: "integer",
+					minimum: 1,
+					maximum: 500,
+					description: "Return at most this many pages (default: all)",
+				},
 			},
 		},
 		annotations: READ,

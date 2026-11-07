@@ -44,6 +44,7 @@ export interface WikiSsrPage {
 	title: string;
 	content: string;
 	url: string;
+	handoff: { requested: string; workspaceSlug: string; page: unknown };
 }
 
 // Best-effort: authenticates the request and resolves a workspace-scoped wiki page for
@@ -68,7 +69,12 @@ export async function resolveWikiPageForSsr(
 
 	try {
 		const page = await getWikiPage(ctxFromHono(c), slugOrId);
-		return { title: page.title, content: page.content, url: page.url };
+		return {
+			title: page.title,
+			content: page.content,
+			url: page.url,
+			handoff: { requested: slugOrId, workspaceSlug: workspace.slug, page },
+		};
 	} catch {
 		// NotFoundError / ForbiddenError / anything else — no metadata to inject, no
 		// redirect target; the plain shell (or a client-side 404) still works.
@@ -114,10 +120,25 @@ export function injectWikiMetadata(
 	pageUrl: string
 ): Response {
 	const description = plainTextExcerpt(page.content);
-	return new HTMLRewriter()
+	const handoffJson = JSON.stringify(page.handoff)
+		.replace(/</g, "\\u003c")
+		.replace(/>/g, "\\u003e")
+		.replace(/&/g, "\\u0026");
+	const rewritten = new HTMLRewriter()
 		.on("title", new TextSetter(`${page.title} — Projektor Wiki`))
 		.on('meta[property="og:title"]', new AttrSetter("content", page.title))
 		.on('meta[property="og:description"]', new AttrSetter("content", description))
 		.on('meta[property="og:url"]', new AttrSetter("content", pageUrl))
+		.on("head", {
+			element(el) {
+				el.append(`<script type="application/json" id="wiki-ssr-handoff">${handoffJson}</script>`, {
+					html: true,
+				});
+			},
+		})
 		.transform(response);
+	const headers = new Headers(rewritten.headers);
+	headers.set("Cache-Control", "private, no-store");
+	headers.delete("ETag");
+	return new Response(rewritten.body, { status: rewritten.status, headers });
 }

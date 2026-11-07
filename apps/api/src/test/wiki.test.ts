@@ -4839,6 +4839,43 @@ describe("Wiki page templates (PROJ-491)", () => {
 		expect(includedResults.map((r) => r.title)).toContain("Runbook Template");
 	});
 
+	it("GET /api/wiki sort=updated&limit returns only the most recently updated pages", async () => {
+		for (const [title, updatedAt] of [
+			["Alpha", 100],
+			["Bravo", 300],
+			["Charlie", 200],
+		] as const) {
+			const res = await SELF.fetch("http://localhost/api/wiki", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ title, content: "x" }),
+			});
+			const { id } = (await res.json()) as { id: string };
+			await env.DB.prepare("UPDATE wiki_pages SET updated_at = ? WHERE id = ?")
+				.bind(updatedAt, id)
+				.run();
+		}
+
+		const res = await SELF.fetch("http://localhost/api/wiki?sort=updated&limit=2", {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const results = (await res.json()) as Array<{ title: string }>;
+		expect(results.map((r) => r.title)).toEqual(["Bravo", "Charlie"]);
+
+		const titleOrder = await SELF.fetch("http://localhost/api/wiki", {
+			headers: authHeaders(token, slug),
+		});
+		const all = (await titleOrder.json()) as Array<{ title: string }>;
+		expect(all.map((r) => r.title)).toEqual(["Alpha", "Bravo", "Charlie"]);
+
+		await resetRateLimits();
+		const bad = await SELF.fetch("http://localhost/api/wiki?limit=0", {
+			headers: authHeaders(token, slug),
+		});
+		expect(bad.status).toBe(400);
+	});
+
 	it("list_stale_pages excludes template pages even with an overdue verify_interval", async () => {
 		const overdueTemplateContent = [
 			"---",
