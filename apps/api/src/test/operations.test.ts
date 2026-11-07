@@ -128,4 +128,27 @@ describe("PROJ-895: operations registry REST adapter", () => {
 			label: null,
 		});
 	});
+
+	it("accepts the boolean and numeric strings validate-args lets through", async () => {
+		const tool = toMcpTool(
+			defineOperation({
+				id: "probe",
+				method: "GET",
+				path: "/api/probe",
+				domain: "probe",
+				tier: "read",
+				summary: "probe",
+				keywords: [],
+				input: z.object({ limit: z.number().optional(), stale: z.boolean().optional() }),
+				run: async (_ctx, input) => input,
+			})
+		);
+		const ctx = { role: "owner" } as never;
+		expect(await tool.handler({ limit: "5", stale: "false" }, ctx)).toEqual({
+			limit: 5,
+			stale: false,
+		});
+		expect(await tool.handler({ stale: "1" }, ctx)).toEqual({ stale: true });
+		await expect(tool.handler({ limit: "five" }, ctx)).rejects.toThrow();
+	});
 });

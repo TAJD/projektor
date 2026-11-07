@@ -82,7 +82,7 @@ export function toMcpTool(op: Operation): MCPTool {
 		inputSchema,
 		annotations: annotationsFor(op),
 		handler: async (raw, ctx) => {
-			const args = dropRejectedNulls(op.input, raw);
+			const args = normalizeArgs(op.input, raw);
 			const input = parseInput(
 				op,
 				ctx,
@@ -94,15 +94,26 @@ export function toMcpTool(op: Operation): MCPTool {
 	};
 }
 
-function dropRejectedNulls(schema: z.ZodObject, raw: unknown) {
+function normalizeArgs(schema: z.ZodObject, raw: unknown) {
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(raw)) {
 		const field = schema.shape[key] as z.ZodType | undefined;
 		if (value === null && field && !field.safeParse(null).success) continue;
-		out[key] = value;
+		out[key] = field ? coerceScalar(field, value) : value;
 	}
 	return out;
+}
+
+function coerceScalar(field: z.ZodType, value: unknown): unknown {
+	if (typeof value !== "string") return value;
+	const kind = baseType(field);
+	if (kind === "number" && value.trim() !== "" && Number.isFinite(Number(value))) {
+		return Number(value);
+	}
+	if (kind === "boolean" && (value === "true" || value === "1")) return true;
+	if (kind === "boolean" && (value === "false" || value === "0" || value === "")) return false;
+	return value;
 }
 
 function baseType(field: z.ZodType): string {
@@ -119,14 +130,8 @@ function fromQuery(schema: z.ZodObject, query: Record<string, string[]>) {
 		const field = schema.shape[key] as z.ZodType | undefined;
 		const values = all.filter((v) => v !== "");
 		if (values.length === 0 || !field) continue;
-		const kind = baseType(field);
-		const value = values[0];
-		if (kind === "array") out[key] = values;
-		else if (all.length > 1) out[key] = all;
-		else if (kind === "number") out[key] = Number(value);
-		else if (kind === "boolean" && (value === "true" || value === "1")) out[key] = true;
-		else if (kind === "boolean" && (value === "false" || value === "0")) out[key] = false;
-		else out[key] = value;
+		if (baseType(field) === "array") out[key] = values;
+		else out[key] = all.length > 1 ? all : coerceScalar(field, values[0]);
 	}
 	return out;
 }
