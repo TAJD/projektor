@@ -369,12 +369,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 
 	// PROJ-857: the filtered total only changes the header count, which the first page
 	// already set — later pages skip the COUNT(*) and return total: null.
-	const total = cursor ? null : await orm.$count(schema.issues, and(...conditions));
-
-	// Select with snake_case aliases to preserve the same response shape as the raw-SQL version.
-	// labels uses a raw SQL expression to return the stored JSON string (bypassing Drizzle's
-	// mode:'json' deserializer), matching what callers expect.
-	const rows = await orm
+	const rowsQuery = orm
 		.select({
 			id: schema.issues.id,
 			workspace_id: schema.issues.workspaceId,
@@ -414,6 +409,20 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		.where(and(...pageConditions))
 		.orderBy(desc(schema.issues.createdAt), desc(schema.issues.id))
 		.limit(limit + 1);
+
+	let total: number | null = null;
+	let rows: Awaited<typeof rowsQuery>;
+	if (cursor) {
+		rows = await rowsQuery;
+	} else {
+		const countQuery = orm
+			.select({ n: sql<number>`count(*)` })
+			.from(schema.issues)
+			.where(and(...conditions));
+		const [countRows, pageRows] = await Promise.all([countQuery, rowsQuery]);
+		total = Number(countRows[0]?.n ?? 0);
+		rows = pageRows;
+	}
 
 	const hasMore = rows.length > limit;
 	const items = hasMore ? rows.slice(0, limit) : rows;
@@ -2438,40 +2447,42 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 	// A label is at most 50 characters (schemas/issues.ts), so a longer query can't be one —
 	// skip the json_each scan, which no index backs, for prose queries.
 	const mayBeLabel = trimmed.length > 0 && trimmed.length <= MAX_LABEL_LENGTH;
-	const labelHits = !mayBeLabel
-		? []
-		: (
-				await ctx.db
-					.prepare(
-						`SELECT ${columns}
+	const ftsQuery = sanitizeFtsQuery(query);
+
+	const statements: D1PreparedStatement[] = [];
+	if (mayBeLabel) {
+		statements.push(
+			ctx.db
+				.prepare(
+					`SELECT ${columns}
 				 FROM issues i
 				 LEFT JOIN projects p ON p.id = i.project_id
 				 WHERE i.workspace_id = ?
 				   AND EXISTS (SELECT 1 FROM json_each(${labelsJsonSql("i.labels")}) WHERE lower(value) = lower(?))
 				   ${scope}
 				 ORDER BY i.created_at DESC, i.id DESC LIMIT ?`
-					)
-					.bind(ctx.workspaceId, trimmed, ...scopeParams, limit)
-					.all<{ id: string }>()
-			).results;
-
-	const ftsQuery = sanitizeFtsQuery(query);
-	const ftsHits = ftsQuery
-		? (
-				await ctx.db
-					.prepare(
-						`SELECT ${columns}
+				)
+				.bind(ctx.workspaceId, trimmed, ...scopeParams, limit)
+		);
+	}
+	if (ftsQuery) {
+		statements.push(
+			ctx.db
+				.prepare(
+					`SELECT ${columns}
 						 FROM issues_fts
 						 JOIN issues i ON i.id = issues_fts.issue_id
 						 LEFT JOIN projects p ON p.id = i.project_id
 						 WHERE issues_fts MATCH ? AND issues_fts.workspace_id = ?
 						   ${scope}
 						 ORDER BY bm25(issues_fts) LIMIT ?`
-					)
-					.bind(ftsQuery, ctx.workspaceId, ...scopeParams, limit)
-					.all<{ id: string }>()
-			).results
-		: [];
+				)
+				.bind(ftsQuery, ctx.workspaceId, ...scopeParams, limit)
+		);
+	}
+	const batched = statements.length === 0 ? [] : await ctx.db.batch<{ id: string }>(statements);
+	const labelHits = mayBeLabel ? (batched.shift()?.results ?? []) : [];
+	const ftsHits = ftsQuery ? (batched.shift()?.results ?? []) : [];
 
 	const seen = new Set<string>();
 	const merged: Array<{ id: string }> = [];

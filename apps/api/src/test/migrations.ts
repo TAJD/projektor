@@ -72,6 +72,7 @@ import m0068 from "../../../../packages/db/migrations/0068_issue_link_follows_fr
 import m0069 from "../../../../packages/db/migrations/0069_project_epic_auto_close.sql?raw";
 import m0070 from "../../../../packages/db/migrations/0070_task_status_backlog.sql?raw";
 import m0071 from "../../../../packages/db/migrations/0071_mcp_tool_usage.sql?raw";
+import m0072 from "../../../../packages/db/migrations/0072_dor_ready_null_index.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -146,4 +147,5 @@ export const MIGRATIONS = [
 	m0069,
 	m0070,
 	m0071,
+	m0072,
 ];
