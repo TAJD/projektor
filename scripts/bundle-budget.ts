@@ -53,6 +53,7 @@ const repoRoot = dirname(fileURLToPath(import.meta.url)) + '/..';
 const distDir = join(repoRoot, 'apps/web/dist');
 const astroDir = join(distDir, '_astro');
 const baselinePath = join(repoRoot, 'bundle-budget.json');
+const apiBundlePath = join(repoRoot, 'apps/api/dist/index.js');
 
 const TOLERANCE = { toleranceRatio: 0.02, toleranceBytes: 1024 };
 
@@ -63,6 +64,9 @@ function fail(msg: string): never {
 
 if (!existsSync(astroDir)) {
   fail(`${astroDir} not found — run \`pnpm --filter @projektor/web build\` first.`);
+}
+if (!existsSync(apiBundlePath)) {
+  fail(`${apiBundlePath} not found — run \`pnpm --filter @projektor/api build\` first.`);
 }
 
 function findAllPages(): string[] {
@@ -114,6 +118,7 @@ for (const file of chunkFiles) {
 const current: Budget = {
   initial: toStableSizes(currentInitial),
   lazy: toStableSizes(currentLazy),
+  api: { 'worker.js': gzipSync(readFileSync(apiBundlePath)).length },
 };
 
 const shouldUpdate = process.argv.includes('--update');
@@ -133,6 +138,7 @@ const baseline: Budget = JSON.parse(readFileSync(baselinePath, 'utf8'));
 const deltas: ChunkDelta[] = [
   ...diffGroup('initial', baseline.initial ?? {}, current.initial, TOLERANCE),
   ...diffGroup('lazy', baseline.lazy ?? {}, current.lazy, TOLERANCE),
+  ...diffGroup('api', baseline.api ?? {}, current.api ?? {}, TOLERANCE),
 ];
 
 for (const d of deltas) console.log(`bundle-budget: [${d.group}] ${formatDeltaLine(d)}`);
@@ -153,7 +159,8 @@ const totalInitial = Object.values(current.initial).reduce((a, b) => a + b, 0);
 const totalLazy = Object.values(current.lazy).reduce((a, b) => a + b, 0);
 console.log(
   `bundle-budget: totals — initial ${(totalInitial / 1024).toFixed(2)} KiB gzip, ` +
-    `lazy ${(totalLazy / 1024).toFixed(2)} KiB gzip`,
+    `lazy ${(totalLazy / 1024).toFixed(2)} KiB gzip, ` +
+    `api worker ${((current.api?.['worker.js'] ?? 0) / 1024).toFixed(2)} KiB gzip`,
 );
 
 const summaryPath = process.env.GITHUB_STEP_SUMMARY;

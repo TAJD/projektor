@@ -74,6 +74,20 @@ describe("diffGroup ratchet rule", () => {
 		expect(isFailingDelta(d)).toBe(false);
 	});
 
+	it("fails the API worker bundle when it has no baseline or outgrows it", () => {
+		const [fresh] = diffGroup("api", {}, { "worker.js": 400_000 }, TOLERANCE);
+		expect(isFailingDelta(fresh)).toBe(true);
+		const [grew] = diffGroup("api", { "worker.js": 400_000 }, { "worker.js": 409_000 }, TOLERANCE);
+		expect(grew.verdict).toBe("grew");
+		const [withinTolerance] = diffGroup(
+			"api",
+			{ "worker.js": 400_000 },
+			{ "worker.js": 407_000 },
+			TOLERANCE
+		);
+		expect(withinTolerance.verdict).toBe("ok");
+	});
+
 	it("never fails a chunk that shrank or stayed the same", () => {
 		const baseline = { "a.js": 1000, "b.js": 1000 };
 		const current = { "a.js": 900, "b.js": 1000 };

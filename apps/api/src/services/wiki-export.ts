@@ -1,6 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, inArray, isNull } from "drizzle-orm";
-import { Zip, ZipDeflate } from "fflate";
 import { stringify as stringifyYaml } from "yaml";
 import { ExportWikiInputSchema } from "../schemas/wiki";
 import { assertProjectAccess } from "./access";
@@ -253,6 +252,7 @@ async function buildZip(
 	const attachments = await collectAttachments(ctx, pages);
 	const totalAttachmentBytes = attachments.reduce((sum, a) => sum + a.size, 0);
 	assertExportSizeAllowed(pages.length, totalAttachmentBytes);
+	const { Zip, ZipDeflate } = await import("fflate");
 
 	return new ReadableStream<Uint8Array>({
 		async start(controller) {

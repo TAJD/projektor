@@ -42,6 +42,7 @@ jobs:
         env:
           NODE_OPTIONS: --max-old-space-size=8192
       - run: pnpm --filter @projektor/web build
+      - run: pnpm --filter @projektor/api build
       - name: Bundle size budget (PROJ-841)
         # A true inline PR comment needs a token with `pull-requests: write`, which this
         # job intentionally doesn't request — the per-chunk delta table instead goes to

@@ -8,7 +8,10 @@ export interface BudgetGroup {
 export interface Budget {
   initial: BudgetGroup;
   lazy: BudgetGroup;
+  api?: BudgetGroup;
 }
+
+export type BudgetGroupName = 'initial' | 'lazy' | 'api';
 
 export interface RatchetOptions {
   /** Fractional tolerance, e.g. 0.02 for 2%. */
@@ -28,7 +31,7 @@ export type Verdict =
 
 export interface ChunkDelta {
   name: string;
-  group: 'initial' | 'lazy';
+  group: BudgetGroupName;
   baselineBytes: number | null;
   currentBytes: number | null;
   deltaBytes: number;
@@ -87,7 +90,7 @@ function allowedGrowth(baselineBytes: number, options: RatchetOptions): number {
  * growth is `--update` plus committing the new baseline, which shows up in the PR diff.
  */
 export function diffGroup(
-  group: 'initial' | 'lazy',
+  group: BudgetGroupName,
   baseline: BudgetGroup,
   current: BudgetGroup,
   options: RatchetOptions,
@@ -103,7 +106,7 @@ export function diffGroup(
       continue;
     }
     if (baselineBytes === null) {
-      const verdict: Verdict = group === 'initial' ? 'new-eager-no-baseline' : 'new-lazy';
+      const verdict: Verdict = group === 'lazy' ? 'new-lazy' : 'new-eager-no-baseline';
       deltas.push({ name, group, baselineBytes, currentBytes, deltaBytes: currentBytes, verdict });
       continue;
     }
