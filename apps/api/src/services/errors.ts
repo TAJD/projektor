@@ -83,3 +83,17 @@ export class UnsupportedMediaTypeError extends ServiceError {
 		super(message);
 	}
 }
+
+export type ItemError = { code: string; message: string };
+
+export function toItemError(err: unknown): ItemError {
+	if (err instanceof ValidationError) {
+		const parts = [
+			...err.issues.formErrors,
+			...Object.entries(err.issues.fieldErrors).map(([k, v]) => `${k}: ${(v ?? []).join("; ")}`),
+		];
+		return { code: err.kind, message: parts.join(" | ") || err.message };
+	}
+	if (err instanceof ServiceError) return { code: err.kind, message: err.message };
+	throw err;
+}

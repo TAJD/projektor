@@ -73,6 +73,16 @@ export const CreateIssueSchema = z
 	})
 	.strict();
 
+export const CreateIssuesSchema = z
+	.object({
+		projectId: z.string().min(1),
+		items: z
+			.array(CreateIssueSchema.omit({ projectId: true }))
+			.min(1)
+			.max(50),
+	})
+	.strict();
+
 export const UpdateIssueSchema = z
 	.object({
 		title: z.string().min(1).max(500).optional(),
@@ -222,6 +232,31 @@ export const CreateIssueLinkSchema = z
 		type: LinkTypeInputEnum.meta({
 			description: "Relationship type from the source issue's perspective",
 		}),
+	})
+	.strict();
+
+export const CreateIssueLinksSchema = z
+	.object({
+		links: z
+			.array(
+				z
+					.object({
+						source: z
+							.string()
+							.min(1)
+							.meta({ description: "UUID of the source issue, or a ref like PROJ-42" }),
+						target: z
+							.string()
+							.min(1)
+							.meta({ description: "UUID of the target issue, or a ref like PROJ-42" }),
+						type: LinkTypeInputEnum.meta({
+							description: "Relationship type from the source issue's perspective",
+						}),
+					})
+					.strict()
+			)
+			.min(1)
+			.max(100),
 	})
 	.strict();
 

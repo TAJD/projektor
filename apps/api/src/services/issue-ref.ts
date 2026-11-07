@@ -150,6 +150,18 @@ const REF_PAIRS_PER_QUERY = 40;
  * names a UUID.
  */
 export async function resolveIssueIdsParam(ctx: ServiceCtx, params: string[]): Promise<string[]> {
+	const ids = await resolveIssueIdsIfFound(ctx, params);
+	return params.map((p, i) => {
+		const id = ids[i];
+		if (!id) throw new NotFoundError(`Issue not found: ${p}`);
+		return id;
+	});
+}
+
+export async function resolveIssueIdsIfFound(
+	ctx: ServiceCtx,
+	params: string[]
+): Promise<Array<string | undefined>> {
 	const pairs = new Map<string, { key: string; number: number }>();
 	for (const p of params) {
 		const m = p.match(ISSUE_REF_PATTERN);
@@ -192,9 +204,7 @@ export async function resolveIssueIdsParam(ctx: ServiceCtx, params: string[]): P
 		if (!m) return p;
 		// Look up through the same normalised key the map was built with, so "PROJ-007" and
 		// "PROJ-7" are the same issue.
-		const id = resolved.get(`${m[1]}-${parseInt(m[2], 10)}`);
-		if (!id) throw new NotFoundError(`Issue not found: ${p}`);
-		return id;
+		return resolved.get(`${m[1]}-${parseInt(m[2], 10)}`);
 	});
 }
 

@@ -24,6 +24,7 @@ import {
 } from "../schemas/issues";
 import {
 	createIssue,
+	createIssues,
 	deleteIssue,
 	getIssue,
 	getIssuesBatch,
@@ -108,6 +109,42 @@ function shapePrioritized(r: PrioritizedRaw): Record<string, unknown> {
 		...(r.needsGrooming ? { needsGrooming: true, missingCriteria: r.missingCriteria } : {}),
 	};
 }
+
+const createIssueInput = CreateIssueSchema.extend({
+	projectId: d(z.string(), "UUID of the project, or a project key like PROJ"),
+	statusId: d(CreateIssueSchema.shape.statusId, "UUID of the task status to assign"),
+	assigneeId: d(CreateIssueSchema.shape.assigneeId, "UUID of the user to assign"),
+	parentId: d(
+		CreateIssueSchema.shape.parentId,
+		"UUID of the parent issue, or a ref like PROJ-42 (optional; max depth 5)"
+	),
+	typeId: d(CreateIssueSchema.shape.typeId, "UUID of the task type to assign"),
+	type: d(
+		CreateIssueSchema.shape.type,
+		"Task type by key or name, case-insensitive (e.g. bug, epic) — the same value list_issues/get_issue return as `type`. Alternative to typeId."
+	),
+	customFields: d(
+		CreateIssueSchema.shape.customFields,
+		"Custom field values keyed by field key (see list_custom_field_defs)"
+	),
+	agentSessionId: d(
+		CreateIssueSchema.shape.agentSessionId,
+		"Your agent session id (from register_agent). With a status of in_review or done it makes completionReport required"
+	),
+	completionReport: d(
+		CreateIssueSchema.shape.completionReport,
+		"Only with a status of in_review or done. Shape: {summary, verification, prLink?, remainder?}. " +
+			"Same evidence rules as update_issue: unverifiable evidence from an agent sets needsAudit:true"
+	),
+	comment: d(
+		CreateIssueSchema.shape.comment,
+		"A comment to add to the new issue (1-10000 chars); its id is returned as commentId"
+	),
+	links: d(
+		CreateIssueSchema.shape.links,
+		'Links from the new issue, e.g. [{type:"follows_from", target:"PROJ-42"}] (max 50); ids returned as linkIds'
+	),
+});
 
 export const issueOperations = [
 	defineOperation({
@@ -379,42 +416,31 @@ export const issueOperations = [
 			"Filing work you already finished? Create it straight in done with completionReport (and " +
 			"agentSessionId), and add `comment` and `links` in the same call instead of follow-up " +
 			"update_issue / add_comment / create_issue_link calls; everything commits together.",
-		input: CreateIssueSchema.extend({
-			projectId: d(z.string(), "UUID of the project, or a project key like PROJ"),
-			statusId: d(CreateIssueSchema.shape.statusId, "UUID of the task status to assign"),
-			assigneeId: d(CreateIssueSchema.shape.assigneeId, "UUID of the user to assign"),
-			parentId: d(
-				CreateIssueSchema.shape.parentId,
-				"UUID of the parent issue, or a ref like PROJ-42 (optional; max depth 5)"
-			),
-			typeId: d(CreateIssueSchema.shape.typeId, "UUID of the task type to assign"),
-			type: d(
-				CreateIssueSchema.shape.type,
-				"Task type by key or name, case-insensitive (e.g. bug, epic) — the same value list_issues/get_issue return as `type`. Alternative to typeId."
-			),
-			customFields: d(
-				CreateIssueSchema.shape.customFields,
-				"Custom field values keyed by field key (see list_custom_field_defs)"
-			),
-			agentSessionId: d(
-				CreateIssueSchema.shape.agentSessionId,
-				"Your agent session id (from register_agent). With a status of in_review or done it makes completionReport required"
-			),
-			completionReport: d(
-				CreateIssueSchema.shape.completionReport,
-				"Only with a status of in_review or done. Shape: {summary, verification, prLink?, remainder?}. " +
-					"Same evidence rules as update_issue: unverifiable evidence from an agent sets needsAudit:true"
-			),
-			comment: d(
-				CreateIssueSchema.shape.comment,
-				"A comment to add to the new issue (1-10000 chars); its id is returned as commentId"
-			),
-			links: d(
-				CreateIssueSchema.shape.links,
-				'Links from the new issue, e.g. [{type:"follows_from", target:"PROJ-42"}] (max 50); ids returned as linkIds'
-			),
-		}),
+		input: createIssueInput,
 		run: (ctx, input) => createIssue(ctx, input),
+	}),
+	defineOperation({
+		...base,
+		id: "create_issues",
+		method: "POST",
+		path: "/api/issues/bulk",
+		tier: "write",
+		summary:
+			"Create up to 50 issues in one project in one call. Each item takes create_issue's fields " +
+			"(including completionReport, comment and links). Returns `results` in item order: " +
+			"{ref, id, ...} for a created issue, or {error: {code, message}} for an item that was rejected " +
+			"(e.g. a bad link target or parent). A rejected item doesn't stop the others; the created ones " +
+			"commit together. A malformed item (wrong field type) rejects the whole call before anything is written.",
+		input: z
+			.object({
+				projectId: createIssueInput.shape.projectId,
+				items: z
+					.array(createIssueInput.omit({ projectId: true }))
+					.min(1)
+					.max(50),
+			})
+			.strict(),
+		run: (ctx, input) => createIssues(ctx, input),
 	}),
 	defineOperation({
 		...base,

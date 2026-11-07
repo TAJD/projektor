@@ -6,6 +6,7 @@ import { AddCommentSchema } from "../schemas/comments";
 import { BooleanQueryParam, IdSchema } from "../schemas/common";
 import {
 	CreateIssueSchema,
+	CreateIssuesSchema,
 	GetIssueSchema,
 	GetIssuesBatchSchema,
 	ListIssuesSchema,
@@ -29,7 +30,13 @@ import {
 	validateCustomFields,
 } from "./custom-fields";
 import { dorColumns } from "./definition-of-ready";
-import { ForbiddenError, flattenWithPaths, NotFoundError, ValidationError } from "./errors";
+import {
+	ForbiddenError,
+	flattenWithPaths,
+	NotFoundError,
+	toItemError,
+	ValidationError,
+} from "./errors";
 import { isExternallyVerifiableEvidence } from "./evidence-classification";
 import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
@@ -1019,6 +1026,70 @@ async function resolveTypeNameParam(
 }
 
 export async function createIssue(ctx: ServiceCtx, raw: unknown) {
+	const prepared = await prepareCreateIssue(ctx, raw);
+	const results = await runIssueWriteBatch(ctx, prepared.statements);
+	return prepared.finish(insertedNumber(results[0]));
+}
+
+export async function createIssues(ctx: ServiceCtx, raw: unknown) {
+	const parsed = CreateIssuesSchema.safeParse(raw);
+	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
+	const projectId = await resolveProjectIdParam(ctx, parsed.data.projectId);
+	await requireProjectWrite(ctx, projectId);
+	const project = await drizzle(ctx.db, { schema })
+		.select({ key: schema.projects.key })
+		.from(schema.projects)
+		.where(and(eq(schema.projects.id, projectId), eq(schema.projects.workspaceId, ctx.workspaceId)))
+		.get();
+	if (!project) throw new NotFoundError("Project not found");
+
+	const prepared = await Promise.all(
+		parsed.data.items.map((item) =>
+			prepareCreateIssue(ctx, { ...item, projectId }, projectId).then(
+				(ok) => ({ ok }),
+				(e) => ({ error: toItemError(e) })
+			)
+		)
+	);
+	const statements: D1PreparedStatement[] = [];
+	const insertAt = prepared.map((p) => {
+		if (!("ok" in p)) return -1;
+		statements.push(...p.ok.statements);
+		return statements.length - p.ok.statements.length;
+	});
+	const written = statements.length > 0 ? await runIssueWriteBatch(ctx, statements) : [];
+	const results = await Promise.all(
+		prepared.map(async (p, i) => {
+			if (!("ok" in p)) return p;
+			const created = await p.ok.finish(insertedNumber(written[insertAt[i]]));
+			return { ref: `${project.key}-${created.number}`, ...created };
+		})
+	);
+	return { results };
+}
+
+function insertedNumber(result: D1Result | undefined): number | undefined {
+	return (result?.results as Array<{ number: number }> | undefined)?.[0]?.number;
+}
+
+type CreatedIssue = {
+	id: string;
+	number: number | undefined;
+	commentId?: string;
+	linkIds?: string[];
+	needsAudit?: boolean;
+	followUp?: { id: string; ref: string };
+	followUpError?: string;
+};
+
+async function prepareCreateIssue(
+	ctx: ServiceCtx,
+	raw: unknown,
+	checkedProjectId?: string
+): Promise<{
+	statements: D1PreparedStatement[];
+	finish: (number: number | undefined) => Promise<CreatedIssue>;
+}> {
 	const result = CreateIssueSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const projectId = await resolveProjectIdParam(ctx, result.data.projectId);
@@ -1030,17 +1101,7 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 	const { title, body, priority, assigneeId, labels, agentSessionId, completionReport, comment } =
 		data;
 
-	// PROJ-389: confirm projectId belongs to this workspace BEFORE the admin-bypass
-	// check below, so an owner/admin can't write into another workspace's project.
-	await requireProjectInWorkspace(ctx, projectId);
-
-	// PROJ-311: writing requires a member/admin grant on this project (owner/admin
-	// bypass). No grant → the project is invisible → 404; a viewer grant is read-only.
-	if (!isWorkspaceAdmin(ctx.role)) {
-		const projRole = await effectiveProjectRole(ctx, projectId);
-		if (projRole === null) throw new NotFoundError("Project not found");
-		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
-	}
+	if (projectId !== checkedProjectId) await requireProjectWrite(ctx, projectId);
 
 	// PROJ-785: an assignee must be a member of this workspace — otherwise we'd
 	// persist a dangling or wrong-workspace user reference.
@@ -1190,49 +1251,59 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 	if (linkPlan) statements.push(...linkPlan.statements);
 	if (agentSessionId) statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, agentSessionId));
 
-	const results = await runIssueWriteBatch(ctx, statements);
-	const number = (results[0]?.results as Array<{ number: number }> | undefined)?.[0]?.number;
+	return { statements, finish };
 
-	await broadcastWorkspaceEvent(ctx, {
-		type: "issue.created",
-		projectId: data.projectId,
-		data: { id, number, title: data.title, status: resolvedStatusKey ?? "todo" },
-	});
-	for (const cid of [reportCommentId, commentId]) {
-		if (!cid) continue;
+	async function finish(number: number | undefined) {
 		await broadcastWorkspaceEvent(ctx, {
-			type: "comment.created",
-			projectId,
-			data: { id: cid, issueId: id, authorId: ctx.userId },
+			type: "issue.created",
+			projectId: data.projectId,
+			data: { id, number, title: data.title, status: resolvedStatusKey ?? "todo" },
 		});
-	}
-
-	let followUp: { id: string; ref: string } | undefined;
-	let followUpError: string | undefined;
-	if (enteringDone && completionReport?.remainder) {
-		try {
-			followUp = await createRemainderFollowUp(
-				ctx,
-				orm,
-				{ ...blank, projectId },
-				completionReport.remainder
-			);
-		} catch (e) {
-			followUpError = `Issue created as done, but the follow-up for the remainder could not be created: ${
-				e instanceof Error ? e.message : String(e)
-			}. Create it manually.`;
+		for (const cid of [reportCommentId, commentId]) {
+			if (!cid) continue;
+			await broadcastWorkspaceEvent(ctx, {
+				type: "comment.created",
+				projectId,
+				data: { id: cid, issueId: id, authorId: ctx.userId },
+			});
 		}
-	}
 
-	return {
-		id,
-		number,
-		...(commentId ? { commentId } : {}),
-		...(linkPlan ? { linkIds: linkPlan.ids } : {}),
-		...(stamps.needsAudit ? { needsAudit: true } : {}),
-		...(followUp ? { followUp } : {}),
-		...(followUpError ? { followUpError } : {}),
-	};
+		let followUp: { id: string; ref: string } | undefined;
+		let followUpError: string | undefined;
+		if (enteringDone && completionReport?.remainder) {
+			try {
+				followUp = await createRemainderFollowUp(
+					ctx,
+					orm,
+					{ ...blank, projectId },
+					completionReport.remainder
+				);
+			} catch (e) {
+				followUpError = `Issue created as done, but the follow-up for the remainder could not be created: ${
+					e instanceof Error ? e.message : String(e)
+				}. Create it manually.`;
+			}
+		}
+
+		return {
+			id,
+			number,
+			...(commentId ? { commentId } : {}),
+			...(linkPlan ? { linkIds: linkPlan.ids } : {}),
+			...(stamps.needsAudit ? { needsAudit: true } : {}),
+			...(followUp ? { followUp } : {}),
+			...(followUpError ? { followUpError } : {}),
+		};
+	}
+}
+
+async function requireProjectWrite(ctx: ServiceCtx, projectId: string): Promise<void> {
+	await requireProjectInWorkspace(ctx, projectId);
+	if (!isWorkspaceAdmin(ctx.role)) {
+		const projRole = await effectiveProjectRole(ctx, projectId);
+		if (projRole === null) throw new NotFoundError("Project not found");
+		if (!canWriteProject(projRole)) throw new ForbiddenError("Insufficient permissions");
+	}
 }
 
 type UpdateIssueData = z.infer<typeof UpdateIssueSchema>;

@@ -104,6 +104,7 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
 	// tool name is the public contract.
 	"issues.ts:getIssuesBatch": "get_issues",
 	"issue-links.ts:createLink": "create_issue_link",
+	"issue-links.ts:createLinks": "create_issue_links",
 	"projects.ts:getProjectBySlug": "get_project",
 	"issue-links.ts:deleteLink": "delete_issue_link",
 	"issue-links.ts:listLinksForIssue": "list_issue_links",
