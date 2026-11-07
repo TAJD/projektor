@@ -1,6 +1,7 @@
 import { drizzle, schema } from "@projektor/db";
 import type { Env } from "@projektor/types";
 import { and, eq } from "drizzle-orm";
+import { setBounded } from "../lib/bounded-map";
 import { ConflictError } from "./errors";
 import { createWorkspace } from "./workspaces";
 
@@ -208,12 +209,12 @@ async function alreadyProvisioned(env: Env, userId: string): Promise<boolean> {
 		return false;
 	}
 	if (!marker) return false;
-	inMemoryProvisionedCache.set(userId, Date.now() + PROVISIONED_LOCAL_TTL_MS);
+	setBounded(inMemoryProvisionedCache, userId, Date.now() + PROVISIONED_LOCAL_TTL_MS);
 	return true;
 }
 
 async function markProvisioned(env: Env, userId: string): Promise<void> {
-	inMemoryProvisionedCache.set(userId, Date.now() + PROVISIONED_LOCAL_TTL_MS);
+	setBounded(inMemoryProvisionedCache, userId, Date.now() + PROVISIONED_LOCAL_TTL_MS);
 	try {
 		await env.KV.put(provisionedKey(userId), "1", { expirationTtl: PROVISIONED_KV_TTL_SECS });
 	} catch (err) {

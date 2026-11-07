@@ -9,6 +9,7 @@ import {
 	parseScopes,
 	tokenAllows,
 } from "../auth/scopes";
+import { setBounded } from "../lib/bounded-map";
 import { ensureUserProvisioned, provisionPublicViewer } from "../services/provisioning";
 import { bumpRateCounter, tokenHashFor } from "./rate-limit";
 import { mcpWorkspaceIdFromPath, mcpWorkspaceTarget, prefetchWorkspaceLookup } from "./workspace";
@@ -642,7 +643,7 @@ async function upsertUserByEmail(
 		}
 		if (cached) {
 			const user = cached as AuthUser;
-			inMemoryUserCache.set(email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
+			setBounded(inMemoryUserCache, email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
 			return user;
 		}
 	}
@@ -677,7 +678,7 @@ async function upsertUserByEmail(
 			);
 		}
 	}
-	inMemoryUserCache.set(email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
+	setBounded(inMemoryUserCache, email, { user, expiresAt: Date.now() + USER_LOCAL_TTL_MS });
 
 	return user;
 }
