@@ -169,3 +169,11 @@ export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
 
 	return next();
 }
+
+export async function pathWorkspaceMiddleware(c: Context<HonoEnv>, next: Next) {
+	const workspace = c.get("workspace") as { slug: string } | undefined;
+	if (c.req.param("slug") !== workspace?.slug) {
+		return c.json({ error: "Workspace not found" }, 404);
+	}
+	return next();
+}

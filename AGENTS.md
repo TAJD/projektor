@@ -119,9 +119,9 @@ audits:
   client in the first place; inherently can't be an MCP tool.
 - **Cross-workspace project list (`GET /api/projects` → `listAllProjects`)** — REST-only.
   MCP connections are bound to a single workspace (`/mcp/<workspaceId>`), so a
-  cross-workspace listing doesn't fit the MCP connection model. MCP's `list_projects` is
-  the single-workspace equivalent (different, plainer shape — no `open_issue_count` /
-  `workspace_name` rollups).
+  cross-workspace listing doesn't fit the MCP connection model. The single-workspace
+  equivalent is `list_projects`, on both surfaces (REST: `GET /api/workspaces/:slug/projects`),
+  with a different, plainer shape — no `open_issue_count` / `workspace_name` rollups.
 - **Public issue sharing (`POST /api/issues/:id/share`, `GET /api/share/:token`)** —
   REST-only. Share-link creation/redemption is a browser-facing feature (the redemption
   endpoint is intentionally unauthenticated by token).

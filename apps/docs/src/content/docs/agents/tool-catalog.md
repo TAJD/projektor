@@ -102,7 +102,7 @@ running server.
 |------|-------------|------|
 | `list_projects` | List projects in the workspace. Archived projects are excluded by default. | read-only |
 | `create_project` | Create a new project in the workspace | write |
-| `get_project` | Get a project by ID | read-only |
+| `get_project` | Get a project by ID (or by its URL slug) | read-only |
 | `update_project` | Update a project name, description, archived state, or epic-closing behaviour (owner/admin only). Set archived: true to hide it from the default project list, false to restore it. epicAutoClose: true closes an epic automatically when its last child is done/cancelled; false (default) makes update_issue/finish_work return parentReadyToClose:{ref} instead. | write |
 | `delete_project` | Delete a project and all its issues (owner only) | destructive |
 

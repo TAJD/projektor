@@ -15,7 +15,7 @@ import {
 	mcpRateLimitMiddleware,
 	rateLimitMiddleware,
 } from "./middleware/rate-limit";
-import { workspaceMiddleware } from "./middleware/workspace";
+import { pathWorkspaceMiddleware, workspaceMiddleware } from "./middleware/workspace";
 import {
 	createOAuthProvider,
 	isOAuthAccessToken,
@@ -45,7 +45,7 @@ import { oauthRouter } from "./routes/oauth";
 import { oauthMetadataRouter } from "./routes/oauth-metadata";
 import { playbooksRouter } from "./routes/playbooks";
 import { projectActivityRouter } from "./routes/project-activity";
-import { projectsRouter } from "./routes/projects";
+import { projectsRouter, workspaceProjectsRouter } from "./routes/projects";
 import { realtimeRouter } from "./routes/realtime";
 import { shareIssuesRouter, sharePublicRouter } from "./routes/share";
 import { sprintsRouter } from "./routes/sprints";
@@ -252,7 +252,7 @@ app.post("/api/workspaces", authMiddleware, async (c) => {
 // PROJ-856: register each prefix ONCE, as `/x/*`. Hono's `/x/*` also matches the bare
 // `/x`, so adding a separate `app.use("/x", …)` ran auth + workspace twice (two wasted
 // sequential D1 round trips per request). test/middleware-once.test.ts guards this.
-app.use("/api/workspaces/:slug/*", authMiddleware, workspaceMiddleware);
+app.use("/api/workspaces/:slug/*", authMiddleware, workspaceMiddleware, pathWorkspaceMiddleware);
 // Cross-workspace project list — auth only, no workspace context needed
 app.get("/api/projects", authMiddleware, etagMiddleware, async (c) => {
 	const user = c.get("user") as { id: string };
@@ -318,6 +318,7 @@ app.use("/api/task-statuses", etagMiddleware);
 
 app.route("/api/workspaces", workspacesRouter);
 app.route("/api/workspaces", groupsRouter);
+app.route("/api/workspaces", workspaceProjectsRouter);
 app.route("/api/projects", projectsRouter);
 app.route("/api/projects", flowMetricsRouter);
 app.route("/api/projects", codeHeatmapRouter);
