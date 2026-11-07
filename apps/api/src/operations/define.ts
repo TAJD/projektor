@@ -102,7 +102,7 @@ export function toMcpTool(op: Operation): MCPTool {
 			let ifVersion: unknown;
 			if (op.versioned && typeof raw === "object" && raw !== null) {
 				({ ifVersion, ...raw } = raw as Record<string, unknown>);
-				if (ifVersion !== undefined && typeof ifVersion !== "string") {
+				if (ifVersion != null && typeof ifVersion !== "string") {
 					throw new ValidationError({
 						formErrors: [],
 						fieldErrors: { ifVersion: ["Expected a string"] },

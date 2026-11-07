@@ -105,6 +105,31 @@ describe("PROJ-1022: conditional reads", () => {
 			const { err } = await call("get_issue", { id: issueRef, ifVersion: 7 });
 			expect(err).toBeDefined();
 		});
+
+		it("treats a null ifVersion as absent", async () => {
+			const { err, data } = await call("get_issue", { id: issueRef, ifVersion: null });
+			expect(err).toBeUndefined();
+			expect(data.title).toBe("Conditional");
+		});
+	});
+
+	it("get_wiki_page through a renamed slug returns the same shape as the live slug", async () => {
+		const created = await call("create_wiki_page", { title: "Old", content: "body" });
+		const page = await call("get_wiki_page", { slug: created.data.slug });
+		const renamed = await call("update_wiki_page", {
+			slug: created.data.slug,
+			newSlug: "renamed-page",
+			baseRevisionId: page.data.revisionId,
+		});
+		expect(renamed.err).toBeUndefined();
+		const live = await call("get_wiki_page", { slug: "renamed-page" });
+		const viaRedirect = await call("get_wiki_page", { slug: created.data.slug });
+		expect(viaRedirect.data.version).toBe(live.data.version);
+
+		const rest = await SELF.fetch(`http://localhost/api/wiki/${created.data.slug}`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await rest.json()) as { version?: unknown }).version).toBeUndefined();
 	});
 
 	describe("get_wiki_page", () => {
