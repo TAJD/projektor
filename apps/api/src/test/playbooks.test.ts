@@ -101,9 +101,10 @@ describe("Playbooks", () => {
 			}),
 		});
 		const mcpJson = (await mcpRes.json()) as JsonRpcResult<{ content: Array<{ text: string }> }>;
-		const mcpBody = JSON.parse(mcpJson.result.content[0].text);
+		const { version, ...mcpBody } = JSON.parse(mcpJson.result.content[0].text);
 
 		expect(mcpBody).toEqual(restBody);
+		expect(version).toMatch(/^[0-9a-f]{12}$/);
 	});
 
 	it("GET /api/playbooks/:name 404s on an unknown name", async () => {

@@ -373,6 +373,7 @@ export const issueOperations = [
 		method: "GET",
 		path: "/api/issues/:id",
 		tier: "read",
+		versioned: true,
 		summary:
 			`Get a single issue by ID or project key + number (e.g. "PROJ-42"). \`body\` is returned ` +
 			`up to ${ISSUE_BODY_MAX_CHARS} chars; if it is longer the result has \`bodyTruncated:true\`, ` +

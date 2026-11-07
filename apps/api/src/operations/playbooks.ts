@@ -30,6 +30,7 @@ export const playbookOperations = [
 		method: "GET",
 		path: "/api/playbooks/:name",
 		tier: "read",
+		versioned: true,
 		workspace: false,
 		summary: "Fetch a shipped playbook's full content by name.",
 		input: GetPlaybookSchema,
