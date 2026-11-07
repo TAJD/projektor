@@ -148,7 +148,18 @@ describe("renderMermaidDiagrams", () => {
 		vi.resetModules();
 	});
 
+	const observers: MutationObserver[] = [];
+
 	async function withMermaid(run: ReturnType<typeof vi.fn>, initialize = vi.fn()) {
+		vi.stubGlobal(
+			"MutationObserver",
+			class extends MutationObserver {
+				constructor(callback: MutationCallback) {
+					super(callback);
+					observers.push(this);
+				}
+			}
+		);
 		vi.doMock("mermaid", () => ({ default: { initialize, run } }));
 		vi.resetModules();
 		const mod = await import("./markdown");
@@ -159,6 +170,8 @@ describe("renderMermaidDiagrams", () => {
 	}
 
 	afterEach(() => {
+		for (const observer of observers.splice(0)) observer.disconnect();
+		vi.unstubAllGlobals();
 		document.documentElement.removeAttribute("data-theme");
 		document.body.innerHTML = "";
 		vi.doUnmock("mermaid");
