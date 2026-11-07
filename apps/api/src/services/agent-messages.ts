@@ -1,39 +1,10 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, asc, desc, eq, gt, gte, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, type SQL, sql } from "drizzle-orm";
 import { ListMessagesSchema, PostMessageSchema } from "../schemas/agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
+import { buildTouchAgentHeartbeatIfLiveStatement } from "./issue-leases";
 import { resolveMessageScope } from "./issue-ref";
 import type { ServiceCtx } from "./types";
-
-// PROJ-929: mirrors ACTIVE_TTL in services/agents.ts (and SESSION_TTL_SECONDS in
-// services/issue-leases.ts / file-claims.ts). Kept local rather than imported for the
-// same circular-import reason as those: agents.ts already imports from sibling service
-// files, so importing back from here would cycle.
-const SESSION_TTL_SECONDS = 120;
-
-// PROJ-929: a post_message call that carries an already-live agentId implicitly
-// refreshes that session's heartbeat, same as claim_issue/claim_files. Gated on the
-// session being live ALREADY (status='active' AND heartbeat > cutoff) — see
-// touchAgentHeartbeatIfLive in file-claims.ts for why an unconditional touch would
-// defeat PROJ-636 stale-holder reclaim.
-async function touchAgentHeartbeatIfLive(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	agentId: string
-): Promise<void> {
-	const cutoff = Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
-	await orm
-		.update(schema.agentSessions)
-		.set({ lastHeartbeatAt: Math.floor(Date.now() / 1000) })
-		.where(
-			and(
-				eq(schema.agentSessions.id, agentId),
-				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
-				eq(schema.agentSessions.status, "active"),
-				gt(schema.agentSessions.lastHeartbeatAt, cutoff)
-			)
-		);
-}
 
 function toD1Statement(
 	ctx: ServiceCtx,
@@ -76,67 +47,64 @@ export function buildPostMessageStatements(
 	return statements;
 }
 
+export function buildGuardedMessageInsert(
+	ctx: ServiceCtx,
+	message: Readonly<{ scope: string; agentId: string | null; body: string }>,
+	guard: Readonly<{ sql: string; params: unknown[] }>
+): { statement: D1PreparedStatement; row: typeof schema.agentMessages.$inferSelect } {
+	const row = {
+		id: crypto.randomUUID(),
+		workspaceId: ctx.workspaceId,
+		scope: message.scope,
+		agentId: message.agentId,
+		body: message.body,
+		createdAt: Date.now(),
+	};
+	const statement = ctx.db
+		.prepare(
+			`INSERT INTO agent_messages (id, workspace_id, scope, agent_id, body, created_at)
+			 SELECT ?, ?, ?, ?, ?, ? WHERE ${guard.sql}`
+		)
+		.bind(
+			row.id,
+			row.workspaceId,
+			row.scope,
+			row.agentId,
+			row.body,
+			row.createdAt,
+			...guard.params
+		);
+	return { statement, row };
+}
+
 export async function postMessage(ctx: ServiceCtx, raw: unknown) {
 	const result = PostMessageSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { agentId, body } = result.data;
-	// PROJ-959: "issue:PROJ-42" is stored (and read) as "issue:<uuid>", so a ref and a UUID
-	// name the same channel.
 	const scope = await resolveMessageScope(ctx, result.data);
 
-	const orm = drizzle(ctx.db, { schema });
+	const guard = agentId
+		? {
+				sql: "EXISTS (SELECT 1 FROM agent_sessions WHERE id = ? AND workspace_id = ?)",
+				params: [agentId, ctx.workspaceId],
+			}
+		: { sql: "1 = 1", params: [] };
+	const { statement, row } = buildGuardedMessageInsert(
+		ctx,
+		{ scope, agentId: agentId ?? null, body },
+		guard
+	);
 
-	// If scope is an issue scope, verify the issue belongs to this workspace
-	if (scope.startsWith("issue:")) {
-		const issueId = scope.slice("issue:".length);
-		const issue = await orm
-			.select({ id: schema.issues.id })
-			.from(schema.issues)
-			.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
-			.get();
-		if (!issue) throw new NotFoundError("Issue not found");
+	if (!agentId) {
+		await statement.run();
+		return row;
 	}
-
-	// If agentId given, verify the agent session belongs to this workspace
-	if (agentId) {
-		const agent = await orm
-			.select({ id: schema.agentSessions.id })
-			.from(schema.agentSessions)
-			.where(
-				and(
-					eq(schema.agentSessions.id, agentId),
-					eq(schema.agentSessions.workspaceId, ctx.workspaceId)
-				)
-			)
-			.get();
-		if (!agent) throw new NotFoundError("Agent session not found");
-
-		// PROJ-929: refresh the poster's heartbeat, live sessions only.
-		await touchAgentHeartbeatIfLive(orm, ctx, agentId);
-	}
-
-	const id = crypto.randomUUID();
-	// Millisecond precision: ensures unique ordering for messages posted in rapid
-	// succession (e.g., multiple SELF.fetch calls in tests within the same second).
-	const now = Date.now();
-
-	await orm.insert(schema.agentMessages).values({
-		id,
-		workspaceId: ctx.workspaceId,
-		scope,
-		agentId: agentId ?? null,
-		body,
-		createdAt: now,
-	});
-
-	const row = await orm
-		.select()
-		.from(schema.agentMessages)
-		.where(eq(schema.agentMessages.id, id))
-		.get();
-
-	// biome-ignore lint/style/noNonNullAssertion: row was just inserted; SELECT immediately after guarantees it exists
-	return row!;
+	const results = await ctx.db.batch([
+		buildTouchAgentHeartbeatIfLiveStatement(ctx, agentId),
+		statement,
+	]);
+	if (results[1].meta.changes === 0) throw new NotFoundError("Agent session not found");
+	return row;
 }
 
 export async function listMessages(ctx: ServiceCtx, raw: unknown) {

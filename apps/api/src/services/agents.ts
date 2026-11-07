@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, type Column, desc, eq, gt, isNull, or, type SQL, sql } from "drizzle-orm";
 import {
 	EndAgentSchema,
 	FinishWorkSchema,
@@ -8,12 +8,19 @@ import {
 	RegisterAgentSchema,
 	StartWorkSchema,
 } from "../schemas/agents";
+import { ISSUE_REF_PATTERN } from "../schemas/common";
 import { visibleProjectPredicate } from "./access";
 import { resolveAgentSessionId } from "./agent-identity";
-import { postMessage } from "./agent-messages";
+import { buildGuardedMessageInsert } from "./agent-messages";
 import { flattenWithPaths, NotFoundError, ValidationError } from "./errors";
-import { claimFiles, releaseClaimsForAgent } from "./file-claims";
-import { claimIssue, releaseLeasesForAgent } from "./issue-leases";
+import { buildReleaseClaimsForAgentStatement, claimFilesResolved } from "./file-claims";
+import {
+	buildLeaseClaimStatements,
+	buildReleaseLeasesForAgentStatement,
+	leaseHeldError,
+	readLeaseClaimState,
+	settleLeaseClaim,
+} from "./issue-leases";
 import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
 import { updateIssue } from "./issues";
 import { resolveVisibleProjectIdParam } from "./projects";
@@ -47,50 +54,70 @@ export async function registerAgent(ctx: ServiceCtx, raw: unknown) {
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { name } = result.data;
 	const issueId = await resolveOptionalIssueId(ctx, result.data.issueId);
+	if (issueId?.startsWith("unresolved:")) throw new NotFoundError("Issue not found");
 
-	const orm = drizzle(ctx.db, { schema });
+	const { statement, row } = buildSessionInsert(ctx, {
+		id: crypto.randomUUID(),
+		name,
+		issueId,
+		now: Math.floor(Date.now() / 1000),
+	});
+	await statement.run();
+	return row;
+}
 
-	if (issueId) {
-		const issue = await orm
-			.select({ id: schema.issues.id })
-			.from(schema.issues)
-			.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
-			.get();
-		if (!issue) throw new NotFoundError("Issue not found");
-	}
+type AgentSessionRow = Pick<
+	typeof schema.agentSessions.$inferSelect,
+	| "id"
+	| "workspaceId"
+	| "issueId"
+	| "tokenId"
+	| "name"
+	| "status"
+	| "startedAt"
+	| "lastHeartbeatAt"
+	| "endedAt"
+>;
 
-	const id = crypto.randomUUID();
-	const now = Math.floor(Date.now() / 1000);
-
-	// PROJ-336: kind is no longer read from the caller — see AGENT_SESSION_COLUMNS
-	// for why it's dropped from every response. The DB column keeps its "agent"
-	// default so existing rows/queries are unaffected.
-	await orm.insert(schema.agentSessions).values({
-		id,
+function buildSessionInsert(
+	ctx: ServiceCtx,
+	input: Readonly<{ id: string; name: string; issueId: string | undefined; now: number }>
+): { statement: D1PreparedStatement; row: AgentSessionRow } {
+	const row: AgentSessionRow = {
+		id: input.id,
 		workspaceId: ctx.workspaceId,
-		issueId: issueId ?? null,
-		// PROJ-894: the credential is recorded so an omitted agentId can later resolve to
-		// this session. token_id keeps its FK meaning (api_tokens.id), so it is only set
-		// for pk/pat credentials; an OAuth grant id lives in credential_id alone.
+		issueId: input.issueId ?? null,
 		tokenId:
 			ctx.auth?.credentialId && isApiTokenMethod(ctx.auth.method) ? ctx.auth.credentialId : null,
-		authMethod: ctx.auth?.method ?? null,
-		credentialId: ctx.auth?.credentialId ?? null,
-		name,
+		name: input.name,
 		status: "active",
-		startedAt: now,
-		lastHeartbeatAt: now,
+		startedAt: input.now,
+		lastHeartbeatAt: input.now,
 		endedAt: null,
-	});
+	};
+	const query = drizzle(ctx.db, { schema })
+		.insert(schema.agentSessions)
+		.values({
+			...row,
+			authMethod: ctx.auth?.method ?? null,
+			credentialId: ctx.auth?.credentialId ?? null,
+		})
+		.toSQL();
+	return { statement: ctx.db.prepare(query.sql).bind(...query.params), row };
+}
 
-	const row = await orm
-		.select(AGENT_SESSION_COLUMNS)
-		.from(schema.agentSessions)
-		.where(eq(schema.agentSessions.id, id))
-		.get();
-
-	// biome-ignore lint/style/noNonNullAssertion: row was just inserted; SELECT immediately after guarantees it exists
-	return row!;
+function sessionRowFromRaw(r: Record<string, unknown>): AgentSessionRow {
+	return {
+		id: r.id,
+		workspaceId: r.workspace_id,
+		issueId: r.issue_id,
+		tokenId: r.token_id,
+		name: r.name,
+		status: r.status,
+		startedAt: r.started_at,
+		lastHeartbeatAt: r.last_heartbeat_at,
+		endedAt: r.ended_at,
+	} as AgentSessionRow;
 }
 
 /**
@@ -113,35 +140,64 @@ export async function startWork(ctx: ServiceCtx, raw: unknown) {
 	const result = StartWorkSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const { paths, name } = result.data;
-	// PROJ-959: resolve a ref up front, before a session is registered, so an unknown ref
-	// fails cleanly instead of leaving a session to compensate for. Everything below then
-	// works with the UUID (the message scope and the claims must agree on it).
-	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issue);
+	const issueId = ISSUE_REF_PATTERN.test(result.data.issue)
+		? await resolveVisibleIssueIdParam(ctx, result.data.issue)
+		: result.data.issue;
 
-	const session = await registerAgent(ctx, { name, issueId });
+	const now = Math.floor(Date.now() / 1000);
+	const cutoff = now - ACTIVE_TTL;
+	const state = await readLeaseClaimState(ctx, { issueId, agentId: null, cutoff });
+	if (state.holder?.live) throw leaseHeldError(state.holder.agentSessionId);
+
+	const sessionId = crypto.randomUUID();
+	const leaseId = crypto.randomUUID();
+	const { statement: sessionInsert, row: session } = buildSessionInsert(ctx, {
+		id: sessionId,
+		name,
+		issueId,
+		now,
+	});
+	const plan = buildLeaseClaimStatements(ctx, {
+		issueId,
+		agentId: sessionId,
+		state,
+		cutoff,
+		now,
+		touchHeartbeat: false,
+		leaseId,
+	});
+	const claimsFiles = paths !== undefined && paths.length > 0;
+	const startMessage = buildGuardedMessageInsert(
+		ctx,
+		{ scope: `issue:${issueId}`, agentId: sessionId, body: `${name} started work` },
+		claimsFiles
+			? { sql: "1 = 1", params: [] }
+			: {
+					sql: "EXISTS (SELECT 1 FROM issue_leases WHERE id = ? AND workspace_id = ?)",
+					params: [leaseId, ctx.workspaceId],
+				}
+	);
+	const results = await ctx.db.batch([
+		sessionInsert,
+		...plan.statements,
+		...(claimsFiles ? [] : [startMessage.statement]),
+	]);
 
 	try {
-		const lease = await claimIssue(ctx, { issueId, agentId: session.id });
-
-		const claimed =
-			paths && paths.length > 0
-				? await claimFiles(ctx, { issueId, agentId: session.id, paths })
-				: null;
-
-		await postMessage(ctx, {
-			scope: `issue:${issueId}`,
-			agentId: session.id,
-			body: `${name} started work`,
-		});
-
-		return {
-			sessionId: session.id,
-			lease,
-			claimedFiles: claimed?.created ?? [],
-		};
+		const lease = await settleLeaseClaim(ctx, plan, results[1 + plan.insertIndex]);
+		const claimed = claimsFiles
+			? await claimFilesResolved(ctx, {
+					issueId,
+					projectId: state.projectId,
+					agentId: session.id,
+					paths,
+					extraStatements: [startMessage.statement],
+				})
+			: null;
+		return { sessionId: session.id, lease, claimedFiles: claimed?.created ?? [] };
 	} catch (err) {
 		try {
-			await endAgent(ctx, { id: session.id });
+			await endSessionById(ctx, session.id);
 		} catch (cleanupErr) {
 			console.error("startWork: compensating endAgent failed", cleanupErr);
 		}
@@ -149,9 +205,12 @@ export async function startWork(ctx: ServiceCtx, raw: unknown) {
 	}
 }
 
-function sessionVisible(ctx: ServiceCtx) {
-	const vis = visibleProjectPredicate(ctx, schema.issues.projectId);
-	return vis ? (or(isNull(schema.agentSessions.issueId), vis) ?? vis) : sql`1 = 1`;
+function sessionVisibleSql(ctx: ServiceCtx, issueIdExpr: Column | SQL): SQL {
+	const vis = visibleProjectPredicate(
+		ctx,
+		sql`(SELECT project_id FROM issues WHERE id = ${issueIdExpr} AND workspace_id = ${ctx.workspaceId})`
+	);
+	return vis ? (or(isNull(issueIdExpr), vis) ?? vis) : sql`1 = 1`;
 }
 
 export async function heartbeatAgent(ctx: ServiceCtx, raw: unknown) {
@@ -161,79 +220,56 @@ export async function heartbeatAgent(ctx: ServiceCtx, raw: unknown) {
 	// this call is what revives a session that just went stale.
 	const id = await resolveAgentSessionId(ctx, result.data.id, { includeStale: true });
 
-	const orm = drizzle(ctx.db, { schema });
-	const existing = await orm
-		.select({ id: schema.agentSessions.id })
-		.from(schema.agentSessions)
-		.leftJoin(schema.issues, eq(schema.agentSessions.issueId, schema.issues.id))
+	const row = await drizzle(ctx.db, { schema })
+		.update(schema.agentSessions)
+		.set({ lastHeartbeatAt: Math.floor(Date.now() / 1000) })
 		.where(
 			and(
 				eq(schema.agentSessions.id, id),
 				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
 				eq(schema.agentSessions.status, "active"),
-				sessionVisible(ctx)
+				sessionVisibleSql(ctx, schema.agentSessions.issueId)
 			)
 		)
+		.returning(AGENT_SESSION_COLUMNS)
 		.get();
-	if (!existing) throw new NotFoundError("Agent session not found");
-
-	const now = Math.floor(Date.now() / 1000);
-	await orm
-		.update(schema.agentSessions)
-		.set({ lastHeartbeatAt: now })
-		.where(
-			and(eq(schema.agentSessions.id, id), eq(schema.agentSessions.workspaceId, ctx.workspaceId))
-		);
-
-	const row = await orm
-		.select(AGENT_SESSION_COLUMNS)
-		.from(schema.agentSessions)
-		.where(eq(schema.agentSessions.id, id))
-		.get();
-
-	// biome-ignore lint/style/noNonNullAssertion: row was just updated; SELECT immediately after guarantees it exists
-	return row!;
+	if (!row) throw new NotFoundError("Agent session not found");
+	return row;
 }
 
 export async function endAgent(ctx: ServiceCtx, raw: unknown) {
 	const result = EndAgentSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const id = await resolveAgentSessionId(ctx, result.data.id, { includeStale: true });
+	return endSessionById(ctx, id);
+}
 
-	const orm = drizzle(ctx.db, { schema });
-	const existing = await orm
-		.select({ id: schema.agentSessions.id })
-		.from(schema.agentSessions)
-		.leftJoin(schema.issues, eq(schema.agentSessions.issueId, schema.issues.id))
+async function endSessionById(ctx: ServiceCtx, id: string): Promise<AgentSessionRow> {
+	const visibleSession = sql`EXISTS (
+		SELECT 1 FROM agent_sessions s
+		WHERE s.id = ${id} AND s.workspace_id = ${ctx.workspaceId}
+		AND ${sessionVisibleSql(ctx, sql.raw("s.issue_id"))}
+	)`;
+	const update = drizzle(ctx.db, { schema })
+		.update(schema.agentSessions)
+		.set({ status: "ended", endedAt: Math.floor(Date.now() / 1000) })
 		.where(
 			and(
 				eq(schema.agentSessions.id, id),
 				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
-				sessionVisible(ctx)
+				sessionVisibleSql(ctx, schema.agentSessions.issueId)
 			)
 		)
-		.get();
-	if (!existing) throw new NotFoundError("Agent session not found");
-
-	const now = Math.floor(Date.now() / 1000);
-	await orm
-		.update(schema.agentSessions)
-		.set({ status: "ended", endedAt: now })
-		.where(
-			and(eq(schema.agentSessions.id, id), eq(schema.agentSessions.workspaceId, ctx.workspaceId))
-		);
-
-	await releaseClaimsForAgent(ctx, id);
-	await releaseLeasesForAgent(ctx, id);
-
-	const row = await orm
-		.select(AGENT_SESSION_COLUMNS)
-		.from(schema.agentSessions)
-		.where(eq(schema.agentSessions.id, id))
-		.get();
-
-	// biome-ignore lint/style/noNonNullAssertion: row was just updated; SELECT immediately after guarantees it exists
-	return row!;
+		.returning(AGENT_SESSION_COLUMNS)
+		.toSQL();
+	const results = await ctx.db.batch([
+		buildReleaseClaimsForAgentStatement(ctx, id, visibleSession),
+		buildReleaseLeasesForAgentStatement(ctx, id, visibleSession),
+		ctx.db.prepare(update.sql).bind(...update.params),
+	]);
+	const raw = results[2].results[0] as Record<string, unknown> | undefined;
+	if (!raw) throw new NotFoundError("Agent session not found");
+	return sessionRowFromRaw(raw);
 }
 
 /**
@@ -247,13 +283,10 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 	const result = FinishWorkSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(flattenWithPaths(result.error));
 	const { sessionId, completionReport, status } = result.data;
-	// PROJ-959: resolved even when nothing is transitioned, so an unknown or hidden ref is
-	// "Issue not found" rather than being silently ignored.
-	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issue);
 
 	let extra: Record<string, unknown> = {};
 	if (status !== undefined || completionReport !== undefined) {
-		const updated = await updateIssue(ctx, issueId, {
+		const updated = await updateIssue(ctx, result.data.issue, {
 			...(status !== undefined ? { status } : {}),
 			...(completionReport !== undefined ? { completionReport } : {}),
 			// Attributes the transition to this session for the PROJ-375 audit flag and
@@ -264,9 +297,11 @@ export async function finishWork(ctx: ServiceCtx, raw: unknown) {
 		// PROJ-961/962: surface followUp / parentReadyToClose / parentClosed from the update.
 		const { ok: _ok, ...rest } = updated;
 		extra = rest;
+	} else {
+		await resolveVisibleIssueIdParam(ctx, result.data.issue);
 	}
 
-	const ended = await endAgent(ctx, { id: sessionId });
+	const ended = await endSessionById(ctx, sessionId);
 	return Object.keys(extra).length > 0 ? { ...ended, ...extra } : ended;
 }
 

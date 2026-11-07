@@ -1,11 +1,12 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, type SQL } from "drizzle-orm";
+import { ISSUE_REF_PATTERN } from "../schemas/common";
 import {
 	ClaimIssueSchema,
 	ListIssueLeasesSchema,
 	ReleaseIssueSchema,
 } from "../schemas/issue-leases";
-import { visibleProjectPredicate } from "./access";
+import { visibleProjectPredicate, visibleProjectSqlFragment } from "./access";
 import { resolveAgentSessionId } from "./agent-identity";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
@@ -24,19 +25,7 @@ const liveCutoff = () => Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 // projects.agent_wip_limit.
 const DEFAULT_AGENT_WIP_LIMIT = 3;
 
-async function assertIssueExists(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	issueId: string
-): Promise<{ projectId: string }> {
-	const issue = await orm
-		.select({ id: schema.issues.id, projectId: schema.issues.projectId })
-		.from(schema.issues)
-		.where(and(eq(schema.issues.id, issueId), eq(schema.issues.workspaceId, ctx.workspaceId)))
-		.get();
-	if (!issue) throw new NotFoundError("Issue not found");
-	return { projectId: issue.projectId };
-}
+type IssueLeaseRow = typeof schema.issueLeases.$inferSelect;
 
 // The project's agent WIP cap (its own agent_wip_limit, else the default).
 export async function fetchAgentWipCap(
@@ -52,93 +41,9 @@ export async function fetchAgentWipCap(
 	return project?.agentWipLimit ?? DEFAULT_AGENT_WIP_LIMIT;
 }
 
-// The issue ids currently held by a live lease in this project — only used to build
-// a helpful error when a claim is rejected for hitting the cap.
-async function liveLeaseHoldersForProject(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	projectId: string,
-	cutoff: number
-): Promise<string[]> {
-	const live = await orm
-		.select({ issueId: schema.issueLeases.issueId })
-		.from(schema.issueLeases)
-		.innerJoin(schema.issues, eq(schema.issueLeases.issueId, schema.issues.id))
-		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
-		.where(
-			and(
-				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
-				isNull(schema.issueLeases.releasedAt),
-				eq(schema.issues.projectId, projectId),
-				eq(schema.agentSessions.status, "active"),
-				gt(schema.agentSessions.lastHeartbeatAt, cutoff)
-			)
-		);
-	return live.map((l) => l.issueId);
-}
-
-// The claiming session must itself be live — a dead agent can't hold a lease.
-async function assertAgentSessionLive(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	agentId: string,
-	cutoff: number
-): Promise<void> {
-	const session = await orm
-		.select({
-			status: schema.agentSessions.status,
-			heartbeat: schema.agentSessions.lastHeartbeatAt,
-		})
-		.from(schema.agentSessions)
-		.where(
-			and(
-				eq(schema.agentSessions.id, agentId),
-				eq(schema.agentSessions.workspaceId, ctx.workspaceId)
-			)
-		)
-		.get();
-	if (!session) throw new NotFoundError("Agent session not found");
-	if (session.status !== "active" || session.heartbeat <= cutoff) {
-		throw new ValidationError({
-			formErrors: ["Agent session is not live — heartbeat before claiming"],
-			fieldErrors: {},
-		});
-	}
-}
-
-// PROJ-929: a call that carries a live agentId implicitly refreshes that session's
-// heartbeat, so explicit heartbeat_agent calls become optional during a claim loop.
-// Safe to call unconditionally at its one call site below: that call only happens after
-// assertAgentSessionLive already confirmed this session is live, so this can't revive a
-// crashed agent's session the way an unconditional touch in claimFiles could (see
-// touchAgentHeartbeatIfLive there, which guards it explicitly for that reason).
-// Local rather than imported from services/agents.ts for the same reason
-// SESSION_TTL_SECONDS is duplicated below: agents.ts already imports from this file
-// (releaseLeasesForAgent), so importing back would cycle.
-async function touchAgentHeartbeat(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	agentId: string
-): Promise<void> {
-	await orm
-		.update(schema.agentSessions)
-		.set({ lastHeartbeatAt: Math.floor(Date.now() / 1000) })
-		.where(
-			and(
-				eq(schema.agentSessions.id, agentId),
-				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
-				eq(schema.agentSessions.status, "active")
-			)
-		);
-}
-
-// PROJ-929: statement-builder twin of touchAgentHeartbeat above, for callers (e.g.
-// updateIssue) that need it folded into their own ctx.db.batch() rather than executed
-// on its own — same PROJ-870 convention as buildReleaseLeaseForClosedIssueStatement.
-// Gated on status='active' AND heartbeat > cutoff (not just active) so it's a no-op for
-// an already-stale session, same reasoning as touchAgentHeartbeatIfLive in
-// file-claims.ts: the caller here has NOT already confirmed liveness the way
-// claimIssue's touchAgentHeartbeat call site has, so the guard must be explicit.
+// PROJ-929: statement-builder for callers (e.g. updateIssue, claimIssue) that fold the
+// heartbeat refresh into their own ctx.db.batch(). Gated on status='active' AND
+// heartbeat > cutoff so it never revives a stale session (PROJ-636 stale-holder reclaim).
 export function buildTouchAgentHeartbeatIfLiveStatement(
 	ctx: ServiceCtx,
 	agentSessionId: string
@@ -159,138 +64,283 @@ export function buildTouchAgentHeartbeatIfLiveStatement(
 	return ctx.db.prepare(query.sql).bind(...query.params);
 }
 
-// Is there already an active lease on this issue? Join the session to decide
-// whether it's a live conflict or a stale lease we can reclaim.
-async function reclaimStaleLeaseOrThrow(
-	orm: ReturnType<typeof drizzle>,
-	ctx: ServiceCtx,
-	issueId: string,
-	cutoff: number,
-	now: number
-): Promise<void> {
-	const existing = await orm
-		.select({
-			id: schema.issueLeases.id,
-			agentSessionId: schema.issueLeases.agentSessionId,
-			sessionStatus: schema.agentSessions.status,
-			sessionHeartbeat: schema.agentSessions.lastHeartbeatAt,
-		})
-		.from(schema.issueLeases)
-		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
-		.where(
-			and(
-				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
-				eq(schema.issueLeases.issueId, issueId),
-				isNull(schema.issueLeases.releasedAt)
-			)
-		)
-		.get();
-	if (!existing) return;
-
-	const live = existing.sessionStatus === "active" && existing.sessionHeartbeat > cutoff;
-	if (live) {
-		throw new ConflictError(`Issue is already leased by agent session ${existing.agentSessionId}`);
-	}
-	// Stale lease: the holder stopped heartbeating. Reclaim it.
-	await orm
-		.update(schema.issueLeases)
-		.set({ releasedAt: now, releaseReason: "expired" })
-		.where(eq(schema.issueLeases.id, existing.id));
+interface ClaimReadState {
+	projectId: string;
+	cap: number;
+	holder: { leaseId: string; agentSessionId: string; live: boolean } | null;
+	session: { status: string; heartbeat: number } | null;
 }
 
-/**
- * Claim an issue for an agent session. Two independent atomicity guards, both
- * enforced inside a single INSERT so concurrent claims can't race (PROJ-290 —
- * D1 has no interactive transactions, and a read-then-insert let two claims each
- * see cap-1 and both proceed):
- *   1. Per-issue: the partial UNIQUE index on (workspace_id, issue_id) WHERE
- *      released_at IS NULL — at most one active lease per issue.
- *   2. Per-project WIP cap: the INSERT ... SELECT ... WHERE (live-lease count) <
- *      cap subquery is evaluated as part of the write statement (SQLite holds the
- *      db write lock), so a concurrent claim sees the other's just-inserted row
- *      and the count can't be undercounted.
- * A lease whose owning session has gone stale is reclaimed transparently first.
- */
-export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
-	const result = ClaimIssueSchema.safeParse(raw);
-	if (!result.success) throw new ValidationError(result.error.flatten());
-	const issueId = await resolveVisibleIssueIdParam(ctx, result.data.issueId);
-	// PROJ-894: an omitted agentId resolves to the credential's single live session.
-	const agentId = await resolveAgentSessionId(ctx, result.data.agentId);
+function visibleIssueClause(ctx: ServiceCtx, column: string): { sql: string; params: unknown[] } {
+	const vis = visibleProjectSqlFragment(ctx, column);
+	return vis ? { sql: ` AND ${vis.sql}`, params: vis.params } : { sql: "", params: [] };
+}
 
-	const orm = drizzle(ctx.db, { schema });
-	const cutoff = liveCutoff();
-
-	const { projectId } = await assertIssueExists(orm, ctx, issueId);
-	await assertAgentSessionLive(orm, ctx, agentId, cutoff);
-	// PROJ-929: this call carries a live agentId, so it refreshes the session's heartbeat
-	// (see touchAgentHeartbeat) — done even if the claim itself is later rejected below,
-	// since the agent proved itself live regardless of whether this particular issue was
-	// available.
-	await touchAgentHeartbeat(orm, ctx, agentId);
-	const cap = await fetchAgentWipCap(orm, ctx, projectId);
-
-	const now = Math.floor(Date.now() / 1000);
-	await reclaimStaleLeaseOrThrow(orm, ctx, issueId, cutoff, now);
-
-	const id = crypto.randomUUID();
-	let res: D1Result;
-	try {
-		res = await ctx.db
+export async function readLeaseClaimState(
+	ctx: ServiceCtx,
+	input: Readonly<{ issueId: string; agentId: string | null; cutoff: number }>
+): Promise<ClaimReadState> {
+	const { issueId, agentId, cutoff } = input;
+	const issueVis = visibleIssueClause(ctx, "i.project_id");
+	const statements = [
+		ctx.db
 			.prepare(
-				`INSERT INTO issue_leases (id, workspace_id, issue_id, agent_session_id, claimed_at, released_at, release_reason)
-				 SELECT ?, ?, ?, ?, ?, NULL, NULL
-				 WHERE (
-				   SELECT COUNT(*) FROM issue_leases il
-				   JOIN issues i ON i.id = il.issue_id
-				   JOIN agent_sessions s ON s.id = il.agent_session_id
-				   WHERE il.workspace_id = ? AND il.released_at IS NULL
-				     AND i.project_id = ? AND s.status = 'active' AND s.last_heartbeat_at > ?
-				 ) < ?`
+				`SELECT i.project_id AS project_id, p.agent_wip_limit AS cap
+				 FROM issues i
+				 JOIN projects p ON p.id = i.project_id AND p.workspace_id = i.workspace_id
+				 WHERE i.id = ? AND i.workspace_id = ?${issueVis.sql}`
 			)
-			.bind(id, ctx.workspaceId, issueId, agentId, now, ctx.workspaceId, projectId, cutoff, cap)
-			.run();
-	} catch (e) {
-		// Lost a genuine race: another claim inserted the active lease for THIS
-		// issue first and the partial UNIQUE index rejected ours.
-		if (e instanceof Error && /UNIQUE constraint failed/i.test(e.message)) {
-			throw new ConflictError("Issue was just leased by another agent");
-		}
-		throw e;
+			.bind(issueId, ctx.workspaceId, ...issueVis.params),
+		ctx.db
+			.prepare(
+				`SELECT il.id AS lease_id, il.agent_session_id AS agent_session_id,
+				        (s.status = 'active' AND s.last_heartbeat_at > ?) AS live
+				 FROM issue_leases il
+				 JOIN issues i ON i.id = il.issue_id AND i.workspace_id = il.workspace_id
+				 JOIN agent_sessions s ON s.id = il.agent_session_id AND s.workspace_id = il.workspace_id
+				 WHERE il.workspace_id = ? AND il.issue_id = ? AND il.released_at IS NULL${issueVis.sql}
+				 LIMIT 1`
+			)
+			.bind(cutoff, ctx.workspaceId, issueId, ...issueVis.params),
+	];
+	if (agentId) {
+		statements.push(
+			ctx.db
+				.prepare(
+					"SELECT status, last_heartbeat_at AS heartbeat FROM agent_sessions WHERE id = ? AND workspace_id = ?"
+				)
+				.bind(agentId, ctx.workspaceId)
+		);
 	}
 
-	// No row inserted and no UNIQUE violation ⇒ the WIP-cap guard subquery held.
-	if (res.meta.changes === 0) {
-		// PROJ-342: record the denial — issue, project, timestamp, requesting agent —
-		// so the factory-health tile has fault data instead of nothing tracked.
-		await ctx.db
-			.prepare(
-				"INSERT INTO wip_cap_denials (id, workspace_id, project_id, issue_id, agent_session_id, " +
-					"occurred_at) VALUES (?, ?, ?, ?, ?, ?)"
-			)
-			.bind(crypto.randomUUID(), ctx.workspaceId, projectId, issueId, agentId, now)
-			.run();
+	const [issueRes, holderRes, sessionRes] = await ctx.db.batch(statements);
+	const issue = issueRes.results[0] as { project_id: string; cap: number | null } | undefined;
+	if (!issue) throw new NotFoundError("Issue not found");
+	const holder = holderRes.results[0] as
+		| { lease_id: string; agent_session_id: string; live: number }
+		| undefined;
+	const session = sessionRes?.results[0] as { status: string; heartbeat: number } | undefined;
+	return {
+		projectId: issue.project_id,
+		cap: issue.cap ?? DEFAULT_AGENT_WIP_LIMIT,
+		holder: holder
+			? {
+					leaseId: holder.lease_id,
+					agentSessionId: holder.agent_session_id,
+					live: holder.live === 1,
+				}
+			: null,
+		session: session ?? null,
+	};
+}
 
-		const held = await liveLeaseHoldersForProject(orm, ctx, projectId, cutoff);
+export function assertSessionLive(state: ClaimReadState, cutoff: number): void {
+	if (!state.session) throw new NotFoundError("Agent session not found");
+	if (state.session.status !== "active" || state.session.heartbeat <= cutoff) {
+		throw new ValidationError({
+			formErrors: ["Agent session is not live — heartbeat before claiming"],
+			fieldErrors: {},
+		});
+	}
+}
+
+export function leaseHeldError(agentSessionId: string): ConflictError {
+	return new ConflictError(`Issue is already leased by agent session ${agentSessionId}`);
+}
+
+export interface LeaseClaimPlan {
+	statements: D1PreparedStatement[];
+	insertIndex: number;
+	lease: IssueLeaseRow;
+	issueId: string;
+	agentId: string;
+	projectId: string;
+	cap: number;
+	cutoff: number;
+	now: number;
+}
+
+export function buildLeaseClaimStatements(
+	ctx: ServiceCtx,
+	input: Readonly<{
+		issueId: string;
+		agentId: string;
+		state: ClaimReadState;
+		cutoff: number;
+		now: number;
+		touchHeartbeat: boolean;
+		leaseId?: string;
+	}>
+): LeaseClaimPlan {
+	const { issueId, agentId, state, cutoff, now } = input;
+	const id = input.leaseId ?? crypto.randomUUID();
+	const statements: D1PreparedStatement[] = [];
+
+	if (input.touchHeartbeat) {
+		statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, agentId));
+	}
+	if (state.holder && !state.holder.live) {
+		statements.push(
+			ctx.db
+				.prepare(
+					`UPDATE issue_leases SET released_at = ?, release_reason = 'expired'
+					 WHERE id = ? AND workspace_id = ? AND released_at IS NULL
+					   AND NOT EXISTS (
+					     SELECT 1 FROM agent_sessions s
+					     WHERE s.id = issue_leases.agent_session_id
+					       AND s.status = 'active' AND s.last_heartbeat_at > ?
+					   )`
+				)
+				.bind(now, state.holder.leaseId, ctx.workspaceId, cutoff)
+		);
+	}
+
+	const issueVis = visibleIssueClause(ctx, "i.project_id");
+	const insertIndex = statements.length;
+	statements.push(
+		ctx.db
+			.prepare(
+				`INSERT OR IGNORE INTO issue_leases (id, workspace_id, issue_id, agent_session_id, claimed_at, released_at, release_reason)
+				 SELECT ?, ?, ?, ?, ?, NULL, NULL
+				 WHERE EXISTS (SELECT 1 FROM issues i WHERE i.id = ? AND i.workspace_id = ?${issueVis.sql})
+				   AND (
+				     SELECT COUNT(*) FROM issue_leases il
+				     JOIN issues i ON i.id = il.issue_id
+				     JOIN agent_sessions s ON s.id = il.agent_session_id
+				     WHERE il.workspace_id = ? AND il.released_at IS NULL
+				       AND i.project_id = ? AND s.status = 'active' AND s.last_heartbeat_at > ?
+				   ) < ?`
+			)
+			.bind(
+				id,
+				ctx.workspaceId,
+				issueId,
+				agentId,
+				now,
+				issueId,
+				ctx.workspaceId,
+				...issueVis.params,
+				ctx.workspaceId,
+				state.projectId,
+				cutoff,
+				state.cap
+			)
+	);
+
+	return {
+		statements,
+		insertIndex,
+		lease: {
+			id,
+			workspaceId: ctx.workspaceId,
+			issueId,
+			agentSessionId: agentId,
+			claimedAt: now,
+			releasedAt: null,
+			releaseReason: null,
+		},
+		issueId,
+		agentId,
+		projectId: state.projectId,
+		cap: state.cap,
+		cutoff,
+		now,
+	};
+}
+
+export async function settleLeaseClaim(
+	ctx: ServiceCtx,
+	plan: LeaseClaimPlan,
+	insertResult: D1Result
+): Promise<IssueLeaseRow> {
+	if (insertResult.meta.changes === 0) {
+		const { issueId, agentId, projectId, cap, cutoff, now } = plan;
+		const vis = visibleIssueClause(ctx, "i.project_id");
+		const [, active, holders] = await ctx.db.batch([
+			ctx.db
+				.prepare(
+					`INSERT INTO wip_cap_denials (id, workspace_id, project_id, issue_id, agent_session_id, occurred_at)
+					 SELECT ?, ?, ?, ?, ?, ?
+					 WHERE NOT EXISTS (
+					   SELECT 1 FROM issue_leases WHERE workspace_id = ? AND issue_id = ? AND released_at IS NULL
+					 )`
+				)
+				.bind(
+					crypto.randomUUID(),
+					ctx.workspaceId,
+					projectId,
+					issueId,
+					agentId,
+					now,
+					ctx.workspaceId,
+					issueId
+				),
+			ctx.db
+				.prepare(
+					"SELECT 1 AS held FROM issue_leases WHERE workspace_id = ? AND issue_id = ? AND released_at IS NULL LIMIT 1"
+				)
+				.bind(ctx.workspaceId, issueId),
+			ctx.db
+				.prepare(
+					`SELECT il.issue_id AS issue_id FROM issue_leases il
+					 JOIN issues i ON i.id = il.issue_id
+					 JOIN agent_sessions s ON s.id = il.agent_session_id
+					 WHERE il.workspace_id = ? AND il.released_at IS NULL
+					   AND i.project_id = ? AND s.status = 'active' AND s.last_heartbeat_at > ?${vis.sql}`
+				)
+				.bind(ctx.workspaceId, projectId, cutoff, ...vis.params),
+		]);
+		if (active.results.length > 0) {
+			throw new ConflictError("Issue was just leased by another agent");
+		}
+		const held = (holders.results as Array<{ issue_id: string }>).map((h) => h.issue_id);
 		throw new ConflictError(
 			`Project agent WIP limit reached (${cap}); currently held: ${held.join(", ")}`
 		);
 	}
 
-	const row = await orm
-		.select()
-		.from(schema.issueLeases)
-		.where(eq(schema.issueLeases.id, id))
-		.get();
-
 	await broadcastWorkspaceEvent(ctx, {
 		type: "lease.claimed",
-		projectId,
-		data: { issueId, agentId, id },
+		projectId: plan.projectId,
+		data: { issueId: plan.issueId, agentId: plan.agentId, id: plan.lease.id },
 	});
+	return plan.lease;
+}
 
-	// biome-ignore lint/style/noNonNullAssertion: row was just inserted; SELECT immediately after guarantees it exists
-	return row!;
+/**
+ * Claim an issue for an agent session in one read batch and one write batch. The per-issue
+ * partial UNIQUE index and the per-project WIP cap subquery are both enforced inside the
+ * single INSERT (PROJ-290); a lease held by a stale session is reclaimed in the same write.
+ */
+export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
+	const result = ClaimIssueSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const issueId =
+		ISSUE_REF_PATTERN.test(result.data.issueId) || !result.data.agentId
+			? await resolveVisibleIssueIdParam(ctx, result.data.issueId)
+			: result.data.issueId;
+	const agentId = await resolveAgentSessionId(ctx, result.data.agentId);
+
+	const cutoff = liveCutoff();
+	const now = Math.floor(Date.now() / 1000);
+	const state = await readLeaseClaimState(ctx, { issueId, agentId, cutoff });
+	assertSessionLive(state, cutoff);
+
+	if (state.holder?.live) {
+		await buildTouchAgentHeartbeatIfLiveStatement(ctx, agentId).run();
+		throw leaseHeldError(state.holder.agentSessionId);
+	}
+
+	const plan = buildLeaseClaimStatements(ctx, {
+		issueId,
+		agentId,
+		state,
+		cutoff,
+		now,
+		touchHeartbeat: true,
+	});
+	const results = await ctx.db.batch(plan.statements);
+	return settleLeaseClaim(ctx, plan, results[plan.insertIndex]);
 }
 
 /** Release the active lease on an issue, optionally only if held by `agentId`. */
@@ -367,21 +417,25 @@ export function buildReleaseLeaseForClosedIssueStatement(
 	return ctx.db.prepare(query.sql).bind(...query.params);
 }
 
-/** Release every active lease held by an agent session (called when it ends). */
-export async function releaseLeasesForAgent(ctx: ServiceCtx, agentSessionId: string) {
+export function buildReleaseLeasesForAgentStatement(
+	ctx: ServiceCtx,
+	agentSessionId: string,
+	guard?: SQL
+): D1PreparedStatement {
 	const orm = drizzle(ctx.db, { schema });
-	const now = Math.floor(Date.now() / 1000);
-
-	await orm
+	const query = orm
 		.update(schema.issueLeases)
-		.set({ releasedAt: now, releaseReason: "agent_ended" })
+		.set({ releasedAt: Math.floor(Date.now() / 1000), releaseReason: "agent_ended" })
 		.where(
 			and(
 				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
 				eq(schema.issueLeases.agentSessionId, agentSessionId),
-				isNull(schema.issueLeases.releasedAt)
+				isNull(schema.issueLeases.releasedAt),
+				guard
 			)
-		);
+		)
+		.toSQL();
+	return ctx.db.prepare(query.sql).bind(...query.params);
 }
 
 /**

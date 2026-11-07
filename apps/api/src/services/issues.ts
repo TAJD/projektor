@@ -1702,23 +1702,21 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	// PROJ-1018: these reads don't depend on each other, so they run concurrently instead
 	// of one round trip after another.
-	const [parentCheck, existingRead, assigneeCheck, customFieldsRead, liveSessionRead] =
-		await Promise.allSettled([
-			"parentId" in data && data.parentId ? validateParent(ctx, data.parentId, id) : undefined,
-			fetchExistingForUpdate(ctx, orm, id),
-			// PROJ-785: a non-null assigneeId must be a member of this workspace —
-			// otherwise we'd persist a dangling or wrong-workspace user reference. `null`
-			// (clearing the assignee) and "not provided" (key absent) both skip this.
-			"assigneeId" in data && data.assigneeId
-				? requireWorkspaceMember(ctx, data.assigneeId)
-				: undefined,
-			// PROJ-870: custom-field writes are validated (read) before the batch; the upserts
-			// themselves are built as statements and folded into it below.
-			data.customFields && Object.keys(data.customFields).length > 0
-				? validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
-				: [],
-			data.agentSessionId ? isLiveAgentSessionId(ctx, data.agentSessionId) : false,
-		]);
+	const [parentCheck, existingRead, assigneeCheck, customFieldsRead] = await Promise.allSettled([
+		"parentId" in data && data.parentId ? validateParent(ctx, data.parentId, id) : undefined,
+		fetchExistingForUpdate(ctx, orm, id),
+		// PROJ-785: a non-null assigneeId must be a member of this workspace —
+		// otherwise we'd persist a dangling or wrong-workspace user reference. `null`
+		// (clearing the assignee) and "not provided" (key absent) both skip this.
+		"assigneeId" in data && data.assigneeId
+			? requireWorkspaceMember(ctx, data.assigneeId)
+			: undefined,
+		// PROJ-870: custom-field writes are validated (read) before the batch; the upserts
+		// themselves are built as statements and folded into it below.
+		data.customFields && Object.keys(data.customFields).length > 0
+			? validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
+			: [],
+	]);
 	settledValue(parentCheck);
 	const existingRow = settledValue(existingRead);
 	if (!existingRow) throw new NotFoundError("Issue not found");
@@ -1751,7 +1749,6 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	} = await buildUpdateSetValues(ctx, orm, data, existing);
 
 	const cfWrites = settledValue(customFieldsRead);
-	const liveSession = settledValue(liveSessionRead);
 
 	const commentId = crypto.randomUUID();
 	const commentNow = now();
@@ -1820,12 +1817,10 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		);
 	}
 
-	// PROJ-929: a call that carries a live agentSessionId implicitly refreshes that
-	// session's heartbeat, same as claim_issue/claim_files/post_message. Folded into this
-	// same batch (PROJ-870 convention) rather than a separate round trip; the statement's
-	// own WHERE guard (status='active' AND heartbeat > cutoff) makes it a no-op if the
-	// session went stale between this check and the batch executing.
-	if (data.agentSessionId && liveSession) {
+	// PROJ-929: a call carrying an agentSessionId refreshes that session's heartbeat, same
+	// as claim_issue/claim_files/post_message; the statement's own WHERE guard
+	// (status='active' AND heartbeat > cutoff) makes it a no-op for a stale session.
+	if (data.agentSessionId) {
 		statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, data.agentSessionId));
 	}
 
