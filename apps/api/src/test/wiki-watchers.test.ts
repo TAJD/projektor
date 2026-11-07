@@ -113,7 +113,12 @@ describe("wiki watch notifications respect current access (PROJ-821)", () => {
 		});
 		expect(res.status).toBeLessThan(300);
 
-		await createWikiPage(adminCtx(), { title: "Child", content: "c", parentId, projectId: project.id });
+		await createWikiPage(adminCtx(), {
+			title: "Child",
+			content: "c",
+			parentId,
+			projectId: project.id,
+		});
 		expect(await notificationCount()).toBe(1);
 	});
 });
