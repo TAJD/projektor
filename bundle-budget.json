@@ -161,5 +161,8 @@
     "wardleyDiagram-T6FBY63Y.js": 6543,
     "workbox-window.prod.es5.js": 2199,
     "xychartDiagram-ELKLHX3M.js": 11650
+  },
+  "api": {
+    "worker.js": 401374
   }
 }
