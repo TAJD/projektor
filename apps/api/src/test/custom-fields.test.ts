@@ -106,6 +106,49 @@ describe("Custom Field Definitions API", () => {
 		expect(res.status).toBe(403);
 	});
 
+	it("MCP list_custom_field_defs with projectId null lists workspace-wide fields only", async () => {
+		const project = await seedProject(workspaceId, "CFP");
+		await seedCustomFieldDef(workspaceId, { key: "everywhere", type: "text" });
+		await seedCustomFieldDef(workspaceId, { key: "scoped", type: "text", projectId: project.id });
+		const list = async (args: Record<string, unknown>) => {
+			const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "tools/call",
+					params: { name: "list_custom_field_defs", arguments: args },
+				}),
+			});
+			const json = (await res.json()) as { result: { content: Array<{ text: string }> } };
+			return (JSON.parse(json.result.content[0].text) as Array<{ key: string }>)
+				.map((d) => d.key)
+				.sort();
+		};
+		expect(await list({ projectId: null })).toEqual(["everywhere"]);
+		expect(await list({ projectId: project.id })).toEqual(["everywhere", "scoped"]);
+	});
+
+	it("PATCH and DELETE /api/custom-fields/:id return 403 for member role (PROJ-895)", async () => {
+		const { id } = await seedCustomFieldDef(workspaceId, { key: "sprint", type: "text" });
+		const memberUser = await seedUser("member2@example.com");
+		await seedMember(workspaceId, memberUser.id, "member");
+		const headers = authHeaders(await seedToken(workspaceId, memberUser.id), slug);
+
+		const patch = await SELF.fetch(`http://localhost/api/custom-fields/${id}`, {
+			method: "PATCH",
+			headers,
+			body: JSON.stringify({ label: "Renamed" }),
+		});
+		expect(patch.status).toBe(403);
+		const del = await SELF.fetch(`http://localhost/api/custom-fields/${id}`, {
+			method: "DELETE",
+			headers,
+		});
+		expect(del.status).toBe(403);
+	});
+
 	it("PATCH /api/custom-fields/:id updates label", async () => {
 		const { id } = await seedCustomFieldDef(workspaceId, {
 			key: "sp",
