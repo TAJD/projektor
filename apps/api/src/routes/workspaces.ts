@@ -16,11 +16,15 @@ import {
 	uploadWorkspaceLogo,
 } from "../services/workspaces";
 
-const [list, create, ...scoped] = workspaceOperations;
+export const workspaceRootRouter = operationsRouter(
+	"/api/workspaces",
+	workspaceOperations.filter((op) => op.workspace === false)
+);
 
-export const workspaceRootRouter = operationsRouter("/api/workspaces", [list, create]);
-
-const router = operationsRouter("/api/workspaces", scoped);
+const router = operationsRouter(
+	"/api/workspaces",
+	workspaceOperations.filter((op) => op.workspace !== false)
+);
 
 // PROJ-917: workspace tokens follow the same rule as personal access tokens
 // (PROJ-903, routes/auth.ts) — minted and revoked only from an interactive human

@@ -37,10 +37,14 @@ export function defineOperation<S extends z.ZodObject>(op: Operation<S>): Operat
 
 const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 } as const;
 
-function parseInput(op: Operation, ctx: ServiceCtx, raw: unknown) {
+function requireRole(op: Operation, ctx: ServiceCtx) {
 	if (op.minRole && ctx.role && ROLE_RANK[ctx.role] < ROLE_RANK[op.minRole]) {
 		throw new ForbiddenError();
 	}
+}
+
+function parseInput(op: Operation, ctx: ServiceCtx, raw: unknown) {
+	requireRole(op, ctx);
 	const parsed = op.input.safeParse(raw ?? {});
 	if (!parsed.success) throw new ValidationError(parsed.error.flatten());
 	return parsed.data;
@@ -141,6 +145,14 @@ export function operationsRouter(base: string, ops: Operation[]) {
 		if (!op.path.startsWith(base)) throw new Error(`${op.id}: ${op.path} is outside ${base}`);
 		router.on(op.method, op.path.slice(base.length) || "/", async (c) => {
 			try {
+				const ctx =
+					op.workspace === false
+						? ({
+								db: c.env.DB,
+								userId: (c.get("user") as { id: string } | undefined)?.id,
+							} as ServiceCtx)
+						: ctxFromHono(c);
+				requireRole(op, ctx);
 				const json = async () => ((await c.req.text()).trim() === "" ? {} : await jsonBody(c));
 				const body =
 					op.method === "GET" || op.method === "DELETE"
@@ -155,13 +167,6 @@ export function operationsRouter(base: string, ops: Operation[]) {
 					typeof body === "object" && body !== null && !Array.isArray(body)
 						? { ...body, ...params }
 						: body;
-				const ctx =
-					op.workspace === false
-						? ({
-								db: c.env.DB,
-								userId: (c.get("user") as { id: string } | undefined)?.id,
-							} as ServiceCtx)
-						: ctxFromHono(c);
 				const result = await op.run(ctx, parseInput(op, ctx, raw));
 				if (op.status === 204) return c.body(null, 204);
 				return c.json(result, op.status ?? 200);
