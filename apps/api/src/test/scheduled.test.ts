@@ -1,8 +1,9 @@
 import { env, SELF } from "cloudflare:test";
 import type { Env } from "@projektor/types";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	purgeAllWorkspacesExpiredWikiPages,
+	purgeExpiredOAuthData,
 	purgeExpiredRetentionData,
 	runFtsDedupeOnce,
 } from "../index";
@@ -482,5 +483,141 @@ describe("scheduled one-off wiki_fts dedupe (PROJ-816)", () => {
 			await env.DB.prepare("SELECT rowid FROM wiki_fts WHERE rowid = 999999999").first()
 		).toBeNull();
 		expect(await env.KV.get("maint:fts-dedupe-0065")).not.toBeNull();
+	});
+});
+
+describe("scheduled OAuth purge resumability (PROJ-926)", () => {
+	const farFuture = () => Math.floor(Date.now() / 1000) + 86400;
+	const stamp = crypto.randomUUID().slice(0, 8);
+
+	async function clearOAuthKv() {
+		for (const prefix of ["grant:", "token:", "client:"]) {
+			const page = await env.OAUTH_KV.list({ prefix });
+			for (const k of page.keys) await env.OAUTH_KV.delete(k.name);
+		}
+		await env.KV.delete("cron:oauth-purge:cursor");
+	}
+
+	it("reaches the token phase and purges expired grants and orphaned tokens past 100 live grants, across runs", async () => {
+		await clearOAuthKv();
+		const clientId = `client-${stamp}`;
+		await env.OAUTH_KV.put(`client:${clientId}`, JSON.stringify({ clientId }));
+		for (let i = 0; i < 150; i++) {
+			const id = `g${String(i).padStart(3, "0")}`;
+			await env.OAUTH_KV.put(
+				`grant:u1:${id}`,
+				JSON.stringify({ id, userId: "u1", clientId, expiresAt: farFuture() })
+			);
+		}
+		await env.OAUTH_KV.put(
+			"grant:u2:expired",
+			JSON.stringify({ id: "expired", userId: "u2", clientId, expiresAt: 1 })
+		);
+		await env.OAUTH_KV.put("token:u2:expired:t1", JSON.stringify({ userId: "u2", grantId: "expired" }));
+		await env.OAUTH_KV.put("token:u1:gone:t2", JSON.stringify({ userId: "u1", grantId: "gone" }));
+		await env.OAUTH_KV.put("token:u1:g000:t3", JSON.stringify({ userId: "u1", grantId: "g000" }));
+
+		await purgeExpiredOAuthData(env);
+		expect(await env.OAUTH_KV.get("grant:u2:expired")).not.toBeNull();
+		expect(JSON.parse((await env.KV.get("cron:oauth-purge:cursor")) as string).phase).toBe("grant");
+
+		for (let run = 0; run < 5; run++) await purgeExpiredOAuthData(env);
+
+		expect(await env.OAUTH_KV.get("grant:u2:expired")).toBeNull();
+		expect(await env.OAUTH_KV.get("token:u2:expired:t1")).toBeNull();
+		expect(await env.OAUTH_KV.get("token:u1:gone:t2")).toBeNull();
+		expect(await env.OAUTH_KV.get("token:u1:g000:t3")).not.toBeNull();
+		expect(await env.OAUTH_KV.get("grant:u1:g000")).not.toBeNull();
+		expect((await env.OAUTH_KV.list({ prefix: "grant:u1:" })).keys).toHaveLength(150);
+		await clearOAuthKv();
+	});
+
+	it("purges a grant whose client no longer exists", async () => {
+		await clearOAuthKv();
+		await env.OAUTH_KV.put(
+			"grant:u1:orphan",
+			JSON.stringify({ id: "orphan", userId: "u1", clientId: `missing-${stamp}`, expiresAt: farFuture() })
+		);
+		await purgeExpiredOAuthData(env);
+		expect(await env.OAUTH_KV.get("grant:u1:orphan")).toBeNull();
+		expect(await env.KV.get("cron:oauth-purge:cursor")).toBeNull();
+		await clearOAuthKv();
+	});
+});
+
+describe("scheduled wiki trash failure backoff (PROJ-926)", () => {
+	it("skips a workspace after 3 consecutive failures until the cool-down passes", async () => {
+		const fixture = await seedFixture({ role: "admin" });
+		const res = await SELF.fetch("http://localhost/api/wiki", {
+			method: "POST",
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+			body: JSON.stringify({ title: "Backoff Page", content: "content" }),
+		});
+		const page = (await res.json()) as { id: string; slug: string };
+		await SELF.fetch(`http://localhost/api/wiki/${page.slug}`, {
+			method: "DELETE",
+			headers: authHeaders(fixture.token, fixture.workspace.slug),
+		});
+		await env.DB.prepare("UPDATE wiki_pages SET deleted_at = ? WHERE id = ?")
+			.bind(Math.floor(Date.now() / 1000) - 31 * 86400, page.id)
+			.run();
+
+		const failingEnv = {
+			...env,
+			DB: new Proxy(env.DB, {
+				get(t, p, r) {
+					if (p === "prepare") {
+						return (sql: string) => {
+							if (!sql.includes("DISTINCT workspace_id")) throw new Error("boom");
+							return t.prepare(sql);
+						};
+					}
+					if (p === "batch") return () => Promise.reject(new Error("boom"));
+					const v = Reflect.get(t, p, r);
+					return typeof v === "function" ? v.bind(t) : v;
+				},
+			}),
+		} as unknown as Env;
+
+		const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+		for (let i = 0; i < 3; i++) await purgeAllWorkspacesExpiredWikiPages(failingEnv);
+		const failureLogs = errors.mock.calls.filter((c) =>
+			String(c[0]).includes("failed for one workspace")
+		);
+		expect(failureLogs).toHaveLength(3);
+		expect(errors.mock.calls.some((c) => String(c[0]).includes("skipping workspace"))).toBe(true);
+
+		await purgeAllWorkspacesExpiredWikiPages(failingEnv);
+		expect(
+			errors.mock.calls.filter((c) => String(c[0]).includes("failed for one workspace"))
+		).toHaveLength(3);
+
+		await purgeAllWorkspacesExpiredWikiPages(env);
+		expect(
+			await env.DB.prepare("SELECT id FROM wiki_pages WHERE id = ?").bind(page.id).first()
+		).not.toBeNull();
+
+		const cursor = JSON.parse((await env.KV.get("cron:wiki-trash-purge:cursor")) as string);
+		cursor.failures[fixture.workspace.id].skipUntil = 1;
+		await env.KV.put("cron:wiki-trash-purge:cursor", JSON.stringify(cursor));
+		await purgeAllWorkspacesExpiredWikiPages(env);
+		expect(
+			await env.DB.prepare("SELECT id FROM wiki_pages WHERE id = ?").bind(page.id).first()
+		).toBeNull();
+		errors.mockRestore();
+	});
+});
+
+describe("retention scan indexes (PROJ-926)", () => {
+	it.each([
+		["activity", "idx_activity_created_at"],
+		["wiki_notifications", "idx_wiki_notifications_created_at"],
+	])("%s retention scan is served by %s", async (table, index) => {
+		const { results } = await env.DB.prepare(
+			`EXPLAIN QUERY PLAN SELECT rowid FROM ${table} WHERE created_at < ? LIMIT 500`
+		)
+			.bind(1)
+			.all<{ detail: string }>();
+		expect(results.map((r) => r.detail).join(" ")).toContain(index);
 	});
 });

@@ -20,6 +20,7 @@ import {
 	createOAuthProvider,
 	isOAuthAccessToken,
 	isOAuthProviderPath,
+	oauthApi,
 	tokenEndpointRateLimited,
 } from "./oauth/provider";
 import { agentMessagesRouter } from "./routes/agent-messages";
@@ -599,36 +600,102 @@ export async function purgeExpiredRetentionData(env: Env): Promise<void> {
 	console.log("scheduled retention purge complete", { deleted: counts, failed: failures });
 }
 
-// PROJ-865 (post-review correction): @cloudflare/workers-oauth-provider 0.10.3's
-// purgeExpiredData has no cross-invocation cursor AND no cross-CALL cursor either — every
-// call re-lists KV from the start of the "grant:" prefix, and `done` is only true once
-// BOTH the grant phase and the token phase complete inside that one call (verified against
-// node_modules/@cloudflare/workers-oauth-provider's source). A workspace with more than
-// `batchSize` live grants therefore never finishes the grant phase in a single call, so
-// `done` is always false and the "token:" phase is never even reached — looping this call
-// in-process (the previous version of this function) just re-lists the same unpurged
-// grants from scratch every iteration, burning this invocation's shared subrequest budget
-// (see WIKI_TRASH_SUBREQUEST_BUDGET below, which shares the same cron fire) for no
-// additional progress. The correct mitigation at this layer is a single call per run with
-// a modest batchSize; `done:false` on a busy install is expected steady-state, not an
-// error. True cross-run resumability (finishing the token phase even when there are many
-// live grants) needs a purge we own — a persisted `kv.list` cursor plus the library's
-// revoke helper — which is out of scope here and tracked as a follow-up ticket. Swallows
-// its own failure — a housekeeping pass is never a reason to fail the cron and skip the
-// work after it.
-const OAUTH_PURGE_BATCH_SIZE = 200;
+const OAUTH_PURGE_BATCH_SIZE = 100;
+const OAUTH_PURGE_CURSOR_KV_KEY = "cron:oauth-purge:cursor";
+
+type OAuthPurgeCursor = { phase: "grant" | "token"; cursor?: string };
+
+async function loadOAuthPurgeCursor(kv: KVNamespace): Promise<OAuthPurgeCursor> {
+	const raw = await kv.get(OAUTH_PURGE_CURSOR_KV_KEY);
+	if (!raw) return { phase: "grant" };
+	try {
+		const parsed = JSON.parse(raw) as Partial<OAuthPurgeCursor>;
+		const phase = parsed.phase === "token" ? "token" : "grant";
+		return typeof parsed.cursor === "string" ? { phase, cursor: parsed.cursor } : { phase };
+	} catch {
+		return { phase: "grant" };
+	}
+}
 
 export async function purgeExpiredOAuthData(env: Env): Promise<void> {
 	try {
-		const result = await oauthProvider.purgeExpiredData(env, {
-			batchSize: OAUTH_PURGE_BATCH_SIZE,
-		});
-		// done:false here just means more than a batch's worth of live grants exist — expected
-		// and fine, since the next scheduled run picks up the remaining purgeable rows.
+		const helpers = oauthApi(env);
+		const state = await loadOAuthPurgeCursor(env.KV);
+		const now = Math.floor(Date.now() / 1000);
+		const knownGoodClients = new Set<string>();
+		const knownMissingClients = new Set<string>();
+		const knownGoodGrants = new Set<string>();
+		const knownMissingGrants = new Set<string>();
+		let checked = 0;
+		let grantsPurged = 0;
+		let tokensPurged = 0;
+		let cycleComplete = false;
+
+		for (let pages = 0; checked < OAUTH_PURGE_BATCH_SIZE && pages < 10; pages++) {
+			const prefix = state.phase === "grant" ? "grant:" : "token:";
+			const page = await env.OAUTH_KV.list({
+				prefix,
+				limit: OAUTH_PURGE_BATCH_SIZE - checked,
+				...(state.cursor ? { cursor: state.cursor } : {}),
+			});
+			for (const key of page.keys) {
+				checked++;
+				const data = await env.OAUTH_KV.get<Record<string, string | number | undefined>>(key.name, {
+					type: "json",
+				});
+				if (!data) continue;
+				if (state.phase === "grant") {
+					const clientId = String(data.clientId);
+					let purge = typeof data.expiresAt === "number" && now >= data.expiresAt;
+					if (!purge && !/^https:\/\/[^/]+\/./.test(clientId)) {
+						if (knownMissingClients.has(clientId)) purge = true;
+						else if (!knownGoodClients.has(clientId)) {
+							if (await env.OAUTH_KV.get(`client:${clientId}`)) knownGoodClients.add(clientId);
+							else {
+								knownMissingClients.add(clientId);
+								purge = true;
+							}
+						}
+					}
+					if (purge) {
+						await helpers.revokeGrant(String(data.id), String(data.userId));
+						grantsPurged++;
+					}
+				} else {
+					const grantKey = `grant:${data.userId}:${data.grantId}`;
+					if (!knownMissingGrants.has(grantKey) && !knownGoodGrants.has(grantKey)) {
+						if (await env.OAUTH_KV.get(grantKey)) {
+							knownGoodGrants.add(grantKey);
+							continue;
+						}
+						knownMissingGrants.add(grantKey);
+					}
+					await env.OAUTH_KV.delete(key.name);
+					tokensPurged++;
+				}
+			}
+			if (page.list_complete) {
+				delete state.cursor;
+				if (state.phase === "grant") {
+					state.phase = "token";
+				} else {
+					state.phase = "grant";
+					cycleComplete = true;
+					break;
+				}
+			} else {
+				state.cursor = page.cursor;
+			}
+		}
+
+		if (cycleComplete && !state.cursor) await env.KV.delete(OAUTH_PURGE_CURSOR_KV_KEY);
+		else await env.KV.put(OAUTH_PURGE_CURSOR_KV_KEY, JSON.stringify(state));
 		console.log("scheduled OAuth purge complete", {
-			done: result.done,
-			grantsPurged: result.grantsPurged,
-			tokensPurged: result.tokensPurged,
+			cycleComplete,
+			nextPhase: state.phase,
+			checked,
+			grantsPurged,
+			tokensPurged,
 		});
 	} catch (err) {
 		console.error("scheduled OAuth purge failed", {
@@ -737,30 +804,39 @@ function wrapCallsWithBudget<T extends object>(target: T, budget: SubrequestBudg
 	});
 }
 
-async function loadWikiTrashPurgeCursor(kv: KVNamespace): Promise<string[] | null> {
+const WIKI_TRASH_MAX_CONSECUTIVE_FAILURES = 3;
+const WIKI_TRASH_FAILURE_COOLDOWN_SECONDS = 7 * 86400;
+
+type WikiTrashFailures = Record<string, { count: number; skipUntil?: number }>;
+type WikiTrashPurgeCursor = { workspaceIds: string[]; failures: WikiTrashFailures };
+
+async function loadWikiTrashPurgeCursor(kv: KVNamespace): Promise<WikiTrashPurgeCursor> {
+	const empty = { workspaceIds: [], failures: {} };
 	const raw = await kv.get(WIKI_TRASH_PURGE_CURSOR_KV_KEY);
-	if (!raw) return null;
+	if (!raw) return empty;
 	try {
-		const parsed = JSON.parse(raw) as { workspaceIds?: unknown };
-		return Array.isArray(parsed.workspaceIds)
+		const parsed = JSON.parse(raw) as { workspaceIds?: unknown; failures?: unknown };
+		const workspaceIds = Array.isArray(parsed.workspaceIds)
 			? parsed.workspaceIds.filter((id): id is string => typeof id === "string")
-			: null;
+			: [];
+		const failures =
+			parsed.failures && typeof parsed.failures === "object"
+				? (parsed.failures as WikiTrashFailures)
+				: {};
+		return { workspaceIds, failures };
 	} catch {
-		return null;
+		return empty;
 	}
 }
 
 async function saveWikiTrashPurgeCursor(
 	kv: KVNamespace,
-	remainingWorkspaceIds: string[]
+	cursor: WikiTrashPurgeCursor
 ): Promise<void> {
-	if (remainingWorkspaceIds.length === 0) {
+	if (cursor.workspaceIds.length === 0 && Object.keys(cursor.failures).length === 0) {
 		await kv.delete(WIKI_TRASH_PURGE_CURSOR_KV_KEY);
 	} else {
-		await kv.put(
-			WIKI_TRASH_PURGE_CURSOR_KV_KEY,
-			JSON.stringify({ workspaceIds: remainingWorkspaceIds })
-		);
+		await kv.put(WIKI_TRASH_PURGE_CURSOR_KV_KEY, JSON.stringify(cursor));
 	}
 }
 
@@ -797,7 +873,12 @@ export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void
 	// first), so a workspace that keeps failing or draining can't stop new workspaces from
 	// ever being picked up.
 	const fresh = await findWorkspacesWithExpiredTrash(wrapD1WithBudget(env.DB, budget));
-	const remaining = [...new Set([...(cursor ?? []), ...fresh])];
+	const failures = cursor.failures;
+	const nowSeconds = Math.floor(Date.now() / 1000);
+	const coolingDown = (id: string) => (failures[id]?.skipUntil ?? 0) > nowSeconds;
+	const remaining = [...new Set([...cursor.workspaceIds, ...fresh])].filter(
+		(id) => !coolingDown(id)
+	);
 	let purged = 0;
 	let failed = 0;
 
@@ -826,6 +907,7 @@ export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void
 		try {
 			const result = await purgeExpiredWikiPages(serviceCtx);
 			purged++;
+			delete failures[id];
 			if (result.moreExpired) remaining.push(remaining.shift() as string);
 			else remaining.shift();
 		} catch (err) {
@@ -835,13 +917,29 @@ export async function purgeAllWorkspacesExpiredWikiPages(env: Env): Promise<void
 				workspaceId: id,
 				err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
 			});
-			remaining.push(remaining.shift() as string);
+			const entry = failures[id] ?? { count: 0 };
+			entry.count++;
+			failures[id] = entry;
+			if (entry.count >= WIKI_TRASH_MAX_CONSECUTIVE_FAILURES) {
+				entry.skipUntil = nowSeconds + WIKI_TRASH_FAILURE_COOLDOWN_SECONDS;
+				console.error("scheduled wiki trash purge skipping workspace after repeated failures", {
+					workspaceId: id,
+					consecutiveFailures: entry.count,
+					skipUntil: entry.skipUntil,
+				});
+				remaining.shift();
+			} else {
+				remaining.push(remaining.shift() as string);
+			}
 		}
 		// Every purge call spends subrequests; if one somehow didn't, stop rather than spin.
 		if (budget.used() === usedBefore) break;
 	}
 
-	await saveWikiTrashPurgeCursor(budgetedKv, remaining);
+	for (const [id, entry] of Object.entries(failures)) {
+		if (!entry.skipUntil && !remaining.includes(id)) delete failures[id];
+	}
+	await saveWikiTrashPurgeCursor(budgetedKv, { workspaceIds: remaining, failures });
 
 	// PROJ-865: one summary log line with counts, not per-workspace noise on the happy path.
 	console.log("scheduled wiki trash purge complete", {
