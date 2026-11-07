@@ -579,6 +579,12 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 // two are UNINDEXED so their weight is irrelevant, left at 0 for clarity.
 const WIKI_FTS_BM25_WEIGHTS = "0, 0, 10.0, 1.0, 5.0";
 
+const wikiFtsSnippet = (col: number) => `snippet(wiki_fts, ${col}, '**', '**', '…', 24)`;
+const WIKI_FTS_EXCERPT_SQL = `CASE
+	WHEN instr(${wikiFtsSnippet(3)}, '**') > 0 THEN ${wikiFtsSnippet(3)}
+	WHEN instr(${wikiFtsSnippet(2)}, '**') > 0 THEN ${wikiFtsSnippet(2)}
+	ELSE ${wikiFtsSnippet(4)} END`;
+
 // PROJ-488: a JSON-array column read through a raw D1 query (no drizzle json decoding).
 function decodeJsonArrayColumn(value: unknown): string[] {
 	if (Array.isArray(value)) return value as string[];
@@ -652,7 +658,7 @@ function buildSearchWikiQuery(
 ): { q: string; params: unknown[]; now: number } {
 	let q = `SELECT p.id, p.slug, p.title, p.project_id,
               p.type, p.tags, p.status, p.verified_at, p.verified_by, p.owners, p.verify_interval,
-              snippet(wiki_fts, -1, '**', '**', '…', 24) as excerpt,
+              ${WIKI_FTS_EXCERPT_SQL} as excerpt,
               bm25(wiki_fts, ${WIKI_FTS_BM25_WEIGHTS}) as rank
             FROM wiki_fts
             JOIN wiki_pages p ON p.id = wiki_fts.page_id
@@ -664,7 +670,8 @@ function buildSearchWikiQuery(
               -- joining wiki_pages and filtering here (not just querying wiki_fts) is what
               -- keeps a trashed page out of search results in the meantime.
               AND p.deleted_at IS NULL`;
-	const params: unknown[] = [ftsQuery, ctx.workspaceId];
+	const scopedQuery = `workspace_id : "${ctx.workspaceId.replace(/"/g, '""')}" AND (${ftsQuery})`;
+	const params: unknown[] = [scopedQuery, ctx.workspaceId];
 
 	if (projectId) {
 		q += includeWorkspacePages
