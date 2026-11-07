@@ -267,11 +267,18 @@ describe("Sprints API", () => {
 			const sprintRes = await createSprint({ projectId, name: "Bulk Target Sprint" });
 			const { id: sprintId } = (await sprintRes.json()) as { id: string };
 
-			const issueIds: string[] = [];
-			for (let i = 0; i < 500; i++) {
-				const issue = await seedIssue(workspaceId, projectId, userId, { title: `Bulk ${i}` });
-				issueIds.push(issue.id);
-			}
+			const issueIds = Array.from({ length: 500 }, () => crypto.randomUUID());
+			const now = Math.floor(Date.now() / 1000);
+			await env.DB.batch(
+				issueIds.map((id, i) =>
+					env.DB.prepare(
+						`INSERT INTO issues (id, workspace_id, project_id, number, title, body, status, priority,
+               labels, created_by_id, created_at, updated_at)
+             SELECT ?, ?, ?, COALESCE(MAX(number), 0) + 1, ?, '', 'backlog', 'none', '[]', ?, ?, ?
+             FROM issues WHERE project_id = ?`
+					).bind(id, workspaceId, projectId, `Bulk ${i}`, userId, now, now, projectId)
+				)
+			);
 
 			// Read it once before the move, so the GET after it proves sprint_id is read live.
 			const warmRes = await SELF.fetch(`http://localhost/api/issues/${issueIds[0]}`, {

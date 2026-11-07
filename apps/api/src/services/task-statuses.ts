@@ -131,13 +131,6 @@ export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown
 	const setObj = buildTaskStatusSetObj(data);
 	const orm = drizzle(ctx.db, { schema });
 
-	if (data.isDefault) {
-		await orm
-			.update(schema.taskStatuses)
-			.set({ isDefault: 0 })
-			.where(eq(schema.taskStatuses.workspaceId, ctx.workspaceId));
-	}
-
 	const existing = await orm
 		.select({ id: schema.taskStatuses.id, category: schema.taskStatuses.category })
 		.from(schema.taskStatuses)
@@ -146,6 +139,13 @@ export async function updateTaskStatus(ctx: ServiceCtx, id: string, raw: unknown
 		)
 		.get();
 	if (!existing) throw new NotFoundError("Task status not found");
+
+	if (data.isDefault) {
+		await orm
+			.update(schema.taskStatuses)
+			.set({ isDefault: 0 })
+			.where(eq(schema.taskStatuses.workspaceId, ctx.workspaceId));
+	}
 
 	// PROJ-849: a status's category can change after issues already reference it by
 	// status_id — re-sync issues.status_category for every issue on this status in the
