@@ -161,8 +161,9 @@ describe("PROJ-886: one mcp_call event per tools/call", () => {
 
 describe("PROJ-886: get_tool_usage reads Analytics Engine", () => {
 	it("reports unavailable (MCP and REST alike) when reading back is not configured", async () => {
-		const mcp = JSON.parse((await call("get_tool_usage", {})).text);
-		const res = await SELF.fetch("http://localhost/api/tool-usage", {
+		const until = Math.floor(Date.now() / 1000);
+		const mcp = JSON.parse((await call("get_tool_usage", { until })).text);
+		const res = await SELF.fetch(`http://localhost/api/tool-usage?until=${until}`, {
 			headers: authHeaders(token, slug),
 		});
 		const rest = await res.json();
