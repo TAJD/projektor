@@ -202,7 +202,7 @@ router.post("/:workspaceId", async (c) => {
 					jsonRpcError(body.id, -32602, "Invalid params: `arguments` must be an object")
 				);
 			}
-			const tool = getAllTools(workspace.id).find((t) => t.name === name);
+			const tool = findTool(workspace.id, name);
 			if (!tool) return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
 			// PROJ-877/920: required presence AND types/enums/lengths against the tool's
 			// inputSchema, before the handler runs. PROJ-893: a bad argument is a tool
@@ -342,6 +342,19 @@ function recordUsage(
 
 function dedupe(values: string[]): string[] {
 	return [...new Set(values)];
+}
+
+let coreToolsByName: Map<string, MCPTool> | undefined;
+
+function findTool(workspaceId: string, name: string): MCPTool | undefined {
+	if (!coreToolsByName) {
+		coreToolsByName = new Map();
+		for (const t of coreMCPTools) if (!coreToolsByName.has(t.name)) coreToolsByName.set(t.name, t);
+	}
+	return (
+		coreToolsByName.get(name) ??
+		pluginRegistry.getToolsForWorkspace(workspaceId).find((t) => t.name === name)
+	);
 }
 
 function getAllTools(workspaceId: string): MCPTool[] {

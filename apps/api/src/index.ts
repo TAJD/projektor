@@ -10,7 +10,11 @@ import { safeDecodeURIComponent } from "./lib/urls";
 import { injectWikiMetadata, resolveWikiPageForSsr } from "./lib/wiki-ssr";
 import { authMiddleware } from "./middleware/auth";
 import { etagMiddleware } from "./middleware/etag";
-import { rateLimitMiddleware } from "./middleware/rate-limit";
+import {
+	mcpRateLimitGate,
+	mcpRateLimitMiddleware,
+	rateLimitMiddleware,
+} from "./middleware/rate-limit";
 import { workspaceMiddleware } from "./middleware/workspace";
 import {
 	createOAuthProvider,
@@ -119,7 +123,7 @@ app.route("/api/config", configRouter);
 // Keyed by bearer-token fingerprint when present, else by CF-Connecting-IP.
 // Limits are read from RATE_LIMIT_AUTH_MAX / RATE_LIMIT_API_MAX env vars.
 app.use("/api/*", rateLimitMiddleware);
-app.use("/mcp/*", rateLimitMiddleware);
+app.use("/mcp/*", mcpRateLimitMiddleware);
 // PROJ-655: the OAuth discovery documents are unauthenticated and are the first
 // thing every MCP client hits, so they get the same IP-keyed limiter. Mounted here,
 // above the auth/workspace middleware, because they must stay public.
@@ -263,7 +267,7 @@ app.use("/api/projects/*", authMiddleware, workspaceMiddleware);
 app.use("/api/issues/*", authMiddleware, workspaceMiddleware);
 app.use("/api/issue-links/*", authMiddleware, workspaceMiddleware);
 app.use("/api/wiki/*", authMiddleware, workspaceMiddleware);
-app.use("/mcp/*", authMiddleware, workspaceMiddleware);
+app.use("/mcp/*", authMiddleware, workspaceMiddleware, mcpRateLimitGate);
 // PROJ-494: an inline image embedded in rendered wiki content (`<img src="/api/files/:id?workspace=...">`)
 // is a plain browser subresource load — it can't attach the X-Workspace-Slug header apiFetch
 // normally sends, so GET here also accepts `?workspace=` as a resolution fallback (see

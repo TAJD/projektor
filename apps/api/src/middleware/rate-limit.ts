@@ -18,10 +18,55 @@ import type { Context, Next } from "hono";
 //   RATE_LIMIT_AUTH_MAX      — max IP-keyed requests per window (default 300)
 //   RATE_LIMIT_API_MAX       — max token-keyed requests per window (default 600)
 //   RATE_LIMIT_WINDOW_SECS   — window size in seconds (default 60)
+type LimitVerdict = { over: false } | { over: true; retryAfter: number };
+
+const tokenHashes = new WeakMap<Request, Promise<string>>();
+
+export function tokenHashFor(c: Context<HonoEnv>, token: string): Promise<string> {
+	let hash = tokenHashes.get(c.req.raw);
+	if (!hash) {
+		hash = sha256Hex(token);
+		tokenHashes.set(c.req.raw, hash);
+	}
+	return hash;
+}
+
+function tooManyRequests(retryAfter: number): Response {
+	return new Response(JSON.stringify({ error: "Too Many Requests" }), {
+		status: 429,
+		headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+	});
+}
+
 export async function rateLimitMiddleware(
 	c: Context<HonoEnv>,
 	next: Next
 ): Promise<Response | undefined> {
+	const verdict = await checkRateLimit(c);
+	if (verdict.over) return tooManyRequests(verdict.retryAfter);
+	await next();
+}
+
+const pendingVerdicts = new WeakMap<Request, Promise<LimitVerdict>>();
+
+export async function mcpRateLimitMiddleware(c: Context<HonoEnv>, next: Next): Promise<void> {
+	const verdict = checkRateLimit(c);
+	pendingVerdicts.set(c.req.raw, verdict);
+	await next();
+	const settled = await verdict;
+	if (settled.over && c.res.status !== 429) c.res = tooManyRequests(settled.retryAfter);
+}
+
+export async function mcpRateLimitGate(
+	c: Context<HonoEnv>,
+	next: Next
+): Promise<Response | undefined> {
+	const settled = await pendingVerdicts.get(c.req.raw);
+	if (settled?.over) return tooManyRequests(settled.retryAfter);
+	await next();
+}
+
+async function checkRateLimit(c: Context<HonoEnv>): Promise<LimitVerdict> {
 	const windowSecs = parseInt(c.env.RATE_LIMIT_WINDOW_SECS ?? "60", 10);
 	const testNow =
 		c.env.ENVIRONMENT !== "production" && c.env.RATE_LIMIT_TEST_NOW_MS
@@ -36,7 +81,7 @@ export async function rateLimitMiddleware(
 
 	if (authHeader?.startsWith("Bearer ")) {
 		const token = authHeader.slice(7);
-		key = `tok:${oauthGrantKey(token) ?? (await sha256Prefix(token))}`;
+		key = `tok:${oauthGrantKey(token) ?? (await tokenHashFor(c, token)).slice(0, 16)}`;
 		limit = parseInt(c.env.RATE_LIMIT_API_MAX ?? "600", 10);
 	} else {
 		const ip = c.req.header("CF-Connecting-IP") ?? "127.0.0.1";
@@ -53,17 +98,14 @@ export async function rateLimitMiddleware(
 		({ count, slot } = await incrementCounter(c.env, key, windowSecs, now));
 	} catch (err) {
 		console.error("rate-limit counter unavailable, failing open", { key, err: String(err) });
-		await next();
-		return;
+		return { over: false };
 	}
 
 	if (count > limit) {
 		const windowRemaining = slot + windowSecs - now;
-		c.header("Retry-After", String(windowRemaining > 0 ? windowRemaining : windowSecs));
-		return c.json({ error: "Too Many Requests" }, 429);
+		return { over: true, retryAfter: windowRemaining > 0 ? windowRemaining : windowSecs };
 	}
-
-	await next();
+	return { over: false };
 }
 
 // PROJ-658: an OAuth access token is `<userId>:<grantId>:<secret>` and rotates roughly
@@ -91,9 +133,9 @@ export async function bumpRateCounter(env: Env, key: string, windowSecs: number)
 	return count;
 }
 
-async function sha256Prefix(input: string): Promise<string> {
+async function sha256Hex(input: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-	return Array.from(new Uint8Array(buf).slice(0, 8))
+	return Array.from(new Uint8Array(buf))
 		.map((b) => b.toString(16).padStart(2, "0"))
 		.join("");
 }
