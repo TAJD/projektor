@@ -249,6 +249,44 @@ binding, the Worker falls back to the deprecated D1 limiter and logs a warning; 
 removed in a later release (PROJ-924), after which a missing binding disables rate
 limiting.
 
+### 7b. MCP usage analytics (optional)
+
+Every MCP `tools/call` and `prompts/get` writes one structured `{"evt":"mcp_call", …}`
+line to Workers Logs (turn on `[observability] enabled = true` to keep them). It
+records the tool, outcome, latency, response and argument sizes, and the caller's auth
+method and credential id. Argument values and results are never logged. To also count
+calls in Workers Analytics Engine (no D1 write per call), add a dataset binding:
+
+```toml
+[[analytics_engine_datasets]]
+binding = "MCP_USAGE"
+dataset = "projektor_mcp_usage"
+
+[vars]
+MCP_USAGE_DATASET = "projektor_mcp_usage"
+CF_ACCOUNT_ID = "<your account id>"
+```
+
+`get_tool_usage` and `GET /api/tool-usage` read the dataset back through the Analytics
+Engine SQL API. That needs an account API token with **Account Analytics: Read**, stored
+as a secret: `wrangler secret put CF_ANALYTICS_TOKEN`. Without all three settings, they
+return `{"available": false, …}`, and calls are still logged.
+
+Each data point is indexed by workspace id. `blob1` is the tool, `blob3` the surface,
+`blob4` the auth method, `blob5` the credential id, `blob6` the OAuth client id, `blob7`
+the user id, `blob8` the outcome, `blob9` the server version and `blob10` the MCP method.
+`double1` is latency in ms, `double2` response bytes, `double3` argument bytes and
+`double4` 1 for an error. Analytics Engine samples at high volume, so weight
+aggregates by `_sample_interval`:
+
+```sql
+SELECT blob1 AS tool, SUM(_sample_interval) AS calls,
+       SUM(_sample_interval * double4) AS errors
+FROM projektor_mcp_usage
+WHERE timestamp > NOW() - INTERVAL '7' DAY
+GROUP BY tool ORDER BY calls DESC
+```
+
 ### 8. Deploy
 
 ```bash

@@ -1,5 +1,6 @@
 import type { AuthInfo, HonoEnv, PluginContext, Role } from "@projektor/types";
 import type { Context } from "hono";
+import { mcpUsageQuery } from "../lib/usage";
 import { parseFileClaimTtlSeconds } from "./file-claims";
 
 // PROJ-889: one context type for REST and MCP — defined in @projektor/types as
@@ -26,6 +27,7 @@ export function ctxFromHono(c: Context<HonoEnv>): ServiceCtx {
 		// doc comment for why) so REST and MCP (both build their ctx via ctxFromHono) agree.
 		config: {
 			fileClaimTtlSeconds: parseFileClaimTtlSeconds(c.env.FILE_CLAIM_TTL_SECONDS),
+			mcpUsage: mcpUsageQuery(c.env, workspace.id),
 		},
 	};
 }

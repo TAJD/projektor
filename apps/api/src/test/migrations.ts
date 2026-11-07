@@ -75,6 +75,7 @@ import m0071 from "../../../../packages/db/migrations/0071_mcp_tool_usage.sql?ra
 import m0072 from "../../../../packages/db/migrations/0072_dor_ready_null_index.sql?raw";
 import m0073 from "../../../../packages/db/migrations/0073_retention_indexes.sql?raw";
 import m0074 from "../../../../packages/db/migrations/0074_wiki_fts_workspace_scope.sql?raw";
+import m0075 from "../../../../packages/db/migrations/0075_drop_mcp_tool_usage.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -152,4 +153,5 @@ export const MIGRATIONS = [
 	m0072,
 	m0073,
 	m0074,
+	m0075,
 ];
