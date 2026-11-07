@@ -49,9 +49,24 @@ export async function rateLimitMiddleware(
 
 const pendingVerdicts = new WeakMap<Request, Promise<LimitVerdict>>();
 
-export async function mcpRateLimitMiddleware(c: Context<HonoEnv>, next: Next): Promise<void> {
+function isPlainBearerRequest(c: Context<HonoEnv>): boolean {
+	return (
+		c.req.header("Authorization")?.startsWith("Bearer ") === true &&
+		!c.req.header("Cf-Access-Jwt-Assertion") &&
+		!c.req.header("cookie")?.includes("CF_Authorization")
+	);
+}
+
+export async function mcpRateLimitMiddleware(
+	c: Context<HonoEnv>,
+	next: Next
+): Promise<Response | undefined> {
 	const verdict = checkRateLimit(c);
 	pendingVerdicts.set(c.req.raw, verdict);
+	if (!isPlainBearerRequest(c)) {
+		const early = await verdict;
+		if (early.over) return tooManyRequests(early.retryAfter);
+	}
 	await next();
 	const settled = await verdict;
 	if (settled.over && c.res.status !== 429) c.res = tooManyRequests(settled.retryAfter);
