@@ -57,6 +57,19 @@ describe("Comments REST API", () => {
 		expect(data).toHaveLength(0);
 	});
 
+	it("POST uses the path issue even when the body names another (PROJ-895)", async () => {
+		const res = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ issueId: "PROJ-99999", body: "lands on the path issue" }),
+		});
+		expect(res.status).toBe(201);
+		const list = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(((await list.json()) as unknown[]).length).toBe(1);
+	});
+
 	it("POST /:issueId/comments creates a comment", async () => {
 		const res = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
 			method: "POST",

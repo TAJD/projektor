@@ -19,7 +19,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	summary: string;
 	keywords: string[];
 	input: S;
-	status?: 200 | 201;
+	status?: 200 | 201 | 204;
 	annotations?: MCPToolAnnotations;
 	workspace?: false;
 	bodyKey?: string;
@@ -155,6 +155,7 @@ export function operationsRouter(base: string, ops: Operation[]) {
 						: body;
 				const ctx = op.workspace === false ? ({} as ServiceCtx) : ctxFromHono(c);
 				const result = await op.run(ctx, parseInput(op, ctx, raw));
+				if (op.status === 204) return c.body(null, 204);
 				return c.json(result, op.status ?? 200);
 			} catch (e) {
 				return serviceErrToResponse(c, e);
