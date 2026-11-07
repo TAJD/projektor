@@ -20,6 +20,9 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	keywords: string[];
 	input: S;
 	status?: 200 | 201;
+	annotations?: MCPToolAnnotations;
+	workspace?: false;
+	bodyKey?: string;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
 	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
@@ -41,6 +44,7 @@ function parseInput(op: Operation, ctx: ServiceCtx, raw: unknown) {
 }
 
 function annotationsFor(op: Operation): MCPToolAnnotations {
+	if (op.annotations) return op.annotations;
 	if (op.tier === "read") return READ;
 	if (op.tier === "destructive") return DESTRUCTIVE;
 	return op.method === "POST" ? CREATE : IDEMPOTENT_WRITE;
@@ -96,13 +100,16 @@ function baseType(field: z.ZodType): string {
 	return def.type;
 }
 
-function fromQuery(schema: z.ZodObject, query: Record<string, string>) {
+function fromQuery(schema: z.ZodObject, query: Record<string, string[]>) {
 	const out: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(query)) {
+	for (const [key, all] of Object.entries(query)) {
 		const field = schema.shape[key] as z.ZodType | undefined;
-		if (value === "" || !field) continue;
+		const values = all.filter((v) => v !== "");
+		if (values.length === 0 || !field) continue;
 		const kind = baseType(field);
-		if (kind === "number") out[key] = Number(value);
+		const value = values[0];
+		if (kind === "array" || values.length > 1) out[key] = values;
+		else if (kind === "number") out[key] = Number(value);
 		else if (kind === "boolean" && (value === "true" || value === "1")) out[key] = true;
 		else if (kind === "boolean" && (value === "false" || value === "0")) out[key] = false;
 		else out[key] = value;
@@ -118,13 +125,15 @@ export function operationsRouter(base: string, ops: Operation[]) {
 			try {
 				const body =
 					op.method === "GET" || op.method === "DELETE"
-						? fromQuery(op.input, c.req.query())
-						: await jsonBody(c);
+						? fromQuery(op.input, c.req.queries())
+						: op.bodyKey
+							? { [op.bodyKey]: await jsonBody(c) }
+							: await jsonBody(c);
 				const raw =
 					typeof body === "object" && body !== null && !Array.isArray(body)
 						? { ...body, ...c.req.param() }
 						: body;
-				const ctx = ctxFromHono(c);
+				const ctx = op.workspace === false ? ({} as ServiceCtx) : ctxFromHono(c);
 				const result = await op.run(ctx, parseInput(op, ctx, raw));
 				return c.json(result, op.status ?? 200);
 			} catch (e) {

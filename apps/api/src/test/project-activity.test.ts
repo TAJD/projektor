@@ -481,5 +481,10 @@ describe("GET /api/projects/:id/activity (PROJ-245)", () => {
 			{ headers }
 		);
 		expect(empty.status).toBe(200);
+		const repeated = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/activity?limit=1&limit=2`,
+			{ headers }
+		);
+		expect(repeated.status).toBe(400);
 	});
 });
