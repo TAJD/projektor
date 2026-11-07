@@ -6,6 +6,7 @@ import {
 	authHeaders,
 	seedMember,
 	seedProjectFixture,
+	seedTaskStatus,
 	seedTaskType,
 	seedToken,
 	seedUser,
@@ -76,6 +77,26 @@ describe("PROJ-895: operations registry REST adapter", () => {
 			await SELF.fetch("http://localhost/api/task-types", { headers: authHeaders(token, slug) })
 		).json()) as Array<{ id: string; is_default?: number; isDefault?: number | boolean }>;
 		const row = list.find((t) => t.id === current.id);
+		expect(row?.is_default ?? row?.isDefault).toBeTruthy();
+	});
+
+	it("does not clear the default task status when the status does not exist", async () => {
+		const current = await seedTaskStatus(workspaceId, {
+			key: "open",
+			name: "Open",
+			category: "todo",
+			isDefault: true,
+		});
+		const res = await SELF.fetch("http://localhost/api/task-statuses/does-not-exist", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ isDefault: true }),
+		});
+		expect(res.status).toBe(404);
+		const list = (await (
+			await SELF.fetch("http://localhost/api/task-statuses", { headers: authHeaders(token, slug) })
+		).json()) as Array<{ id: string; is_default?: number; isDefault?: number | boolean }>;
+		const row = list.find((s) => s.id === current.id);
 		expect(row?.is_default ?? row?.isDefault).toBeTruthy();
 	});
 
