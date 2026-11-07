@@ -102,6 +102,19 @@ describe("Issue Links API", () => {
 		expect(aLinks[0].type).toBe("duplicates");
 	});
 
+	it("takes the source issue from the path, not the body (PROJ-895)", async () => {
+		const res = await SELF.fetch(`http://localhost/api/issues/${issueA.id}/links`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ sourceIssueId: issueC.id, targetIssueId: issueB.id, type: "blocks" }),
+		});
+		expect(res.status).toBe(201);
+		const { links } = await listLinks(issueA.id);
+		expect(links).toHaveLength(1);
+		expect(links[0].linkedIssueId).toBe(issueB.id);
+		expect((await listLinks(issueC.id)).links).toHaveLength(0);
+	});
+
 	it("rejects self-links", async () => {
 		const res = await createLink(issueA.id, issueA.id, "blocks");
 		expect(res.status).toBe(400);

@@ -176,20 +176,26 @@ export const LinkTypeEffectiveEnum = z.enum([
 
 export const CreateIssueLinkSchema = z
 	.object({
-		sourceIssueId: z.string(),
-		targetIssueId: z.string(),
-		type: LinkTypeInputEnum,
+		sourceIssueId: z
+			.string()
+			.meta({ description: "UUID of the source issue, or a ref like PROJ-42" }),
+		targetIssueId: z
+			.string()
+			.meta({ description: "UUID of the target issue, or a ref like PROJ-42" }),
+		type: LinkTypeInputEnum.meta({
+			description: "Relationship type from the source issue's perspective",
+		}),
 	})
 	.strict();
 
-export const DeleteIssueLinkSchema = z
-	.object({
-		id: z.string().uuid(),
-	})
-	.strict();
+export const DeleteIssueLinkFields = z.object({
+	id: z.string().uuid().meta({ description: "UUID of the link to delete" }),
+});
+
+export const DeleteIssueLinkSchema = DeleteIssueLinkFields.strict();
 
 export const ListIssueLinksSchema = z
 	.object({
-		issueId: z.string(),
+		issueId: z.string().meta({ description: "UUID of the issue, or a ref like PROJ-42" }),
 	})
 	.strict();
