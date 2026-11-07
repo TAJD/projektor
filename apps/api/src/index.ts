@@ -45,7 +45,7 @@ import { oauthRouter } from "./routes/oauth";
 import { oauthMetadataRouter } from "./routes/oauth-metadata";
 import { playbooksRouter } from "./routes/playbooks";
 import { projectActivityRouter } from "./routes/project-activity";
-import { projectsRouter } from "./routes/projects";
+import { projectsRouter, workspaceProjectsRouter } from "./routes/projects";
 import { realtimeRouter } from "./routes/realtime";
 import { shareIssuesRouter, sharePublicRouter } from "./routes/share";
 import { sprintsRouter } from "./routes/sprints";
@@ -318,6 +318,7 @@ app.use("/api/task-statuses", etagMiddleware);
 
 app.route("/api/workspaces", workspacesRouter);
 app.route("/api/workspaces", groupsRouter);
+app.route("/api/workspaces", workspaceProjectsRouter);
 app.route("/api/projects", projectsRouter);
 app.route("/api/projects", flowMetricsRouter);
 app.route("/api/projects", codeHeatmapRouter);

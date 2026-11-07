@@ -95,6 +95,45 @@ describe("Projects REST", () => {
 		expect(res.status).toBe(403);
 	});
 
+	it("POST /api/projects rejects a member before validating the body (PROJ-895)", async () => {
+		const res = await SELF.fetch("http://localhost/api/projects", {
+			method: "POST",
+			headers: memberHeaders,
+			body: JSON.stringify({ key: "1BAD" }),
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("GET /api/workspaces/:slug/projects lists this workspace's projects (PROJ-895)", async () => {
+		for (const [name, key] of [
+			["Live", "LIVE"],
+			["Old", "OLD"],
+		]) {
+			await SELF.fetch("http://localhost/api/projects", {
+				method: "POST",
+				headers: ownerHeaders,
+				body: JSON.stringify({ name, key }),
+			});
+		}
+		const list = await SELF.fetch("http://localhost/api/projects", { headers: ownerHeaders });
+		const old = ((await list.json()) as { id: string; key: string }[]).find((p) => p.key === "OLD");
+		await SELF.fetch(`http://localhost/api/projects/${old?.id}`, {
+			method: "PATCH",
+			headers: ownerHeaders,
+			body: JSON.stringify({ archived: true }),
+		});
+		await resetRateLimits();
+		const keys = async (qs: string) => {
+			const res = await SELF.fetch(`http://localhost/api/workspaces/${slug}/projects${qs}`, {
+				headers: ownerHeaders,
+			});
+			expect(res.status).toBe(200);
+			return ((await res.json()) as { key: string }[]).map((p) => p.key).sort();
+		};
+		expect(await keys("")).toEqual(["LIVE"]);
+		expect(await keys("?includeArchived=true")).toEqual(["LIVE", "OLD"]);
+	});
+
 	it("POST /api/projects rejects viewer role (403)", async () => {
 		const res = await SELF.fetch("http://localhost/api/projects", {
 			method: "POST",

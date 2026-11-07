@@ -35,10 +35,7 @@ const SRC = join(import.meta.dirname, "..");
 // ---------------------------------------------------------------------------
 
 /** MCP tools with no REST equivalent. Each is a real parity gap, tracked in PROJ-633. */
-const MCP_ONLY: Record<string, string> = {
-	"projects.ts:listProjects":
-		"workspace-scoped list; the REST surface serves the cross-workspace listProjectsAcrossWorkspaces instead",
-};
+const MCP_ONLY: Record<string, string> = {};
 
 /**
  * REST operations with no MCP tool. Browser-only by design unless noted — auth, upload
@@ -89,7 +86,6 @@ const REST_ONLY: Record<string, string> = {
 	"oauth.ts:revokeConnectorGrant": "settings-only: revoking a credential is a browser action",
 	// Misc.
 	"issue-ref.ts:resolveIssueIdParam": "URL param coercion, not an operation",
-	"projects.ts:getProjectBySlug": "slug routing for the browser; agents address projects by id",
 	"projects.ts:listProjectsAcrossWorkspaces":
 		"cross-workspace summary for the browser's project switcher; MCP is scoped to one workspace per endpoint",
 	"wiki-export.ts:exportWiki": "file download response, not a JSON operation",
@@ -108,6 +104,7 @@ const TOOL_NAME_ALIASES: Record<string, string> = {
 	// tool name is the public contract.
 	"issues.ts:getIssuesBatch": "get_issues",
 	"issue-links.ts:createLink": "create_issue_link",
+	"projects.ts:getProjectBySlug": "get_project",
 	"issue-links.ts:deleteLink": "delete_issue_link",
 	"issue-links.ts:listLinksForIssue": "list_issue_links",
 	"wiki.ts:getWikiBacklinks": "get_backlinks",
