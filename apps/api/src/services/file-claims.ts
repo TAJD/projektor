@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import { PostMessageSchema } from "../schemas/agent-messages";
 import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../schemas/file-claims";
 import { visibleProjectPredicate } from "./access";
@@ -293,6 +293,24 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		await touchAgentHeartbeatIfLive(orm, ctx, agentId, liveCutoff());
 	}
 
+	return claimFilesResolved(ctx, { issueId, projectId, agentId, force, paths });
+}
+
+export async function claimFilesResolved(
+	ctx: ServiceCtx,
+	input: Readonly<{
+		issueId: string;
+		projectId: string;
+		agentId: string | undefined;
+		force?: boolean;
+		paths: readonly string[];
+		extraStatements?: readonly D1PreparedStatement[];
+	}>
+) {
+	const { issueId, projectId, agentId, force } = input;
+	const paths = [...new Set(input.paths)];
+	const orm = drizzle(ctx.db, { schema });
+
 	// Pre-check all paths for active claims — all-or-nothing on conflict.
 	const now = Math.floor(Date.now() / 1000);
 	const claimsByPath = await loadActiveClaimsByPath(
@@ -444,6 +462,7 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 		releasedAt: null,
 	}));
 	statements.push(...buildClaimInsertStatements(ctx, orm, created));
+	if (input.extraStatements) statements.push(...input.extraStatements);
 
 	await ctx.db.batch(statements);
 
@@ -677,20 +696,27 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 // agent no longer deadlocks its paths. Agent-end remains the *eager* path — it frees the
 // claim immediately rather than leaving it to the next claimant — and it is the one that
 // records `agent_ended` for the health tile, which distinguishes a clean exit from a crash.
-export async function releaseClaimsForAgent(ctx: ServiceCtx, agentId: string) {
+export function buildReleaseClaimsForAgentStatement(
+	ctx: ServiceCtx,
+	agentId: string,
+	guard?: SQL
+): D1PreparedStatement {
 	const orm = drizzle(ctx.db, { schema });
-	const now = Math.floor(Date.now() / 1000);
-
-	await orm
-		.update(schema.issueFileClaims)
-		.set({ releasedAt: now, releaseReason: "agent_ended" })
-		.where(
-			and(
-				eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
-				eq(schema.issueFileClaims.agentId, agentId),
-				isNull(schema.issueFileClaims.releasedAt)
+	return toD1Statement(
+		ctx,
+		orm
+			.update(schema.issueFileClaims)
+			.set({ releasedAt: Math.floor(Date.now() / 1000), releaseReason: "agent_ended" })
+			.where(
+				and(
+					eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
+					eq(schema.issueFileClaims.agentId, agentId),
+					isNull(schema.issueFileClaims.releasedAt),
+					guard
+				)
 			)
-		);
+			.toSQL()
+	);
 }
 
 /**
