@@ -1,6 +1,13 @@
 import { env, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { authHeaders, seedIssue, seedProject, seedProjectFixture, toolError } from "./helpers";
+import {
+	authHeaders,
+	seedGroupGrant,
+	seedIssue,
+	seedProject,
+	seedProjectFixture,
+	toolError,
+} from "./helpers";
 
 describe("PROJ-1012: create_issues and create_issue_links", () => {
 	let token: string;
@@ -118,6 +125,48 @@ describe("PROJ-1012: create_issues and create_issue_links", () => {
 			expect(await issueCount()).toBe(before);
 		});
 
+		it("spawns a follow-up for each item's remainder", async () => {
+			const report = { summary: "Partly", verification: "https://github.com/acme/repo/pull/1" };
+			const { err, data } = await call("create_issues", {
+				projectId,
+				items: [
+					{
+						title: "One",
+						status: "done",
+						completionReport: { ...report, remainder: "Rest of one" },
+					},
+					{
+						title: "Two",
+						status: "done",
+						completionReport: { ...report, remainder: "Rest of two" },
+					},
+				],
+			});
+			expect(err).toBeUndefined();
+			const [a, b] = data.results;
+			expect(a.followUp.ref).toMatch(/^PROJ-\d+$/);
+			expect(b.followUp.ref).toMatch(/^PROJ-\d+$/);
+			expect(a.followUp.ref).not.toBe(b.followUp.ref);
+		});
+
+		it("rejects each item that links into a read-only project", async () => {
+			const readOnly = await seedProject(workspaceId, "READ");
+			await seedGroupGrant(workspaceId, userId, readOnly.id, "viewer");
+			const locked = await seedIssue(workspaceId, readOnly.id, userId, { title: "Locked" });
+			const { err, data } = await call("create_issues", {
+				projectId,
+				items: [
+					{ title: "A", links: [{ type: "relates_to", target: locked.id }] },
+					{ title: "B" },
+					{ title: "C", links: [{ type: "blocks", target: `READ-${locked.number}` }] },
+				],
+			});
+			expect(err).toBeUndefined();
+			expect(data.results[0].error.code).toBe("forbidden");
+			expect(data.results[1].ref).toMatch(/^PROJ-\d+$/);
+			expect(data.results[2].error.code).toBe("forbidden");
+		});
+
 		it("rejects more than 50 items", async () => {
 			const items = Array.from({ length: 51 }, (_, i) => ({ title: `Item ${i}` }));
 			const { err } = await call("create_issues", { projectId, items });
@@ -204,6 +253,25 @@ describe("PROJ-1012: create_issues and create_issue_links", () => {
 			expect(err).toBeUndefined();
 			expect(data.results.every((r: { id?: string }) => typeof r.id === "string")).toBe(true);
 			expect(await linkCount()).toBe(before + 100);
+		});
+
+		it("rejects a link into a read-only project as forbidden", async () => {
+			const readOnly = await seedProject(workspaceId, "READ");
+			await seedGroupGrant(workspaceId, userId, readOnly.id, "viewer");
+			const locked = await seedIssue(workspaceId, readOnly.id, userId, { title: "Locked" });
+			const before = await linkCount();
+			const { err, data } = await call("create_issue_links", {
+				links: [
+					{ source: otherRef, target: `READ-${locked.number}`, type: "relates_to" },
+					{ source: locked.id, target: otherRef, type: "blocks" },
+				],
+			});
+			expect(err).toBeUndefined();
+			expect(data.results.map((r: { error: { code: string } }) => r.error.code)).toEqual([
+				"forbidden",
+				"forbidden",
+			]);
+			expect(await linkCount()).toBe(before);
 		});
 
 		it("rejects more than 100 links", async () => {

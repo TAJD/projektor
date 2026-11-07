@@ -430,7 +430,8 @@ export const issueOperations = [
 			"(including completionReport, comment and links). Returns `results` in item order: " +
 			"{ref, id, ...} for a created issue, or {error: {code, message}} for an item that was rejected " +
 			"(e.g. a bad link target or parent). A rejected item doesn't stop the others; the created ones " +
-			"commit together. A malformed item (wrong field type) rejects the whole call before anything is written.",
+			"commit together. A malformed item (wrong field type) rejects the whole call before anything is written, " +
+			"and so does a commit that fails because a referenced record (e.g. a status) was deleted mid-call.",
 		input: z
 			.object({
 				projectId: createIssueInput.shape.projectId,

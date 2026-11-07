@@ -1,4 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
+import type { Role } from "@projektor/types";
 import { and, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
 import {
@@ -31,10 +32,16 @@ import type { ServiceCtx } from "./types";
 async function requireIssueProjectWrite(
 	ctx: ServiceCtx,
 	projectId: string,
-	notFoundLabel: string
+	notFoundLabel: string,
+	roles?: ProjectRoleCache
 ): Promise<void> {
 	if (isWorkspaceAdmin(ctx.role)) return;
-	const role = await effectiveProjectRole(ctx, projectId);
+	let pending = roles?.get(projectId);
+	if (!pending) {
+		pending = effectiveProjectRole(ctx, projectId);
+		roles?.set(projectId, pending);
+	}
+	const role = await pending;
 	if (role === null) throw new NotFoundError(notFoundLabel);
 	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
 }
@@ -137,10 +144,13 @@ export async function createLink(ctx: ServiceCtx, raw: unknown) {
 	return { id };
 }
 
+export type ProjectRoleCache = Map<string, Promise<Role | null>>;
+
 export async function prepareNewIssueLinks(
 	ctx: ServiceCtx,
 	newIssueId: string,
-	links: ReadonlyArray<{ type: string; target: string }>
+	links: ReadonlyArray<{ type: string; target: string }>,
+	roles?: ProjectRoleCache
 ): Promise<{ ids: string[]; statements: D1PreparedStatement[] }> {
 	const targetIds = await resolveIssueIdsParam(
 		ctx,
@@ -162,7 +172,7 @@ export async function prepareNewIssueLinks(
 	});
 	await Promise.all(
 		[...new Set(projectOf.values())].map((p) =>
-			requireIssueProjectWrite(ctx, p, "Target issue not found")
+			requireIssueProjectWrite(ctx, p, "Target issue not found", roles)
 		)
 	);
 

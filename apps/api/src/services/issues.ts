@@ -50,6 +50,7 @@ import {
 	buildLinksForIssueStatement,
 	createLink,
 	mapLinksForIssue,
+	type ProjectRoleCache,
 	prepareNewIssueLinks,
 } from "./issue-links";
 import { ISSUE_REF_PATTERN, resolveIssueIdParam, resolveVisibleIssueIdParam } from "./issue-ref";
@@ -1043,9 +1044,10 @@ export async function createIssues(ctx: ServiceCtx, raw: unknown) {
 		.get();
 	if (!project) throw new NotFoundError("Project not found");
 
+	const roles: ProjectRoleCache = new Map();
 	const prepared = await Promise.all(
 		parsed.data.items.map((item) =>
-			prepareCreateIssue(ctx, { ...item, projectId }, projectId).then(
+			prepareCreateIssue(ctx, { ...item, projectId }, projectId, roles).then(
 				(ok) => ({ ok }),
 				(e) => ({ error: toItemError(e) })
 			)
@@ -1085,7 +1087,8 @@ type CreatedIssue = {
 async function prepareCreateIssue(
 	ctx: ServiceCtx,
 	raw: unknown,
-	checkedProjectId?: string
+	checkedProjectId?: string,
+	roles?: ProjectRoleCache
 ): Promise<{
 	statements: D1PreparedStatement[];
 	finish: (number: number | undefined) => Promise<CreatedIssue>;
@@ -1144,7 +1147,7 @@ async function prepareCreateIssue(
 	}
 
 	const [linkPlan, agentWork] = await Promise.all([
-		data.links ? prepareNewIssueLinks(ctx, id, data.links) : undefined,
+		data.links ? prepareNewIssueLinks(ctx, id, data.links, roles) : undefined,
 		agentSessionId && reporting ? readAgentWorkFlags(ctx, id, agentSessionId) : undefined,
 	]);
 
