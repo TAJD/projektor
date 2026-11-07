@@ -25,11 +25,18 @@ const scopeSchema = z
 	);
 
 const channelFields = {
-	scope: scopeSchema.optional(),
+	scope: scopeSchema.optional().meta({
+		description:
+			'Channel scope: "workspace" (default), "issue:<uuid>" / "issue:<ref like PROJ-42>" (or just the bare uuid/ref), "project:<key|uuid>", or "project" together with projectId. Every spelling of a channel names the same channel',
+	}),
 	projectId: z
 		.string()
 		.refine(isProjectTarget, { message: "projectId must be a project UUID or key like PROJ" })
-		.optional(),
+		.optional()
+		.meta({
+			description:
+				'Project key (e.g. PROJ) or UUID. Use with scope "project"; on its own it selects that project\'s channel',
+		}),
 };
 
 function checkProjectId(data: { scope?: string; projectId?: string }, ctx: z.RefinementCtx): void {
@@ -51,8 +58,12 @@ function checkProjectId(data: { scope?: string; projectId?: string }, ctx: z.Ref
 export const PostMessageSchema = z
 	.object({
 		...channelFields,
-		agentId: z.string().uuid().optional(),
-		body: z.string().min(1).max(5000),
+		agentId: z
+			.string()
+			.uuid()
+			.optional()
+			.meta({ description: "Agent session UUID posting the message (optional)" }),
+		body: z.string().min(1).max(5000).meta({ description: "Message body (1–5000 characters)" }),
 	})
 	.superRefine(checkProjectId);
 
@@ -60,9 +71,24 @@ export const ListMessagesSchema = z
 	.object({
 		...channelFields,
 		// Opaque composite cursor: "createdAt:id" — stable across same-second inserts
-		cursor: z.string().optional(),
-		limit: z.coerce.number().int().min(1).max(100).default(50),
-		order: z.enum(["asc", "desc"]).default("asc"),
-		since: z.coerce.number().int().nonnegative().optional(),
+		cursor: z
+			.string()
+			.optional()
+			.meta({ description: "Pagination cursor: pass the previous page's `nextCursor` unchanged" }),
+		limit: z.coerce
+			.number()
+			.int()
+			.min(1)
+			.max(100)
+			.default(50)
+			.meta({ description: "Max messages to return (1–100)" }),
+		order: z
+			.enum(["asc", "desc"])
+			.default("asc")
+			.meta({ description: "desc = newest first, asc = oldest first" }),
+		since: z.coerce.number().int().nonnegative().optional().meta({
+			description:
+				"Unix seconds: only messages created at or after this time (rows' createdAt is in milliseconds)",
+		}),
 	})
 	.superRefine(checkProjectId);

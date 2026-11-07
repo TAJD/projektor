@@ -1,29 +1,4 @@
-import type { HonoEnv } from "@projektor/types";
-import { Hono } from "hono";
-import { jsonBody } from "../http/body";
-import { serviceErrToResponse } from "../http/error-adapter";
-import { listMessages, postMessage } from "../services/agent-messages";
-import { ctxFromHono } from "../services/types";
+import { agentMessageOperations } from "../operations/agent-messages";
+import { operationsRouter } from "../operations/define";
 
-const router = new Hono<HonoEnv>();
-
-router.get("/", async (c) => {
-	const ctx = ctxFromHono(c);
-	const { scope, projectId, cursor, limit, order, since } = c.req.query();
-	try {
-		return c.json(await listMessages(ctx, { scope, projectId, cursor, limit, order, since }));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.post("/", async (c) => {
-	const ctx = ctxFromHono(c);
-	try {
-		return c.json(await postMessage(ctx, await jsonBody(c)), 201);
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-export { router as agentMessagesRouter };
+export const agentMessagesRouter = operationsRouter("/api/agent-messages", agentMessageOperations);

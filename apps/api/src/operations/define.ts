@@ -23,6 +23,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	annotations?: MCPToolAnnotations;
 	workspace?: false;
 	bodyKey?: string;
+	mcpDefaults?: Record<string, unknown>;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
 	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
@@ -71,28 +72,48 @@ export function toMcpTool(op: Operation): MCPTool {
 			}
 		},
 	});
+	const props = inputSchema.properties as Record<string, Record<string, unknown>> | undefined;
+	for (const [key, value] of Object.entries(op.mcpDefaults ?? {})) {
+		if (props?.[key]) props[key].default = value;
+	}
 	return {
 		name: op.id,
 		description: op.summary,
 		inputSchema,
 		annotations: annotationsFor(op),
 		handler: async (raw, ctx) => {
-			const input = parseInput(op, ctx, dropRejectedNulls(op.input, raw));
+			const args = normalizeArgs(op.input, raw);
+			const input = parseInput(
+				op,
+				ctx,
+				op.mcpDefaults ? { ...op.mcpDefaults, ...(args as object) } : args
+			);
 			const result = await op.run(ctx, input);
 			return op.mcpResult ? op.mcpResult(result, input, ctx) : result;
 		},
 	};
 }
 
-function dropRejectedNulls(schema: z.ZodObject, raw: unknown) {
+function normalizeArgs(schema: z.ZodObject, raw: unknown) {
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return raw;
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(raw)) {
 		const field = schema.shape[key] as z.ZodType | undefined;
 		if (value === null && field && !field.safeParse(null).success) continue;
-		out[key] = value;
+		out[key] = field ? coerceScalar(field, value) : value;
 	}
 	return out;
+}
+
+function coerceScalar(field: z.ZodType, value: unknown): unknown {
+	if (typeof value !== "string") return value;
+	const kind = baseType(field);
+	if (kind === "number" && value.trim() !== "" && Number.isFinite(Number(value))) {
+		return Number(value);
+	}
+	if (kind === "boolean" && (value === "true" || value === "1")) return true;
+	if (kind === "boolean" && (value === "false" || value === "0" || value === "")) return false;
+	return value;
 }
 
 function baseType(field: z.ZodType): string {
@@ -109,14 +130,8 @@ function fromQuery(schema: z.ZodObject, query: Record<string, string[]>) {
 		const field = schema.shape[key] as z.ZodType | undefined;
 		const values = all.filter((v) => v !== "");
 		if (values.length === 0 || !field) continue;
-		const kind = baseType(field);
-		const value = values[0];
-		if (kind === "array") out[key] = values;
-		else if (all.length > 1) out[key] = all;
-		else if (kind === "number") out[key] = Number(value);
-		else if (kind === "boolean" && (value === "true" || value === "1")) out[key] = true;
-		else if (kind === "boolean" && (value === "false" || value === "0")) out[key] = false;
-		else out[key] = value;
+		if (baseType(field) === "array") out[key] = values;
+		else out[key] = all.length > 1 ? all : coerceScalar(field, values[0]);
 	}
 	return out;
 }
@@ -127,12 +142,13 @@ export function operationsRouter(base: string, ops: Operation[]) {
 		if (!op.path.startsWith(base)) throw new Error(`${op.id}: ${op.path} is outside ${base}`);
 		router.on(op.method, op.path.slice(base.length) || "/", async (c) => {
 			try {
+				const json = async () => ((await c.req.text()).trim() === "" ? {} : await jsonBody(c));
 				const body =
 					op.method === "GET" || op.method === "DELETE"
 						? fromQuery(op.input, c.req.queries())
 						: op.bodyKey
-							? { [op.bodyKey]: await jsonBody(c) }
-							: await jsonBody(c);
+							? { [op.bodyKey]: await json() }
+							: await json();
 				const raw =
 					typeof body === "object" && body !== null && !Array.isArray(body)
 						? { ...body, ...c.req.param() }
