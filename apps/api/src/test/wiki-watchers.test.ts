@@ -1,5 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ServiceCtx } from "../services/types";
+import { createWikiPage, updateWikiPage } from "../services/wiki";
 import {
 	authHeaders,
 	seedFixture,
@@ -9,12 +11,12 @@ import {
 	seedToken,
 	seedUser,
 } from "./helpers";
-import { resetRateLimits } from "./rate-limit-reset";
 
 // PROJ-821: a watcher who loses access to a page (grant revoked, or removed from the
 // workspace) must stop receiving its notifications, which carry the page title.
 describe("wiki watch notifications respect current access (PROJ-821)", () => {
 	let adminToken: string;
+	let adminId: string;
 	let slug: string;
 	let workspaceId: string;
 	let watcherId: string;
@@ -23,6 +25,7 @@ describe("wiki watch notifications respect current access (PROJ-821)", () => {
 	beforeEach(async () => {
 		const fixture = await seedFixture({ role: "admin" });
 		adminToken = fixture.token;
+		adminId = fixture.user.id;
 		slug = fixture.workspace.slug;
 		workspaceId = fixture.workspace.id;
 		const watcher = await seedUser(`w-${crypto.randomUUID().slice(0, 8)}@example.com`);
@@ -50,14 +53,12 @@ describe("wiki watch notifications respect current access (PROJ-821)", () => {
 		expect(res.status).toBeLessThan(300);
 	}
 
+	function adminCtx(): ServiceCtx {
+		return { db: env.DB, kv: env.KV, r2: env.R2, workspaceId, userId: adminId, role: "admin" };
+	}
+
 	async function edit(pageId: string, content: string): Promise<void> {
-		await resetRateLimits();
-		const res = await SELF.fetch(`http://localhost/api/wiki/${pageId}`, {
-			method: "PUT",
-			headers: authHeaders(adminToken, slug),
-			body: JSON.stringify({ content }),
-		});
-		expect(res.status).toBe(200);
+		await updateWikiPage(adminCtx(), pageId, { content });
 	}
 
 	async function notificationCount(): Promise<number> {
@@ -112,8 +113,12 @@ describe("wiki watch notifications respect current access (PROJ-821)", () => {
 		});
 		expect(res.status).toBeLessThan(300);
 
-		await resetRateLimits();
-		await createPage({ title: "Child", content: "c", parentId, projectId: project.id });
+		await createWikiPage(adminCtx(), {
+			title: "Child",
+			content: "c",
+			parentId,
+			projectId: project.id,
+		});
 		expect(await notificationCount()).toBe(1);
 	});
 });

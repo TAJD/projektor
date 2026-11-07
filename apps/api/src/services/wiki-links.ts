@@ -85,6 +85,12 @@ const HEAL_BATCH = 200;
  * once a workspace is healed (partial indexes on `fold IS NULL` keep the check cheap).
  * Called before title resolution and by backfill_wiki_links.
  */
+const healedWorkspaces = new Set<string>();
+
+export async function ensureTitleFoldsHealed(ctx: ServiceCtx): Promise<void> {
+	if (!healedWorkspaces.has(ctx.workspaceId)) await healTitleFolds(ctx);
+}
+
 export async function healTitleFolds(ctx: ServiceCtx): Promise<number> {
 	const [pages, links] = await Promise.all([
 		ctx.db
@@ -113,6 +119,7 @@ export async function healTitleFolds(ctx: ServiceCtx): Promise<number> {
 		),
 	];
 	if (statements.length > 0) await ctx.db.batch(statements);
+	else healedWorkspaces.add(ctx.workspaceId);
 	return statements.length;
 }
 
@@ -151,16 +158,18 @@ async function resolveTitleTargets(
 	// PROJ-818: pages whose fold hasn't been healed yet (non-ASCII titles from before
 	// migration 0063) are invisible to the IN above — fold them here in JS so a link that
 	// resolved before the migration still resolves. The set shrinks with every heal.
-	const unhealed = await orm
-		.select(cols)
-		.from(schema.wikiPages)
-		.where(
-			and(
-				eq(schema.wikiPages.workspaceId, workspaceId),
-				isNull(schema.wikiPages.titleFold),
-				isNull(schema.wikiPages.deletedAt)
-			)
-		);
+	const unhealed = healedWorkspaces.has(workspaceId)
+		? []
+		: await orm
+				.select(cols)
+				.from(schema.wikiPages)
+				.where(
+					and(
+						eq(schema.wikiPages.workspaceId, workspaceId),
+						isNull(schema.wikiPages.titleFold),
+						isNull(schema.wikiPages.deletedAt)
+					)
+				);
 	const candidates = [...rows, ...unhealed.filter((r) => wanted.has(foldWikiTitle(r.title)))].sort(
 		(a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 	);
@@ -370,7 +379,7 @@ export async function buildWikiLinksReindexStatements(
 ): Promise<D1PreparedStatement[]> {
 	const targets = parseWikiLinkTargets(content);
 	// PROJ-818: title matching reads the stored folds — heal any NULLs first.
-	await healTitleFolds(ctx);
+	await ensureTitleFoldsHealed(ctx);
 	const resolved =
 		targets.length > 0 ? await resolveLinkTargets(orm, ctx.workspaceId, targets) : [];
 	return buildLinkWriteStatements(ctx, sourcePageId, resolved);
