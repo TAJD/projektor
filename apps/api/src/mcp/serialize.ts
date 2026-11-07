@@ -82,7 +82,7 @@ export const VIEW_FIELDS_PROPS = {
 	},
 } as const;
 
-const ShapeOptsSchema = z.object({
+export const ShapeOptsSchema = z.object({
 	view: z.enum(["summary", "full"]).optional(),
 	verbose: z.boolean().optional(),
 	fields: z

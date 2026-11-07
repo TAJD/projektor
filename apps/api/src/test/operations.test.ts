@@ -2,6 +2,7 @@ import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineOperation, operationsRouter, toMcpTool } from "../operations/define";
+import { issueOperations } from "../operations/issues";
 import { taskTypeOperations } from "../operations/task-types";
 import {
 	authHeaders,
@@ -150,5 +151,21 @@ describe("PROJ-895: operations registry REST adapter", () => {
 		});
 		expect(await tool.handler({ stale: "1" }, ctx)).toEqual({ stale: true });
 		await expect(tool.handler({ limit: "five" }, ctx)).rejects.toThrow();
+	});
+
+	const getIssues = (query: string) =>
+		SELF.fetch(`http://localhost/api/issues?${query}`, { headers: authHeaders(token, slug) });
+
+	it("rejects a key passed under both its name and its REST alias", async () => {
+		const res = await getIssues("project=a&projectId=b");
+		expect(res.status).toBe(400);
+		expect(JSON.stringify(await res.json())).toContain("projectId");
+	});
+
+	it("advertises the defaults the service applies", () => {
+		const tool = toMcpTool(issueOperations.find((op) => op.id === "get_prioritized_issues")!);
+		const props = tool.inputSchema.properties as Record<string, { default?: unknown }>;
+		expect(props.limit.default).toBe(10);
+		expect(props.includeBacklog.default).toBe(true);
 	});
 });

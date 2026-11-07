@@ -24,6 +24,8 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	workspace?: false;
 	bodyKey?: string;
 	mcpDefaults?: Record<string, unknown>;
+	restAliases?: Record<string, string>;
+	headers?: (result: unknown) => Record<string, string>;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
 	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
@@ -127,14 +129,38 @@ function baseType(field: z.ZodType): string {
 	return def.type;
 }
 
-function fromQuery(schema: z.ZodObject, query: Record<string, string[]>) {
+function aliasConflict(name: string, key: string) {
+	return new ValidationError({
+		formErrors: [],
+		fieldErrors: { [key]: [`Pass ${key} once; "${name}" is another name for it`] },
+	});
+}
+
+function fromQuery(
+	schema: z.ZodObject,
+	query: Record<string, string[]>,
+	aliases: Record<string, string> = {}
+) {
 	const out: Record<string, unknown> = {};
-	for (const [key, all] of Object.entries(query)) {
+	for (const [name, all] of Object.entries(query)) {
+		const key = aliases[name] ?? name;
 		const field = schema.shape[key] as z.ZodType | undefined;
 		const values = all.filter((v) => v !== "");
 		if (values.length === 0 || !field) continue;
+		if (key in out) throw aliasConflict(name, key);
 		if (baseType(field) === "array") out[key] = values;
 		else out[key] = all.length > 1 ? all : coerceScalar(field, values[0]);
+	}
+	return out;
+}
+
+function renameKeys(body: unknown, aliases: Record<string, string> | undefined) {
+	if (!aliases || typeof body !== "object" || body === null || Array.isArray(body)) return body;
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(body)) {
+		const key = aliases[k] ?? k;
+		if (key in out) throw aliasConflict(k, key);
+		out[key] = v;
 	}
 	return out;
 }
@@ -156,10 +182,10 @@ export function operationsRouter(base: string, ops: Operation[]) {
 				const json = async () => ((await c.req.text()).trim() === "" ? {} : await jsonBody(c));
 				const body =
 					op.method === "GET" || op.method === "DELETE"
-						? fromQuery(op.input, c.req.queries())
+						? fromQuery(op.input, c.req.queries(), op.restAliases)
 						: op.bodyKey
 							? { [op.bodyKey]: await json() }
-							: await json();
+							: renameKeys(await json(), op.restAliases);
 				const params = Object.fromEntries(
 					Object.entries(c.req.param()).filter(([key]) => key in op.input.shape)
 				);
@@ -169,6 +195,9 @@ export function operationsRouter(base: string, ops: Operation[]) {
 						: body;
 				const result = await op.run(ctx, parseInput(op, ctx, raw));
 				if (op.status === 204) return c.body(null, 204);
+				for (const [name, value] of Object.entries(op.headers?.(result) ?? {})) {
+					c.header(name, value);
+				}
 				return c.json(result, op.status ?? 200);
 			} catch (e) {
 				return serviceErrToResponse(c, e);

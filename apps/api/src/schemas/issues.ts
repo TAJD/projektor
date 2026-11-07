@@ -67,13 +67,16 @@ export const UpdateIssueSchema = z
 	.strict()
 	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
 
-export const IssueListCursorSchema = z
-	.union([z.number().int().nonnegative(), z.string().regex(/^\d+(?::[A-Za-z0-9-]+)?$/)])
-	.transform((v) => {
-		if (typeof v === "number") return { createdAt: v } as { createdAt: number; id?: string };
-		const [createdAt, id] = v.split(":");
-		return { createdAt: Number(createdAt), id } as { createdAt: number; id?: string };
-	});
+export const IssueListCursorInput = z.union([
+	z.number().int().nonnegative(),
+	z.string().regex(/^\d+(?::[A-Za-z0-9-]+)?$/),
+]);
+
+export const IssueListCursorSchema = IssueListCursorInput.transform((v) => {
+	if (typeof v === "number") return { createdAt: v } as { createdAt: number; id?: string };
+	const [createdAt, id] = v.split(":");
+	return { createdAt: Number(createdAt), id } as { createdAt: number; id?: string };
+});
 
 // PROJ-931: accepts either a real array (MCP JSON) or a comma-separated string
 // (REST query param), same convention as the existing statusIds/excludeTypeIds filters.
