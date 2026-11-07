@@ -1702,7 +1702,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	// PROJ-1018: these reads don't depend on each other, so they run concurrently instead
 	// of one round trip after another.
-	const [parentCheck, existingRead, assigneeCheck, customFieldsRead, liveSessionRead] =
+	const [parentCheck, existingRead, assigneeCheck, customFieldsRead] =
 		await Promise.allSettled([
 			"parentId" in data && data.parentId ? validateParent(ctx, data.parentId, id) : undefined,
 			fetchExistingForUpdate(ctx, orm, id),
@@ -1717,7 +1717,6 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 			data.customFields && Object.keys(data.customFields).length > 0
 				? validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
 				: [],
-			data.agentSessionId ? isLiveAgentSessionId(ctx, data.agentSessionId) : false,
 		]);
 	settledValue(parentCheck);
 	const existingRow = settledValue(existingRead);
@@ -1751,7 +1750,6 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	} = await buildUpdateSetValues(ctx, orm, data, existing);
 
 	const cfWrites = settledValue(customFieldsRead);
-	const liveSession = settledValue(liveSessionRead);
 
 	const commentId = crypto.randomUUID();
 	const commentNow = now();
@@ -1820,12 +1818,10 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		);
 	}
 
-	// PROJ-929: a call that carries a live agentSessionId implicitly refreshes that
-	// session's heartbeat, same as claim_issue/claim_files/post_message. Folded into this
-	// same batch (PROJ-870 convention) rather than a separate round trip; the statement's
-	// own WHERE guard (status='active' AND heartbeat > cutoff) makes it a no-op if the
-	// session went stale between this check and the batch executing.
-	if (data.agentSessionId && liveSession) {
+	// PROJ-929: a call carrying an agentSessionId refreshes that session's heartbeat, same
+	// as claim_issue/claim_files/post_message; the statement's own WHERE guard
+	// (status='active' AND heartbeat > cutoff) makes it a no-op for a stale session.
+	if (data.agentSessionId) {
 		statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, data.agentSessionId));
 	}
 
