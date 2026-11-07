@@ -240,5 +240,9 @@ describe("Workflow spec", () => {
 			headers: authHeaders(token, slug),
 		});
 		expect(res.status).toBe(400);
+		const withEmpty = await SELF.fetch("http://localhost/api/workflow?ifVersion=a&ifVersion=", {
+			headers: authHeaders(token, slug),
+		});
+		expect(withEmpty.status).toBe(400);
 	});
 });

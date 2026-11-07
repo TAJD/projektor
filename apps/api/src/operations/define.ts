@@ -28,6 +28,9 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 }
 
 export function defineOperation<S extends z.ZodObject>(op: Operation<S>): Operation {
+	if (op.workspace === false && op.minRole) {
+		throw new Error(`${op.id}: a workspace-less op has no role to check`);
+	}
 	return op as unknown as Operation;
 }
 
@@ -108,7 +111,8 @@ function fromQuery(schema: z.ZodObject, query: Record<string, string[]>) {
 		if (values.length === 0 || !field) continue;
 		const kind = baseType(field);
 		const value = values[0];
-		if (kind === "array" || values.length > 1) out[key] = values;
+		if (kind === "array") out[key] = values;
+		else if (all.length > 1) out[key] = all;
 		else if (kind === "number") out[key] = Number(value);
 		else if (kind === "boolean" && (value === "true" || value === "1")) out[key] = true;
 		else if (kind === "boolean" && (value === "false" || value === "0")) out[key] = false;
