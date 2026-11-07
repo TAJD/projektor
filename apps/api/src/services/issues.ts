@@ -33,11 +33,10 @@ import { ForbiddenError, flattenWithPaths, NotFoundError, ValidationError } from
 import { isExternallyVerifiableEvidence } from "./evidence-classification";
 import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
+	type AgentWorkFlags,
 	buildReleaseLeaseForClosedIssueStatement,
 	buildTouchAgentHeartbeatIfLiveStatement,
-	isLiveAgentSessionId,
-	issueEverHadAgentLease,
-	issueHasLiveAgentLease,
+	readAgentWorkFlags,
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
 import { buildLinksForIssueStatement, createLink, mapLinksForIssue } from "./issue-links";
@@ -1287,23 +1286,23 @@ function classifyStatusTransition(
 // (live lease) transitioning to done — agents can close freely now; see
 // computeNeedsAudit below for the audit-after-the-fact replacement.
 async function assertReviewGate(
-	ctx: ServiceCtx,
 	data: UpdateIssueData,
 	existing: ExistingIssue,
-	transition: Readonly<{ enteringInReview: boolean; enteringDone: boolean }>
+	transition: Readonly<{ enteringInReview: boolean; enteringDone: boolean }>,
+	reads: StatusReads
 ): Promise<void> {
 	const { enteringInReview, enteringDone } = transition;
 	if (!enteringInReview && !enteringDone) return;
 
 	if (enteringInReview) {
-		const hasLiveAgentLease = await issueHasLiveAgentLease(ctx, existing.id);
+		const hasLiveAgentLease = (await agentFlags(reads)).liveLease;
 		if (hasLiveAgentLease) {
 			assertCompletionReportPresent(data);
 		}
 	}
 
 	if (enteringDone) {
-		const everAgentWorked = await issueEverHadAgentLease(ctx, existing.id);
+		const everAgentWorked = (await agentFlags(reads)).everLeased;
 		if (everAgentWorked && existing.completionReportAt == null && !data.completionReport) {
 			throw new ValidationError({
 				formErrors: [
@@ -1316,23 +1315,38 @@ async function assertReviewGate(
 }
 
 // PROJ-375: audit-after-the-fact replacement for the removed done-gate block. Only
-// flags a call that's actually agent-initiated — `isLiveAgentSessionId` checks the
-// session is real and live, not just a self-declared string, so a caller can't get
-// flagged/unflagged by lease state (the bug that started this ticket: an agent that
-// released its lease before closing slipped the old gate unintentionally). A caller
-// can still dodge the flag by omitting agentSessionId entirely — accepted limitation,
-// see the module doc on evidence-classification.ts.
-async function computeNeedsAudit(ctx: ServiceCtx, data: UpdateIssueData): Promise<boolean> {
+// flags a call that's actually agent-initiated — `sessionLive` checks the session is
+// real and live, not just a self-declared string, so a caller can't get flagged/unflagged
+// by lease state. A caller can still dodge the flag by omitting agentSessionId
+// entirely — accepted limitation, see the module doc on evidence-classification.ts.
+async function computeNeedsAudit(data: UpdateIssueData, reads: StatusReads): Promise<boolean> {
 	if (!data.agentSessionId) return false;
-	if (!(await isLiveAgentSessionId(ctx, data.agentSessionId))) return false;
+	if (!(await agentFlags(reads)).sessionLive) return false;
 	if (!data.completionReport) return true;
 	return !isExternallyVerifiableEvidence(data.completionReport.verification);
+}
+
+type StatusReads = {
+	status?: ReturnType<typeof resolveStatus>;
+	flags?: Promise<AgentWorkFlags | undefined>;
+};
+
+function startedEarly<T>(p: Promise<T>): Promise<T> {
+	p.catch(() => {});
+	return p;
+}
+
+async function agentFlags(reads: StatusReads): Promise<AgentWorkFlags> {
+	const flags = await reads.flags;
+	if (!flags) throw new Error("updateIssue: agent work flags were not read");
+	return flags;
 }
 
 async function applyStatusFields(
 	ctx: ServiceCtx,
 	data: UpdateIssueData,
-	existing: ExistingIssue
+	existing: ExistingIssue,
+	reads: StatusReads
 ): Promise<{
 	setValues: SetValues;
 	reviewOrDoneTransition: boolean;
@@ -1360,11 +1374,8 @@ async function applyStatusFields(
 	// PROJ-870: resolveStatus returns the category from the same row lookup that resolves
 	// the status id/key, replacing the separate fetchStatusCategory re-query of that id and
 	// the COALESCE((SELECT category ...)) subquery that used to sit in the UPDATE.
-	const resolved = await resolveStatus(
-		ctx,
-		"statusId" in data ? data.statusId : undefined,
-		data.status
-	);
+	const resolved = await (reads.status ??
+		resolveStatus(ctx, "statusId" in data ? data.statusId : undefined, data.status));
 	const { id: resolvedStatusId, key: resolvedStatusKey } = resolved;
 	const newStatusCategory = resolved.category ?? undefined;
 
@@ -1375,7 +1386,7 @@ async function applyStatusFields(
 		newStatusCategory,
 		newIsReviewStep
 	);
-	await assertReviewGate(ctx, data, existing, transition);
+	await assertReviewGate(data, existing, transition, reads);
 
 	const setValues: SetValues = {
 		status: resolvedStatusKey,
@@ -1383,7 +1394,7 @@ async function applyStatusFields(
 		statusCategory: resolved.category ?? "",
 	};
 	if (transition.enteringDone) {
-		setValues.needsAudit = await computeNeedsAudit(ctx, data);
+		setValues.needsAudit = await computeNeedsAudit(data, reads);
 	}
 
 	Object.assign(
@@ -1523,7 +1534,8 @@ async function buildUpdateSetValues(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
 	data: UpdateIssueData,
-	existing: ExistingIssue
+	existing: ExistingIssue,
+	reads: StatusReads
 ): Promise<{
 	setValues: SetValues;
 	recordCompletionReport: boolean;
@@ -1534,7 +1546,7 @@ async function buildUpdateSetValues(
 	closing: boolean;
 }> {
 	const setValues: SetValues = { updatedAt: now(), ...buildSimpleFields(data) };
-	const statusFields = await applyStatusFields(ctx, data, existing);
+	const statusFields = await applyStatusFields(ctx, data, existing, reads);
 	Object.assign(setValues, statusFields.setValues);
 	const reviewOrDoneTransition = statusFields.reviewOrDoneTransition;
 	if ("typeId" in data) {
@@ -1558,7 +1570,7 @@ async function buildUpdateSetValues(
 		(isDoneState(existing.statusCategory, existing.status) || existing.statusIsReviewStep);
 	if (reviseCompletionReport && data.agentSessionId) {
 		if (isDoneState(existing.statusCategory, existing.status)) {
-			setValues.needsAudit = await computeNeedsAudit(ctx, data);
+			setValues.needsAudit = await computeNeedsAudit(data, reads);
 		}
 	}
 	if (data.completionReport && !statusMoves && !reviseCompletionReport && !recordCompletionReport) {
@@ -1700,6 +1712,24 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	const orm = drizzle(ctx.db, { schema });
 
+	const statusChange = data.status !== undefined || "statusId" in data;
+	const statusRead = statusChange
+		? startedEarly(resolveStatus(ctx, "statusId" in data ? data.statusId : undefined, data.status))
+		: undefined;
+	const readFlags = () => readAgentWorkFlags(ctx, id, data.agentSessionId);
+	const statusReads: StatusReads = {
+		status: statusRead,
+		flags:
+			data.agentSessionId && data.completionReport
+				? startedEarly(readFlags())
+				: statusRead &&
+					startedEarly(
+						statusRead.then((s) =>
+							s.isReviewStep || s.category === "done" || s.key === "done" ? readFlags() : undefined
+						)
+					),
+	};
+
 	// PROJ-1018: these reads don't depend on each other, so they run concurrently instead
 	// of one round trip after another.
 	const [parentCheck, existingRead, assigneeCheck, customFieldsRead] = await Promise.allSettled([
@@ -1746,7 +1776,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		enteringClosed,
 		gateRejectionStatement,
 		closing,
-	} = await buildUpdateSetValues(ctx, orm, data, existing);
+	} = await buildUpdateSetValues(ctx, orm, data, existing, statusReads);
 
 	const cfWrites = settledValue(customFieldsRead);
 
@@ -1882,6 +1912,17 @@ async function handleLastChildClosed(
 	{ parentReadyToClose: { ref: string } } | { parentClosed: { ref: string } } | undefined
 > {
 	if (!existing.parentId) return undefined;
+	const openRead = startedEarly(
+		orm.$count(
+			schema.issues,
+			and(
+				eq(schema.issues.parentId, existing.parentId),
+				eq(schema.issues.workspaceId, ctx.workspaceId),
+				notInArray(schema.issues.statusCategory, ["done", "cancelled"]),
+				notInArray(schema.issues.status, ["done", "cancelled"])
+			)
+		)
+	);
 	const parent = await orm
 		.select({
 			id: schema.issues.id,
@@ -1919,16 +1960,7 @@ async function handleLastChildClosed(
 	if (isCancelledState(parent.statusCategory, parent.status)) return undefined;
 
 	// Open = neither done nor cancelled, by category or by legacy key (see isDoneState).
-	const open = await orm.$count(
-		schema.issues,
-		and(
-			eq(schema.issues.parentId, parent.id),
-			eq(schema.issues.workspaceId, ctx.workspaceId),
-			notInArray(schema.issues.statusCategory, ["done", "cancelled"]),
-			notInArray(schema.issues.status, ["done", "cancelled"])
-		)
-	);
-	if (open > 0) return undefined;
+	if ((await openRead) > 0) return undefined;
 
 	const ref = `${parent.projectKey}-${parent.number}`;
 	if (!parent.epicAutoClose || !canWrite) return { parentReadyToClose: { ref } };

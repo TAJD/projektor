@@ -11,10 +11,8 @@ export const ACCESS_GUARD_ALLOWLIST: Record<string, string> = {
 		"Workspace owner only; owners bypass project access by design. Delete is scoped by workspace_id.",
 	"projects:updateProject":
 		"Workspace owner/admin only (member/viewer rejected up front); admins bypass project access by design.",
-	"issue-leases:issueHasLiveAgentLease":
-		"Internal boolean probe used by issue update/review gating after the caller already resolved the issue through the guard; workspace-scoped and returns no issue data.",
-	"issue-leases:issueEverHadAgentLease":
-		"Same as issueHasLiveAgentLease: internal boolean probe after the guarded issue load; returns no issue data.",
+	"issue-leases:readAgentWorkFlags":
+		"PROJ-1059: replaces the issueHasLiveAgentLease/issueEverHadAgentLease probes. Internal boolean probe for updateIssue's review/done gating; started alongside updateIssue's guarded issue load and read only after that guard passes. Workspace-scoped and returns no issue data.",
 	"issue-leases:buildReleaseLeaseForClosedIssueStatement":
 		"PROJ-928: internal cleanup called from updateIssue only after that call's own access guard already authorized the status change; workspace-scoped write, returns no issue data.",
 	"file-claims:buildReleaseClaimsForClosedIssueStatement":
