@@ -67,6 +67,17 @@ describe("Issue leases API (PROJ-184)", () => {
 		expect(lease.agentSessionId).toBe(agent);
 	});
 
+	it("claims with an empty body when the credential has one live session (PROJ-895)", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "No body" });
+		const agent = await registerAgent("solo");
+		const res = await SELF.fetch(`http://localhost/api/issues/${issue.id}/claim`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(201);
+		expect(((await res.json()) as { agentSessionId: string }).agentSessionId).toBe(agent);
+	});
+
 	it("rejects a second claim while the first holder is live", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Contended" });
 		const a1 = await registerAgent("a1");

@@ -23,6 +23,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	annotations?: MCPToolAnnotations;
 	workspace?: false;
 	bodyKey?: string;
+	mcpDefaults?: Record<string, unknown>;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
 	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
@@ -71,13 +72,22 @@ export function toMcpTool(op: Operation): MCPTool {
 			}
 		},
 	});
+	const props = inputSchema.properties as Record<string, Record<string, unknown>> | undefined;
+	for (const [key, value] of Object.entries(op.mcpDefaults ?? {})) {
+		if (props?.[key]) props[key].default = value;
+	}
 	return {
 		name: op.id,
 		description: op.summary,
 		inputSchema,
 		annotations: annotationsFor(op),
 		handler: async (raw, ctx) => {
-			const input = parseInput(op, ctx, dropRejectedNulls(op.input, raw));
+			const args = dropRejectedNulls(op.input, raw);
+			const input = parseInput(
+				op,
+				ctx,
+				op.mcpDefaults ? { ...op.mcpDefaults, ...(args as object) } : args
+			);
 			const result = await op.run(ctx, input);
 			return op.mcpResult ? op.mcpResult(result, input, ctx) : result;
 		},
@@ -127,12 +137,13 @@ export function operationsRouter(base: string, ops: Operation[]) {
 		if (!op.path.startsWith(base)) throw new Error(`${op.id}: ${op.path} is outside ${base}`);
 		router.on(op.method, op.path.slice(base.length) || "/", async (c) => {
 			try {
+				const json = async () => ((await c.req.text()).trim() === "" ? {} : await jsonBody(c));
 				const body =
 					op.method === "GET" || op.method === "DELETE"
 						? fromQuery(op.input, c.req.queries())
 						: op.bodyKey
-							? { [op.bodyKey]: await jsonBody(c) }
-							: await jsonBody(c);
+							? { [op.bodyKey]: await json() }
+							: await json();
 				const raw =
 					typeof body === "object" && body !== null && !Array.isArray(body)
 						? { ...body, ...c.req.param() }
