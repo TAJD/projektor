@@ -757,7 +757,7 @@ describe("Workspace brand (PROJ-761)", () => {
 		expect(res.status).toBe(404);
 	});
 
-	it("review finding 4: PATCH /:slug/brand operates on the header-resolved workspace, not the URL slug, and doesn't touch the URL's workspace", async () => {
+	it("review finding 4: PATCH /:slug/brand with a URL slug that isn't the header's workspace is a 404 and touches neither", async () => {
 		const other = await seedFixture({ role: "owner" });
 
 		const patchRes = await SELF.fetch(
@@ -768,16 +768,12 @@ describe("Workspace brand (PROJ-761)", () => {
 				body: JSON.stringify({ displayName: "Header Workspace" }),
 			}
 		);
-		expect(patchRes.status).toBe(200);
-		const patched = (await patchRes.json()) as { displayName: string | null };
-		expect(patched.displayName).toBe("Header Workspace");
+		expect(patchRes.status).toBe(404);
 
 		const headerWsBrand = await SELF.fetch(`http://localhost/api/workspaces/${slug}/brand`, {
 			headers: memberHeaders,
 		});
-		expect(((await headerWsBrand.json()) as { displayName: string | null }).displayName).toBe(
-			"Header Workspace"
-		);
+		expect(((await headerWsBrand.json()) as { displayName: string | null }).displayName).toBeNull();
 
 		const otherOwnerHeaders = authHeaders(other.token, other.workspace.slug);
 		const otherWsBrand = await SELF.fetch(

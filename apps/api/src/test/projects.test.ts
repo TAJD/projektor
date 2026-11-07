@@ -4,6 +4,8 @@ import {
 	authHeaders,
 	type JsonRpcError,
 	type JsonRpcResult,
+	seedGroupGrant,
+	seedWorkspace,
 	seedWorkspaceRoles,
 	toolError,
 } from "./helpers";
@@ -38,6 +40,7 @@ describe("Projects REST", () => {
 	let viewerToken: string;
 	let slug: string;
 	let _workspaceId: string;
+	let memberId: string;
 	let ownerHeaders: Record<string, string>;
 	let memberHeaders: Record<string, string>;
 	let viewerHeaders: Record<string, string>;
@@ -48,6 +51,7 @@ describe("Projects REST", () => {
 		_workspaceId = roles.workspace.id;
 		ownerToken = roles.owner.token;
 		memberToken = roles.member.token;
+		memberId = roles.member.user.id;
 		viewerToken = roles.viewer.token;
 		ownerHeaders = authHeaders(ownerToken, slug);
 		memberHeaders = authHeaders(memberToken, slug);
@@ -132,6 +136,33 @@ describe("Projects REST", () => {
 		};
 		expect(await keys("")).toEqual(["LIVE"]);
 		expect(await keys("?includeArchived=true")).toEqual(["LIVE", "OLD"]);
+	});
+
+	it("GET /api/workspaces/:slug/projects shows a member only granted projects", async () => {
+		const ids: Record<string, string> = {};
+		for (const key of ["LIVE", "HIDDEN"]) {
+			const res = await SELF.fetch("http://localhost/api/projects", {
+				method: "POST",
+				headers: ownerHeaders,
+				body: JSON.stringify({ name: key, key }),
+			});
+			ids[key] = ((await res.json()) as { id: string }).id;
+		}
+		await seedGroupGrant(_workspaceId, memberId, ids.LIVE);
+		const res = await SELF.fetch(
+			`http://localhost/api/workspaces/${slug}/projects?includeArchived=true`,
+			{ headers: memberHeaders }
+		);
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as { key: string }[]).map((p) => p.key)).toEqual(["LIVE"]);
+	});
+
+	it("a path slug that is not the request's workspace is a 404", async () => {
+		const other = await seedWorkspace();
+		const res = await SELF.fetch(`http://localhost/api/workspaces/${other.slug}/projects`, {
+			headers: ownerHeaders,
+		});
+		expect(res.status).toBe(404);
 	});
 
 	it("POST /api/projects rejects viewer role (403)", async () => {
