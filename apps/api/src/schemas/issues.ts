@@ -34,7 +34,17 @@ export const CompletionReportSchema = z
 		// (same parent, same labels, linked follows_from) is created carrying this text.
 		remainder: z.preprocess(
 			(v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
-			z.string().trim().min(1).max(20000).optional()
+			z
+				.string()
+				.trim()
+				.max(20000)
+				.optional()
+				.meta({
+					description:
+						"What is NOT done. Only acted on in the call that moves the issue to done (ignored for in_review/other updates; it is still recorded in the report comment). When it is, a follow-up issue is created " +
+						"under the same parent with the same labels, linked follows_from this one; its " +
+						"ref is returned as followUp.ref",
+				})
 		),
 	})
 	.strict();
