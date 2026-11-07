@@ -1076,7 +1076,7 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 			formErrors: [],
 			fieldErrors: {
 				completionReport: [
-					"completionReport.summary and completionReport.verification are required for an agent to create an issue in in_review or done (PROJ-254)",
+					"A create with agentSessionId into in_review or done requires completionReport (summary and verification)",
 				],
 			},
 		});
@@ -1116,7 +1116,7 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 		}).setValues,
 	};
 	if (completionReport) stamps.completionReportAt = nowTs;
-	if (agentWork?.sessionLive) {
+	if (agentWork?.sessionLive && enteringDone) {
 		stamps.needsAudit =
 			!completionReport || !isExternallyVerifiableEvidence(completionReport.verification);
 	}

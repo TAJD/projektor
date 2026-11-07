@@ -245,7 +245,28 @@ describe("PROJ-1011: compound writes on create_issue and update_issue", () => {
 	it("update_issue rejects a comment alone and writes nothing", async () => {
 		const { err } = await call("update_issue", { id: otherRef, comment: "Just a note" });
 		expect(JSON.stringify(err)).toMatch(/add_comment/);
+		const agentSessionId = await registerAgent();
+		const withSession = await call("update_issue", {
+			id: otherRef,
+			agentSessionId,
+			comment: "Just a note",
+		});
+		expect(JSON.stringify(withSession.err)).toMatch(/add_comment/);
 		expect(await comments(otherId)).toHaveLength(0);
+	});
+
+	it("an agent's create into in_review is not flagged for audit", async () => {
+		const agentSessionId = await registerAgent();
+		const { err, data } = await call("create_issue", {
+			projectId,
+			title: "Awaiting review",
+			status: "in_review",
+			agentSessionId,
+			completionReport: { summary: "Ready", verification: "I eyeballed it" },
+		});
+		expect(err).toBeUndefined();
+		expect(data.needsAudit).toBeUndefined();
+		expect((await issueRow(data.id))?.needs_audit).toBe(0);
 	});
 
 	it("REST create accepts the compound fields", async () => {

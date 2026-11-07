@@ -90,9 +90,13 @@ export const UpdateIssueSchema = z
 		comment: CommentBodySchema.optional(),
 	})
 	.strict()
-	.refine((obj) => Object.keys(obj).some((k) => k !== "comment"), {
-		message: "Nothing to update (use add_comment for a comment alone)",
-	});
+	.refine(
+		(obj) =>
+			obj.comment === undefined
+				? Object.keys(obj).length > 0
+				: Object.keys(obj).some((k) => k !== "comment" && k !== "agentSessionId"),
+		{ message: "Nothing to update (use add_comment for a comment alone)" }
+	);
 
 export const IssueListCursorInput = z.union([
 	z.number().int().nonnegative(),
