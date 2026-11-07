@@ -2779,7 +2779,7 @@ describe("PROJ-931 — compact MCP responses", () => {
 		});
 		expect(res.error).toBeUndefined();
 		const issue = JSON.parse(res.result!.content[0].text) as Record<string, unknown>;
-		expect(Object.keys(issue).sort()).toEqual(["id", "priority", "title"]);
+		expect(Object.keys(issue).sort()).toEqual(["id", "priority", "title", "version"]);
 		expect(issue.title).toBe("Fields test");
 	});
 
@@ -2812,6 +2812,7 @@ describe("PROJ-931 — compact MCP responses", () => {
 			"links",
 			"rollup",
 			"sprint_id",
+			"version",
 		]);
 		expect(issue.assignee_id).toBeNull();
 		expect(issue.sprint_id).toBeNull();

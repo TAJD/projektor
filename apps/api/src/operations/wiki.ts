@@ -22,6 +22,7 @@ const base = {
 
 const WIKI = "/api/wiki";
 const PAGE = `${WIKI}/:slug`;
+const WIKI_CHANGES_DEFAULT_WINDOW_SECONDS = 7 * 24 * 60 * 60;
 
 const WELL_KNOWN_TYPES = WIKI_WELL_KNOWN_TYPES.join("|");
 
@@ -408,10 +409,10 @@ export const wikiOperations = [
 			"is watching (directly or via a subtree watch). A `deleted` entry's slug/title/" +
 			"projectId reflect the page as it was just before deletion (the row itself is gone).",
 		input: z.object({
-			since: z
-				.number()
-				.optional()
-				.meta({ description: "Unix seconds; only changes strictly after this are returned" }),
+			since: z.number().optional().meta({
+				description:
+					"Unix seconds; only changes strictly after this are returned. Defaults to 7 days ago",
+			}),
 			cursor: z
 				.string()
 				.optional()
@@ -425,19 +426,25 @@ export const wikiOperations = [
 				description: "Restrict to pages the caller is watching (directly or via subtree)",
 			}),
 		}),
-		run: (ctx, { cursor, ...rest }) => {
-			const since = cursor ? Number(cursor) : rest.since;
-			if (since === undefined || Number.isNaN(since)) {
+		run: async (ctx, { cursor, ...rest }) => {
+			const since = cursor
+				? Number(cursor)
+				: (rest.since ?? Math.floor(Date.now() / 1000) - WIKI_CHANGES_DEFAULT_WINDOW_SECONDS);
+			if (Number.isNaN(since)) {
 				throw new ValidationError({
 					formErrors: [],
-					fieldErrors: { since: ["pass since (unix seconds) or cursor from a previous `next`"] },
+					fieldErrors: { cursor: ["pass the previous page's `next` unchanged"] },
 				});
 			}
-			return wikiWatchersService.listWikiChanges(ctx, { ...rest, since });
+			return { ...(await wikiWatchersService.listWikiChanges(ctx, { ...rest, since })), since };
 		},
-		mcpResult: (result, input) => {
-			const since = input.cursor ? Number(input.cursor) : (input.since as number);
-			const r = result as { changes: Array<{ createdAt: number }>; nextSince: number };
+		mcpResult: (result) => {
+			const r = result as {
+				changes: Array<{ createdAt: number }>;
+				nextSince: number;
+				since: number;
+			};
+			const since = r.since;
 			const events = r.changes;
 			const page = toPage(events, r.nextSince > since ? r.nextSince : null);
 			return capPage(page, {
@@ -559,6 +566,7 @@ export const wikiOperations = [
 		method: "GET",
 		path: PAGE,
 		tier: "read",
+		versioned: true,
 		summary:
 			"Get a wiki page by slug. Long pages are windowed: `content` is at most `maxChars` " +
 			"(default 8000, max 20000) and `totalChars` is the full length; when `next` is present pass it " +

@@ -845,8 +845,9 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 		.get();
 	// PROJ-483: live page always wins over a redirect, so reusing an old slug for a
 	// new/renamed page never leaves getWikiPage returning an ambiguous result.
-	const page = direct ?? (await resolveWikiPageByRedirect(orm, ctx.workspaceId, slugOrId));
-	if (!page) throw new NotFoundError("Wiki page not found");
+	const found = direct ?? (await resolveWikiPageByRedirect(orm, ctx.workspaceId, slugOrId));
+	if (!found) throw new NotFoundError("Wiki page not found");
+	const { version: _writeCounter, ...page } = found as typeof found & { version?: number };
 	await assertWikiPageVisible(ctx, page.project_id);
 	return {
 		...page,

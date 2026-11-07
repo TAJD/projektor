@@ -6,6 +6,7 @@ import { serviceErrToResponse } from "../http/error-adapter";
 import { CREATE, DESTRUCTIVE, IDEMPOTENT_WRITE, READ } from "../mcp/annotations";
 import { ForbiddenError, ValidationError } from "../services/errors";
 import { ctxFromHono, type ServiceCtx } from "../services/types";
+import { hashWorkflowContent } from "../services/workflow";
 
 export type Tier = "read" | "write" | "destructive" | "admin";
 
@@ -26,6 +27,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	mcpDefaults?: Record<string, unknown>;
 	restAliases?: Record<string, string>;
 	headers?: (result: unknown) => Record<string, string>;
+	versioned?: true;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
 	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
@@ -59,8 +61,18 @@ function annotationsFor(op: Operation): MCPToolAnnotations {
 	return op.method === "POST" ? CREATE : IDEMPOTENT_WRITE;
 }
 
+const IfVersion = z
+	.string()
+	.optional()
+	.meta({
+		description:
+			"The `version` from an earlier call with the same arguments. If the result is unchanged you get " +
+			"{unchanged: true, version} instead of the full result",
+	});
+
 export function toMcpTool(op: Operation): MCPTool {
-	const { $schema: _, ...inputSchema } = z.toJSONSchema(op.input, {
+	const advertised = op.versioned ? op.input.extend({ ifVersion: IfVersion }) : op.input;
+	const { $schema: _, ...inputSchema } = z.toJSONSchema(advertised, {
 		io: "input",
 		reused: "inline",
 		override: ({ jsonSchema: s }) => {
@@ -87,6 +99,16 @@ export function toMcpTool(op: Operation): MCPTool {
 		inputSchema,
 		annotations: annotationsFor(op),
 		handler: async (raw, ctx) => {
+			let ifVersion: unknown;
+			if (op.versioned && typeof raw === "object" && raw !== null) {
+				({ ifVersion, ...raw } = raw as Record<string, unknown>);
+				if (ifVersion != null && typeof ifVersion !== "string") {
+					throw new ValidationError({
+						formErrors: [],
+						fieldErrors: { ifVersion: ["Expected a string"] },
+					});
+				}
+			}
 			const args = normalizeArgs(op.input, raw);
 			const input = parseInput(
 				op,
@@ -94,7 +116,12 @@ export function toMcpTool(op: Operation): MCPTool {
 				op.mcpDefaults ? { ...op.mcpDefaults, ...(args as object) } : args
 			);
 			const result = await op.run(ctx, input);
-			return op.mcpResult ? op.mcpResult(result, input, ctx) : result;
+			const output = op.mcpResult ? await op.mcpResult(result, input, ctx) : result;
+			if (!op.versioned) return output;
+			const version = await hashWorkflowContent(JSON.stringify(output));
+			return ifVersion === version
+				? { unchanged: true, version }
+				: { ...(output as Record<string, unknown>), version };
 		},
 	};
 }
