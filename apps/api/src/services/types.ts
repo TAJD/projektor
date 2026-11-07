@@ -8,7 +8,7 @@ import { parseFileClaimTtlSeconds } from "./file-claims";
 export type ServiceCtx = PluginContext;
 
 export function ctxFromHono(c: Context<HonoEnv>): ServiceCtx {
-	const workspace = c.get("workspace") as { id: string };
+	const workspace = c.get("workspace") as { id: string; name: string; slug: string };
 	const user = c.get("user") as { id: string };
 	const role = c.get("role") as Role | undefined;
 	const authKind = c.get("authKind") as "human" | "agent" | undefined;
@@ -17,6 +17,8 @@ export function ctxFromHono(c: Context<HonoEnv>): ServiceCtx {
 		kv: c.env.KV,
 		r2: c.env.R2,
 		workspaceId: workspace.id,
+		workspaceSlug: workspace.slug,
+		workspaceName: workspace.name,
 		userId: user.id,
 		role,
 		authKind,
@@ -28,6 +30,7 @@ export function ctxFromHono(c: Context<HonoEnv>): ServiceCtx {
 		config: {
 			fileClaimTtlSeconds: parseFileClaimTtlSeconds(c.env.FILE_CLAIM_TTL_SECONDS),
 			mcpUsage: mcpUsageQuery(c.env, workspace.id),
+			defaultWorkspaceSlug: c.env.DEFAULT_WORKSPACE_SLUG ?? "projektor",
 		},
 	};
 }

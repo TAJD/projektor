@@ -1,78 +1,26 @@
-import type { HonoEnv } from "@projektor/types";
-import { Hono } from "hono";
 import { jsonBody } from "../http/body";
 import { serviceErrToResponse } from "../http/error-adapter";
 import { isPublicViewer, requireInteractiveHuman } from "../middleware/auth";
 import { oauthApi } from "../oauth/provider";
+import { operationsRouter } from "../operations/define";
+import { workspaceOperations } from "../operations/workspaces";
 import { listConnectorGrants, revokeConnectorGrant } from "../services/oauth";
 import { ctxFromHono } from "../services/types";
 import {
 	createToken,
-	deleteWorkspace,
 	deleteWorkspaceLogo,
-	getWorkspaceBrand,
 	getWorkspaceLogoObject,
 	getWorkspaceMcpInfo,
-	getWorkspaceWithMembers,
-	inviteMember,
 	listTokens,
-	removeMember,
 	revokeToken,
-	updateMemberRole,
-	updateWorkspace,
-	updateWorkspaceBrand,
 	uploadWorkspaceLogo,
 } from "../services/workspaces";
 
-const router = new Hono<HonoEnv>();
+const [list, create, ...scoped] = workspaceOperations;
 
-// GET / and POST / are handled inline in index.ts (no workspace context yet at that point)
+export const workspaceRootRouter = operationsRouter("/api/workspaces", [list, create]);
 
-router.get("/:slug", async (c) => {
-	const ctx = ctxFromHono(c);
-	const workspace = c.get("workspace") as { id: string; name: string; slug: string };
-	try {
-		return c.json(await getWorkspaceWithMembers(ctx, workspace));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.patch("/:slug", async (c) => {
-	const ctx = ctxFromHono(c);
-	try {
-		return c.json(await updateWorkspace(ctx, await jsonBody(c)));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.post("/:slug/members", async (c) => {
-	const ctx = ctxFromHono(c);
-	try {
-		return c.json(await inviteMember(ctx, await jsonBody(c)), 201);
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.delete("/:slug/members/:userId", async (c) => {
-	const ctx = ctxFromHono(c);
-	try {
-		return c.json(await removeMember(ctx, c.req.param("userId")));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.patch("/:slug/members/:userId", async (c) => {
-	const ctx = ctxFromHono(c);
-	try {
-		return c.json(await updateMemberRole(ctx, c.req.param("userId"), await jsonBody(c)));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
+const router = operationsRouter("/api/workspaces", scoped);
 
 // PROJ-917: workspace tokens follow the same rule as personal access tokens
 // (PROJ-903, routes/auth.ts) — minted and revoked only from an interactive human
@@ -155,37 +103,6 @@ router.delete("/:slug/connectors/:grantId", async (c) => {
 				c.req.param("grantId")
 			)
 		);
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.delete("/:slug", async (c) => {
-	const ctx = ctxFromHono(c);
-	try {
-		return c.json(
-			await deleteWorkspace(ctx, c.req.param("slug"), c.env.DEFAULT_WORKSPACE_SLUG ?? "projektor")
-		);
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.get("/:slug/brand", async (c) => {
-	const ctx = ctxFromHono(c);
-	const workspace = c.get("workspace") as { slug: string };
-	try {
-		return c.json(await getWorkspaceBrand(ctx, workspace.slug));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-router.patch("/:slug/brand", async (c) => {
-	const ctx = ctxFromHono(c);
-	const workspace = c.get("workspace") as { slug: string };
-	try {
-		return c.json(await updateWorkspaceBrand(ctx, workspace.slug, await jsonBody(c)));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

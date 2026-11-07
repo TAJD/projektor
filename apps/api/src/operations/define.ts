@@ -15,7 +15,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	path: string;
 	domain: string;
 	tier: Tier;
-	minRole?: "admin" | "member";
+	minRole?: "owner" | "admin" | "member";
 	summary: string;
 	keywords: string[];
 	input: S;
@@ -35,11 +35,10 @@ export function defineOperation<S extends z.ZodObject>(op: Operation<S>): Operat
 	return op as unknown as Operation;
 }
 
+const ROLE_RANK = { viewer: 0, member: 1, admin: 2, owner: 3 } as const;
+
 function parseInput(op: Operation, ctx: ServiceCtx, raw: unknown) {
-	if (
-		(op.minRole === "admin" && ctx.role === "member") ||
-		(op.minRole !== undefined && ctx.role === "viewer")
-	) {
+	if (op.minRole && ctx.role && ROLE_RANK[ctx.role] < ROLE_RANK[op.minRole]) {
 		throw new ForbiddenError();
 	}
 	const parsed = op.input.safeParse(raw ?? {});
@@ -61,7 +60,7 @@ export function toMcpTool(op: Operation): MCPTool {
 		override: ({ jsonSchema: s }) => {
 			if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
 			if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
-			if (s.format === "uuid") delete s.pattern;
+			if (s.format === "uuid" || s.format === "email") delete s.pattern;
 			const variants = s.anyOf;
 			if (variants?.length === 2 && variants.some((v) => v.type === "null")) {
 				const other = variants.find((v) => v.type !== "null");
@@ -149,11 +148,20 @@ export function operationsRouter(base: string, ops: Operation[]) {
 						: op.bodyKey
 							? { [op.bodyKey]: await json() }
 							: await json();
+				const params = Object.fromEntries(
+					Object.entries(c.req.param()).filter(([key]) => key in op.input.shape)
+				);
 				const raw =
 					typeof body === "object" && body !== null && !Array.isArray(body)
-						? { ...body, ...c.req.param() }
+						? { ...body, ...params }
 						: body;
-				const ctx = op.workspace === false ? ({} as ServiceCtx) : ctxFromHono(c);
+				const ctx =
+					op.workspace === false
+						? ({
+								db: c.env.DB,
+								userId: (c.get("user") as { id: string } | undefined)?.id,
+							} as ServiceCtx)
+						: ctxFromHono(c);
 				const result = await op.run(ctx, parseInput(op, ctx, raw));
 				if (op.status === 204) return c.body(null, 204);
 				return c.json(result, op.status ?? 200);
