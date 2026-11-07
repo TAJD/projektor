@@ -24,6 +24,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	workspace?: false;
 	bodyKey?: string;
 	mcpDefaults?: Record<string, unknown>;
+	queryAliases?: Record<string, string>;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
 	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
@@ -127,9 +128,14 @@ function baseType(field: z.ZodType): string {
 	return def.type;
 }
 
-function fromQuery(schema: z.ZodObject, query: Record<string, string[]>) {
+function fromQuery(
+	schema: z.ZodObject,
+	query: Record<string, string[]>,
+	aliases: Record<string, string> = {}
+) {
 	const out: Record<string, unknown> = {};
-	for (const [key, all] of Object.entries(query)) {
+	for (const [name, all] of Object.entries(query)) {
+		const key = aliases[name] ?? name;
 		const field = schema.shape[key] as z.ZodType | undefined;
 		const values = all.filter((v) => v !== "");
 		if (values.length === 0 || !field) continue;
@@ -156,7 +162,7 @@ export function operationsRouter(base: string, ops: Operation[]) {
 				const json = async () => ((await c.req.text()).trim() === "" ? {} : await jsonBody(c));
 				const body =
 					op.method === "GET" || op.method === "DELETE"
-						? fromQuery(op.input, c.req.queries())
+						? fromQuery(op.input, c.req.queries(), op.queryAliases)
 						: op.bodyKey
 							? { [op.bodyKey]: await json() }
 							: await json();
