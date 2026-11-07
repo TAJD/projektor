@@ -170,6 +170,16 @@ describe("PROJ-886: get_tool_usage reads Analytics Engine", () => {
 		expect(rest).toEqual(mcp);
 	});
 
+	it("coerces REST query numbers and ignores unknown or empty keys (PROJ-895)", async () => {
+		const get = (qs: string) =>
+			SELF.fetch(`http://localhost/api/tool-usage?${qs}`, { headers: authHeaders(token, slug) });
+		expect((await get("since=864000&until=10")).status).toBe(400);
+		expect((await get("limit=abc")).status).toBe(400);
+		const ok = await get("_=123&tool=&since=");
+		expect(ok.status).toBe(200);
+		expect(await ok.json()).toMatchObject({ available: false });
+	});
+
 	it("queries the SQL API scoped to the workspace and maps the rows", async () => {
 		const fetchMock = vi.fn(async () =>
 			Response.json({
