@@ -21,6 +21,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	input: S;
 	status?: 200 | 201;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
+	mcpResult?: (result: unknown, input: z.output<S>) => unknown;
 }
 
 export function defineOperation<S extends z.ZodObject>(op: Operation<S>): Operation {
@@ -49,6 +50,7 @@ export function toMcpTool(op: Operation): MCPTool {
 		override: ({ jsonSchema: s }) => {
 			if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
 			if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
+			if (s.format === "uuid") delete s.pattern;
 			const variants = s.anyOf;
 			if (variants?.length === 2 && variants.some((v) => v.type === "null")) {
 				const other = variants.find((v) => v.type !== "null");
@@ -64,8 +66,34 @@ export function toMcpTool(op: Operation): MCPTool {
 		description: op.summary,
 		inputSchema,
 		annotations: annotationsFor(op),
-		handler: (input, ctx) => op.run(ctx, parseInput(op, ctx, input)),
+		handler: async (raw, ctx) => {
+			const input = parseInput(op, ctx, raw);
+			const result = await op.run(ctx, input);
+			return op.mcpResult ? op.mcpResult(result, input) : result;
+		},
 	};
+}
+
+function baseType(field: z.ZodType): string {
+	let def = field._zod.def as { type: string; innerType?: z.ZodType };
+	while (def.innerType && ["optional", "default", "nullable"].includes(def.type)) {
+		def = def.innerType._zod.def as typeof def;
+	}
+	return def.type;
+}
+
+function fromQuery(schema: z.ZodObject, query: Record<string, string>) {
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(query)) {
+		if (value === "") continue;
+		const field = schema.shape[key] as z.ZodType | undefined;
+		const kind = field ? baseType(field) : "";
+		if (kind === "number") out[key] = Number(value);
+		else if (kind === "boolean" && (value === "true" || value === "1")) out[key] = true;
+		else if (kind === "boolean" && (value === "false" || value === "0")) out[key] = false;
+		else out[key] = value;
+	}
+	return out;
 }
 
 export function operationsRouter(base: string, ops: Operation[]) {
@@ -75,7 +103,9 @@ export function operationsRouter(base: string, ops: Operation[]) {
 		router.on(op.method, op.path.slice(base.length) || "/", async (c) => {
 			try {
 				const body =
-					op.method === "GET" || op.method === "DELETE" ? c.req.query() : await jsonBody(c);
+					op.method === "GET" || op.method === "DELETE"
+						? fromQuery(op.input, c.req.query())
+						: await jsonBody(c);
 				const raw =
 					typeof body === "object" && body !== null && !Array.isArray(body)
 						? { ...body, ...c.req.param() }

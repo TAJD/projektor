@@ -470,4 +470,16 @@ describe("GET /api/projects/:id/activity (PROJ-245)", () => {
 		});
 		expect(res.status).toBe(404);
 	});
+
+	it("rejects a non-numeric limit and treats an empty one as absent (PROJ-895)", async () => {
+		const bad = await SELF.fetch(`http://localhost/api/projects/${projectId}/activity?limit=abc`, {
+			headers,
+		});
+		expect(bad.status).toBe(400);
+		const empty = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/activity?limit=&since=`,
+			{ headers }
+		);
+		expect(empty.status).toBe(200);
+	});
 });

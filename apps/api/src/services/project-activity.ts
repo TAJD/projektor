@@ -1,13 +1,7 @@
-import { z } from "zod";
+import { ListProjectActivitySchema } from "../schemas/project-activity";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
-
-const ListProjectActivitySchema = z.object({
-	projectId: z.string().uuid(),
-	since: z.number().int().optional(),
-	limit: z.number().int().min(1).max(200).default(50),
-});
 
 export interface ActivityEvent {
 	type: string;
