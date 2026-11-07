@@ -16,6 +16,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { TOOL_DOMAINS } from "../mcp/catalog";
 import { coreMCPTools } from "../routes/mcp";
@@ -349,5 +350,25 @@ describe("MCP surface parity (PROJ-623)", () => {
 				.map(([k]) => k);
 			expect(redundant).toEqual([]);
 		});
+	});
+
+	it("serves every registry operation as an MCP tool and under a mounted REST base", async () => {
+		const mounts = [
+			...readFileSync(join(SRC, "index.ts"), "utf8").matchAll(/app\.route\("([^"]+)"/g),
+		].map((m) => m[1]);
+		const modules = await Promise.all(operationFiles.map((f) => import(pathToFileURL(f).href)));
+		const ops = modules.flatMap((mod) => Object.values(mod).flat()) as Array<{
+			id: string;
+			path: string;
+		}>;
+		expect(ops.length).toBeGreaterThan(0);
+		const unserved = ops
+			.filter(
+				(op) =>
+					!runtimeToolNames.includes(op.id) ||
+					!mounts.some((base) => op.path === base || op.path.startsWith(`${base}/`))
+			)
+			.map((op) => op.id);
+		expect(unserved).toEqual([]);
 	});
 });

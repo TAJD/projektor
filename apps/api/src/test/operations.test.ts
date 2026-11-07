@@ -1,6 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { operationsRouter } from "../operations/define";
+import { operationsRouter, toMcpTool } from "../operations/define";
 import { taskTypeOperations } from "../operations/task-types";
 import {
 	authHeaders,
@@ -55,6 +55,28 @@ describe("PROJ-895: operations registry REST adapter", () => {
 		).json()) as Array<{ id: string; name: string }>;
 		expect(list.find((t) => t.id === target.id)?.name).toBe("Renamed");
 		expect(list.find((t) => t.id === other.id)?.name).toBe("Chore");
+	});
+
+	it("gives nullable fields a type list the MCP arg validator enforces", () => {
+		const update = taskTypeOperations.map(toMcpTool).find((t) => t.name === "update_task_type");
+		const props = update?.inputSchema.properties as Record<string, Record<string, unknown>>;
+		expect(props.color).toEqual({ type: ["string", "null"], maxLength: 50 });
+		expect(props.position).toEqual({ type: "integer", minimum: 0 });
+	});
+
+	it("does not clear the workspace default when the task type does not exist", async () => {
+		const current = await seedTaskType(workspaceId, { key: "task", name: "Task", isDefault: true });
+		const res = await SELF.fetch("http://localhost/api/task-types/does-not-exist", {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ isDefault: true }),
+		});
+		expect(res.status).toBe(404);
+		const list = (await (
+			await SELF.fetch("http://localhost/api/task-types", { headers: authHeaders(token, slug) })
+		).json()) as Array<{ id: string; is_default?: number; isDefault?: number | boolean }>;
+		const row = list.find((t) => t.id === current.id);
+		expect(row?.is_default ?? row?.isDefault).toBeTruthy();
 	});
 
 	it("refuses to mount an operation outside the router's base path", () => {

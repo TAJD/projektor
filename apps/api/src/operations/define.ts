@@ -45,9 +45,18 @@ function annotationsFor(op: Operation): MCPToolAnnotations {
 export function toMcpTool(op: Operation): MCPTool {
 	const { $schema: _, ...inputSchema } = z.toJSONSchema(op.input, {
 		io: "input",
+		reused: "inline",
 		override: ({ jsonSchema: s }) => {
 			if (s.maximum === Number.MAX_SAFE_INTEGER) delete s.maximum;
 			if (s.minimum === Number.MIN_SAFE_INTEGER) delete s.minimum;
+			const variants = s.anyOf;
+			if (variants?.length === 2 && variants.some((v) => v.type === "null")) {
+				const other = variants.find((v) => v.type !== "null");
+				if (typeof other?.type === "string") {
+					delete s.anyOf;
+					Object.assign(s, other, { type: [other.type, "null"] });
+				}
+			}
 		},
 	});
 	return {
