@@ -129,6 +129,13 @@ function baseType(field: z.ZodType): string {
 	return def.type;
 }
 
+function aliasConflict(name: string, key: string) {
+	return new ValidationError({
+		formErrors: [],
+		fieldErrors: { [key]: [`Pass ${key} once; "${name}" is another name for it`] },
+	});
+}
+
 function fromQuery(
 	schema: z.ZodObject,
 	query: Record<string, string[]>,
@@ -140,15 +147,22 @@ function fromQuery(
 		const field = schema.shape[key] as z.ZodType | undefined;
 		const values = all.filter((v) => v !== "");
 		if (values.length === 0 || !field) continue;
+		if (key in out) throw aliasConflict(name, key);
 		if (baseType(field) === "array") out[key] = values;
-		else out[key] = all.length > 1 ? all : coerceScalar(field, values[0]);
+		else out[key] = values.length > 1 ? values : coerceScalar(field, values[0]);
 	}
 	return out;
 }
 
 function renameKeys(body: unknown, aliases: Record<string, string> | undefined) {
 	if (!aliases || typeof body !== "object" || body === null || Array.isArray(body)) return body;
-	return Object.fromEntries(Object.entries(body).map(([k, v]) => [aliases[k] ?? k, v]));
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(body)) {
+		const key = aliases[k] ?? k;
+		if (key in out) throw aliasConflict(k, key);
+		out[key] = v;
+	}
+	return out;
 }
 
 export function operationsRouter(base: string, ops: Operation[]) {

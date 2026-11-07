@@ -117,6 +117,7 @@ export const issueOperations = [
 		path: "/api/issues",
 		tier: "read",
 		restAliases: { project: "projectId" },
+		mcpDefaults: { bodyChars: 0 },
 		summary:
 			"List issues in the workspace, optionally filtered by status, priority, project, or assignee. " +
 			"Items omit `body` by default — pass bodyChars:N (max 1000) for a preview, or includeBody:true for whole bodies. Pass includeRollups:true " +
@@ -227,6 +228,7 @@ export const issueOperations = [
 		method: "GET",
 		path: "/api/issues/prioritized",
 		tier: "read",
+		mcpDefaults: { limit: 10, includeBacklog: true, excludeClaimed: false, includeNotReady: false },
 		summary:
 			"Return open issues ranked by a composite score: link-network centrality (in-degree) + priority + " +
 			"inverse story points. Useful for deciding what to work on next. By default, issues that fail the " +
@@ -266,6 +268,7 @@ export const issueOperations = [
 		path: "/api/issues/search",
 		tier: "read",
 		restAliases: { q: "query" },
+		mcpDefaults: { labelsMode: "all" },
 		summary:
 			"Search issues by keyword in title or body, or by exact label text (an issue whose label " +
 			"equals the whole query is a hit, listed first; case-insensitive for ASCII only). Pass `labels` to narrow keyword hits to " +
@@ -299,6 +302,7 @@ export const issueOperations = [
 		method: "GET",
 		path: "/api/issues/batch",
 		tier: "read",
+		mcpDefaults: { bodyChars: 0 },
 		summary:
 			"Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than " +
 			"repeated get_issue calls for triage. Items carry customFields but no rollup/links/" +
