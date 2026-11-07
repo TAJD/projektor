@@ -24,9 +24,9 @@ export const customFieldOperations = [
 		tier: "read",
 		summary: "List all custom field definitions for the workspace",
 		input: z.object({
-			projectId: z.string().optional().meta({
+			projectId: z.string().nullable().optional().meta({
 				description:
-					"Optional project ID to include project-scoped fields alongside workspace-wide fields",
+					"Optional project ID to include project-scoped fields alongside workspace-wide fields; null for workspace-wide fields only",
 			}),
 		}),
 		run: (ctx, { projectId }) => listCustomFieldDefs(ctx, projectId),
