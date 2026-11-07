@@ -10,8 +10,8 @@ import {
 	tokenAllows,
 } from "../auth/scopes";
 import { ensureUserProvisioned, provisionPublicViewer } from "../services/provisioning";
-import { bumpRateCounter } from "./rate-limit";
-import { mcpWorkspaceIdFromPath } from "./workspace";
+import { bumpRateCounter, tokenHashFor } from "./rate-limit";
+import { mcpWorkspaceIdFromPath, mcpWorkspaceTarget, prefetchWorkspaceLookup } from "./workspace";
 
 // PROJ-373: the shared identity anonymous requests are provisioned as when
 // PUBLIC_READ_ONLY is on. Fixed and well-known — there's exactly one, since
@@ -210,25 +210,40 @@ function checkTokenScope(
 const LAST_USED_AT_THROTTLE_SECS = 60;
 
 async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise<AuthOutcome> {
-	const hash = await hashToken(token);
-	const row = await c.env.DB.prepare(
-		`SELECT at.id, at.workspace_id, at.expires_at, at.scopes, at.last_used_at,
+	const hash = await tokenHashFor(c, token);
+	const mcpWorkspaceId = mcpWorkspaceTarget(c);
+	const row = await (mcpWorkspaceId
+		? c.env.DB.prepare(
+				`SELECT at.id, at.workspace_id, at.expires_at, at.scopes, at.last_used_at,
+              u.id as user_id, u.email, u.name,
+              w.id as ws_id, w.name as ws_name, w.slug as ws_slug, m.role as ws_role
+       FROM api_tokens at
+       LEFT JOIN users u ON u.id = at.user_id
+       LEFT JOIN workspaces w ON w.id = ?
+       LEFT JOIN workspace_members m ON m.workspace_id = w.id AND m.user_id = at.user_id
+       WHERE at.token_hash = ?`
+			).bind(mcpWorkspaceId, hash)
+		: c.env.DB.prepare(
+				`SELECT at.id, at.workspace_id, at.expires_at, at.scopes, at.last_used_at,
               u.id as user_id, u.email, u.name
        FROM api_tokens at
        LEFT JOIN users u ON u.id = at.user_id
        WHERE at.token_hash = ?`
-	)
-		.bind(hash)
-		.first<{
-			id: string;
-			user_id: string;
-			email: string;
-			name: string;
-			workspace_id: string | null;
-			expires_at: number | null;
-			scopes: string | null;
-			last_used_at: number | null;
-		}>();
+			).bind(hash)
+	).first<{
+		id: string;
+		user_id: string;
+		email: string;
+		name: string;
+		workspace_id: string | null;
+		expires_at: number | null;
+		scopes: string | null;
+		last_used_at: number | null;
+		ws_id?: string | null;
+		ws_name?: string | null;
+		ws_slug?: string | null;
+		ws_role?: string | null;
+	}>();
 
 	if (!row) {
 		return { kind: "deny", response: await tooManyAuthFailuresResponse(c, "Unauthorized") };
@@ -240,6 +255,21 @@ async function authenticateApiToken(c: Context<HonoEnv>, token: string): Promise
 	const scopes = parseScopes(row.scopes);
 	const scopeError = checkTokenScope(c, scopes);
 	if (scopeError) return { kind: "deny", response: scopeError };
+
+	if (mcpWorkspaceId) {
+		prefetchWorkspaceLookup(
+			c,
+			mcpWorkspaceId,
+			row.ws_id
+				? {
+						id: row.ws_id,
+						name: row.ws_name ?? "",
+						slug: row.ws_slug ?? "",
+						role: row.ws_role ?? null,
+					}
+				: null
+		);
+	}
 
 	c.set("user", { id: row.user_id, email: row.email, name: row.name } satisfies AuthUser);
 	c.set("tokenWorkspaceId", row.workspace_id);
@@ -668,11 +698,4 @@ function base64urlDecode(s: string): string {
 function base64urlToUint8Array(s: string): Uint8Array {
 	const binary = base64urlDecode(s);
 	return Uint8Array.from(binary, (c) => c.charCodeAt(0));
-}
-
-async function hashToken(token: string): Promise<string> {
-	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
-	return Array.from(new Uint8Array(buf))
-		.map((b) => b.toString(16).padStart(2, "0"))
-		.join("");
 }

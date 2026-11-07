@@ -110,6 +110,24 @@ function resolveWorkspaceTarget(
 	return { slug, mcpWorkspaceId };
 }
 
+type WorkspaceRow = { id: string; name: string; slug: string; role: string | null };
+
+const prefetchedLookups = new WeakMap<Request, { workspaceId: string; row: WorkspaceRow | null }>();
+
+export function mcpWorkspaceTarget(c: Context<HonoEnv>): string | undefined {
+	const headerSlug = c.req.header("X-Workspace-Slug");
+	const routingEnabled = subdomainRoutingEnabled(c.env.WORKSPACE_SUBDOMAIN_ROUTING);
+	return resolveWorkspaceTarget(c, headerSlug, routingEnabled).mcpWorkspaceId;
+}
+
+export function prefetchWorkspaceLookup(
+	c: Context<HonoEnv>,
+	workspaceId: string,
+	row: WorkspaceRow | null
+): void {
+	prefetchedLookups.set(c.req.raw, { workspaceId, row });
+}
+
 export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
 	const headerSlug = c.req.header("X-Workspace-Slug");
 	const routingEnabled = subdomainRoutingEnabled(c.env.WORKSPACE_SUBDOMAIN_ROUTING);
@@ -123,15 +141,21 @@ export async function workspaceMiddleware(c: Context<HonoEnv>, next: Next) {
 	// two sequential D1 queries, on a path every authenticated request goes through. A LEFT
 	// JOIN keeps the two outcomes distinguishable: no row at all is a missing workspace
 	// (404), a row with a null role is a non-member (403).
-	const user = c.get("user") as { id: string };
-	const lookup = `SELECT w.id, w.name, w.slug, m.role
-	                FROM workspaces w
-	                LEFT JOIN workspace_members m
-	                  ON m.workspace_id = w.id AND m.user_id = ?
-	                WHERE w.${mcpWorkspaceId ? "id" : "slug"} = ?`;
-	const row = await c.env.DB.prepare(lookup)
-		.bind(user.id, mcpWorkspaceId ?? slug)
-		.first<{ id: string; name: string; slug: string; role: string | null }>();
+	const prefetched = prefetchedLookups.get(c.req.raw);
+	let row: WorkspaceRow | null;
+	if (prefetched && mcpWorkspaceId && prefetched.workspaceId === mcpWorkspaceId) {
+		row = prefetched.row;
+	} else {
+		const user = c.get("user") as { id: string };
+		const lookup = `SELECT w.id, w.name, w.slug, m.role
+		                FROM workspaces w
+		                LEFT JOIN workspace_members m
+		                  ON m.workspace_id = w.id AND m.user_id = ?
+		                WHERE w.${mcpWorkspaceId ? "id" : "slug"} = ?`;
+		row = await c.env.DB.prepare(lookup)
+			.bind(user.id, mcpWorkspaceId ?? slug)
+			.first<WorkspaceRow>();
+	}
 
 	if (!row) return c.json({ error: "Workspace not found" }, 404);
 
