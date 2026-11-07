@@ -210,7 +210,7 @@ function pickNotFoundHint(subject: string): string | undefined {
 		return "Wiki pages are addressed by slug. Use search_wiki or wiki_tree to find one.";
 	}
 	if (subject.includes("agent session") || subject.includes("session")) {
-		return "Sessions come from register_agent; an ended session no longer exists to call.";
+		return "Start a session with start_work (claims the issue too) or register_agent; an ended session can't be reused.";
 	}
 	if (subject.includes("issue")) {
 		return "Refs look like PROJ-42 (project key + number). Use search_issues to find one.";
@@ -227,6 +227,12 @@ function conflictHint(message: string, details: Record<string, unknown> | undefi
 	}
 	if (/wip limit/i.test(message)) {
 		return "Finish or release one of the issues listed as currently held, then claim again.";
+	}
+	if (details && "heldBySelf" in details) {
+		return "This session already holds the lease. Carry on working on the issue.";
+	}
+	if ((details && "leaseAgeMinutes" in details) || /just leased by another agent/i.test(message)) {
+		return "Another agent is working on this issue. Pick another issue with get_prioritized_issues.";
 	}
 	return "Someone else's change got there first. Re-read the current state and retry.";
 }

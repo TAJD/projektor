@@ -1,9 +1,9 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, gt, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
 import { PostMessageSchema } from "../schemas/agent-messages";
 import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../schemas/file-claims";
 import { visibleProjectPredicate } from "./access";
-import { resolveAgentSessionId } from "./agent-identity";
+import { resolveAgentSessionId, SESSION_TTL_SECONDS, touchableSession } from "./agent-identity";
 import { buildPostMessageStatements } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
@@ -41,19 +41,9 @@ async function assertAgentInWorkspace(
 	if (!agent) throw new NotFoundError("Agent session not found");
 }
 
-// PROJ-929: a call that carries an already-live agentId implicitly refreshes that
-// session's heartbeat, so explicit heartbeat_agent calls become optional during a claim
-// loop. Local rather than imported from services/agents.ts for the same reason
-// SESSION_TTL_SECONDS below is duplicated: agents.ts already imports from this file
-// (releaseClaimsForAgent), so importing back would cycle.
-//
-// Deliberately gated on the session being live ALREADY (status='active' AND heartbeat
-// > cutoff), not just active — otherwise this would revive a crashed agent's session
-// merely because some other issue's claim/release call happened to name its id, which
-// would silently defeat the PROJ-636 stale-holder reclaim this same file implements: a
-// dead session must stay reclaimable, not get its heartbeat bumped by a call that isn't
-// actually coming from it.
-async function touchAgentHeartbeatIfLive(
+// A dead session must stay reclaimable (PROJ-636), so a call naming its id revives it only
+// when it comes from the credential that registered it, i.e. from the same agent.
+async function touchAgentHeartbeat(
 	orm: ReturnType<typeof drizzle>,
 	ctx: ServiceCtx,
 	agentId: string,
@@ -66,16 +56,10 @@ async function touchAgentHeartbeatIfLive(
 			and(
 				eq(schema.agentSessions.id, agentId),
 				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
-				eq(schema.agentSessions.status, "active"),
-				gt(schema.agentSessions.lastHeartbeatAt, cutoff)
+				touchableSession(ctx, cutoff)
 			)
 		);
 }
-
-// PROJ-636: mirrors SESSION_TTL_SECONDS in services/issue-leases.ts, which in turn mirrors
-// ACTIVE_TTL in services/agents.ts. Kept local for the same reason theirs are: agents.ts
-// already imports releaseClaimsForAgent from here, so importing back would cycle.
-const SESSION_TTL_SECONDS = 120;
 
 const liveCutoff = () => Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 
@@ -286,14 +270,14 @@ export async function claimFiles(ctx: ServiceCtx, raw: unknown) {
 	const orm = drizzle(ctx.db, { schema });
 
 	const projectId = await assertIssueInWorkspace(orm, ctx.workspaceId, issueId);
-	if (agentId) {
-		await assertAgentInWorkspace(orm, ctx.workspaceId, agentId);
-		// PROJ-929: refresh the acting session's heartbeat if it's already live (see
-		// touchAgentHeartbeatIfLive) — done even if the claim itself is later rejected below.
-		await touchAgentHeartbeatIfLive(orm, ctx, agentId, liveCutoff());
+	if (!agentId) return claimFilesResolved(ctx, { issueId, projectId, agentId, force, paths });
+	await assertAgentInWorkspace(orm, ctx.workspaceId, agentId);
+	const cutoff = liveCutoff();
+	try {
+		return await claimFilesResolved(ctx, { issueId, projectId, agentId, force, paths });
+	} finally {
+		await touchAgentHeartbeat(orm, ctx, agentId, cutoff);
 	}
-
-	return claimFilesResolved(ctx, { issueId, projectId, agentId, force, paths });
 }
 
 export async function claimFilesResolved(

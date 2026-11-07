@@ -1,12 +1,29 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, or, type SQL } from "drizzle-orm";
 import { ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
-// Mirrors ACTIVE_TTL in services/agents.ts (and SESSION_TTL_SECONDS in
-// services/issue-leases.ts). Duplicated rather than imported: both of those files import
-// this one, so importing back would cycle.
-const LIVE_TTL_SECONDS = 120;
+export const SESSION_TTL_SECONDS = 120;
+
+export function touchableSession(ctx: ServiceCtx, cutoff: number): SQL {
+	const live = gt(schema.agentSessions.lastHeartbeatAt, cutoff);
+	const credentialId = ctx.auth?.credentialId;
+	return and(
+		eq(schema.agentSessions.status, "active"),
+		credentialId ? or(live, eq(schema.agentSessions.credentialId, credentialId)) : live
+	) as SQL;
+}
+
+export function canReviveSession(
+	ctx: ServiceCtx,
+	session: { status: string; credential_id: string | null }
+): boolean {
+	return (
+		session.status === "active" &&
+		session.credential_id !== null &&
+		session.credential_id === ctx.auth?.credentialId
+	);
+}
 
 const MAX_NAMED_SESSIONS = 5;
 
@@ -63,7 +80,7 @@ export async function resolveAgentSessionId(
 			.orderBy(desc(schema.agentSessions.lastHeartbeatAt))
 			.limit(opts.nameSessions ? MAX_NAMED_SESSIONS + 1 : 2);
 
-	const cutoff = Math.floor(Date.now() / 1000) - LIVE_TTL_SECONDS;
+	const cutoff = Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 	let rows = await find([gt(schema.agentSessions.lastHeartbeatAt, cutoff)]);
 	// heartbeat/end must be able to reach a session that has just gone stale (that call
 	// revives it) — but only when no live session exists, so an abandoned session left

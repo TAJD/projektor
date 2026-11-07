@@ -10,6 +10,7 @@ import {
 	seedIssue,
 	seedProject,
 	seedProjectFixture,
+	seedToken,
 } from "./helpers";
 
 describe("Issue leases API (PROJ-184)", () => {
@@ -103,13 +104,93 @@ describe("Issue leases API (PROJ-184)", () => {
 		expect(lease.agentSessionId).toBe(a2);
 	});
 
-	it("refuses a claim from an agent that is not live", async () => {
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Dead claimer" });
+	it("revives a stale but active session when its own credential claims (PROJ-1010)", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Stale claimer" });
 		const a1 = await registerAgent("a1");
 		await backdateHeartbeat(a1);
 
 		const res = await claim(issue.id, a1);
-		expect(res.status).toBe(400); // ValidationError — heartbeat first
+		expect(res.status).toBe(201);
+		const row = await env.DB.prepare(
+			"SELECT last_heartbeat_at AS hb FROM agent_sessions WHERE id = ?"
+		)
+			.bind(a1)
+			.first<{ hb: number }>();
+		expect(row?.hb).toBeGreaterThan(Math.floor(Date.now() / 1000) - 120);
+	});
+
+	it("tells a revived session it already holds its own stale lease", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Mine already" });
+		const a1 = await registerAgent("a1");
+		expect((await claim(issue.id, a1)).status).toBe(201);
+		await backdateHeartbeat(a1);
+
+		const res = await claim(issue.id, a1);
+		expect(res.status).toBe(409);
+		expect(JSON.stringify(await res.json())).toContain("already leased by this session");
+	});
+
+	it("claim_files revives a stale session that re-claims its own paths", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Files" });
+		const a1 = await registerAgent("a1");
+		const claimFiles = () =>
+			SELF.fetch("http://localhost/api/file-claims", {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ issueId: issue.id, agentId: a1, paths: ["src/a.ts"] }),
+			});
+		expect((await claimFiles()).status).toBe(201);
+		await backdateHeartbeat(a1);
+
+		expect((await claimFiles()).status).toBe(201);
+		const row = await env.DB.prepare(
+			"SELECT last_heartbeat_at AS hb FROM agent_sessions WHERE id = ?"
+		)
+			.bind(a1)
+			.first<{ hb: number }>();
+		expect(row?.hb).toBeGreaterThan(Math.floor(Date.now() / 1000) - 120);
+	});
+
+	it("refuses a stale session's claim from a different credential", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Foreign claimer" });
+		const a1 = await registerAgent("a1");
+		await backdateHeartbeat(a1);
+		const other = await seedToken(workspaceId, userId);
+
+		const res = await SELF.fetch(`http://localhost/api/issues/${issue.id}/claim`, {
+			method: "POST",
+			headers: authHeaders(other, slug),
+			body: JSON.stringify({ agentId: a1 }),
+		});
+		expect(res.status).toBe(400);
+	});
+
+	it("refuses a claim from an ended session", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Ended claimer" });
+		const a1 = await registerAgent("a1");
+		const endRes = await SELF.fetch(`http://localhost/api/agents/${a1}/end`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+		});
+		expect(endRes.status).toBe(200);
+
+		const res = await claim(issue.id, a1);
+		expect(res.status).toBe(400);
+		expect(JSON.stringify(await res.json())).toContain("start_work");
+	});
+
+	it("names the holder, issue ref and lease age on a conflict (PROJ-1010)", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Held" });
+		const a1 = await registerAgent("holder-one");
+		const a2 = await registerAgent("a2");
+		expect((await claim(issue.id, a1)).status).toBe(201);
+
+		const res = await claim(issue.id, a2);
+		expect(res.status).toBe(409);
+		const text = JSON.stringify(await res.json());
+		expect(text).toContain('agent \\"holder-one\\"');
+		expect(text).toMatch(/[A-Z]+-\d+ is leased/);
+		expect(text).toContain("claimed 0 min ago");
 	});
 
 	it("release frees the issue for another agent", async () => {
