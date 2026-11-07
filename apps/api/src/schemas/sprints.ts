@@ -4,28 +4,34 @@ import { IssueIdOrRefSchema } from "./common";
 const SprintStatusEnum = z.enum(["planned", "active", "completed"]);
 
 export const ListSprintsSchema = z.object({
-	projectId: z.string().uuid(),
+	projectId: z.string().uuid().meta({ description: "Project UUID" }),
 });
 
 export const CreateSprintSchema = z.object({
 	projectId: z.string().uuid(),
 	name: z.string().min(1).max(255),
-	goal: z.string().max(2000).optional(),
-	startDate: z.number().int().optional(),
-	endDate: z.number().int().optional(),
+	goal: z.string().max(2000).optional().meta({ description: "Sprint goal description" }),
+	startDate: z.number().int().optional().meta({ description: "Unix timestamp for sprint start" }),
+	endDate: z.number().int().optional().meta({ description: "Unix timestamp for sprint end" }),
 });
 
-export const UpdateSprintSchema = z
-	.object({
-		name: z.string().min(1).max(255).optional(),
-		goal: z.string().max(2000).nullable().optional(),
-		status: SprintStatusEnum.optional(),
-		startDate: z.number().int().nullable().optional(),
-		endDate: z.number().int().nullable().optional(),
-	})
-	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
+export const UpdateSprintFields = z.object({
+	name: z.string().min(1).max(255).optional(),
+	goal: z.string().max(2000).nullable().optional(),
+	status: SprintStatusEnum.optional(),
+	startDate: z.number().int().nullable().optional(),
+	endDate: z.number().int().nullable().optional(),
+});
+
+export const UpdateSprintSchema = UpdateSprintFields.refine((obj) => Object.keys(obj).length > 0, {
+	message: "Nothing to update",
+});
 
 export const MoveIssuesToSprintSchema = z.object({
-	issueIds: z.array(IssueIdOrRefSchema).min(1).max(500),
-	sprintId: z.string().uuid(),
+	issueIds: z
+		.array(IssueIdOrRefSchema)
+		.min(1)
+		.max(500)
+		.meta({ description: "Issue UUIDs or refs like PROJ-42, may be mixed (max 500)" }),
+	sprintId: z.string().uuid().meta({ description: "Target sprint UUID" }),
 });
