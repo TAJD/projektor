@@ -18,6 +18,7 @@ export const issueLinkOperations = [
 		method: "POST",
 		path: "/api/issues/:sourceIssueId/links",
 		tier: "write",
+		minRole: "member",
 		status: 201,
 		summary:
 			"Create a typed link between two issues (blocks, blocked_by, relates_to, duplicates, follows_from). " +
@@ -31,6 +32,7 @@ export const issueLinkOperations = [
 		method: "DELETE",
 		path: "/api/issues/:issueId/links/:id",
 		tier: "destructive",
+		minRole: "member",
 		summary: "Delete an issue link by ID",
 		input: DeleteIssueLinkFields,
 		run: (ctx, { id }) => deleteLink(ctx, { id }),

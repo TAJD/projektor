@@ -238,6 +238,20 @@ describe("Issue Links role guards", () => {
 		expect(res.status).toBe(403);
 	});
 
+	it("viewer gets 403, not 400, for an invalid body (PROJ-895)", async () => {
+		const roles = await seedWorkspaceRoles();
+		const project = await seedProject(roles.workspace.id);
+		const issue = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, {
+			title: "A",
+		});
+		const res = await SELF.fetch(`http://localhost/api/issues/${issue.id}/links`, {
+			method: "POST",
+			headers: authHeaders(roles.viewer.token, roles.workspace.slug),
+			body: JSON.stringify({ foo: 1 }),
+		});
+		expect(res.status).toBe(403);
+	});
+
 	it("viewer cannot delete a link (403)", async () => {
 		const roles = await seedWorkspaceRoles();
 		const project = await seedProject(roles.workspace.id);

@@ -15,7 +15,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	path: string;
 	domain: string;
 	tier: Tier;
-	minRole?: "admin";
+	minRole?: "admin" | "member";
 	summary: string;
 	keywords: string[];
 	input: S;
@@ -29,7 +29,10 @@ export function defineOperation<S extends z.ZodObject>(op: Operation<S>): Operat
 }
 
 function parseInput(op: Operation, ctx: ServiceCtx, raw: unknown) {
-	if (op.minRole === "admin" && (ctx.role === "member" || ctx.role === "viewer")) {
+	if (
+		(op.minRole === "admin" && ctx.role === "member") ||
+		(op.minRole !== undefined && ctx.role === "viewer")
+	) {
 		throw new ForbiddenError();
 	}
 	const parsed = op.input.safeParse(raw ?? {});
