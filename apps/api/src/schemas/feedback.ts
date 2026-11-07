@@ -28,10 +28,15 @@ export const SubmitFeedbackSchema = z
 	);
 
 export const CreateFeedbackSourceSchema = z.object({
-	projectId: z.string().min(1, "projectId is required"),
+	projectId: z
+		.string()
+		.min(1, "projectId is required")
+		.meta({ description: "UUID of the project this source belongs to" }),
 	name: z.string().min(1).max(100),
 	description: z.string().max(500).optional(),
-	allowedOrigins: z.array(z.string().max(2000)).max(50).optional(),
+	allowedOrigins: z.array(z.string().max(2000)).max(50).optional().meta({
+		description: "Allowed CORS origins for browser submission; omit for no restriction",
+	}),
 });
 
 export const ListFeedbackSourcesSchema = z.object({
