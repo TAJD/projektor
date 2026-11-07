@@ -62,6 +62,8 @@ export interface PluginContext {
 	kv: KVNamespace;
 	r2: R2Bucket;
 	workspaceId: string;
+	workspaceSlug?: string;
+	workspaceName?: string;
 	userId: string;
 	role?: Role;
 	// PROJ-328: which auth path authenticated this request ("human" = Cloudflare Access
@@ -79,6 +81,7 @@ export interface PluginContext {
 	config?: {
 		fileClaimTtlSeconds?: number;
 		mcpUsage?: (filter: McpUsageFilter) => Promise<McpUsageRow[]>;
+		defaultWorkspaceSlug?: string;
 	};
 }
 

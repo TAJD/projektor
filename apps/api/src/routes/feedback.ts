@@ -9,12 +9,9 @@ import { ForbiddenError, NotFoundError, ValidationError } from "../services/erro
 import {
 	bulkConvertToIssue,
 	bulkMarkReviewed,
-	convertFeedbackToIssue,
 	getFeedbackSummary,
 	hashFeedbackToken,
-	listFeedback,
 	submitFeedback,
-	updateFeedbackStatus,
 } from "../services/feedback";
 import { ctxFromHono } from "../services/types";
 
@@ -112,35 +109,11 @@ export { publicRouter as feedbackPublicRouter };
 
 const authedRouter = new Hono<HonoEnv>();
 
-authedRouter.get("/:id/feedback", async (c) => {
-	const ctx = ctxFromHono(c);
-	const projectId = c.req.param("id");
-	const status = c.req.query("status");
-	const sourceId = c.req.query("sourceId");
-	try {
-		return c.json(await listFeedback(ctx, { projectId, status, sourceId }));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
 authedRouter.get("/:id/feedback/summary", async (c) => {
 	const ctx = ctxFromHono(c);
 	const projectId = c.req.param("id");
 	try {
 		return c.json(await getFeedbackSummary(ctx, { projectId }));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-authedRouter.patch("/:id/feedback/:feedbackId", async (c) => {
-	const ctx = ctxFromHono(c);
-	const projectId = c.req.param("id");
-	const feedbackId = c.req.param("feedbackId");
-	const raw = await jsonBody(c);
-	try {
-		return c.json(await updateFeedbackStatus(ctx, { ...raw, projectId, feedbackId }));
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}
@@ -163,17 +136,6 @@ authedRouter.post("/:id/feedback/bulk-convert-to-issue", async (c) => {
 	const raw = await jsonBody(c);
 	try {
 		return c.json(await bulkConvertToIssue(ctx, { ...raw, projectId }), 201);
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-authedRouter.post("/:id/feedback/:feedbackId/convert-to-issue", async (c) => {
-	const ctx = ctxFromHono(c);
-	const projectId = c.req.param("id");
-	const feedbackId = c.req.param("feedbackId");
-	try {
-		return c.json(await convertFeedbackToIssue(ctx, { projectId, feedbackId }), 201);
 	} catch (e) {
 		return serviceErrToResponse(c, e);
 	}

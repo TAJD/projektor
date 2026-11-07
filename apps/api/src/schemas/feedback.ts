@@ -28,10 +28,15 @@ export const SubmitFeedbackSchema = z
 	);
 
 export const CreateFeedbackSourceSchema = z.object({
-	projectId: z.string().min(1, "projectId is required"),
+	projectId: z
+		.string()
+		.min(1, "projectId is required")
+		.meta({ description: "UUID of the project this source belongs to" }),
 	name: z.string().min(1).max(100),
 	description: z.string().max(500).optional(),
-	allowedOrigins: z.array(z.string().max(2000)).max(50).optional(),
+	allowedOrigins: z.array(z.string().max(2000)).max(50).optional().meta({
+		description: "Allowed CORS origins for browser submission; omit for no restriction",
+	}),
 });
 
 export const ListFeedbackSourcesSchema = z.object({
@@ -42,12 +47,16 @@ export const GetFeedbackSourceSchema = z.object({
 	sourceId: z.string().min(1, "sourceId is required"),
 });
 
+const ScopeProjectId = z.string().min(1).optional().meta({
+	description: "Optional UUID of the project to restrict the lookup to (default: workspace-wide)",
+});
+
 export const UpdateFeedbackSourceSchema = z
 	.object({
 		sourceId: z.string(),
 		// Optional: REST routes always pass the URL path's projectId (scoping the
 		// lookup to that project); MCP tools omit it and stay workspace-scoped.
-		projectId: z.string().min(1).optional(),
+		projectId: ScopeProjectId,
 		name: z.string().min(1).max(100).optional(),
 		description: z.string().max(500).nullable().optional(),
 		isActive: z.boolean().optional(),
@@ -58,11 +67,11 @@ export const UpdateFeedbackSourceSchema = z
 
 export const RotateFeedbackSourceSchema = z.object({
 	sourceId: z.string(),
-	projectId: z.string().min(1).optional(),
+	projectId: ScopeProjectId,
 });
 export const RevokeFeedbackSourceSchema = z.object({
 	sourceId: z.string(),
-	projectId: z.string().min(1).optional(),
+	projectId: ScopeProjectId,
 });
 
 export const ListFeedbackSchema = z.object({
@@ -74,13 +83,13 @@ export const ListFeedbackSchema = z.object({
 export const UpdateFeedbackSchema = z.object({
 	// Optional: REST routes always pass the URL path's projectId (scoping the
 	// lookup to that project); MCP tools omit it and resolve it from the feedback row.
-	projectId: z.string().min(1).optional(),
+	projectId: ScopeProjectId,
 	feedbackId: z.string(),
 	status: FeedbackStatusEnum,
 });
 
 export const ConvertFeedbackSchema = z.object({
-	projectId: z.string().min(1).optional(),
+	projectId: ScopeProjectId,
 	feedbackId: z.string(),
 });
 

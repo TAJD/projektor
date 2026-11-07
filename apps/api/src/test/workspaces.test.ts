@@ -447,6 +447,24 @@ describe("Member removal tombstone (PROJ-436)", () => {
 	});
 });
 
+describe("Member role changes are owner-only", () => {
+	it("an admin gets 403 whether or not the body is valid", async () => {
+		const fixture = await seedFixture({ role: "admin" });
+		const memberUser = await seedUser(`m-role-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		await seedMember(fixture.workspace.id, memberUser.id, "member");
+		const url = `http://localhost/api/workspaces/${fixture.workspace.slug}/members/${memberUser.id}`;
+		const headers = authHeaders(fixture.token, fixture.workspace.slug);
+		for (const role of ["viewer", "superuser"]) {
+			const res = await SELF.fetch(url, {
+				method: "PATCH",
+				headers,
+				body: JSON.stringify({ role }),
+			});
+			expect(res.status).toBe(403);
+		}
+	});
+});
+
 describe("GET /api/workspaces/:slug (currentUserRole)", () => {
 	it("returns members and the caller's own role for an owner", async () => {
 		const fixture = await seedFixture({ role: "owner" });

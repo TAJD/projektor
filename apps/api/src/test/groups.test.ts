@@ -87,6 +87,18 @@ describe("Groups REST", () => {
 			body: JSON.stringify({ name: "Sneaky" }),
 		});
 		expect(res.status).toBe(403);
+		const invalid = await SELF.fetch(`http://localhost/api/workspaces/${slug}/groups`, {
+			method: "POST",
+			headers: memberHeaders,
+			body: JSON.stringify({ name: "" }),
+		});
+		expect(invalid.status).toBe(403);
+		const malformed = await SELF.fetch(`http://localhost/api/workspaces/${slug}/groups`, {
+			method: "POST",
+			headers: memberHeaders,
+			body: "{bad",
+		});
+		expect(malformed.status).toBe(403);
 	});
 
 	it("duplicate group name is a 409", async () => {

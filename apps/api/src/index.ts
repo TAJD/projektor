@@ -4,7 +4,6 @@ import type { Context, Next } from "hono";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { jsonBody } from "./http/body";
 import { serviceErrToResponse } from "./http/error-adapter";
 import { safeDecodeURIComponent } from "./lib/urls";
 import { injectWikiMetadata, resolveWikiPageForSsr } from "./lib/wiki-ssr";
@@ -31,7 +30,7 @@ import { commentsRouter } from "./routes/comments";
 import { configRouter } from "./routes/config";
 import { customFieldsRouter } from "./routes/custom-fields";
 import { feedbackPublicRouter, feedbackRouter } from "./routes/feedback";
-import { feedbackSourceLookupRouter, feedbackSourcesRouter } from "./routes/feedback-sources";
+import { feedbackProjectRouter, feedbackSourceLookupRouter } from "./routes/feedback-sources";
 import { fileClaimsRouter } from "./routes/file-claims";
 import { filesRouter } from "./routes/files";
 import { flowMetricsRouter } from "./routes/flow-metrics";
@@ -54,7 +53,7 @@ import { taskTypesRouter } from "./routes/task-types";
 import { toolUsageRouter } from "./routes/tool-usage";
 import { wikiRouter } from "./routes/wiki";
 import { workflowRouter } from "./routes/workflow";
-import { workspacesRouter } from "./routes/workspaces";
+import { workspaceRootRouter, workspacesRouter } from "./routes/workspaces";
 import { seedDefaultCustomFields } from "./services/custom-fields";
 import { ServiceError } from "./services/errors";
 import { listProjectsAcrossWorkspaces } from "./services/projects";
@@ -62,7 +61,6 @@ import { seedDefaultTaskStatuses } from "./services/task-statuses";
 import { seedDefaultTaskTypes } from "./services/task-types";
 import type { ServiceCtx } from "./services/types";
 import { purgeExpiredWikiPages, WIKI_TRASH_RETENTION_SECONDS } from "./services/wiki";
-import { createWorkspace, listWorkspaces } from "./services/workspaces";
 
 const app = new Hono<HonoEnv>();
 
@@ -234,19 +232,8 @@ app.route("/api/share", sharePublicRouter);
 app.route("/auth", authRouter);
 
 // Workspace list + create — auth only, no workspace context
-app.get("/api/workspaces", authMiddleware, async (c) => {
-	const user = c.get("user") as { id: string };
-	return c.json(await listWorkspaces(c.env.DB, user.id));
-});
-
-app.post("/api/workspaces", authMiddleware, async (c) => {
-	const user = c.get("user") as { id: string };
-	try {
-		return c.json(await createWorkspace(c.env.DB, user.id, await jsonBody(c)), 201);
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
+app.use("/api/workspaces", authMiddleware);
+app.route("/api/workspaces", workspaceRootRouter);
 
 // All remaining /api/* and /mcp/* routes need auth + workspace context.
 // PROJ-856: register each prefix ONCE, as `/x/*`. Hono's `/x/*` also matches the bare
@@ -324,7 +311,7 @@ app.route("/api/projects", flowMetricsRouter);
 app.route("/api/projects", codeHeatmapRouter);
 app.route("/api/tool-usage", toolUsageRouter);
 app.route("/api/projects", projectActivityRouter);
-app.route("/api/projects", feedbackSourcesRouter);
+app.route("/api/projects", feedbackProjectRouter);
 app.route("/api/feedback-sources", feedbackSourceLookupRouter);
 app.route("/api/projects", feedbackRouter);
 app.route("/api/issues", issuesRouter);
