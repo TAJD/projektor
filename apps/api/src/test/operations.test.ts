@@ -1,0 +1,63 @@
+import { SELF } from "cloudflare:test";
+import { beforeEach, describe, expect, it } from "vitest";
+import { operationsRouter } from "../operations/define";
+import { taskTypeOperations } from "../operations/task-types";
+import {
+	authHeaders,
+	seedMember,
+	seedProjectFixture,
+	seedTaskType,
+	seedToken,
+	seedUser,
+} from "./helpers";
+
+describe("PROJ-895: operations registry REST adapter", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+
+	beforeEach(async () => {
+		({ token, slug, workspaceId } = await seedProjectFixture({ role: "owner" }));
+	});
+
+	const post = (bearer: string, body: unknown) =>
+		SELF.fetch("http://localhost/api/task-types", {
+			method: "POST",
+			headers: authHeaders(bearer, slug),
+			body: JSON.stringify(body),
+		});
+
+	it("checks the workspace role before validating the input", async () => {
+		const member = await seedUser("op-member@example.com");
+		await seedMember(workspaceId, member.id, "member");
+		const res = await post(await seedToken(workspaceId, member.id), { name: 5 });
+		expect(res.status).toBe(403);
+	});
+
+	it("rejects a wrongly-typed field at the edge with the standard 400 shape", async () => {
+		const res = await post(token, { key: "bug", name: 5 });
+		expect(res.status).toBe(400);
+		const body = (await res.json()) as { details?: { fieldErrors?: Record<string, unknown> } };
+		expect(JSON.stringify(body)).toContain("name");
+	});
+
+	it("takes the id from the path, not the body", async () => {
+		const target = await seedTaskType(workspaceId, { key: "story", name: "Story" });
+		const other = await seedTaskType(workspaceId, { key: "chore", name: "Chore" });
+		const res = await SELF.fetch(`http://localhost/api/task-types/${target.id}`, {
+			method: "PATCH",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ id: other.id, name: "Renamed" }),
+		});
+		expect(res.status).toBe(200);
+		const list = (await (
+			await SELF.fetch("http://localhost/api/task-types", { headers: authHeaders(token, slug) })
+		).json()) as Array<{ id: string; name: string }>;
+		expect(list.find((t) => t.id === target.id)?.name).toBe("Renamed");
+		expect(list.find((t) => t.id === other.id)?.name).toBe("Chore");
+	});
+
+	it("refuses to mount an operation outside the router's base path", () => {
+		expect(() => operationsRouter("/api/projects", taskTypeOperations)).toThrow(/outside/);
+	});
+});

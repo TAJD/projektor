@@ -183,8 +183,15 @@ interface ServiceFn {
 // /api/projects). Scanning only routes/ made those read as unwired, which is how two
 // MCP_ONLY entries came to claim a REST equivalent was missing when one existed, and how
 // listAllProjects got swallowed by the internal-by-construction rule. PROJ-638.
-const restIdentifiers = serviceIdentifiersUsedIn(join(SRC, "routes"), join(SRC, "index.ts"));
-const mcpIdentifiers = serviceIdentifiersUsedIn(join(SRC, "mcp"));
+const operationFiles = tsFiles(join(SRC, "operations"))
+	.filter((f) => f !== "define.ts")
+	.map((f) => join(SRC, "operations", f));
+const restIdentifiers = serviceIdentifiersUsedIn(
+	join(SRC, "routes"),
+	join(SRC, "index.ts"),
+	...operationFiles
+);
+const mcpIdentifiers = serviceIdentifiersUsedIn(join(SRC, "mcp"), ...operationFiles);
 
 const serviceFns: ServiceFn[] = [];
 for (const file of tsFiles(join(SRC, "services"))) {
