@@ -106,6 +106,25 @@ describe("Custom Field Definitions API", () => {
 		expect(res.status).toBe(403);
 	});
 
+	it("PATCH and DELETE /api/custom-fields/:id return 403 for member role (PROJ-895)", async () => {
+		const { id } = await seedCustomFieldDef(workspaceId, { key: "sprint", type: "text" });
+		const memberUser = await seedUser("member2@example.com");
+		await seedMember(workspaceId, memberUser.id, "member");
+		const headers = authHeaders(await seedToken(workspaceId, memberUser.id), slug);
+
+		const patch = await SELF.fetch(`http://localhost/api/custom-fields/${id}`, {
+			method: "PATCH",
+			headers,
+			body: JSON.stringify({ label: "Renamed" }),
+		});
+		expect(patch.status).toBe(403);
+		const del = await SELF.fetch(`http://localhost/api/custom-fields/${id}`, {
+			method: "DELETE",
+			headers,
+		});
+		expect(del.status).toBe(403);
+	});
+
 	it("PATCH /api/custom-fields/:id updates label", async () => {
 		const { id } = await seedCustomFieldDef(workspaceId, {
 			key: "sp",
