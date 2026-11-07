@@ -2,6 +2,7 @@ import type { HonoEnv, MCPTool } from "@projektor/types";
 import { type Context, Hono } from "hono";
 import { insufficientScopeChallenge } from "../auth/challenge";
 import { type Capability, capabilityForMcpTool, tokenAllows } from "../auth/scopes";
+import { byteLength, emitCallEvent, type McpCallEvent, toolErrorCode } from "../lib/usage";
 import { agentMessagesTools } from "../mcp/agent-messages";
 import { agentsTools } from "../mcp/agents";
 import { normalizeToolArgs } from "../mcp/aliases";
@@ -33,7 +34,6 @@ import { workflowTools } from "../mcp/workflow";
 import { workspacesTools } from "../mcp/workspaces";
 import { pluginRegistry } from "../plugins/registry";
 import { ValidationError } from "../services/errors";
-import { recordToolCall } from "../services/tool-usage";
 import { ctxFromHono } from "../services/types";
 import { getWorkflow } from "../services/workflow";
 
@@ -202,8 +202,17 @@ router.post("/:workspaceId", async (c) => {
 					jsonRpcError(body.id, -32602, "Invalid params: `arguments` must be an object")
 				);
 			}
+			const call = {
+				workspaceId: workspace.id,
+				method: "tools/call" as const,
+				name: name.slice(0, 128),
+				startedAt: Date.now(),
+			};
 			const tool = findTool(workspace.id, name);
-			if (!tool) return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
+			if (!tool) {
+				recordUsage(c, call, rawArgs, undefined, "not_found");
+				return c.json(jsonRpcError(body.id, -32601, `Tool not found: ${name}`));
+			}
 			// PROJ-877/920: required presence AND types/enums/lengths against the tool's
 			// inputSchema, before the handler runs. PROJ-893: a bad argument is a tool
 			// execution failure, so it comes back as an isError result naming each field
@@ -232,7 +241,7 @@ router.post("/:workspaceId", async (c) => {
 						fieldErrors,
 					})
 				);
-				recordUsage(ctx, workspace.id, name, toolError, true);
+				recordUsage(c, call, rawArgs, toolError, "validation");
 				// biome-ignore lint/style/noNonNullAssertion: a ValidationError always maps
 				return c.json(jsonRpcResult(body.id, toolError!));
 			}
@@ -244,6 +253,7 @@ router.post("/:workspaceId", async (c) => {
 			if (scopes) {
 				const required = capabilityForMcpTool(name);
 				if (!tokenAllows(scopes, required)) {
+					recordUsage(c, call, args, undefined, "insufficient_scope");
 					return insufficientScope(c, workspace.id, body.id, required);
 				}
 			}
@@ -253,14 +263,14 @@ router.post("/:workspaceId", async (c) => {
 				// PROJ-931: minified — pretty-printing roughly doubled token cost
 				// for agents reading tool results. REST responses are unaffected.
 				const text = JSON.stringify(result);
-				recordUsage(ctx, workspace.id, name, text, false);
+				recordUsage(c, call, args, text, "ok");
 				return c.json(jsonRpcResult(body.id, { content: [{ type: "text", text }] }));
 			} catch (err) {
 				// PROJ-893: service errors (validation, not_found, forbidden, conflict, …) are
 				// tool results the model can act on. Only an unexpected internal failure stays a
 				// JSON-RPC error, carrying just a request id.
 				const toolError = toToolError(err, { toolName: name, role: ctx.role });
-				recordUsage(ctx, workspace.id, name, toolError ?? null, true);
+				recordUsage(c, call, args, toolError ?? undefined, toolErrorCode(toolError));
 				if (toolError) return c.json(jsonRpcResult(body.id, toolError));
 				const { code, message, data } = toMcpError(err, crypto.randomUUID());
 				return c.json(jsonRpcError(body.id, code, message, data));
@@ -278,18 +288,27 @@ router.post("/:workspaceId", async (c) => {
 
 			// PROJ-600: prompts/get delegates to compose_playbook under the hood, so it's
 			// gated by the same scope as calling that tool directly.
+			const promptCall = {
+				workspaceId: workspace.id,
+				method: "prompts/get" as const,
+				name: typeof name === "string" ? name.slice(0, 128) : "",
+				startedAt: Date.now(),
+			};
 			const scopes = c.get("tokenScopes");
 			if (scopes) {
 				const required = capabilityForMcpTool("compose_playbook");
 				if (!tokenAllows(scopes, required)) {
+					recordUsage(c, promptCall, promptArgs, undefined, "insufficient_scope");
 					return insufficientScope(c, workspace.id, body.id, required);
 				}
 			}
 
 			try {
 				const result = await getPrompt(ctx, name, promptArgs ?? {});
+				recordUsage(c, promptCall, promptArgs, result, "ok");
 				return c.json(jsonRpcResult(body.id, result));
 			} catch (err) {
+				recordUsage(c, promptCall, promptArgs, undefined, toolErrorCode(toToolError(err)));
 				const { code, message, data } = toMcpError(err, crypto.randomUUID());
 				return c.json(jsonRpcError(body.id, code, message, data));
 			}
@@ -317,27 +336,24 @@ function insufficientScope(
 	return c.json(jsonRpcError(id, -32003, `Token lacks '${required}' scope`), 403);
 }
 
-// PROJ-1055: count every tools/call (result or error) toward the workspace's per-tool,
-// per-day usage row. Off the response path via waitUntil and best-effort: telemetry must
-// never fail or slow a tool call. `payload` is the result text, or the error result object.
-const utf8 = new TextEncoder();
 function recordUsage(
-	ctx: { db: D1Database; waitUntil?: (p: Promise<unknown>) => void },
-	workspaceId: string,
-	tool: string,
+	c: Context<HonoEnv>,
+	call: { workspaceId: string; method: McpCallEvent["method"]; name: string; startedAt: number },
+	args: unknown,
 	payload: unknown,
-	isError: boolean
+	outcome: string
 ): void {
-	const text = typeof payload === "string" ? payload : JSON.stringify(payload ?? null);
-	const write = recordToolCall(ctx.db, workspaceId, tool, utf8.encode(text).length, isError).catch(
-		(err) => {
-			console.error("mcp tool usage write failed (PROJ-1055)", {
-				tool,
-				err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
-			});
-		}
-	);
-	ctx.waitUntil?.(write);
+	emitCallEvent(c, {
+		workspaceId: call.workspaceId,
+		method: call.method,
+		name: call.name,
+		outcome,
+		isError: outcome !== "ok",
+		latencyMs: Date.now() - call.startedAt,
+		responseBytes: byteLength(payload),
+		argBytes: byteLength(args),
+		version: SERVER_VERSION,
+	});
 }
 
 function dedupe(values: string[]): string[] {

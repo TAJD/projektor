@@ -78,7 +78,21 @@ export interface PluginContext {
 	// the reading service.
 	config?: {
 		fileClaimTtlSeconds?: number;
+		mcpUsage?: (filter: McpUsageFilter) => Promise<McpUsageRow[]>;
 	};
+}
+
+export interface McpUsageFilter {
+	since: number;
+	until: number;
+	tool?: string;
+}
+
+export interface McpUsageRow {
+	tool: string;
+	calls: number;
+	errors: number;
+	responseBytes: number;
 }
 
 export interface Plugin {

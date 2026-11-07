@@ -1,161 +1,275 @@
-// PROJ-1055: every MCP tools/call is counted per workspace, UTC day and tool, and read
-// back through get_tool_usage (MCP) and GET /api/tool-usage (REST).
-
-import { env, SELF } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
-import { recordToolCall, utcDayStart } from "../services/tool-usage";
-import { authHeaders, seedProjectFixture } from "./helpers";
+import { SELF } from "cloudflare:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { emitCallEvent, mcpUsageQuery } from "../lib/usage";
+import { ValidationError } from "../services/errors";
+import { getToolUsage } from "../services/tool-usage";
+import { authHeaders, seedProjectFixture, seedToken } from "./helpers";
 
 type Rpc = { result?: { content?: Array<{ text: string }>; isError?: boolean } };
-type Usage = {
-	since: number;
-	until: number;
-	total: { calls: number; errors: number; responseBytes: number };
-	tools: Array<{ tool: string; calls: number; errors: number; responseBytes: number }>;
-	omittedTools?: number;
-};
 
 let token: string;
 let slug: string;
 let workspaceId: string;
-let projectId: string;
+let userId: string;
 
 beforeEach(async () => {
-	({ token, slug, workspaceId, projectId } = await seedProjectFixture());
+	const fixture = await seedProjectFixture();
+	({ token, slug, workspaceId } = fixture);
+	userId = fixture.userId;
 });
 
-async function call(name: string, args: Record<string, unknown>) {
+afterEach(() => {
+	vi.restoreAllMocks();
+	vi.unstubAllGlobals();
+});
+
+function rpc(name: string, args: Record<string, unknown>) {
+	return JSON.stringify({
+		jsonrpc: "2.0",
+		id: 1,
+		method: "tools/call",
+		params: { name, arguments: args },
+	});
+}
+
+async function call(name: string, args: Record<string, unknown>, bearer = token) {
 	const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
 		method: "POST",
-		headers: authHeaders(token, slug),
-		body: JSON.stringify({
-			jsonrpc: "2.0",
-			id: 1,
-			method: "tools/call",
-			params: { name, arguments: args },
-		}),
+		headers: bearer === token ? authHeaders(token, slug) : { Authorization: `Bearer ${bearer}` },
+		body: rpc(name, args),
 	});
 	const json = (await res.json()) as Rpc;
-	return { isError: json.result?.isError === true, text: json.result?.content?.[0]?.text ?? "" };
+	return { status: res.status, text: json.result?.content?.[0]?.text ?? "" };
 }
 
-async function usageRow(tool: string) {
-	return env.DB.prepare(
-		"SELECT calls, errors, response_bytes FROM mcp_tool_usage WHERE workspace_id = ? AND tool = ?"
-	)
-		.bind(workspaceId, tool)
-		.first<{ calls: number; errors: number; response_bytes: number }>();
+function captureEvents() {
+	const spy = vi.spyOn(console, "log");
+	return () =>
+		spy.mock.calls
+			.map(([line]) => (typeof line === "string" && line.startsWith("{") ? JSON.parse(line) : null))
+			.filter((e): e is Record<string, unknown> => e?.evt === "mcp_call");
 }
 
-/** The write runs in waitUntil, after the response; give it a moment to land. */
-async function eventually<T>(read: () => Promise<T>, done: (v: T) => boolean): Promise<T> {
-	let v = await read();
-	for (let i = 0; i < 50 && !done(v); i++) {
-		await new Promise((r) => setTimeout(r, 20));
-		v = await read();
-	}
-	return v;
-}
+describe("PROJ-886: one mcp_call event per tools/call", () => {
+	it("records a successful call without any argument value", async () => {
+		const events = captureEvents();
+		const secret = `needle-${crypto.randomUUID()}`;
+		await call("search_issues", { query: secret });
 
-describe("PROJ-1055: recording", () => {
-	it("counts a successful call and its response bytes", async () => {
-		const { text } = await call("list_projects", {});
-		const row = await eventually(
-			() => usageRow("list_projects"),
-			(r) => (r?.calls ?? 0) >= 1
-		);
-		expect(row).toEqual({
-			calls: 1,
-			errors: 0,
-			response_bytes: new TextEncoder().encode(text).length,
+		const [evt] = events();
+		expect(evt).toMatchObject({
+			workspaceId,
+			method: "tools/call",
+			name: "search_issues",
+			outcome: "ok",
+			isError: false,
+			authMethod: "pat",
+			userId,
+		});
+		expect(evt.responseBytes).toBeGreaterThan(0);
+		expect(evt.argBytes).toBeGreaterThan(secret.length);
+		expect(JSON.stringify(events())).not.toContain(secret);
+	});
+
+	it("records an argument validation failure as outcome=validation", async () => {
+		const events = captureEvents();
+		await call("get_issue", { ref: 42 });
+		expect(events()).toEqual([
+			expect.objectContaining({ name: "get_issue", outcome: "validation", isError: true }),
+		]);
+	});
+
+	it("records a scope denial as outcome=insufficient_scope", async () => {
+		const readOnly = await seedToken(workspaceId, userId, { scopes: ["read"] });
+		const events = captureEvents();
+		const { status } = await call("create_project", { name: "nope", key: "NOPE" }, readOnly);
+		expect(status).toBe(403);
+		expect(events()).toEqual([
+			expect.objectContaining({ name: "create_project", outcome: "insufficient_scope" }),
+		]);
+	});
+
+	it("writes an Analytics Engine data point indexed by workspace when the binding exists", () => {
+		const writeDataPoint = vi.fn();
+		const c = {
+			env: { MCP_USAGE: { writeDataPoint } },
+			req: { query: () => undefined },
+			get: (key: string) =>
+				key === "auth"
+					? { kind: "agent", method: "oauth", credentialId: "grant-1", clientId: "client-1" }
+					: key === "user"
+						? { id: "u1" }
+						: undefined,
+		};
+		emitCallEvent(c as never, {
+			workspaceId: "ws-1",
+			method: "tools/call",
+			name: "list_issues",
+			outcome: "ok",
+			isError: false,
+			latencyMs: 12,
+			responseBytes: 300,
+			argBytes: 20,
+			version: "1.2.3",
+		});
+		expect(writeDataPoint).toHaveBeenCalledWith({
+			indexes: ["ws-1"],
+			blobs: [
+				"list_issues",
+				"",
+				"full",
+				"oauth",
+				"grant-1",
+				"client-1",
+				"u1",
+				"ok",
+				"1.2.3",
+				"tools/call",
+			],
+			doubles: [12, 300, 20, 0],
 		});
 	});
 
-	it("counts an error result as an error", async () => {
-		const { isError } = await call("get_issue", { ref: "PROJ-999" });
-		expect(isError).toBe(true);
-		const row = await eventually(
-			() => usageRow("get_issue"),
-			(r) => (r?.calls ?? 0) >= 1
-		);
-		expect(row?.errors).toBe(1);
-	});
-
-	it("upserts into one row per workspace, day and tool", async () => {
-		const now = 1_790_000_000;
-		await recordToolCall(env.DB, workspaceId, "x", 10, false, now);
-		await recordToolCall(env.DB, workspaceId, "x", 5, true, now + 60);
-		await recordToolCall(env.DB, workspaceId, "x", 7, false, now + 86_400);
-		const { results } = await env.DB.prepare(
-			"SELECT day, calls, errors, response_bytes FROM mcp_tool_usage WHERE workspace_id = ? AND tool = 'x' ORDER BY day"
-		)
-			.bind(workspaceId)
-			.all();
-		expect(results).toEqual([
-			{ day: utcDayStart(now), calls: 2, errors: 1, response_bytes: 15 },
-			{ day: utcDayStart(now + 86_400), calls: 1, errors: 0, response_bytes: 7 },
-		]);
+	it("never throws into the request when the binding fails", () => {
+		const c = {
+			env: {
+				MCP_USAGE: {
+					writeDataPoint: () => {
+						throw new Error("boom");
+					},
+				},
+			},
+			req: { query: () => undefined },
+			get: () => undefined,
+		};
+		vi.spyOn(console, "error").mockImplementation(() => {});
+		expect(() =>
+			emitCallEvent(c as never, {
+				workspaceId: "ws-1",
+				method: "tools/call",
+				name: "x",
+				outcome: "ok",
+				isError: false,
+				latencyMs: 0,
+				responseBytes: 0,
+				argBytes: 0,
+				version: "dev",
+			})
+		).not.toThrow();
 	});
 });
 
-describe("PROJ-1055: get_tool_usage / GET /api/tool-usage", () => {
-	beforeEach(async () => {
-		const now = Math.floor(Date.now() / 1000);
-		await recordToolCall(env.DB, workspaceId, "list_issues", 900, false, now);
-		await recordToolCall(env.DB, workspaceId, "list_issues", 100, false, now);
-		await recordToolCall(env.DB, workspaceId, "get_issue", 300, true, now);
-		// Outside the default 7-day window.
-		await recordToolCall(env.DB, workspaceId, "search_wiki", 5000, false, now - 30 * 86_400);
-	});
-
-	it("MCP lists tools by bytes with totals over the default window", async () => {
-		const { text } = await call("get_tool_usage", {});
-		const usage = JSON.parse(text) as Usage;
-		const mine = usage.tools.filter((t) => t.tool !== "get_tool_usage");
-		expect(mine).toEqual([
-			{ tool: "list_issues", calls: 2, errors: 0, responseBytes: 1000, avgResponseBytes: 500 },
-			{ tool: "get_issue", calls: 1, errors: 1, responseBytes: 300, avgResponseBytes: 300 },
-		]);
-	});
-
-	it("REST matches MCP for the same filters", async () => {
-		const res = await SELF.fetch(
-			"http://localhost/api/tool-usage?tool=list_issues&since=0&until=4102444800",
-			{
-				headers: authHeaders(token, slug),
-			}
-		);
-		expect(res.status).toBe(200);
-		const rest = (await res.json()) as Usage;
-		const mcp = JSON.parse(
-			(await call("get_tool_usage", { tool: "list_issues", since: 0, until: 4102444800 })).text
-		) as Usage;
-		expect(rest).toEqual(mcp);
-		expect(rest.total).toEqual({ calls: 2, errors: 0, responseBytes: 1000 });
-	});
-
-	it("limit trims the list but not the total", async () => {
-		const usage = JSON.parse((await call("get_tool_usage", { limit: 1 })).text) as Usage;
-		expect(usage.tools).toHaveLength(1);
-		expect(usage.omittedTools).toBeGreaterThanOrEqual(1);
-		expect(usage.total.responseBytes).toBeGreaterThanOrEqual(1300);
-	});
-
-	it("is scoped to the caller's workspace", async () => {
-		const other = await seedProjectFixture();
+describe("PROJ-886: get_tool_usage reads Analytics Engine", () => {
+	it("reports unavailable (MCP and REST alike) when reading back is not configured", async () => {
+		const mcp = JSON.parse((await call("get_tool_usage", {})).text);
 		const res = await SELF.fetch("http://localhost/api/tool-usage", {
-			headers: authHeaders(other.token, other.slug),
-		});
-		const usage = (await res.json()) as Usage;
-		expect(usage.tools.map((t) => t.tool)).not.toContain("list_issues");
-		expect(usage.total.calls).toBe(0);
-		void projectId;
-	});
-
-	it("rejects since > until", async () => {
-		const res = await SELF.fetch("http://localhost/api/tool-usage?since=200&until=100", {
 			headers: authHeaders(token, slug),
 		});
-		expect(res.status).toBe(400);
+		const rest = await res.json();
+		expect(mcp.available).toBe(false);
+		expect(rest).toEqual(mcp);
+	});
+
+	it("queries the SQL API scoped to the workspace and maps the rows", async () => {
+		const fetchMock = vi.fn(async () =>
+			Response.json({
+				data: [{ tool: "list_issues", calls: "3", errors: "1", response_bytes: "900" }],
+			})
+		);
+		vi.stubGlobal("fetch", fetchMock);
+		const query = mcpUsageQuery(
+			{ CF_ACCOUNT_ID: "acct", CF_ANALYTICS_TOKEN: "tok", MCP_USAGE_DATASET: "mcp_usage" },
+			"ws-1"
+		);
+		const rows = await query?.({ since: 100, until: 200, tool: "list_issues" });
+
+		expect(rows).toEqual([{ tool: "list_issues", calls: 3, errors: 1, responseBytes: 900 }]);
+		const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toBe("https://api.cloudflare.com/client/v4/accounts/acct/analytics_engine/sql");
+		expect(init.headers).toEqual({ Authorization: "Bearer tok" });
+		expect(init.body).toContain("FROM mcp_usage");
+		expect(init.body).toContain("index1 = 'ws-1'");
+		expect(init.body).toContain("blob1 = 'list_issues'");
+		expect(init.body).toContain("toDateTime(100)");
+	});
+
+	it("refuses a tool filter that is not a plain identifier without querying", async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		const query = mcpUsageQuery(
+			{ CF_ACCOUNT_ID: "acct", CF_ANALYTICS_TOKEN: "tok", MCP_USAGE_DATASET: "mcp_usage" },
+			"ws-1"
+		);
+		expect(await query?.({ since: 0, until: 1, tool: "x' OR '1'='1" })).toEqual([]);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("is not configured without all three settings", () => {
+		expect(
+			mcpUsageQuery({ CF_ACCOUNT_ID: "acct", MCP_USAGE_DATASET: "d" }, "ws-1")
+		).toBeUndefined();
+	});
+
+	it("refuses a dataset name that is not a bare SQL identifier", async () => {
+		const fetchMock = vi.fn();
+		vi.stubGlobal("fetch", fetchMock);
+		const query = mcpUsageQuery(
+			{ CF_ACCOUNT_ID: "acct", CF_ANALYTICS_TOKEN: "tok", MCP_USAGE_DATASET: "mcp-usage" },
+			"ws-1"
+		);
+		expect(await query?.({ since: 0, until: 1 })).toEqual([]);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+});
+
+describe("PROJ-886: get_tool_usage aggregation", () => {
+	const ctxWith = (mcpUsage: () => Promise<unknown>) => ({ config: { mcpUsage } }) as never;
+	const rows = [
+		{ tool: "a", calls: 2, errors: 0, responseBytes: 100 },
+		{ tool: "b", calls: 4, errors: 1, responseBytes: 900 },
+		{ tool: "c", calls: 1, errors: 0, responseBytes: 300 },
+	];
+
+	it("sorts by bytes, totals every tool and reports what the limit omitted", async () => {
+		const out = await getToolUsage(
+			ctxWith(async () => rows.map((r) => ({ ...r }))),
+			{ limit: 2 }
+		);
+		expect(out).toMatchObject({
+			available: true,
+			total: { calls: 7, errors: 1, responseBytes: 1300 },
+			tools: [
+				{ tool: "b", avgResponseBytes: 225 },
+				{ tool: "c", avgResponseBytes: 300 },
+			],
+			omittedTools: 1,
+		});
+	});
+
+	it("rejects since after until even within the same UTC day", async () => {
+		await expect(
+			getToolUsage(
+				ctxWith(async () => []),
+				{ since: 86_400 * 10 + 50, until: 86_400 * 10 + 10 }
+			)
+		).rejects.toBeInstanceOf(ValidationError);
+	});
+
+	it("reports unavailable instead of failing when the query errors", async () => {
+		const out = await getToolUsage(
+			ctxWith(async () => {
+				throw new Error("analytics engine query failed: 403");
+			}),
+			{}
+		);
+		expect(out).toMatchObject({ available: false, reason: expect.stringContaining("403") });
+	});
+
+	it("records an unknown tool as outcome=not_found", async () => {
+		const events = captureEvents();
+		await call("no_such_tool", {});
+		expect(events()).toEqual([
+			expect.objectContaining({ name: "no_such_tool", outcome: "not_found" }),
+		]);
 	});
 });

@@ -72,6 +72,10 @@ export interface Env {
 	// Test-only (ignored in production): changes every limiter key so each test starts fresh.
 	RATE_LIMIT_TEST_EPOCH?: string;
 	RATE_LIMIT_TEST_NOW_MS?: string;
+	MCP_USAGE?: AnalyticsEngineDataset;
+	MCP_USAGE_DATASET?: string;
+	CF_ACCOUNT_ID?: string;
+	CF_ANALYTICS_TOKEN?: string;
 	BRAND_NAME?: string;
 	BRAND_MARK?: string;
 	BRAND_ACCENT?: string;
