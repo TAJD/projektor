@@ -1328,7 +1328,7 @@ async function computeNeedsAudit(data: UpdateIssueData, reads: StatusReads): Pro
 
 type StatusReads = {
 	status?: ReturnType<typeof resolveStatus>;
-	flags?: Promise<AgentWorkFlags>;
+	flags?: Promise<AgentWorkFlags | undefined>;
 };
 
 function startedEarly<T>(p: Promise<T>): Promise<T> {
@@ -1336,9 +1336,10 @@ function startedEarly<T>(p: Promise<T>): Promise<T> {
 	return p;
 }
 
-function agentFlags(reads: StatusReads): Promise<AgentWorkFlags> {
-	if (!reads.flags) throw new Error("updateIssue: agent work flags were not read");
-	return reads.flags;
+async function agentFlags(reads: StatusReads): Promise<AgentWorkFlags> {
+	const flags = await reads.flags;
+	if (!flags) throw new Error("updateIssue: agent work flags were not read");
+	return flags;
 }
 
 async function applyStatusFields(
@@ -1712,16 +1713,21 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	const orm = drizzle(ctx.db, { schema });
 
 	const statusChange = data.status !== undefined || "statusId" in data;
+	const statusRead = statusChange
+		? startedEarly(resolveStatus(ctx, "statusId" in data ? data.statusId : undefined, data.status))
+		: undefined;
+	const readFlags = () => readAgentWorkFlags(ctx, id, data.agentSessionId);
 	const statusReads: StatusReads = {
-		status: statusChange
-			? startedEarly(
-					resolveStatus(ctx, "statusId" in data ? data.statusId : undefined, data.status)
-				)
-			: undefined,
+		status: statusRead,
 		flags:
-			statusChange || (data.agentSessionId && data.completionReport)
-				? startedEarly(readAgentWorkFlags(ctx, id, data.agentSessionId))
-				: undefined,
+			data.agentSessionId && data.completionReport
+				? startedEarly(readFlags())
+				: statusRead &&
+					startedEarly(
+						statusRead.then((s) =>
+							s.isReviewStep || s.category === "done" || s.key === "done" ? readFlags() : undefined
+						)
+					),
 	};
 
 	// PROJ-1018: these reads don't depend on each other, so they run concurrently instead
