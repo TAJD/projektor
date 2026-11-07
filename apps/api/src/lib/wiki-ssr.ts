@@ -131,19 +131,14 @@ export function injectWikiMetadata(
 		.on('meta[property="og:url"]', new AttrSetter("content", pageUrl))
 		.on("head", {
 			element(el) {
-				el.append(
-					`<script type="application/json" id="${WIKI_SSR_HANDOFF_ID}">${handoffJson}</script>`,
-					{
-						html: true,
-					}
-				);
+				el.append(`<script type="application/json" id="wiki-ssr-handoff">${handoffJson}</script>`, {
+					html: true,
+				});
 			},
 		})
 		.transform(response);
 	const headers = new Headers(rewritten.headers);
-	headers.set("Cache-Control", "private, no-cache");
+	headers.set("Cache-Control", "private, no-store");
 	headers.delete("ETag");
 	return new Response(rewritten.body, { status: rewritten.status, headers });
 }
-
-export const WIKI_SSR_HANDOFF_ID = "wiki-ssr-handoff";

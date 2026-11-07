@@ -83,7 +83,7 @@ describe("injectWikiMetadata", () => {
 		expect(html.replace(/content="[^"]*"/g, "").match(/<script/g)).toHaveLength(1);
 		expect(blocks[0][1]).not.toMatch(/[<>&]/);
 		expect(JSON.parse(blocks[0][1])).toEqual({ requested: "evil", workspaceSlug: "acme", page });
-		expect(rewritten.headers.get("cache-control")).toBe("private, no-cache");
+		expect(rewritten.headers.get("cache-control")).toBe("private, no-store");
 		expect(rewritten.headers.get("etag")).toBeNull();
 	});
 });
