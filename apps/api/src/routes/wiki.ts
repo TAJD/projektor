@@ -32,6 +32,8 @@ router.get("/", async (c) => {
 				tags,
 				includeTemplates,
 				includeWorkspacePages: c.req.query("includeWorkspacePages"),
+				sort: c.req.query("sort"),
+				limit: c.req.query("limit"),
 			})
 		);
 	} catch (e) {

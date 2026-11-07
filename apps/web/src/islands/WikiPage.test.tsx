@@ -260,6 +260,39 @@ describe("WikiPage — path-based routing (PROJ-487)", () => {
 		expect(await screen.findByText("My Page")).toBeTruthy();
 	});
 
+	function addSsrHandoff(handoff: unknown) {
+		const el = document.createElement("script");
+		el.type = "application/json";
+		el.id = "wiki-ssr-handoff";
+		el.textContent = JSON.stringify(handoff);
+		document.head.append(el);
+	}
+
+	const pageFetches = () =>
+		vi.mocked(fetch).mock.calls.filter(([url]) => /\/api\/wiki\/my-page$/.test(String(url)));
+
+	it("renders the server-handed page without fetching it again", async () => {
+		mockFetchWiki({ ...PAGE, title: "Fetched Title" });
+		addSsrHandoff({ requested: "my-page", workspaceSlug: "acme", page: PAGE });
+		render(<WikiPage slug="my-page" workspaceSlug="acme" />);
+		expect(await screen.findByText("My Page")).toBeTruthy();
+		expect(pageFetches()).toHaveLength(0);
+		expect(document.getElementById("wiki-ssr-handoff")).toBeNull();
+	});
+
+	it("ignores a server handoff for a different workspace and fetches the page", async () => {
+		mockFetchWiki(PAGE);
+		addSsrHandoff({
+			requested: "my-page",
+			workspaceSlug: "other",
+			page: { ...PAGE, title: "Wrong Workspace" },
+		});
+		render(<WikiPage slug="my-page" workspaceSlug="acme" />);
+		expect(await screen.findByText("My Page")).toBeTruthy();
+		expect(screen.queryByText("Wrong Workspace")).toBeNull();
+		expect(pageFetches()).toHaveLength(1);
+	});
+
 	it("sets document title and OG meta tags from the fetched page", async () => {
 		mockFetchWiki(PAGE);
 		render(<WikiPage slug="my-page" />);

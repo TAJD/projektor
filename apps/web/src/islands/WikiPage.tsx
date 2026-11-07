@@ -2386,6 +2386,24 @@ function useWikiSearch(
 	return { searchQuery, setSearchQuery, searchResults, searchLoading };
 }
 
+function takeSsrHandoff(requested: string, workspaceSlug: string | undefined): WikiPageData | null {
+	const el = document.getElementById("wiki-ssr-handoff");
+	if (!el) return null;
+	el.remove();
+	try {
+		const handoff = JSON.parse(el.textContent ?? "") as {
+			requested?: string;
+			workspaceSlug?: string;
+			page?: WikiPageData;
+		};
+		const expectedWorkspace = workspaceSlug ?? window.location.hostname.split(".")[0];
+		if (handoff.requested !== requested || handoff.workspaceSlug !== expectedWorkspace) return null;
+		return handoff.page ?? null;
+	} catch {
+		return null;
+	}
+}
+
 function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 	const [page, setPage] = useState<WikiPageData | null>(null);
 	const [loading, setLoading] = useState(false);
@@ -2432,6 +2450,13 @@ function useWikiPageData(workspaceSlug: string | undefined, slug: string) {
 			if (!s) return;
 			const ticket = ++pageRequestRef.current;
 			const isCurrent = () => ticket === pageRequestRef.current;
+			const handoff = takeSsrHandoff(s, workspaceSlug);
+			if (handoff) {
+				setPage(handoff);
+				setError(null);
+				setLoading(false);
+				return;
+			}
 			setLoading(true);
 			setError(null);
 			try {

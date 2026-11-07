@@ -568,7 +568,12 @@ export async function listWikiPages(ctx: ServiceCtx, input: unknown) {
 		})
 		.from(schema.wikiPages)
 		.where(and(...conditions))
-		.orderBy(asc(schema.wikiPages.title));
+		.orderBy(
+			parsed.data.sort === "updated"
+				? desc(schema.wikiPages.updatedAt)
+				: asc(schema.wikiPages.title)
+		)
+		.limit(parsed.data.limit ?? -1);
 
 	return rows.map((r) => ({ ...r, url: wikiPagePath(r.slug) }));
 }

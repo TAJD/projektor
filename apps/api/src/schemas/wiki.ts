@@ -125,6 +125,8 @@ export const ListPagesInputSchema = z.object({
 	// listWikiPages itself that specifically wants templates included.
 	includeTemplates: z.boolean().optional().default(false),
 	includeWorkspacePages: IncludeWorkspacePagesSchema,
+	sort: z.enum(["title", "updated"]).optional().default("title"),
+	limit: z.coerce.number().int().min(1).max(500).optional(),
 });
 
 export const WikiTreeInputSchema = z.object({
