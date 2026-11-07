@@ -102,6 +102,19 @@ describe("Issue Links API", () => {
 		expect(aLinks[0].type).toBe("duplicates");
 	});
 
+	it("takes the source issue from the path, not the body (PROJ-895)", async () => {
+		const res = await SELF.fetch(`http://localhost/api/issues/${issueA.id}/links`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ sourceIssueId: issueC.id, targetIssueId: issueB.id, type: "blocks" }),
+		});
+		expect(res.status).toBe(201);
+		const { links } = await listLinks(issueA.id);
+		expect(links).toHaveLength(1);
+		expect(links[0].linkedIssueId).toBe(issueB.id);
+		expect((await listLinks(issueC.id)).links).toHaveLength(0);
+	});
+
 	it("rejects self-links", async () => {
 		const res = await createLink(issueA.id, issueA.id, "blocks");
 		expect(res.status).toBe(400);
@@ -221,6 +234,20 @@ describe("Issue Links role guards", () => {
 			method: "POST",
 			headers: authHeaders(roles.viewer.token, roles.workspace.slug),
 			body: JSON.stringify({ targetIssueId: issue2.id, type: "relates_to" }),
+		});
+		expect(res.status).toBe(403);
+	});
+
+	it("viewer gets 403, not 400, for an invalid body (PROJ-895)", async () => {
+		const roles = await seedWorkspaceRoles();
+		const project = await seedProject(roles.workspace.id);
+		const issue = await seedIssue(roles.workspace.id, project.id, roles.owner.user.id, {
+			title: "A",
+		});
+		const res = await SELF.fetch(`http://localhost/api/issues/${issue.id}/links`, {
+			method: "POST",
+			headers: authHeaders(roles.viewer.token, roles.workspace.slug),
+			body: JSON.stringify({ foo: 1 }),
 		});
 		expect(res.status).toBe(403);
 	});
