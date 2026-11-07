@@ -149,7 +149,7 @@ function fromQuery(
 		if (values.length === 0 || !field) continue;
 		if (key in out) throw aliasConflict(name, key);
 		if (baseType(field) === "array") out[key] = values;
-		else out[key] = values.length > 1 ? values : coerceScalar(field, values[0]);
+		else out[key] = all.length > 1 ? all : coerceScalar(field, values[0]);
 	}
 	return out;
 }

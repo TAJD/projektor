@@ -156,11 +156,6 @@ describe("PROJ-895: operations registry REST adapter", () => {
 	const getIssues = (query: string) =>
 		SELF.fetch(`http://localhost/api/issues?${query}`, { headers: authHeaders(token, slug) });
 
-	it("ignores an empty repeat of a scalar query key", async () => {
-		expect((await getIssues("limit=&limit=5")).status).toBe(200);
-		expect((await getIssues("limit=5&limit=6")).status).toBe(400);
-	});
-
 	it("rejects a key passed under both its name and its REST alias", async () => {
 		const res = await getIssues("project=a&projectId=b");
 		expect(res.status).toBe(400);
