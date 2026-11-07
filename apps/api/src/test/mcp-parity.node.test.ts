@@ -16,6 +16,7 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { TOOL_DOMAINS } from "../mcp/catalog";
 import { coreMCPTools } from "../routes/mcp";
@@ -183,8 +184,15 @@ interface ServiceFn {
 // /api/projects). Scanning only routes/ made those read as unwired, which is how two
 // MCP_ONLY entries came to claim a REST equivalent was missing when one existed, and how
 // listAllProjects got swallowed by the internal-by-construction rule. PROJ-638.
-const restIdentifiers = serviceIdentifiersUsedIn(join(SRC, "routes"), join(SRC, "index.ts"));
-const mcpIdentifiers = serviceIdentifiersUsedIn(join(SRC, "mcp"));
+const operationFiles = tsFiles(join(SRC, "operations"))
+	.filter((f) => f !== "define.ts")
+	.map((f) => join(SRC, "operations", f));
+const restIdentifiers = serviceIdentifiersUsedIn(
+	join(SRC, "routes"),
+	join(SRC, "index.ts"),
+	...operationFiles
+);
+const mcpIdentifiers = serviceIdentifiersUsedIn(join(SRC, "mcp"), ...operationFiles);
 
 const serviceFns: ServiceFn[] = [];
 for (const file of tsFiles(join(SRC, "services"))) {
@@ -342,5 +350,25 @@ describe("MCP surface parity (PROJ-623)", () => {
 				.map(([k]) => k);
 			expect(redundant).toEqual([]);
 		});
+	});
+
+	it("serves every registry operation as an MCP tool and under a mounted REST base", async () => {
+		const mounts = [
+			...readFileSync(join(SRC, "index.ts"), "utf8").matchAll(/app\.route\("([^"]+)"/g),
+		].map((m) => m[1]);
+		const modules = await Promise.all(operationFiles.map((f) => import(pathToFileURL(f).href)));
+		const ops = modules.flatMap((mod) => Object.values(mod).flat()) as Array<{
+			id: string;
+			path: string;
+		}>;
+		expect(ops.length).toBeGreaterThan(0);
+		const unserved = ops
+			.filter(
+				(op) =>
+					!runtimeToolNames.includes(op.id) ||
+					!mounts.some((base) => op.path === base || op.path.startsWith(`${base}/`))
+			)
+			.map((op) => op.id);
+		expect(unserved).toEqual([]);
 	});
 });

@@ -18,9 +18,9 @@ function tsFiles(dir: string): string[] {
 }
 
 describe("no ServiceCtx workspace retargeting", () => {
-	it("apps/api/src/{mcp,services} never spread ctx with a new workspaceId", () => {
-		const offenders = [...tsFiles("mcp"), ...tsFiles("services")].filter((f) =>
-			RETARGET.test(readFileSync(join(SRC, f), "utf8"))
+	it("apps/api/src/{mcp,operations,services} never spread ctx with a new workspaceId", () => {
+		const offenders = [...tsFiles("mcp"), ...tsFiles("operations"), ...tsFiles("services")].filter(
+			(f) => RETARGET.test(readFileSync(join(SRC, f), "utf8"))
 		);
 		expect(offenders).toEqual([]);
 	});
