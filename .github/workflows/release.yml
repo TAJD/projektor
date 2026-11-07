@@ -59,12 +59,29 @@ jobs:
       # Optionally notify a downstream deploy repo so it can auto-deploy this
       # release. Stays generic: only fires if the DEPLOY_DISPATCH_REPO repo
       # variable is set (Settings → Secrets and variables → Actions → Variables).
-      # Needs WORKSPACE_PAT with permission to POST dispatches to that repo
-      # (classic PAT: `repo`; fine-grained: Contents read/write on the target).
+      # Needs the release-bot GitHub App installed on that repo (Contents: write).
+      - name: Resolve deploy repo
+        id: deploy-repo
+        if: vars.DEPLOY_DISPATCH_REPO != ''
+        run: |
+          echo "owner=${DEPLOY_REPO%%/*}" >> "$GITHUB_OUTPUT"
+          echo "name=${DEPLOY_REPO#*/}" >> "$GITHUB_OUTPUT"
+        env:
+          DEPLOY_REPO: ${{ vars.DEPLOY_DISPATCH_REPO }}
+
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        if: vars.DEPLOY_DISPATCH_REPO != ''
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ steps.deploy-repo.outputs.owner }}
+          repositories: ${{ steps.deploy-repo.outputs.name }}
+
       - name: Notify deploy repo
         if: vars.DEPLOY_DISPATCH_REPO != ''
         env:
-          GH_TOKEN: ${{ secrets.WORKSPACE_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           gh api "repos/${{ vars.DEPLOY_DISPATCH_REPO }}/dispatches" \
             -f event_type=projektor-release \
