@@ -120,7 +120,8 @@ describe("PROJ-959: issue refs accepted by every issue-id tool", () => {
 			const agentId = await register();
 			const claim = await call("claim_issue", { issueId: ref, agentId });
 			expect(claim.err).toBeUndefined();
-			expect(claim.data.issueId).toBe(issueId);
+			expect(claim.data.issueRef).toBe(ref);
+			expect(typeof claim.data.leaseId).toBe("string");
 
 			const list = await call("list_issue_leases", { issueId: ref });
 			expect(list.err).toBeUndefined();
@@ -159,7 +160,11 @@ describe("PROJ-959: issue refs accepted by every issue-id tool", () => {
 
 	describe("agent sessions", () => {
 		it("register_agent links the session to the resolved UUID", async () => {
-			const { err, data } = await call("register_agent", { name: "linked", issueId: ref });
+			const { err, data } = await call("register_agent", {
+				name: "linked",
+				issueId: ref,
+				verbose: true,
+			});
 			expect(err).toBeUndefined();
 			expect(data.issueId).toBe(issueId);
 		});
@@ -172,7 +177,8 @@ describe("PROJ-959: issue refs accepted by every issue-id tool", () => {
 		it("start_work, list_active_agents and finish_work", async () => {
 			const start = await call("start_work", { issue: ref, name: "worker", paths: ["src/b.ts"] });
 			expect(start.err).toBeUndefined();
-			expect(start.data.lease.issueId).toBe(issueId);
+			expect(start.data.issue.ref).toBe(ref);
+			expect(start.data.paths).toEqual(["src/b.ts"]);
 
 			const active = await call("list_active_agents", { issueId: ref });
 			expect(active.err).toBeUndefined();

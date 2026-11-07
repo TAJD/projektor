@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
 	capPage,
+	issueMcpView,
 	OMISSION_NOTE,
 	ShapeOptsSchema,
 	shapeIssue,
@@ -8,12 +9,7 @@ import {
 	toPage,
 	VIEW_FIELDS_PROPS,
 } from "../mcp/serialize";
-import {
-	bodyPreview,
-	ISSUE_BODY_MAX_CHARS,
-	LIST_BODY_MAX_CHARS,
-	windowText,
-} from "../mcp/windowing";
+import { bodyPreview, ISSUE_BODY_MAX_CHARS, LIST_BODY_MAX_CHARS } from "../mcp/windowing";
 import {
 	CreateIssueSchema,
 	GetIssuesBatchSchema,
@@ -95,6 +91,8 @@ type PrioritizedRaw = {
 	project_key: string | null;
 	number: number;
 	_score: number;
+	body?: string;
+	bodyTruncated?: true;
 	needsGrooming?: true;
 	missingCriteria?: string[];
 };
@@ -287,6 +285,7 @@ export const issueOperations = [
 				z.string().optional(),
 				"Scope ranking to a single project's issues (default: workspace-wide, all visible projects)"
 			),
+			bodyChars: BodyChars,
 			verbose: flag(
 				"Return the raw rows (ids, status ids, _score and _score_breakdown) instead of the compact shape"
 			),
@@ -295,7 +294,14 @@ export const issueOperations = [
 		mcpResult: (result, input) => {
 			if (input.verbose === true) return result;
 			const r = result as { issues: PrioritizedRaw[] } & Record<string, unknown>;
-			return { ...r, issues: r.issues.map(shapePrioritized) };
+			return {
+				...r,
+				issues: r.issues.map((i) => ({
+					...shapePrioritized(i),
+					...(i.body !== undefined ? { body: i.body } : {}),
+					...(i.bodyTruncated ? { bodyTruncated: true } : {}),
+				})),
+			};
 		},
 	}),
 	defineOperation({
@@ -387,19 +393,7 @@ export const issueOperations = [
 			...Shape,
 		}),
 		run: (ctx, { id }) => getIssue(ctx, ISSUE_REF_PATTERN.test(id) ? { ref: id } : { id }),
-		mcpResult: (result, input) => {
-			const { rest: _, ...shape } = splitShapeOpts(input);
-			const shaped = shapeIssue(result as Record<string, unknown>, shape);
-			if (typeof shaped.body !== "string") return shaped;
-			const w = windowText(shaped.body, { max: ISSUE_BODY_MAX_CHARS, cursor: input.cursor });
-			if (!w.next && input.cursor === undefined) return shaped;
-			return {
-				...shaped,
-				body: w.text,
-				bodyTotalChars: w.totalChars,
-				...(w.next ? { bodyTruncated: true, next: w.next } : {}),
-			};
-		},
+		mcpResult: (result, input) => issueMcpView(result, input),
 	}),
 	defineOperation({
 		...base,

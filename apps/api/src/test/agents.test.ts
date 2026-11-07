@@ -1,5 +1,5 @@
 import { env, SELF } from "cloudflare:test";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { startWork as startWorkDirect } from "../services/agents";
 import type { ServiceCtx } from "../services/types";
 import {
@@ -620,6 +620,134 @@ describe("Agents API", () => {
 
 			const byUuid = await listAgents({ projectId: hidden.id });
 			expect(((await byUuid.json()) as { items: unknown[] }).items).toHaveLength(0);
+		});
+	});
+
+	describe("PROJ-1013: slim lifecycle results over MCP", () => {
+		const prevApiMax = env.RATE_LIMIT_API_MAX;
+		beforeAll(() => {
+			env.RATE_LIMIT_API_MAX = "1000";
+		});
+		afterAll(() => {
+			env.RATE_LIMIT_API_MAX = prevApiMax;
+		});
+		async function tool(name: string, args: Record<string, unknown>) {
+			const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "tools/call",
+					params: { name, arguments: args },
+				}),
+			});
+			const body = (await res.json()) as {
+				result?: { content: Array<{ text: string }>; isError?: boolean };
+			};
+			const text = body.result?.content[0]?.text ?? "";
+			expect(body.result?.isError, text).toBeFalsy();
+			return JSON.parse(text) as Record<string, unknown>;
+		}
+
+		async function seedWithBody(title: string, body: string) {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title });
+			await env.DB.prepare("UPDATE issues SET body = ? WHERE id = ?").bind(body, issue.id).run();
+			return issue;
+		}
+
+		it("start_work returns {sessionId, leaseId, paths, issue} with issue in get_issue's shape", async () => {
+			const issue = await seedWithBody("Pick me up", "Do the thing.");
+			const started = await tool("start_work", {
+				issue: issue.id,
+				name: "worker",
+				paths: ["src/x.ts"],
+			});
+			expect(Object.keys(started).sort()).toEqual(["issue", "leaseId", "paths", "sessionId"]);
+			expect(started.paths).toEqual(["src/x.ts"]);
+
+			const { version: _v, ...viaGetIssue } = await tool("get_issue", { id: issue.id });
+			expect(started.issue).toEqual(viaGetIssue);
+			expect((started.issue as { body: string }).body).toBe("Do the thing.");
+		});
+
+		it("register_agent, claim_issue and finish_work return slim shapes", async () => {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Slim" });
+			const { ref } = await tool("get_issue", { id: issue.id, fields: ["ref"] });
+
+			const session = await tool("register_agent", { name: "slim" });
+			expect(Object.keys(session).sort()).toEqual(["id", "name"]);
+
+			const claim = await tool("claim_issue", { issueId: issue.id, agentId: session.id });
+			expect(Object.keys(claim).sort()).toEqual(["issueRef", "leaseId"]);
+			expect(claim.issueRef).toBe(ref);
+
+			const finished = await tool("finish_work", { sessionId: session.id, issue: issue.id });
+			expect(finished).toEqual({ sessionId: session.id, issueRef: ref });
+
+			const second = await tool("register_agent", { name: "slim-2" });
+			const byRef = await tool("finish_work", {
+				sessionId: second.id,
+				issue: ref,
+				status: "in_progress",
+			});
+			expect(byRef).toEqual({ sessionId: second.id, issueRef: ref, status: "in_progress" });
+		});
+
+		it("list_active_agents and list_issue_leases rows drop workspaceId, issueId and nulls", async () => {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Listed" });
+			await tool("start_work", { issue: issue.id, name: "lister" });
+
+			const agents = (await tool("list_active_agents", {})).items as Record<string, unknown>[];
+			expect(Object.keys(agents[0]).sort()).toEqual([
+				"id",
+				"issueRef",
+				"lastHeartbeatAt",
+				"live",
+				"name",
+				"startedAt",
+			]);
+			const leases = (await tool("list_issue_leases", {})).items as Record<string, unknown>[];
+			expect(leases[0]).not.toHaveProperty("issueId");
+			expect(leases[0]).toHaveProperty("issueRef");
+		});
+
+		it("verbose:true returns the raw rows", async () => {
+			const issue = await seedIssue(workspaceId, projectId, userId, { title: "Raw" });
+			const session = await tool("register_agent", { name: "raw", verbose: true });
+			expect(session.workspaceId).toBe(workspaceId);
+			const started = await tool("start_work", { issue: issue.id, name: "raw2", verbose: true });
+			expect((started.lease as { issueId: string }).issueId).toBe(issue.id);
+			const agents = (await tool("list_active_agents", { verbose: true })).items as Array<{
+				workspaceId: string;
+			}>;
+			expect(agents[0].workspaceId).toBe(workspaceId);
+		});
+
+		it("get_prioritized_issues previews bodies with bodyChars", async () => {
+			const issue = await seedWithBody("Long body", "x".repeat(50));
+			const { ref } = await tool("get_issue", { id: issue.id, fields: ["ref"] });
+
+			const plain = (await tool("get_prioritized_issues", { includeNotReady: true }))
+				.issues as Array<Record<string, unknown>>;
+			expect(plain.find((i) => i.ref === ref)).not.toHaveProperty("body");
+
+			const previewed = (
+				await tool("get_prioritized_issues", { includeNotReady: true, bodyChars: 10 })
+			).issues as Array<Record<string, unknown>>;
+			const row = previewed.find((i) => i.ref === ref);
+			expect(row?.body).toBe("x".repeat(10));
+			expect(row?.bodyTruncated).toBe(true);
+
+			const rest = await SELF.fetch(
+				"http://localhost/api/issues/prioritized?includeNotReady=true&bodyChars=10",
+				{ headers: authHeaders(token, slug) }
+			);
+			const restRow = (
+				(await rest.json()) as { issues: Array<Record<string, unknown>> }
+			).issues.find((i) => i.id === issue.id);
+			expect(restRow?.body).toBe("x".repeat(10));
+			expect(restRow?.bodyTruncated).toBe(true);
 		});
 	});
 });

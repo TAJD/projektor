@@ -29,7 +29,7 @@ async function mcpList(
 			jsonrpc: "2.0",
 			id: 1,
 			method: "tools/call",
-			params: { name: tool, arguments: {} },
+			params: { name: tool, arguments: { verbose: true } },
 		}),
 	});
 	const body = (await res.json()) as {

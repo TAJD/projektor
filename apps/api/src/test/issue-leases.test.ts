@@ -698,10 +698,10 @@ describe("PROJ-932: list_issue_leases live-only default", () => {
 		const issueB = await seedIssue(workspaceId, otherProject.id, userId, { title: "In other" });
 		await seedAgentLease(workspaceId, issueB.id, { name: "b" });
 
-		const byKey = await mcpLeases({ projectId: projectKey });
+		const byKey = await mcpLeases({ projectId: projectKey, verbose: true });
 		expect(byKey.items.map((i) => i.issueId)).toEqual([issueA.id]);
 
-		const byUuid = await mcpLeases({ projectId });
+		const byUuid = await mcpLeases({ projectId, verbose: true });
 		expect(byUuid.items.map((i) => i.issueId)).toEqual([issueA.id]);
 	});
 

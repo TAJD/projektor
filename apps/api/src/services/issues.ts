@@ -2447,6 +2447,7 @@ type PrioritizedFilters = {
 	excludeClaimed: boolean;
 	includeNotReady: boolean;
 	projectId: string | undefined;
+	bodyChars: number;
 };
 
 function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
@@ -2456,6 +2457,7 @@ function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
 		excludeClaimed?: unknown;
 		includeNotReady?: unknown;
 		projectId?: unknown;
+		bodyChars?: unknown;
 	};
 	// PROJ-920: MCP clients may send "5" / "false" (the arg validator allows what the
 	// services coerce), so parse like BooleanQueryParam / z.coerce rather than comparing
@@ -2474,7 +2476,9 @@ function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
 	const includeNotReady = flag(input.includeNotReady, false);
 	const projectId =
 		typeof input.projectId === "string" && input.projectId ? input.projectId : undefined;
-	return { limit, includeBacklog, excludeClaimed, includeNotReady, projectId };
+	const rawChars = Number(input.bodyChars ?? 0);
+	const bodyChars = Number.isFinite(rawChars) ? Math.max(Math.floor(rawChars), 0) : 0;
+	return { limit, includeBacklog, excludeClaimed, includeNotReady, projectId, bodyChars };
 }
 
 // PROJ-859: fill in dor_ready/dor_missing for rows written before migration 0058.
@@ -2522,6 +2526,7 @@ interface PrioritizedRow {
 	story_points: number;
 	score: number;
 	not_ready_count: number;
+	body?: string;
 }
 
 /**
@@ -2542,6 +2547,7 @@ async function queryPrioritized(
 		excludeClaimed: boolean;
 		projectId: string | undefined;
 		readyOnly: boolean;
+		bodyChars: number;
 	}
 ): Promise<PrioritizedRow[]> {
 	const where: string[] = [
@@ -2576,7 +2582,7 @@ async function queryPrioritized(
 		params.push(Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS);
 	}
 
-	const sqlText = `
+	const rankedSql = `
 		WITH open AS (
 			SELECT i.id, i.title, i.status, i.priority, i.project_id, i.number, i.status_id,
 			       (SELECT p.key FROM projects p WHERE p.id = i.project_id) AS project_key,
@@ -2609,6 +2615,12 @@ async function queryPrioritized(
 		 ORDER BY score DESC, rid ASC
 		 LIMIT ?`;
 	params.push(opts.limit);
+	const sqlText =
+		opts.bodyChars > 0
+			? `SELECT r.*, substr(b.body, 1, ${opts.bodyChars + 1}) AS body
+			     FROM (${rankedSql}) r JOIN issues b ON b.rowid = r.rid
+			    ORDER BY r.score DESC, r.rid ASC`
+			: rankedSql;
 
 	const { results } = await ctx.db
 		.prepare(sqlText)
@@ -2617,7 +2629,13 @@ async function queryPrioritized(
 	return results ?? [];
 }
 
-function toPrioritizedIssue(r: PrioritizedRow) {
+function previewPrioritizedBody(body: string, chars: number) {
+	if (body.length <= chars) return { body };
+	const end = /[\uD800-\uDBFF]/.test(body.charAt(chars - 1)) ? chars - 1 : chars;
+	return { body: body.slice(0, end), bodyTruncated: true as const };
+}
+
+function toPrioritizedIssue(r: PrioritizedRow, bodyChars: number) {
 	const issue = {
 		id: r.id,
 		title: r.title,
@@ -2635,6 +2653,7 @@ function toPrioritizedIssue(r: PrioritizedRow) {
 			priority: r.priority_score,
 			story_points: r.story_points,
 		},
+		...(r.body !== undefined ? previewPrioritizedBody(r.body ?? "", bodyChars) : {}),
 	};
 	if (r.dor_ready === 1) return issue;
 	return {
@@ -2652,7 +2671,7 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 		: parsed.projectId;
 
 	await healDefinitionOfReady(ctx);
-	const base = { limit, includeBacklog, excludeClaimed, projectId };
+	const base = { limit, includeBacklog, excludeClaimed, projectId, bodyChars: parsed.bodyChars };
 
 	// PROJ-253: definition-of-ready gate. By default, issues missing acceptance
 	// criteria/scope are dropped from "what should I work on next?" — an agent that
@@ -2661,14 +2680,17 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 	if (includeNotReady) {
 		const rows = await queryPrioritized(ctx, { ...base, readyOnly: false });
 		if (rows.length === 0) return { issues: [] };
-		return { issues: rows.map(toPrioritizedIssue), droppedNotReady: 0 };
+		return { issues: rows.map((r) => toPrioritizedIssue(r, base.bodyChars)), droppedNotReady: 0 };
 	}
 
 	const ready = await queryPrioritized(ctx, { ...base, readyOnly: true });
 	// PROJ-291: don't SILENTLY drop not-ready issues — surface the count so a caller
 	// seeing few results knows to groom (or re-query with includeNotReady).
 	if (ready.length > 0) {
-		return { issues: ready.map(toPrioritizedIssue), droppedNotReady: ready[0].not_ready_count };
+		return {
+			issues: ready.map((r) => toPrioritizedIssue(r, base.bodyChars)),
+			droppedNotReady: ready[0].not_ready_count,
+		};
 	}
 
 	// Nothing ready: return the ranked not-ready list, flagged, rather than an empty
@@ -2676,7 +2698,7 @@ export async function getPrioritizedIssues(ctx: ServiceCtx, raw: unknown) {
 	const all = await queryPrioritized(ctx, { ...base, readyOnly: false });
 	if (all.length === 0) return { issues: [] };
 	return {
-		issues: all.map(toPrioritizedIssue),
+		issues: all.map((r) => toPrioritizedIssue(r, base.bodyChars)),
 		droppedNotReady: all[0].not_ready_count,
 		degraded: true,
 	};
