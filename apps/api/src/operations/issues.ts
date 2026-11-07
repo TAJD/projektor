@@ -375,7 +375,10 @@ export const issueOperations = [
 			"autonomously, the body should state acceptance criteria and scope (files/components) " +
 			"— see get_workflow's definition of ready. get_prioritized_issues excludes issues " +
 			"missing these by default. Verification isn't part of the readiness bar (PROJ-738) — " +
-			"it's required later, in the completionReport when entering review/done.",
+			"it's required later, in the completionReport when entering review/done. " +
+			"Filing work you already finished? Create it straight in done with completionReport (and " +
+			"agentSessionId), and add `comment` and `links` in the same call instead of follow-up " +
+			"update_issue / add_comment / create_issue_link calls; everything commits together.",
 		input: CreateIssueSchema.extend({
 			projectId: d(z.string(), "UUID of the project, or a project key like PROJ"),
 			statusId: d(CreateIssueSchema.shape.statusId, "UUID of the task status to assign"),
@@ -392,6 +395,23 @@ export const issueOperations = [
 			customFields: d(
 				CreateIssueSchema.shape.customFields,
 				"Custom field values keyed by field key (see list_custom_field_defs)"
+			),
+			agentSessionId: d(
+				CreateIssueSchema.shape.agentSessionId,
+				"Your agent session id (from register_agent). With a status of in_review or done it makes completionReport required"
+			),
+			completionReport: d(
+				CreateIssueSchema.shape.completionReport,
+				"Only with a status of in_review or done. Shape: {summary, verification, prLink?, remainder?}. " +
+					"Same evidence rules as update_issue: unverifiable evidence from an agent sets needsAudit:true"
+			),
+			comment: d(
+				CreateIssueSchema.shape.comment,
+				"A comment to add to the new issue (1-10000 chars); its id is returned as commentId"
+			),
+			links: d(
+				CreateIssueSchema.shape.links,
+				'Links from the new issue, e.g. [{type:"follows_from", target:"PROJ-42"}] (max 50); ids returned as linkIds'
 			),
 		}),
 		run: (ctx, input) => createIssue(ctx, input),
@@ -429,6 +449,10 @@ export const issueOperations = [
 				UpdateIssueSchema.shape.completionReport,
 				"Required when an agent moves an issue into in_review; also gates the done transition. " +
 					"Shape: {summary, verification, prLink?, remainder?} — summary and verification are required."
+			),
+			comment: d(
+				UpdateIssueSchema.shape.comment,
+				"A comment added in the same call, after the update (1-10000 chars); its id is returned as commentId. Needs at least one field to update; use add_comment for a comment alone"
 			),
 		}),
 		run: (ctx, { id, ...fields }) => updateIssue(ctx, id, fields),
