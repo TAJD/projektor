@@ -1,6 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, type Column, desc, eq, gt, isNull, or, type SQL, sql } from "drizzle-orm";
-import { ISSUE_REF_PATTERN } from "../schemas/common";
 import {
 	EndAgentSchema,
 	FinishWorkSchema,
@@ -9,6 +8,7 @@ import {
 	RegisterAgentSchema,
 	StartWorkSchema,
 } from "../schemas/agents";
+import { ISSUE_REF_PATTERN } from "../schemas/common";
 import { visibleProjectPredicate } from "./access";
 import { resolveAgentSessionId } from "./agent-identity";
 import { buildGuardedMessageInsert } from "./agent-messages";

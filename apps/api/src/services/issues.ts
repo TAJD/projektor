@@ -1693,22 +1693,21 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	// PROJ-1018: these reads don't depend on each other, so they run concurrently instead
 	// of one round trip after another.
-	const [parentCheck, existingRead, assigneeCheck, customFieldsRead] =
-		await Promise.allSettled([
-			"parentId" in data && data.parentId ? validateParent(ctx, data.parentId, id) : undefined,
-			fetchExistingForUpdate(ctx, orm, id),
-			// PROJ-785: a non-null assigneeId must be a member of this workspace —
-			// otherwise we'd persist a dangling or wrong-workspace user reference. `null`
-			// (clearing the assignee) and "not provided" (key absent) both skip this.
-			"assigneeId" in data && data.assigneeId
-				? requireWorkspaceMember(ctx, data.assigneeId)
-				: undefined,
-			// PROJ-870: custom-field writes are validated (read) before the batch; the upserts
-			// themselves are built as statements and folded into it below.
-			data.customFields && Object.keys(data.customFields).length > 0
-				? validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
-				: [],
-		]);
+	const [parentCheck, existingRead, assigneeCheck, customFieldsRead] = await Promise.allSettled([
+		"parentId" in data && data.parentId ? validateParent(ctx, data.parentId, id) : undefined,
+		fetchExistingForUpdate(ctx, orm, id),
+		// PROJ-785: a non-null assigneeId must be a member of this workspace —
+		// otherwise we'd persist a dangling or wrong-workspace user reference. `null`
+		// (clearing the assignee) and "not provided" (key absent) both skip this.
+		"assigneeId" in data && data.assigneeId
+			? requireWorkspaceMember(ctx, data.assigneeId)
+			: undefined,
+		// PROJ-870: custom-field writes are validated (read) before the batch; the upserts
+		// themselves are built as statements and folded into it below.
+		data.customFields && Object.keys(data.customFields).length > 0
+			? validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
+			: [],
+	]);
 	settledValue(parentCheck);
 	const existingRow = settledValue(existingRead);
 	if (!existingRow) throw new NotFoundError("Issue not found");

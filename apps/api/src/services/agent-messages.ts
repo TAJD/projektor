@@ -2,8 +2,8 @@ import { drizzle, schema } from "@projektor/db";
 import { and, asc, desc, eq, gte, type SQL, sql } from "drizzle-orm";
 import { ListMessagesSchema, PostMessageSchema } from "../schemas/agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
-import { resolveMessageScope } from "./issue-ref";
 import { buildTouchAgentHeartbeatIfLiveStatement } from "./issue-leases";
+import { resolveMessageScope } from "./issue-ref";
 import type { ServiceCtx } from "./types";
 
 function toD1Statement(

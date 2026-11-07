@@ -1,13 +1,7 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	endAgent,
-	finishWork,
-	heartbeatAgent,
-	registerAgent,
-	startWork,
-} from "../services/agents";
 import { postMessage } from "../services/agent-messages";
+import { endAgent, finishWork, heartbeatAgent, registerAgent, startWork } from "../services/agents";
 import {
 	buildLeaseClaimStatements,
 	claimIssue,
@@ -15,13 +9,7 @@ import {
 	settleLeaseClaim,
 } from "../services/issue-leases";
 import type { ServiceCtx } from "../services/types";
-import {
-	seedAgentLease,
-	seedIssue,
-	seedMember,
-	seedProjectFixture,
-	seedUser,
-} from "./helpers";
+import { seedAgentLease, seedIssue, seedMember, seedProjectFixture, seedUser } from "./helpers";
 
 function trackD1RoundTrips() {
 	let count = 0;
@@ -123,7 +111,10 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 
 	it("start_work by ref resolves and claims", async () => {
 		const issue = await newIssue();
-		const [{ number }] = await q<{ number: number }>("SELECT number FROM issues WHERE id = ?", issue.id);
+		const [{ number }] = await q<{ number: number }>(
+			"SELECT number FROM issues WHERE id = ?",
+			issue.id
+		);
 		const res = await startWork(ctx, { issue: `PROJ-${number}`, name: "w" });
 		expect(res.lease.issueId).toBe(issue.id);
 	});
@@ -228,7 +219,11 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 			.run();
 
 		const cutoff = Math.floor(Date.now() / 1000) - 120;
-		const state = await readLeaseClaimState(ctx, { issueId: issue.id, agentId: session.id, cutoff });
+		const state = await readLeaseClaimState(ctx, {
+			issueId: issue.id,
+			agentId: session.id,
+			cutoff,
+		});
 		await seedAgentLease(f.workspaceId, issue.id, { live: true });
 
 		const plan = buildLeaseClaimStatements(ctx, {
