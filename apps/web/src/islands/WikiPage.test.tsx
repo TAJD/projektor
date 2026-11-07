@@ -196,6 +196,18 @@ describe("WikiPage — public read-only demo viewer (PROJ-580)", () => {
 		expect(screen.queryByRole("button", { name: /Attach file/i })).toBeNull();
 	});
 
+	it("fetches templates only once the create form opens", async () => {
+		mockFetchWiki(PAGE, true, 404, "real-user@example.com");
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		const templateCalls = () =>
+			vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/api/wiki/templates"));
+		expect(templateCalls()).toHaveLength(0);
+
+		fireEvent.click(await screen.findByRole("button", { name: "+ New page" }));
+		await waitFor(() => expect(templateCalls()).toHaveLength(1));
+	});
+
 	it("shows write affordances for a real user", async () => {
 		mockFetchWiki(PAGE, true, 404, "real-user@example.com");
 		render(<WikiPage slug="my-page" />);
