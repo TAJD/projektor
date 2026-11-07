@@ -162,6 +162,26 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(mcpBody).toEqual(restBody);
 	});
 
+	it("REST returns the raw agingWip even when MCP-only options are passed (PROJ-895)", async () => {
+		for (const title of ["a", "b"]) {
+			const { id } = await seedIssue(workspaceId, projectId, userId, {
+				title,
+				status: "in_progress",
+			});
+			await env.DB.prepare("UPDATE issues SET claimed_at = ? WHERE id = ?")
+				.bind(Math.floor(Date.now() / 1000) - 86_400, id)
+				.run();
+		}
+		const res = await SELF.fetch(
+			`http://localhost/api/projects/${projectId}/flow-metrics?agingWipLimit=1&verbose=false`,
+			{ headers: authHeaders(token, slug) }
+		);
+		expect(res.status).toBe(200);
+		const body = (await res.json()) as { agingWip: unknown[]; agingWipTotal?: number };
+		expect(body.agingWip).toHaveLength(2);
+		expect(body.agingWipTotal).toBeUndefined();
+	});
+
 	it("404s for a project in another workspace", async () => {
 		const res = await SELF.fetch("http://localhost/api/projects/does-not-exist/flow-metrics", {
 			headers: authHeaders(token, slug),

@@ -21,7 +21,7 @@ export interface Operation<S extends z.ZodObject = z.ZodObject> {
 	input: S;
 	status?: 200 | 201;
 	run(ctx: ServiceCtx, input: z.output<S>): Promise<unknown>;
-	mcpResult?: (result: unknown, input: z.output<S>) => unknown;
+	mcpResult?: (result: unknown, input: z.output<S>, ctx: ServiceCtx) => unknown;
 }
 
 export function defineOperation<S extends z.ZodObject>(op: Operation<S>): Operation {
@@ -69,7 +69,7 @@ export function toMcpTool(op: Operation): MCPTool {
 		handler: async (raw, ctx) => {
 			const input = parseInput(op, ctx, raw);
 			const result = await op.run(ctx, input);
-			return op.mcpResult ? op.mcpResult(result, input) : result;
+			return op.mcpResult ? op.mcpResult(result, input, ctx) : result;
 		},
 	};
 }
