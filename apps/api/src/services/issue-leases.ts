@@ -460,87 +460,51 @@ export async function liveLeasedIssueIds(ctx: ServiceCtx): Promise<Set<string>> 
 }
 
 /**
- * Is there a LIVE lease on this issue, held by any session regardless of its
- * self-declared kind? This is the authoritative "an agent is actively working
- * this issue" signal used by the review/done gate (PROJ-287), replacing the
- * spoofable caller-supplied agentSessionId/kind. Gating deliberately ignores
- * agentSessions.kind — a session's kind is self-declared at register_agent
- * time with no privilege check, so a caller could register kind:"human",
- * claim the issue, and mark it done directly if the gate trusted that label.
- * Holding a lease at all is what triggers the gate, not the declared kind.
+ * One read for the review/done gate and the audit flag. everLeased: any lease, ever
+ * (PROJ-289 scopes the done-report requirement to agent-worked issues). liveLease: a
+ * live lease by any session (PROJ-287). sessionLive: agentSessionId is registered,
+ * active and within the TTL (PROJ-375 audit flag). None trusts the session's
+ * self-declared kind, which register_agent sets without a privilege check.
  */
-export async function issueHasLiveAgentLease(ctx: ServiceCtx, issueId: string): Promise<boolean> {
-	const orm = drizzle(ctx.db, { schema });
-	const row = await orm
-		.select({ id: schema.issueLeases.id })
-		.from(schema.issueLeases)
-		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
-		.where(
-			and(
-				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
-				eq(schema.issueLeases.issueId, issueId),
-				isNull(schema.issueLeases.releasedAt),
-				eq(schema.agentSessions.status, "active"),
-				gt(schema.agentSessions.lastHeartbeatAt, liveCutoff())
-			)
-		)
-		.get();
-	return row != null;
+export interface AgentWorkFlags {
+	everLeased: boolean;
+	liveLease: boolean;
+	sessionLive: boolean;
 }
 
-/**
- * Has this issue EVER been leased by any session (live, released, or stale),
- * regardless of its self-declared kind — see issueHasLiveAgentLease for why
- * kind is ignored. Scopes the human-done completion-report requirement to
- * agent-worked issues (PROJ-289) so closing ordinary human/duplicate/won't-fix
- * issues isn't blocked for a report no agent was ever going to write.
- */
-export async function issueEverHadAgentLease(ctx: ServiceCtx, issueId: string): Promise<boolean> {
-	const orm = drizzle(ctx.db, { schema });
-	const row = await orm
-		.select({ id: schema.issueLeases.id })
-		.from(schema.issueLeases)
-		.innerJoin(schema.agentSessions, eq(schema.issueLeases.agentSessionId, schema.agentSessions.id))
-		.where(
-			and(
-				eq(schema.issueLeases.workspaceId, ctx.workspaceId),
-				eq(schema.issueLeases.issueId, issueId)
-			)
-		)
-		.get();
-	return row != null;
-}
-
-/**
- * Is `agentSessionId` a currently-live agent session (registered, status
- * "active", heartbeated within the TTL)? Unlike issueHasLiveAgentLease this
- * isn't about holding a lease on a specific issue — it's used by the PROJ-375
- * evidence-audit flag to tell an agent-initiated `done` transition from a
- * human one, so a caller can't get flagged/unflagged by a lease it released.
- * Still resistant to the "declare kind:human" spoof (issueHasLiveAgentLease's
- * docstring) because it doesn't look at kind at all — only that the session
- * is real and live. A caller can dodge the audit flag by omitting
- * agentSessionId entirely, same limitation the ticket accepts (PROJ-375: no
- * trusted CI/webhook verification here, audit-after-the-fact only).
- */
-export async function isLiveAgentSessionId(
+export async function readAgentWorkFlags(
 	ctx: ServiceCtx,
-	agentSessionId: string
-): Promise<boolean> {
-	const orm = drizzle(ctx.db, { schema });
-	const row = await orm
-		.select({ id: schema.agentSessions.id })
-		.from(schema.agentSessions)
-		.where(
-			and(
-				eq(schema.agentSessions.id, agentSessionId),
-				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
-				eq(schema.agentSessions.status, "active"),
-				gt(schema.agentSessions.lastHeartbeatAt, liveCutoff())
-			)
+	issueId: string,
+	agentSessionId: string | undefined
+): Promise<AgentWorkFlags> {
+	const cutoff = liveCutoff();
+	const row = await ctx.db
+		.prepare(
+			`SELECT
+			   EXISTS (SELECT 1 FROM issue_leases il JOIN agent_sessions s ON s.id = il.agent_session_id
+			           WHERE il.workspace_id = ? AND il.issue_id = ?) AS ever_leased,
+			   EXISTS (SELECT 1 FROM issue_leases il JOIN agent_sessions s ON s.id = il.agent_session_id
+			           WHERE il.workspace_id = ? AND il.issue_id = ? AND il.released_at IS NULL
+			             AND s.status = 'active' AND s.last_heartbeat_at > ?) AS live_lease,
+			   EXISTS (SELECT 1 FROM agent_sessions
+			           WHERE id = ? AND workspace_id = ? AND status = 'active' AND last_heartbeat_at > ?) AS session_live`
 		)
-		.get();
-	return row != null;
+		.bind(
+			ctx.workspaceId,
+			issueId,
+			ctx.workspaceId,
+			issueId,
+			cutoff,
+			agentSessionId ?? "",
+			ctx.workspaceId,
+			cutoff
+		)
+		.first<{ ever_leased: number; live_lease: number; session_live: number }>();
+	return {
+		everLeased: row?.ever_leased === 1,
+		liveLease: row?.live_lease === 1,
+		sessionLive: row?.session_live === 1,
+	};
 }
 
 /**

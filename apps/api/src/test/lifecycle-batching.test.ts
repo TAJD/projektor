@@ -13,6 +13,18 @@ import { seedAgentLease, seedIssue, seedMember, seedProjectFixture, seedUser } f
 
 function trackD1RoundTrips() {
 	let count = 0;
+	let inFlight = 0;
+	let waves = 0;
+	const track = <T>(run: () => T): T => {
+		count++;
+		if (inFlight++ === 0) waves++;
+		const result = run();
+		Promise.resolve(result).then(
+			() => inFlight--,
+			() => inFlight--
+		);
+		return result;
+	};
 	const origPrepare = env.DB.prepare.bind(env.DB);
 	const origBatch = env.DB.batch.bind(env.DB);
 	const EXEC_METHODS = new Set(["run", "all", "get", "first", "raw"]);
@@ -27,10 +39,8 @@ function trackD1RoundTrips() {
 						wrapStmt((value as (...a: unknown[]) => D1PreparedStatement).apply(target, args));
 				}
 				if (typeof prop === "string" && EXEC_METHODS.has(prop)) {
-					return (...args: unknown[]) => {
-						count++;
-						return (value as (...a: unknown[]) => unknown).apply(target, args);
-					};
+					return (...args: unknown[]) =>
+						track(() => (value as (...a: unknown[]) => unknown).apply(target, args));
 				}
 				return value.bind(target);
 			},
@@ -39,12 +49,11 @@ function trackD1RoundTrips() {
 	vi.spyOn(env.DB, "prepare").mockImplementation(
 		(q: string) => wrapStmt(origPrepare(q)) as D1PreparedStatement
 	);
-	vi.spyOn(env.DB, "batch").mockImplementation((stmts: D1PreparedStatement[]) => {
-		count++;
-		return origBatch(stmts);
-	});
+	vi.spyOn(env.DB, "batch").mockImplementation((stmts: D1PreparedStatement[]) =>
+		track(() => origBatch(stmts))
+	);
 
-	return { count: () => count };
+	return { count: () => count, waves: () => waves };
 }
 
 type Fixture = Awaited<ReturnType<typeof seedProjectFixture>>;
@@ -430,7 +439,7 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 		expect(tracker.count()).toBe(1);
 	});
 
-	it("finish_work to done with a report is at most 6 round trips (updateIssue's own reads dominate)", async () => {
+	it("finish_work to done with a report is at most 5 round trips in 3 sequential waves (PROJ-1059)", async () => {
 		const issue = await newIssue();
 		const started = await startWork(ctx, { issue: issue.id, paths: ["f.ts"], name: "w" });
 		const tracker = trackD1RoundTrips();
@@ -440,7 +449,8 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 			status: "done",
 			completionReport: { summary: "ok", verification: "pnpm test" },
 		});
-		expect(tracker.count()).toBeLessThanOrEqual(6);
+		expect(tracker.waves()).toBeLessThanOrEqual(3);
+		expect(tracker.count()).toBeLessThanOrEqual(5);
 		const [session] = await q<{ status: string }>(
 			"SELECT status FROM agent_sessions WHERE id = ?",
 			started.sessionId
@@ -448,7 +458,7 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 		expect(session.status).toBe("ended");
 	});
 
-	it("finish_work into review with a report is at most 5 round trips", async () => {
+	it("finish_work into review with a report is at most 5 round trips in 3 sequential waves", async () => {
 		const issue = await newIssue();
 		const started = await startWork(ctx, { issue: issue.id, name: "w" });
 		const tracker = trackD1RoundTrips();
@@ -458,6 +468,7 @@ describe("PROJ-1017: agent lifecycle round trips", () => {
 			status: "in_review",
 			completionReport: { summary: "ok", verification: "pnpm test" },
 		});
+		expect(tracker.waves()).toBeLessThanOrEqual(3);
 		expect(tracker.count()).toBeLessThanOrEqual(5);
 	});
 
