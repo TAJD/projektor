@@ -85,9 +85,9 @@ function baseType(field: z.ZodType): string {
 function fromQuery(schema: z.ZodObject, query: Record<string, string>) {
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(query)) {
-		if (value === "") continue;
 		const field = schema.shape[key] as z.ZodType | undefined;
-		const kind = field ? baseType(field) : "";
+		if (value === "" || !field) continue;
+		const kind = baseType(field);
 		if (kind === "number") out[key] = Number(value);
 		else if (kind === "boolean" && (value === "true" || value === "1")) out[key] = true;
 		else if (kind === "boolean" && (value === "false" || value === "0")) out[key] = false;

@@ -1,38 +1,4 @@
-import type { MCPTool } from "@projektor/types";
-import { getToolUsage } from "../services/tool-usage";
-import { READ } from "./annotations";
+import { toMcpTool } from "../operations/define";
+import { toolUsageOperations } from "../operations/tool-usage";
 
-export const toolUsageTools: MCPTool[] = [
-	{
-		name: "get_tool_usage",
-		description:
-			"MCP tool-call telemetry for this workspace: per tool, the calls, error results and " +
-			"total/average response bytes (a proxy for the tokens agents spend reading results), " +
-			"sorted by bytes. Counted from the start of a UTC day; defaults to the last 7 days. Use " +
-			"it to find the tools whose results cost agents the most. Returns available:false when " +
-			"the deployment has not configured reading usage back from Analytics Engine.",
-		inputSchema: {
-			type: "object",
-			properties: {
-				since: {
-					type: "integer",
-					minimum: 0,
-					description: "Epoch seconds; counts from the start of that UTC day (default 7 days ago)",
-				},
-				until: { type: "integer", minimum: 0, description: "Epoch seconds (default now)" },
-				tool: { type: "string", description: "Only this tool" },
-				limit: {
-					type: "integer",
-					minimum: 1,
-					maximum: 200,
-					default: 25,
-					description: "Max tools listed (the total still covers every tool)",
-				},
-			},
-		},
-		annotations: READ,
-		handler(input, ctx) {
-			return getToolUsage(ctx, input);
-		},
-	},
-];
+export const toolUsageTools = toolUsageOperations.map(toMcpTool);
