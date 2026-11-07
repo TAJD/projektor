@@ -2,22 +2,15 @@ import { z } from "zod";
 import { BooleanQueryParam, PriorityEnum, StatusEnum, TaxonomyIdSchema } from "./common";
 import { CustomFieldFilterSchema } from "./custom-fields";
 
-export const CreateIssueSchema = z
-	.object({
-		projectId: z.string(),
-		title: z.string().min(1).max(500),
-		body: z.string().max(50000).optional(),
-		status: StatusEnum.optional(),
-		statusId: TaxonomyIdSchema.nullable().optional(),
-		priority: PriorityEnum.optional(),
-		assigneeId: z.string().uuid().optional(),
-		type: z.string().min(1).optional(),
-		labels: z.array(z.string().max(50)).max(20).optional(),
-		parentId: z.string().nullable().optional(),
-		typeId: TaxonomyIdSchema.nullable().optional(),
-		customFields: z.record(z.string(), z.unknown()).optional(),
-	})
-	.strict();
+export const LinkTypeInputEnum = z.enum([
+	"blocks",
+	"blocked_by",
+	"relates_to",
+	"duplicates",
+	"follows_from",
+]);
+
+const CommentBodySchema = z.string().min(1).max(10000);
 
 // PROJ-254: completion report an agent (or human) submits when entering review /
 // before an issue can be marked done. Exported (PROJ-929) so finish_work's schema can
@@ -49,6 +42,37 @@ export const CompletionReportSchema = z
 	})
 	.strict();
 
+export const NewIssueLinkSchema = z
+	.object({
+		type: LinkTypeInputEnum.meta({ description: "Relationship from the new issue's side" }),
+		target: z
+			.string()
+			.min(1)
+			.meta({ description: "The other issue: a ref like PROJ-42 or a UUID" }),
+	})
+	.strict();
+
+export const CreateIssueSchema = z
+	.object({
+		projectId: z.string(),
+		title: z.string().min(1).max(500),
+		body: z.string().max(50000).optional(),
+		status: StatusEnum.optional(),
+		statusId: TaxonomyIdSchema.nullable().optional(),
+		priority: PriorityEnum.optional(),
+		assigneeId: z.string().uuid().optional(),
+		type: z.string().min(1).optional(),
+		labels: z.array(z.string().max(50)).max(20).optional(),
+		parentId: z.string().nullable().optional(),
+		typeId: TaxonomyIdSchema.nullable().optional(),
+		customFields: z.record(z.string(), z.unknown()).optional(),
+		agentSessionId: z.string().uuid().optional(),
+		completionReport: CompletionReportSchema.optional(),
+		comment: CommentBodySchema.optional(),
+		links: z.array(NewIssueLinkSchema).min(1).max(50).optional(),
+	})
+	.strict();
+
 export const UpdateIssueSchema = z
 	.object({
 		title: z.string().min(1).max(500).optional(),
@@ -63,9 +87,16 @@ export const UpdateIssueSchema = z
 		customFields: z.record(z.string(), z.unknown()).optional(),
 		agentSessionId: z.string().uuid().optional(),
 		completionReport: CompletionReportSchema.optional(),
+		comment: CommentBodySchema.optional(),
 	})
 	.strict()
-	.refine((obj) => Object.keys(obj).length > 0, { message: "Nothing to update" });
+	.refine(
+		(obj) =>
+			obj.comment === undefined
+				? Object.keys(obj).length > 0
+				: Object.keys(obj).some((k) => k !== "comment" && k !== "agentSessionId"),
+		{ message: "Nothing to update (use add_comment for a comment alone)" }
+	);
 
 export const IssueListCursorInput = z.union([
 	z.number().int().nonnegative(),
@@ -168,13 +199,6 @@ export const SearchIssuesInputSchema = z
 	})
 	.strict();
 
-export const LinkTypeInputEnum = z.enum([
-	"blocks",
-	"blocked_by",
-	"relates_to",
-	"duplicates",
-	"follows_from",
-]);
 export const LinkTypeStoredEnum = z.enum(["blocks", "relates_to", "duplicates", "follows_from"]);
 // PROJ-961: what list_issue_links reports from the viewing issue's side; "followed_by" is the
 // inverse of follows_from and is output-only.

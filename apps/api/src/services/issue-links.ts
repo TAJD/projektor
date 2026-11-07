@@ -15,7 +15,7 @@ import {
 	visibleProjectSqlFragment,
 } from "./access";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
-import { resolveIssueIdParam } from "./issue-ref";
+import { resolveIssueIdParam, resolveIssueIdsParam } from "./issue-ref";
 import type { ServiceCtx } from "./types";
 
 // PROJ-311: linking touches two issues; a non-admin must be able to write to the
@@ -127,6 +127,68 @@ export async function createLink(ctx: ServiceCtx, raw: unknown) {
 	});
 
 	return { id };
+}
+
+export async function prepareNewIssueLinks(
+	ctx: ServiceCtx,
+	newIssueId: string,
+	links: ReadonlyArray<{ type: string; target: string }>
+): Promise<{ ids: string[]; statements: D1PreparedStatement[] }> {
+	const targetIds = await resolveIssueIdsParam(
+		ctx,
+		links.map((l) => l.target)
+	);
+	const orm = drizzle(ctx.db, { schema });
+	const rows = await orm
+		.select({ id: schema.issues.id, projectId: schema.issues.projectId })
+		.from(schema.issues)
+		.where(
+			and(
+				inArray(schema.issues.id, [...new Set(targetIds)]),
+				eq(schema.issues.workspaceId, ctx.workspaceId)
+			)
+		);
+	const projectOf = new Map(rows.map((r) => [r.id, r.projectId]));
+	targetIds.forEach((id, i) => {
+		if (!projectOf.has(id)) throw new NotFoundError(`Issue not found: ${links[i].target}`);
+	});
+	await Promise.all(
+		[...new Set(projectOf.values())].map((p) =>
+			requireIssueProjectWrite(ctx, p, "Target issue not found")
+		)
+	);
+
+	const seen = new Set<string>();
+	const ids: string[] = [];
+	const statements: D1PreparedStatement[] = [];
+	const now = Math.floor(Date.now() / 1000);
+	links.forEach((link, i) => {
+		const canon = canonicalize(newIssueId, targetIds[i], link.type);
+		const key = `${canon.source}:${canon.target}:${canon.type}`;
+		if (seen.has(key)) {
+			throw new ValidationError({
+				formErrors: [],
+				fieldErrors: { links: [`Duplicate link: ${link.type} ${link.target}`] },
+			});
+		}
+		seen.add(key);
+		const id = crypto.randomUUID();
+		ids.push(id);
+		const query = orm
+			.insert(schema.issueLinks)
+			.values({
+				id,
+				workspaceId: ctx.workspaceId,
+				sourceIssueId: canon.source,
+				targetIssueId: canon.target,
+				type: canon.type,
+				createdById: ctx.userId,
+				createdAt: now,
+			})
+			.toSQL();
+		statements.push(ctx.db.prepare(query.sql).bind(...query.params));
+	});
+	return { ids, statements };
 }
 
 export async function deleteLink(ctx: ServiceCtx, raw: unknown) {

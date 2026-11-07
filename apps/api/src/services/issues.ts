@@ -39,7 +39,12 @@ import {
 	readAgentWorkFlags,
 	SESSION_TTL_SECONDS,
 } from "./issue-leases";
-import { buildLinksForIssueStatement, createLink, mapLinksForIssue } from "./issue-links";
+import {
+	buildLinksForIssueStatement,
+	createLink,
+	mapLinksForIssue,
+	prepareNewIssueLinks,
+} from "./issue-links";
 import { ISSUE_REF_PATTERN, resolveIssueIdParam, resolveVisibleIssueIdParam } from "./issue-ref";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
@@ -966,12 +971,20 @@ async function resolveCreateIssueDeps(ctx: ServiceCtx, data: CreateIssueData) {
 		id: resolvedStatusId,
 		key: resolvedStatusKey,
 		category: resolvedStatusCategory,
+		isReviewStep: resolvedIsReviewStep,
 	} = await resolveStatus(ctx, data.statusId, data.status);
 	const cfWrites = data.customFields
 		? await validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
 		: [];
 
-	return { resolvedTypeId, resolvedStatusId, resolvedStatusKey, resolvedStatusCategory, cfWrites };
+	return {
+		resolvedTypeId,
+		resolvedStatusId,
+		resolvedStatusKey,
+		resolvedStatusCategory,
+		resolvedIsReviewStep,
+		cfWrites,
+	};
 }
 
 async function resolveTypeNameParam(
@@ -1014,7 +1027,8 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 		: result.data.parentId;
 	const typeId = await resolveTypeNameParam(ctx, result.data.type, result.data.typeId);
 	const data = { ...result.data, projectId, parentId, typeId };
-	const { title, body, priority, assigneeId, labels } = data;
+	const { title, body, priority, assigneeId, labels, agentSessionId, completionReport, comment } =
+		data;
 
 	// PROJ-389: confirm projectId belongs to this workspace BEFORE the admin-bypass
 	// check below, so an owner/admin can't write into another workspace's project.
@@ -1034,14 +1048,82 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 		await requireWorkspaceMember(ctx, assigneeId);
 	}
 
-	const { resolvedTypeId, resolvedStatusId, resolvedStatusKey, resolvedStatusCategory, cfWrites } =
-		await resolveCreateIssueDeps(ctx, data);
+	const {
+		resolvedTypeId,
+		resolvedStatusId,
+		resolvedStatusKey,
+		resolvedStatusCategory,
+		resolvedIsReviewStep,
+		cfWrites,
+	} = await resolveCreateIssueDeps(ctx, data);
 
 	const id = crypto.randomUUID();
 	const nowTs = now();
 	const resolvedBody = body ?? "";
+	const readyAt = isOpenPastBacklog(resolvedStatusKey, resolvedStatusCategory) ? nowTs : null;
+	const enteringDone = isDoneState(resolvedStatusCategory, resolvedStatusKey);
+	const reporting = resolvedIsReviewStep || enteringDone;
+	if (completionReport && !reporting) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: {
+				completionReport: ["completionReport only applies when creating in in_review or done"],
+			},
+		});
+	}
+	if (agentSessionId && reporting && !completionReport) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: {
+				completionReport: [
+					"A create with agentSessionId into in_review or done requires completionReport (summary and verification)",
+				],
+			},
+		});
+	}
+
+	const [linkPlan, agentWork] = await Promise.all([
+		data.links ? prepareNewIssueLinks(ctx, id, data.links) : undefined,
+		agentSessionId && reporting ? readAgentWorkFlags(ctx, id, agentSessionId) : undefined,
+	]);
+
+	const blank: ExistingIssue = {
+		id,
+		parentId: parentId ?? null,
+		typeId: resolvedTypeId,
+		title,
+		body: resolvedBody,
+		status: "",
+		statusCategory: null,
+		readyAt,
+		claimedAt: null,
+		doneAt: null,
+		completionReportAt: null,
+		inReviewAt: null,
+		reviewBounceCount: 0,
+		statusIsReviewStep: false,
+	};
+	const category = resolvedStatusCategory ?? undefined;
+	const stamps: SetValues = {
+		...buildCompletedAtTransition(blank, resolvedStatusKey, category),
+		...buildFlowTimestampTransitions(blank, resolvedStatusKey, category, resolvedIsReviewStep),
+		...buildReviewTransitions(blank, {
+			resolvedStatusKey,
+			newStatusCategory: category,
+			newIsReviewStep: resolvedIsReviewStep,
+			enteringInReview: resolvedIsReviewStep,
+			enteringDone,
+		}).setValues,
+	};
+	if (completionReport) stamps.completionReportAt = nowTs;
+	if (agentWork?.sessionLive && enteringDone) {
+		stamps.needsAudit =
+			!completionReport || !isExternallyVerifiableEvidence(completionReport.verification);
+	}
 
 	const orm = drizzle(ctx.db, { schema });
+	const reportCommentId = completionReport ? crypto.randomUUID() : undefined;
+	const commentId = comment ? crypto.randomUUID() : undefined;
 
 	// PROJ-870: everything below is independent of everything above it having already
 	// happened (all validation/resolution reads are done), so the issue INSERT (with its
@@ -1062,7 +1144,7 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 			labels: labels ?? [],
 			parentId: parentId ?? null,
 			resolvedTypeId,
-			readyAt: isOpenPastBacklog(resolvedStatusKey, resolvedStatusCategory) ? nowTs : null,
+			readyAt,
 			now: nowTs,
 		}),
 		buildFtsInsertStatement(ctx, id, title, resolvedBody),
@@ -1073,6 +1155,40 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 			action: "created",
 		}),
 	];
+	if (Object.keys(stamps).length > 0) {
+		statements.push(
+			toD1Statement(
+				ctx,
+				orm
+					.update(schema.issues)
+					.set(stamps)
+					.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
+					.toSQL()
+			)
+		);
+	}
+	if (reportCommentId && completionReport) {
+		statements.push(
+			buildAddCommentInsertStatement(ctx, orm, {
+				id: reportCommentId,
+				issueId: id,
+				body: completionReportCommentBody(completionReport, false),
+				now: nowTs,
+			})
+		);
+	}
+	if (commentId && comment) {
+		statements.push(
+			buildAddCommentInsertStatement(ctx, orm, {
+				id: commentId,
+				issueId: id,
+				body: comment,
+				now: nowTs,
+			})
+		);
+	}
+	if (linkPlan) statements.push(...linkPlan.statements);
+	if (agentSessionId) statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, agentSessionId));
 
 	const results = await runIssueWriteBatch(ctx, statements);
 	const number = (results[0]?.results as Array<{ number: number }> | undefined)?.[0]?.number;
@@ -1082,8 +1198,41 @@ export async function createIssue(ctx: ServiceCtx, raw: unknown) {
 		projectId: data.projectId,
 		data: { id, number, title: data.title, status: resolvedStatusKey ?? "todo" },
 	});
+	for (const cid of [reportCommentId, commentId]) {
+		if (!cid) continue;
+		await broadcastWorkspaceEvent(ctx, {
+			type: "comment.created",
+			projectId,
+			data: { id: cid, issueId: id, authorId: ctx.userId },
+		});
+	}
 
-	return { id, number };
+	let followUp: { id: string; ref: string } | undefined;
+	let followUpError: string | undefined;
+	if (enteringDone && completionReport?.remainder) {
+		try {
+			followUp = await createRemainderFollowUp(
+				ctx,
+				orm,
+				{ ...blank, projectId },
+				completionReport.remainder
+			);
+		} catch (e) {
+			followUpError = `Issue created as done, but the follow-up for the remainder could not be created: ${
+				e instanceof Error ? e.message : String(e)
+			}. Create it manually.`;
+		}
+	}
+
+	return {
+		id,
+		number,
+		...(commentId ? { commentId } : {}),
+		...(linkPlan ? { linkIds: linkPlan.ids } : {}),
+		...(stamps.needsAudit ? { needsAudit: true } : {}),
+		...(followUp ? { followUp } : {}),
+		...(followUpError ? { followUpError } : {}),
+	};
 }
 
 type UpdateIssueData = z.infer<typeof UpdateIssueSchema>;
@@ -1823,6 +1972,18 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		);
 	}
 
+	const userCommentId = data.comment ? crypto.randomUUID() : undefined;
+	if (userCommentId && data.comment) {
+		statements.push(
+			buildAddCommentInsertStatement(ctx, orm, {
+				id: userCommentId,
+				issueId: id,
+				body: data.comment,
+				now: commentNow,
+			})
+		);
+	}
+
 	if (gateRejectionStatement) statements.push(gateRejectionStatement);
 
 	statements.push(
@@ -1863,6 +2024,13 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 			data: { id: commentId, issueId: id, authorId: ctx.userId },
 		});
 	}
+	if (userCommentId) {
+		await broadcastWorkspaceEvent(ctx, {
+			type: "comment.created",
+			projectId: existing.projectId,
+			data: { id: userCommentId, issueId: id, authorId: ctx.userId },
+		});
+	}
 
 	const isStatusChange = data.status !== undefined || data.statusId !== undefined;
 	await broadcastWorkspaceEvent(ctx, {
@@ -1895,6 +2063,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	return {
 		ok: true,
+		...(userCommentId ? { commentId: userCommentId } : {}),
 		...(followUp ? { followUp } : {}),
 		...(followUpError ? { followUpError } : {}),
 		...(parent ?? {}),
