@@ -179,6 +179,62 @@ describe("PROJ-894: stateless agent identity", () => {
 		expect((await call(token, "end_agent", { agentId: sessionId })).ok).toBe(true);
 	});
 
+	it("a lease conflict over MCP points at get_prioritized_issues, not a retry (PROJ-1010)", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Contended" });
+		const holder = await register(token, "holder");
+		expect((await call(token, "claim_issue", { issueId: issue.id, agentId: holder })).ok).toBe(
+			true
+		);
+		const other = await register(await seedToken(workspaceId, userId), "other");
+
+		const res = await call(token, "claim_issue", { issueId: issue.id, agentId: other });
+		expect(res.ok).toBe(false);
+		expect(res.message).toContain("get_prioritized_issues");
+		expect(res.message).toContain('\\"holder\\"');
+		expect(res.message).not.toMatch(/retry/i);
+	});
+
+	it("update_issue and post_message revive a stale session for its own credential (PROJ-1010)", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Revive" });
+		const sessionId = await register();
+		const stale = Math.floor(Date.now() / 1000) - 3600;
+		const heartbeat = async () =>
+			(
+				await env.DB.prepare("SELECT last_heartbeat_at AS hb FROM agent_sessions WHERE id = ?")
+					.bind(sessionId)
+					.first<{ hb: number }>()
+			)?.hb ?? 0;
+		const backdate = () =>
+			env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")
+				.bind(stale, sessionId)
+				.run();
+
+		await backdate();
+		expect(
+			(await call(token, "post_message", { scope: issue.id, agentId: sessionId, body: "hi" })).ok
+		).toBe(true);
+		expect(await heartbeat()).toBeGreaterThan(stale);
+
+		await backdate();
+		expect(
+			(
+				await call(token, "update_issue", {
+					id: issue.id,
+					agentSessionId: sessionId,
+					priority: "high",
+				})
+			).ok
+		).toBe(true);
+		expect(await heartbeat()).toBeGreaterThan(stale);
+
+		await backdate();
+		const foreign = await seedToken(workspaceId, userId);
+		expect(
+			(await call(foreign, "post_message", { scope: issue.id, agentId: sessionId, body: "x" })).ok
+		).toBe(true);
+		expect(await heartbeat()).toBe(stale);
+	});
+
 	it("an abandoned stale session does not make a lone live agent's id-less heartbeat ambiguous", async () => {
 		const abandoned = await register(token, "crashed");
 		await env.DB.prepare("UPDATE agent_sessions SET last_heartbeat_at = ? WHERE id = ?")

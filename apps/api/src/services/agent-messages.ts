@@ -2,7 +2,7 @@ import { drizzle, schema } from "@projektor/db";
 import { and, asc, desc, eq, gte, type SQL, sql } from "drizzle-orm";
 import { ListMessagesSchema, PostMessageSchema } from "../schemas/agent-messages";
 import { NotFoundError, ValidationError } from "./errors";
-import { buildTouchAgentHeartbeatIfLiveStatement } from "./issue-leases";
+import { buildTouchAgentHeartbeatStatement } from "./issue-leases";
 import { resolveMessageScope } from "./issue-ref";
 import type { ServiceCtx } from "./types";
 
@@ -99,10 +99,7 @@ export async function postMessage(ctx: ServiceCtx, raw: unknown) {
 		await statement.run();
 		return row;
 	}
-	const results = await ctx.db.batch([
-		buildTouchAgentHeartbeatIfLiveStatement(ctx, agentId),
-		statement,
-	]);
+	const results = await ctx.db.batch([buildTouchAgentHeartbeatStatement(ctx, agentId), statement]);
 	if (results[1].meta.changes === 0) throw new NotFoundError("Agent session not found");
 	return row;
 }

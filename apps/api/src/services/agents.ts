@@ -10,7 +10,7 @@ import {
 } from "../schemas/agents";
 import { ISSUE_REF_PATTERN } from "../schemas/common";
 import { visibleProjectPredicate } from "./access";
-import { resolveAgentSessionId } from "./agent-identity";
+import { resolveAgentSessionId, SESSION_TTL_SECONDS } from "./agent-identity";
 import { buildGuardedMessageInsert } from "./agent-messages";
 import { flattenWithPaths, NotFoundError, ValidationError } from "./errors";
 import { buildReleaseClaimsForAgentStatement, claimFilesResolved } from "./file-claims";
@@ -25,8 +25,6 @@ import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref"
 import { updateIssue } from "./issues";
 import { resolveVisibleProjectIdParam } from "./projects";
 import type { ServiceCtx } from "./types";
-
-const ACTIVE_TTL = 120;
 
 // PROJ-336: agent_sessions.kind is caller-declared at register_agent with no
 // privilege check (the original review-gate spoof vector; PROJ-287 rebound the
@@ -134,7 +132,7 @@ function sessionRowFromRaw(r: Record<string, unknown>): AgentSessionRow {
  * is left behind by a failed start_work call in the ordinary case. If the process
  * itself crashes mid-call (so the compensating end_agent never runs), the claims it
  * made are still reclaimable by the next caller once the session's heartbeat goes
- * stale after ACTIVE_TTL (120s) — see claim_issue/claim_files's stale-holder reclaim.
+ * stale after SESSION_TTL_SECONDS (120s) — see claim_issue/claim_files's stale-holder reclaim.
  */
 export async function startWork(ctx: ServiceCtx, raw: unknown) {
 	const result = StartWorkSchema.safeParse(raw);
@@ -145,9 +143,9 @@ export async function startWork(ctx: ServiceCtx, raw: unknown) {
 		: result.data.issue;
 
 	const now = Math.floor(Date.now() / 1000);
-	const cutoff = now - ACTIVE_TTL;
+	const cutoff = now - SESSION_TTL_SECONDS;
 	const state = await readLeaseClaimState(ctx, { issueId, agentId: null, cutoff });
-	if (state.holder?.live) throw leaseHeldError(state.holder.agentSessionId);
+	if (state.holder?.live) throw leaseHeldError(state, now);
 
 	const sessionId = crypto.randomUUID();
 	const leaseId = crypto.randomUUID();
@@ -325,7 +323,7 @@ export async function listActiveAgents(ctx: ServiceCtx, raw: unknown) {
 		: undefined;
 
 	const orm = drizzle(ctx.db, { schema });
-	const cutoff = Math.floor(Date.now() / 1000) - ACTIVE_TTL;
+	const cutoff = Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 
 	// `status='active'` is unconditional — an ended session is never returned, whether or
 	// not includeStale is set. includeStale only lifts the heartbeat-freshness check below.

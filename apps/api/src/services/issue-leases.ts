@@ -7,17 +7,17 @@ import {
 	ReleaseIssueSchema,
 } from "../schemas/issue-leases";
 import { visibleProjectPredicate, visibleProjectSqlFragment } from "./access";
-import { resolveAgentSessionId } from "./agent-identity";
+import {
+	canReviveSession,
+	resolveAgentSessionId,
+	SESSION_TTL_SECONDS,
+	touchableSession,
+} from "./agent-identity";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
 import { resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import type { ServiceCtx } from "./types";
-
-// Mirrors ACTIVE_TTL in services/agents.ts: a session (and therefore its leases)
-// is live only while it has heartbeat within this window. Kept local to avoid a
-// circular import (agents.ts already imports releaseLeasesForAgent from here).
-export const SESSION_TTL_SECONDS = 120;
 
 const liveCutoff = () => Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
 
@@ -41,10 +41,7 @@ export async function fetchAgentWipCap(
 	return project?.agentWipLimit ?? DEFAULT_AGENT_WIP_LIMIT;
 }
 
-// PROJ-929: statement-builder for callers (e.g. updateIssue, claimIssue) that fold the
-// heartbeat refresh into their own ctx.db.batch(). Gated on status='active' AND
-// heartbeat > cutoff so it never revives a stale session (PROJ-636 stale-holder reclaim).
-export function buildTouchAgentHeartbeatIfLiveStatement(
+export function buildTouchAgentHeartbeatStatement(
 	ctx: ServiceCtx,
 	agentSessionId: string
 ): D1PreparedStatement {
@@ -56,8 +53,7 @@ export function buildTouchAgentHeartbeatIfLiveStatement(
 			and(
 				eq(schema.agentSessions.id, agentSessionId),
 				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
-				eq(schema.agentSessions.status, "active"),
-				gt(schema.agentSessions.lastHeartbeatAt, liveCutoff())
+				touchableSession(ctx, liveCutoff())
 			)
 		)
 		.toSQL();
@@ -67,8 +63,15 @@ export function buildTouchAgentHeartbeatIfLiveStatement(
 interface ClaimReadState {
 	projectId: string;
 	cap: number;
-	holder: { leaseId: string; agentSessionId: string; live: boolean } | null;
-	session: { status: string; heartbeat: number } | null;
+	issueRef: string;
+	holder: {
+		leaseId: string;
+		agentSessionId: string;
+		agentName: string;
+		claimedAt: number;
+		live: boolean;
+	} | null;
+	session: { status: string; heartbeat: number; credential_id: string | null } | null;
 }
 
 function visibleIssueClause(ctx: ServiceCtx, column: string): { sql: string; params: unknown[] } {
@@ -85,7 +88,8 @@ export async function readLeaseClaimState(
 	const statements = [
 		ctx.db
 			.prepare(
-				`SELECT i.project_id AS project_id, p.agent_wip_limit AS cap
+				`SELECT i.project_id AS project_id, p.agent_wip_limit AS cap,
+				        p.key || '-' || i.number AS ref
 				 FROM issues i
 				 JOIN projects p ON p.id = i.project_id AND p.workspace_id = i.workspace_id
 				 WHERE i.id = ? AND i.workspace_id = ?${issueVis.sql}`
@@ -94,6 +98,7 @@ export async function readLeaseClaimState(
 		ctx.db
 			.prepare(
 				`SELECT il.id AS lease_id, il.agent_session_id AS agent_session_id,
+				        s.name AS agent_name, il.claimed_at AS claimed_at,
 				        (s.status = 'active' AND s.last_heartbeat_at > ?) AS live
 				 FROM issue_leases il
 				 JOIN issues i ON i.id = il.issue_id AND i.workspace_id = il.workspace_id
@@ -107,26 +112,37 @@ export async function readLeaseClaimState(
 		statements.push(
 			ctx.db
 				.prepare(
-					"SELECT status, last_heartbeat_at AS heartbeat FROM agent_sessions WHERE id = ? AND workspace_id = ?"
+					"SELECT status, last_heartbeat_at AS heartbeat, credential_id FROM agent_sessions WHERE id = ? AND workspace_id = ?"
 				)
 				.bind(agentId, ctx.workspaceId)
 		);
 	}
 
 	const [issueRes, holderRes, sessionRes] = await ctx.db.batch(statements);
-	const issue = issueRes.results[0] as { project_id: string; cap: number | null } | undefined;
+	const issue = issueRes.results[0] as
+		| { project_id: string; cap: number | null; ref: string }
+		| undefined;
 	if (!issue) throw new NotFoundError("Issue not found");
 	const holder = holderRes.results[0] as
-		| { lease_id: string; agent_session_id: string; live: number }
+		| {
+				lease_id: string;
+				agent_session_id: string;
+				agent_name: string;
+				claimed_at: number;
+				live: number;
+		  }
 		| undefined;
-	const session = sessionRes?.results[0] as { status: string; heartbeat: number } | undefined;
+	const session = sessionRes?.results[0] as ClaimReadState["session"] | undefined;
 	return {
 		projectId: issue.project_id,
 		cap: issue.cap ?? DEFAULT_AGENT_WIP_LIMIT,
+		issueRef: issue.ref,
 		holder: holder
 			? {
 					leaseId: holder.lease_id,
 					agentSessionId: holder.agent_session_id,
+					agentName: holder.agent_name,
+					claimedAt: holder.claimed_at,
 					live: holder.live === 1,
 				}
 			: null,
@@ -134,18 +150,47 @@ export async function readLeaseClaimState(
 	};
 }
 
-export function assertSessionLive(state: ClaimReadState, cutoff: number): void {
-	if (!state.session) throw new NotFoundError("Agent session not found");
-	if (state.session.status !== "active" || state.session.heartbeat <= cutoff) {
+export function assertSessionUsable(
+	ctx: ServiceCtx,
+	state: ClaimReadState,
+	cutoff: number
+): { revived: boolean } {
+	const session = state.session;
+	if (!session) throw new NotFoundError("Agent session not found");
+	if (session.status !== "active") {
 		throw new ValidationError({
-			formErrors: ["Agent session is not live — heartbeat before claiming"],
+			formErrors: ["Agent session has ended — start a new one with start_work or register_agent"],
 			fieldErrors: {},
 		});
 	}
+	if (session.heartbeat > cutoff) return { revived: false };
+	if (canReviveSession(ctx, session)) return { revived: true };
+	throw new ValidationError({
+		formErrors: [
+			"Agent session is not live and was registered by another credential — heartbeat it with heartbeat_agent, or start your own with start_work",
+		],
+		fieldErrors: {},
+	});
 }
 
-export function leaseHeldError(agentSessionId: string): ConflictError {
-	return new ConflictError(`Issue is already leased by agent session ${agentSessionId}`);
+export function leaseHeldError(
+	state: ClaimReadState,
+	now: number,
+	agentId?: string
+): ConflictError {
+	const holder = state.holder;
+	if (!holder) return new ConflictError(`${state.issueRef} is already leased`);
+	if (holder.agentSessionId === agentId) {
+		return new ConflictError(`${state.issueRef} is already leased by this session`, {
+			heldBySelf: true,
+		});
+	}
+	const minutes = Math.max(0, Math.round((now - holder.claimedAt) / 60));
+	return new ConflictError(
+		`${state.issueRef} is leased by agent "${holder.agentName}" (session ${holder.agentSessionId}), ` +
+			`claimed ${minutes} min ago`,
+		{ holder: holder.agentName, issueRef: state.issueRef, leaseAgeMinutes: minutes }
+	);
 }
 
 export interface LeaseClaimPlan {
@@ -177,7 +222,7 @@ export function buildLeaseClaimStatements(
 	const statements: D1PreparedStatement[] = [];
 
 	if (input.touchHeartbeat) {
-		statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, agentId));
+		statements.push(buildTouchAgentHeartbeatStatement(ctx, agentId));
 	}
 	if (state.holder && !state.holder.live) {
 		statements.push(
@@ -324,11 +369,11 @@ export async function claimIssue(ctx: ServiceCtx, raw: unknown) {
 	const cutoff = liveCutoff();
 	const now = Math.floor(Date.now() / 1000);
 	const state = await readLeaseClaimState(ctx, { issueId, agentId, cutoff });
-	assertSessionLive(state, cutoff);
+	const { revived } = assertSessionUsable(ctx, state, cutoff);
 
-	if (state.holder?.live) {
-		await buildTouchAgentHeartbeatIfLiveStatement(ctx, agentId).run();
-		throw leaseHeldError(state.holder.agentSessionId);
+	if (state.holder?.live || (revived && state.holder?.agentSessionId === agentId)) {
+		await buildTouchAgentHeartbeatStatement(ctx, agentId).run();
+		throw leaseHeldError(state, now, agentId);
 	}
 
 	const plan = buildLeaseClaimStatements(ctx, {
@@ -487,7 +532,8 @@ export async function readAgentWorkFlags(
 			           WHERE il.workspace_id = ? AND il.issue_id = ? AND il.released_at IS NULL
 			             AND s.status = 'active' AND s.last_heartbeat_at > ?) AS live_lease,
 			   EXISTS (SELECT 1 FROM agent_sessions
-			           WHERE id = ? AND workspace_id = ? AND status = 'active' AND last_heartbeat_at > ?) AS session_live`
+			           WHERE id = ? AND workspace_id = ? AND status = 'active'
+			             AND (last_heartbeat_at > ? OR credential_id = ?)) AS session_live`
 		)
 		.bind(
 			ctx.workspaceId,
@@ -497,7 +543,8 @@ export async function readAgentWorkFlags(
 			cutoff,
 			agentSessionId ?? "",
 			ctx.workspaceId,
-			cutoff
+			cutoff,
+			ctx.auth?.credentialId ?? null
 		)
 		.first<{ ever_leased: number; live_lease: number; session_live: number }>();
 	return {

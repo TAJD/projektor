@@ -23,6 +23,7 @@ import {
 	visibleProjectSqlFragment,
 } from "./access";
 import { recordActivity } from "./activity";
+import { SESSION_TTL_SECONDS } from "./agent-identity";
 import { buildAddCommentInsertStatement } from "./comments";
 import {
 	batchLoadCustomFields,
@@ -42,9 +43,8 @@ import { buildReleaseClaimsForClosedIssueStatement } from "./file-claims";
 import {
 	type AgentWorkFlags,
 	buildReleaseLeaseForClosedIssueStatement,
-	buildTouchAgentHeartbeatIfLiveStatement,
+	buildTouchAgentHeartbeatStatement,
 	readAgentWorkFlags,
-	SESSION_TTL_SECONDS,
 } from "./issue-leases";
 import {
 	buildLinksForIssueStatement,
@@ -1252,7 +1252,7 @@ async function prepareCreateIssue(
 		);
 	}
 	if (linkPlan) statements.push(...linkPlan.statements);
-	if (agentSessionId) statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, agentSessionId));
+	if (agentSessionId) statements.push(buildTouchAgentHeartbeatStatement(ctx, agentSessionId));
 
 	return { statements, finish };
 
@@ -2086,7 +2086,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	// as claim_issue/claim_files/post_message; the statement's own WHERE guard
 	// (status='active' AND heartbeat > cutoff) makes it a no-op for a stale session.
 	if (data.agentSessionId) {
-		statements.push(buildTouchAgentHeartbeatIfLiveStatement(ctx, data.agentSessionId));
+		statements.push(buildTouchAgentHeartbeatStatement(ctx, data.agentSessionId));
 	}
 
 	await runIssueWriteBatch(ctx, statements);
