@@ -6,6 +6,11 @@ import { z } from "zod";
 // before asking, so an internal link never makes the Worker fetch itself.
 export const GetLinkPreviewSchema = z
 	.object({
-		url: z.string().trim().min(1).max(2048),
+		url: z
+			.string()
+			.trim()
+			.min(1)
+			.max(2048)
+			.meta({ description: "Absolute http(s) URL, or an app path starting with /" }),
 	})
 	.strict();

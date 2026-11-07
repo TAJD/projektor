@@ -1,24 +1,11 @@
-import type { HonoEnv } from "@projektor/types";
-import { Hono } from "hono";
 import { serviceErrToResponse } from "../http/error-adapter";
-import { getLinkPreview, getLinkPreviewImage } from "../services/link-previews";
+import { operationsRouter } from "../operations/define";
+import { linkPreviewOperations } from "../operations/link-previews";
+import { getLinkPreviewImage } from "../services/link-previews";
 import { ctxFromHono } from "../services/types";
 
-const router = new Hono<HonoEnv>();
+const router = operationsRouter("/api/link-preview", linkPreviewOperations);
 
-// GET /api/link-preview?url=… — PROJ-1036. `url` is an absolute http(s) URL or an
-// app-relative issue/wiki path (see schemas/link-previews.ts).
-router.get("/", async (c) => {
-	try {
-		return c.json(await getLinkPreview(ctxFromHono(c), { url: c.req.query("url") }));
-	} catch (e) {
-		return serviceErrToResponse(c, e);
-	}
-});
-
-// GET /api/link-preview/image?url=<page url> — PROJ-1037. The card's image, fetched by the
-// Worker so the viewer's browser never contacts the linked site. REST-only: it streams
-// bytes for an <img>, there's no JSON operation for an MCP tool to mirror.
 router.get("/image", async (c) => {
 	try {
 		const image = await getLinkPreviewImage(ctxFromHono(c), { url: c.req.query("url") });
