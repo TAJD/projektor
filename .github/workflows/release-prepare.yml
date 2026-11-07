@@ -20,12 +20,17 @@ jobs:
     steps:
       # A PR opened with the default GITHUB_TOKEN doesn't trigger ci.yml's
       # `pull_request` gate (GitHub suppresses that to avoid recursive runs),
-      # so the bump PR would sit with no CI status. Use WORKSPACE_PAT instead
-      # (same one release-tag.yml and release.yml's dispatch step use).
+      # so the bump PR would sit with no CI status. Use a release-bot app token.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           ref: main
-          token: ${{ secrets.WORKSPACE_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Bump version
         id: bump
@@ -36,7 +41,7 @@ jobs:
 
       - name: Open release PR
         env:
-          GH_TOKEN: ${{ secrets.WORKSPACE_PAT }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           VERSION="${{ steps.bump.outputs.version }}"
           BRANCH="chore/release-v$VERSION"

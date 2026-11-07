@@ -16,12 +16,17 @@ jobs:
     steps:
       # Tags pushed with the default GITHUB_TOKEN don't trigger other workflows
       # (GitHub suppresses that to avoid runaway loops), so release.yml's
-      # `on: push: tags: ['v*']` would never fire. Use the same WORKSPACE_PAT
-      # release.yml already relies on for its cross-repo dispatch step.
+      # `on: push: tags: ['v*']` would never fire. Use a release-bot app token.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           ref: main
-          token: ${{ secrets.WORKSPACE_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Determine version
         id: version
