@@ -1,9 +1,10 @@
 import {
 	CreateIssueLinkSchema,
+	CreateIssueLinksSchema,
 	DeleteIssueLinkFields,
 	ListIssueLinksSchema,
 } from "../schemas/issues";
-import { createLink, deleteLink, listLinksForIssue } from "../services/issue-links";
+import { createLink, createLinks, deleteLink, listLinksForIssue } from "../services/issue-links";
 import { defineOperation } from "./define";
 
 const base = {
@@ -25,6 +26,22 @@ export const issueLinkOperations = [
 			"follows_from: the source is a follow-up that continues the target (list_issue_links reports the inverse as followed_by)",
 		input: CreateIssueLinkSchema,
 		run: (ctx, input) => createLink(ctx, input),
+	}),
+	defineOperation({
+		...base,
+		id: "create_issue_links",
+		method: "POST",
+		path: "/api/issues/links/bulk",
+		tier: "write",
+		minRole: "member",
+		summary:
+			"Create up to 100 issue links in one call, e.g. fanning one epic out to many children. " +
+			"Each link is {source, target, type} with the same types as create_issue_link. Returns `results` " +
+			"in input order: {id} for a created link, or {error: {code, message}} for one that was rejected " +
+			"(unknown issue, no write access, self-link, already exists, or repeated in this call). " +
+			"A rejected link doesn't stop the others.",
+		input: CreateIssueLinksSchema,
+		run: (ctx, input) => createLinks(ctx, input),
 	}),
 	defineOperation({
 		...base,

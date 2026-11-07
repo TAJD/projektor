@@ -12,7 +12,7 @@ running server.
 
 <!-- gen-mcp-catalog:start - generated block; run `pnpm --filter @projektor/api gen:catalog` to refresh -->
 
-**124 tools across 24 domains.**
+**126 tools across 24 domains.**
 
 ## Coordination
 
@@ -122,6 +122,7 @@ running server.
 | `get_issues` | Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than repeated get_issue calls for triage. Items carry customFields but no rollup/links/assignee_name, and omit `body` unless includeBody:true. Returned in the order refs/ids were given; `missing` lists (once each) any requested ref/id that didn't resolve or isn't visible to you. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 | `get_issue` | Get a single issue by ID or project key + number (e.g. "PROJ-42"). `body` is returned up to 16000 chars; if it is longer the result has `bodyTruncated:true`, `bodyTotalChars` and `next` — pass `next` back as `cursor` for the rest. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/. | read-only |
 | `create_issue` | Create a new issue in a project. For an issue an agent should be able to pick up autonomously, the body should state acceptance criteria and scope (files/components) — see get_workflow's definition of ready. get_prioritized_issues excludes issues missing these by default. Verification isn't part of the readiness bar (PROJ-738) — it's required later, in the completionReport when entering review/done. Filing work you already finished? Create it straight in done with completionReport (and agentSessionId), and add `comment` and `links` in the same call instead of follow-up update_issue / add_comment / create_issue_link calls; everything commits together. | write |
+| `create_issues` | Create up to 50 issues in one project in one call. Each item takes create_issue's fields (including completionReport, comment and links). Returns `results` in item order: {ref, id, ...} for a created issue, or {error: {code, message}} for an item that was rejected (e.g. a bad link target or parent). A rejected item doesn't stop the others; the created ones commit together. A malformed item (wrong field type) rejects the whole call before anything is written, and so does a commit that fails because a referenced record (e.g. a status) was deleted mid-call. | write |
 | `update_issue` | Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. If the work is only partly done, pass completionReport.remainder when marking done: a follow-up issue (same parent and labels, linked follows_from) is created and its ref returned as followUp.ref. | write |
 | `delete_issue` | Delete an issue by ID or ref (e.g. PROJ-42) | destructive |
 
@@ -130,6 +131,7 @@ running server.
 | Tool | Description | Kind |
 |------|-------------|------|
 | `create_issue_link` | Create a typed link between two issues (blocks, blocked_by, relates_to, duplicates, follows_from). follows_from: the source is a follow-up that continues the target (list_issue_links reports the inverse as followed_by) | write |
+| `create_issue_links` | Create up to 100 issue links in one call, e.g. fanning one epic out to many children. Each link is {source, target, type} with the same types as create_issue_link. Returns `results` in input order: {id} for a created link, or {error: {code, message}} for one that was rejected (unknown issue, no write access, self-link, already exists, or repeated in this call). A rejected link doesn't stop the others. | write |
 | `delete_issue_link` | Delete an issue link by ID | destructive |
 | `list_issue_links` | List all links for an issue (shows effective type from this issue's perspective) | read-only |
 

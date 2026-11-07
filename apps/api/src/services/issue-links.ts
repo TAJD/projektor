@@ -1,8 +1,10 @@
 import { drizzle, schema } from "@projektor/db";
+import type { Role } from "@projektor/types";
 import { and, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
 import {
 	CreateIssueLinkSchema,
+	CreateIssueLinksSchema,
 	DeleteIssueLinkSchema,
 	type LinkTypeEffectiveEnum,
 	type LinkTypeStoredEnum,
@@ -14,8 +16,15 @@ import {
 	isWorkspaceAdmin,
 	visibleProjectSqlFragment,
 } from "./access";
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "./errors";
-import { resolveIssueIdParam, resolveIssueIdsParam } from "./issue-ref";
+import {
+	ConflictError,
+	ForbiddenError,
+	NotFoundError,
+	toItemError,
+	ValidationError,
+} from "./errors";
+import { resolveIssueIdParam, resolveIssueIdsIfFound, resolveIssueIdsParam } from "./issue-ref";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 // PROJ-311: linking touches two issues; a non-admin must be able to write to the
@@ -23,10 +32,16 @@ import type { ServiceCtx } from "./types";
 async function requireIssueProjectWrite(
 	ctx: ServiceCtx,
 	projectId: string,
-	notFoundLabel: string
+	notFoundLabel: string,
+	roles?: ProjectRoleCache
 ): Promise<void> {
 	if (isWorkspaceAdmin(ctx.role)) return;
-	const role = await effectiveProjectRole(ctx, projectId);
+	let pending = roles?.get(projectId);
+	if (!pending) {
+		pending = effectiveProjectRole(ctx, projectId);
+		roles?.set(projectId, pending);
+	}
+	const role = await pending;
 	if (role === null) throw new NotFoundError(notFoundLabel);
 	if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
 }
@@ -129,10 +144,13 @@ export async function createLink(ctx: ServiceCtx, raw: unknown) {
 	return { id };
 }
 
+export type ProjectRoleCache = Map<string, Promise<Role | null>>;
+
 export async function prepareNewIssueLinks(
 	ctx: ServiceCtx,
 	newIssueId: string,
-	links: ReadonlyArray<{ type: string; target: string }>
+	links: ReadonlyArray<{ type: string; target: string }>,
+	roles?: ProjectRoleCache
 ): Promise<{ ids: string[]; statements: D1PreparedStatement[] }> {
 	const targetIds = await resolveIssueIdsParam(
 		ctx,
@@ -154,7 +172,7 @@ export async function prepareNewIssueLinks(
 	});
 	await Promise.all(
 		[...new Set(projectOf.values())].map((p) =>
-			requireIssueProjectWrite(ctx, p, "Target issue not found")
+			requireIssueProjectWrite(ctx, p, "Target issue not found", roles)
 		)
 	);
 
@@ -189,6 +207,120 @@ export async function prepareNewIssueLinks(
 		statements.push(ctx.db.prepare(query.sql).bind(...query.params));
 	});
 	return { ids, statements };
+}
+
+export async function createLinks(ctx: ServiceCtx, raw: unknown) {
+	if (ctx.role === "viewer") throw new ForbiddenError("Insufficient permissions");
+	const result = CreateIssueLinksSchema.safeParse(raw);
+	if (!result.success) throw new ValidationError(result.error.flatten());
+	const { links } = result.data;
+
+	const ids = await resolveIssueIdsIfFound(
+		ctx,
+		links.flatMap((l) => [l.source, l.target])
+	);
+	const orm = drizzle(ctx.db, { schema });
+	const rows = await inChunks(
+		[...new Set(ids.filter((id): id is string => id !== undefined))],
+		(chunk) =>
+			orm
+				.select({ id: schema.issues.id, projectId: schema.issues.projectId })
+				.from(schema.issues)
+				.where(
+					and(inArray(schema.issues.id, chunk), eq(schema.issues.workspaceId, ctx.workspaceId))
+				)
+	);
+	const projectOf = new Map(rows.map((r) => [r.id, r.projectId]));
+	const roles = isWorkspaceAdmin(ctx.role)
+		? undefined
+		: new Map(
+				await Promise.all(
+					[...new Set(projectOf.values())].map(
+						async (p) => [p, await effectiveProjectRole(ctx, p)] as const
+					)
+				)
+			);
+	const writable = (id: string | undefined, ref: string, side: string): string => {
+		const projectId = id === undefined ? undefined : projectOf.get(id);
+		const role = projectId === undefined ? null : roles ? roles.get(projectId) : "admin";
+		if (id === undefined || !role) throw new NotFoundError(`${side} issue not found: ${ref}`);
+		if (!canWriteProject(role)) throw new ForbiddenError("Insufficient permissions");
+		return id;
+	};
+
+	const planned = links.map((link, i) => {
+		try {
+			const source = writable(ids[2 * i], link.source, "Source");
+			const target = writable(ids[2 * i + 1], link.target, "Target");
+			if (source === target) {
+				throw new ValidationError({
+					formErrors: ["An issue cannot link to itself"],
+					fieldErrors: {},
+				});
+			}
+			return canonicalize(source, target, link.type);
+		} catch (e) {
+			return { error: toItemError(e) };
+		}
+	});
+
+	const sources = [...new Set(planned.flatMap((p) => ("error" in p ? [] : [p.source])))];
+	const existing = await inChunks(sources, (chunk) =>
+		orm
+			.select({
+				source: schema.issueLinks.sourceIssueId,
+				target: schema.issueLinks.targetIssueId,
+				type: schema.issueLinks.type,
+			})
+			.from(schema.issueLinks)
+			.where(
+				and(
+					eq(schema.issueLinks.workspaceId, ctx.workspaceId),
+					inArray(schema.issueLinks.sourceIssueId, chunk)
+				)
+			)
+	);
+	const keyOf = (l: { source: string; target: string; type: string }) =>
+		`${l.source}:${l.target}:${l.type}`;
+	const taken = new Map<string, number | undefined>(existing.map((l) => [keyOf(l), undefined]));
+
+	const now = Math.floor(Date.now() / 1000);
+	const statements: D1PreparedStatement[] = [];
+	const results = planned.map((p, i) => {
+		if ("error" in p) return p;
+		const key = keyOf(p);
+		if (taken.has(key)) {
+			const first = taken.get(key);
+			return {
+				error: toItemError(
+					first === undefined
+						? new ConflictError("This link already exists")
+						: new ValidationError({
+								formErrors: [`Duplicate of links[${first}] in this call`],
+								fieldErrors: {},
+							})
+				),
+			};
+		}
+		taken.set(key, i);
+		const id = crypto.randomUUID();
+		const query = orm
+			.insert(schema.issueLinks)
+			.values({
+				id,
+				workspaceId: ctx.workspaceId,
+				sourceIssueId: p.source,
+				targetIssueId: p.target,
+				type: p.type,
+				createdById: ctx.userId,
+				createdAt: now,
+			})
+			.toSQL();
+		statements.push(ctx.db.prepare(query.sql).bind(...query.params));
+		return { id };
+	});
+	if (statements.length > 0) await ctx.db.batch(statements);
+	return { results };
 }
 
 export async function deleteLink(ctx: ServiceCtx, raw: unknown) {
