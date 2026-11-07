@@ -1,4 +1,4 @@
-export { drizzle } from "drizzle-orm/d1";
+export { drizzle } from "./drizzle";
 export * as schema from "./schema";
 export * from "./schema/attachments";
 export * from "./schema/core";
