@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createIssue, listIssues, searchIssues } from "../services/issues";
+import { createIssue, getPrioritizedIssues, listIssues, searchIssues } from "../services/issues";
 import type { ServiceCtx } from "../services/types";
 import { seedProjectFixture } from "./helpers";
 
@@ -79,6 +79,29 @@ describe("PROJ-1020: query plans and batching", () => {
 			.all<{ detail: string }>();
 		const plan = results.map((r) => r.detail).join("\n");
 		expect(plan).toContain("COVERING INDEX idx_issues_ws_project_status");
+	});
+
+	it("get_prioritized_issues scans only open issues through the partial index", async () => {
+		let captured: { sql: string; args: unknown[] } | null = null;
+		const origPrepare = env.DB.prepare.bind(env.DB);
+		vi.spyOn(env.DB, "prepare").mockImplementation((q: string) => {
+			const stmt = origPrepare(q);
+			if (!q.includes("WITH open AS")) return stmt;
+			const origBind = stmt.bind.bind(stmt);
+			stmt.bind = (...args: unknown[]) => {
+				captured = { sql: q, args };
+				return origBind(...args);
+			};
+			return stmt;
+		});
+		await getPrioritizedIssues(ctx, { includeNotReady: true });
+		vi.restoreAllMocks();
+		expect(captured).not.toBeNull();
+		const { sql, args } = captured as unknown as { sql: string; args: unknown[] };
+		const { results } = await env.DB.prepare(`EXPLAIN QUERY PLAN ${sql}`)
+			.bind(...args)
+			.all<{ detail: string }>();
+		expect(results.map((r) => r.detail).join("\n")).toContain("idx_issues_open_by_workspace");
 	});
 
 	it("searchIssues runs the label scan and FTS query in one round trip", async () => {

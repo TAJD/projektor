@@ -2664,8 +2664,7 @@ async function queryPrioritized(
 ): Promise<PrioritizedRow[]> {
 	const where: string[] = [
 		"i.workspace_id = ?",
-		`((i.status_id IS NULL AND i.status NOT IN ('done', 'cancelled'))
-		  OR (i.status_id IS NOT NULL AND ts.category NOT IN ('done', 'cancelled')))`,
+		"COALESCE(NULLIF(i.status_category, ''), i.status) NOT IN ('done','cancelled')",
 	];
 	const linkSource = visibleProjectSqlFragment(ctx, "src.project_id");
 	const inboundLinkVisible = linkSource
