@@ -23,20 +23,10 @@ async function seedCounter(key: string, count: number): Promise<void> {
 	await seedRateLimitCounter(key, count, WINDOW_SECS);
 }
 
-// ── Deprecated D1 fallback (no RATE_LIMITER binding; removed in PROJ-924) ──
 function currentSlot(): number {
 	return Math.floor(Date.now() / 1000 / WINDOW_SECS) * WINDOW_SECS;
 }
 
-async function seedD1Counter(key: string, count: number): Promise<void> {
-	await env.DB.prepare(
-		"INSERT OR REPLACE INTO rate_limit (key, count, window_start) VALUES (?, ?, ?)"
-	)
-		.bind(key, count, currentSlot())
-		.run();
-}
-
-// Run the worker without the Durable Object binding, as a deploy that hasn't added it yet.
 function withoutLimiterBinding() {
 	let saved: Env["RATE_LIMITER"];
 	beforeEach(() => {
@@ -158,121 +148,14 @@ describe("PROJ-198: failed bearer-auth throttle (IP-keyed)", () => {
 	});
 });
 
-describe("PROJ-361: opportunistic rate_limit row pruning (D1 fallback)", () => {
-	const ENDPOINT = "http://localhost/api/workspaces";
-	withoutLimiterBinding();
-
-	it("prunes rows several windows stale while leaving the current window's row intact", async () => {
-		const now = Math.floor(Date.now() / 1000);
-		const staleWindowStart = now - WINDOW_SECS * 20; // well past the 10-window retention cutoff
-		await seedD1Counter("ip:stale-client", 1);
-		await env.DB.prepare("UPDATE rate_limit SET window_start = ? WHERE key = ?")
-			.bind(staleWindowStart, "ip:stale-client")
-			.run();
-
-		// PRUNE_PROBABILITY is 1% — force the opportunistic prune to run this request.
-		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
-		try {
-			const res = await SELF.fetch(ENDPOINT);
-			expect(res.status).not.toBe(429);
-		} finally {
-			randomSpy.mockRestore();
-		}
-
-		const staleRow = await env.DB.prepare("SELECT key FROM rate_limit WHERE key = ?")
-			.bind("ip:stale-client")
-			.first();
-		expect(staleRow).toBeNull();
-
-		// The request above increments the current-window row for its own key (127.0.0.1) —
-		// pruning must not have deleted it too.
-		const currentRow = await env.DB.prepare("SELECT key FROM rate_limit WHERE key = ?")
-			.bind("ip:127.0.0.1")
-			.first();
-		expect(currentRow).not.toBeNull();
-	});
-
-	it("does not prune when the probability roll misses", async () => {
-		const now = Math.floor(Date.now() / 1000);
-		const staleWindowStart = now - WINDOW_SECS * 20;
-		await seedD1Counter("ip:stale-client-2", 1);
-		await env.DB.prepare("UPDATE rate_limit SET window_start = ? WHERE key = ?")
-			.bind(staleWindowStart, "ip:stale-client-2")
-			.run();
-
-		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // above PRUNE_PROBABILITY
-		try {
-			await SELF.fetch(ENDPOINT);
-		} finally {
-			randomSpy.mockRestore();
-		}
-
-		const staleRow = await env.DB.prepare("SELECT key FROM rate_limit WHERE key = ?")
-			.bind("ip:stale-client-2")
-			.first();
-		expect(staleRow).not.toBeNull();
-	});
-});
-
-// PROJ-432: the limiter runs on every request, and its upsert + read-back used to be two
-// sequential awaits. They're one D1 batch now — same statements, same order, one round trip.
-describe("PROJ-432: the D1 fallback counter costs one round trip", () => {
-	const d1Only = (db: D1Database): Env => ({ ...env, DB: db, RATE_LIMITER: undefined });
-	function countingDb(db: D1Database) {
-		const counts = { prepare: 0, batch: 0 };
-		const proxy = new Proxy(db, {
-			get(target, prop, receiver) {
-				if (prop === "prepare") counts.prepare++;
-				if (prop === "batch") counts.batch++;
-				const value = Reflect.get(target, prop, receiver);
-				return typeof value === "function" ? value.bind(target) : value;
-			},
-		});
-		return { counts, proxy };
-	}
-
-	it("issues a single batch rather than sequential statements", async () => {
-		const { counts, proxy } = countingDb(env.DB);
-		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0.5); // no prune
-		try {
-			await bumpRateCounter(
-				d1Only(proxy),
-				`ip:batch-${crypto.randomUUID().slice(0, 8)}`,
-				WINDOW_SECS
-			);
-		} finally {
-			randomSpy.mockRestore();
-		}
-
-		expect(counts.batch).toBe(1);
-	});
-
-	it("still counts correctly through the batch", async () => {
-		const key = `ip:batch-count-${crypto.randomUUID().slice(0, 8)}`;
-		expect(await bumpRateCounter(d1Only(env.DB), key, WINDOW_SECS)).toBe(1);
-		expect(await bumpRateCounter(d1Only(env.DB), key, WINDOW_SECS)).toBe(2);
-		expect(await bumpRateCounter(d1Only(env.DB), key, WINDOW_SECS)).toBe(3);
-	});
-});
-
 describe("PROJ-867: counters live in the RateLimiter Durable Object, not D1", () => {
 	const ENDPOINT = "http://localhost/api/workspaces";
 
-	async function rateLimitRows(): Promise<number> {
-		const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM rate_limit").first<{ n: number }>();
-		return row?.n ?? 0;
-	}
-
-	it("GET requests write nothing to D1", async () => {
-		const fixture = await seedFixture();
-		for (let i = 0; i < 3; i++) {
-			const res = await SELF.fetch(ENDPOINT, {
-				headers: authHeaders(fixture.token, fixture.workspace.slug),
-			});
-			expect(res.status).toBe(200);
-		}
-		await SELF.fetch(ENDPOINT); // IP-keyed, unauthenticated
-		expect(await rateLimitRows()).toBe(0);
+	it("the rate_limit table is gone (PROJ-924)", async () => {
+		const row = await env.DB.prepare(
+			"SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rate_limit'"
+		).first();
+		expect(row).toBeNull();
 	});
 
 	it("still enforces the token limit (API max 5) from the Durable Object counter", async () => {
@@ -286,7 +169,6 @@ describe("PROJ-867: counters live in the RateLimiter Durable Object, not D1", ()
 		}
 		expect(statuses.slice(0, API_LIMIT).every((s) => s === 200)).toBe(true);
 		expect(statuses[API_LIMIT]).toBe(429);
-		expect(await rateLimitRows()).toBe(0);
 	});
 
 	it("Retry-After is the seconds left in the fixed window, as before", async () => {
@@ -364,13 +246,28 @@ describe("PROJ-867: counters live in the RateLimiter Durable Object, not D1", ()
 		});
 	});
 
-	describe("without the binding (deploys not yet updated)", () => {
+	describe("without the binding (PROJ-924)", () => {
 		withoutLimiterBinding();
 
-		it("falls back to the D1 counter and still enforces the limit", async () => {
-			await seedD1Counter("ip:127.0.0.1", AUTH_LIMIT);
-			const res = await SELF.fetch(ENDPOINT);
-			expect(res.status).toBe(429);
+		it("fails open, logs once and reports health as degraded", async () => {
+			const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+			try {
+				const statuses: number[] = [];
+				for (let i = 0; i < AUTH_LIMIT + 2; i++) statuses.push((await SELF.fetch(ENDPOINT)).status);
+				expect(statuses).not.toContain(429);
+				expect(await bumpRateCounter(env, "authfail:203.0.113.9", WINDOW_SECS)).toBe(0);
+				expect(await bumpRateCounter(env, "authfail:203.0.113.9", WINDOW_SECS)).toBe(0);
+				expect(
+					errors.mock.calls.filter((args) => String(args[0]).includes("RATE_LIMITER")).length
+				).toBe(1);
+			} finally {
+				errors.mockRestore();
+			}
+			for (const path of ["/health", "/api/health"]) {
+				const res = await SELF.fetch(`http://localhost${path}`);
+				expect(res.status).toBe(503);
+				expect(await res.json()).toMatchObject({ ok: false, degraded: [expect.any(String)] });
+			}
 		});
 	});
 });

@@ -113,10 +113,14 @@ app.use(
 	})
 );
 
-app.get("/health", (c) => c.json({ ok: true }));
+const health = (c: Context<HonoEnv>) =>
+	c.env.RATE_LIMITER
+		? c.json({ ok: true })
+		: c.json({ ok: false, degraded: ["RATE_LIMITER binding missing: rate limiting is off"] }, 503);
+app.get("/health", health);
 // Same probe under /api so the served frontend (same-origin /api/*) can reach it.
 // Registered before the /api/* rate-limit + auth so it stays an open health check.
-app.get("/api/health", (c) => c.json({ ok: true }));
+app.get("/api/health", health);
 app.route("/api/config", configRouter);
 
 // Rate-limit all API and MCP traffic ahead of auth and heavy handlers.
