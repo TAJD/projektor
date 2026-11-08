@@ -63,18 +63,20 @@ export const METRIC_DEFINITIONS: Record<MetricId, MetricDefinition> = {
 	"review-latency": {
 		label: "Review latency",
 		definition: "How long an issue sits in review before a human signs off.",
-		computation: "Review latency = done − entered review, for issues completed in the window.",
+		computation:
+			"Review latency = done − first entered review, for issues completed in the window.",
 	},
 	"human-interventions": {
 		label: "Human interventions",
-		definition: "How much direct human attention a completed issue needed.",
+		definition: "How many review decisions a completed issue needed.",
 		computation:
-			"Count of human-authored comments plus status bounces (review → in progress), per completed issue.",
+			"Times sent back out of review, plus one for the sign-off if it went through review, per completed issue.",
 	},
 	"autonomy-ratio": {
 		label: "Autonomy ratio",
 		definition: "What share of a completed issue's cycle time an agent held the work unattended.",
-		computation: "Autonomy ratio = lease-held time ÷ total cycle time, per completed issue.",
+		computation:
+			"Autonomy ratio = lease-held time ÷ total cycle time, per completed issue that held an agent lease.",
 	},
 	"cumulative-flow": {
 		label: "Cumulative flow",
@@ -100,7 +102,7 @@ export const METRIC_DEFINITIONS: Record<MetricId, MetricDefinition> = {
 		definition:
 			"What share of an issue's total time from ready to done was actual agent work, versus waiting.",
 		computation:
-			"Flow efficiency = lease-held time ÷ lead time (ready → done), for issues completed in the window.",
+			"Flow efficiency = lease-held time ÷ lead time (ready → done), for leased issues completed in the window.",
 	},
 	"aging-wip": {
 		label: "Aging WIP",

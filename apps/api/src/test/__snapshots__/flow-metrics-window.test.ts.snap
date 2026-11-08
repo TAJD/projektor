@@ -138,10 +138,10 @@ exports[`PROJ-866: bucket-rewrite fidelity (snapshot on a representative fixture
     },
   ],
   "autonomyRatio": {
-    "avg": 0,
-    "count": 2,
-    "p50": 0,
-    "p90": 0,
+    "avg": null,
+    "count": 0,
+    "p50": null,
+    "p90": null,
   },
   "bugShareOverTime": [
     {
@@ -447,16 +447,16 @@ exports[`PROJ-866: bucket-rewrite fidelity (snapshot on a representative fixture
     "wipCapPressure": 0,
   },
   "flowEfficiency": {
-    "avg": 0,
-    "count": 2,
-    "p50": 0,
-    "p90": 0,
+    "avg": null,
+    "count": 0,
+    "p50": null,
+    "p90": null,
   },
   "humanInterventions": {
-    "avg": 0,
+    "avg": 0.5,
     "count": 2,
-    "p50": 0,
-    "p90": 0,
+    "p50": 1,
+    "p90": 1,
   },
   "leadTime": {
     "avg": 1251042.5,

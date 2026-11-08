@@ -8,6 +8,7 @@ import {
 	seedIssue as seedIssueNow,
 	seedProjectFixture,
 	seedTaskType,
+	toolError,
 } from "./helpers";
 
 const seedIssue: typeof seedIssueNow = (workspaceId, projectId, userId, opts) =>
@@ -486,21 +487,61 @@ describe("Flow metrics (PROJ-252)", () => {
 		expect(Array.isArray(metrics.reviewLatencyOverTime)).toBe(true);
 	});
 
-	it("counts human comments + review bounces as human interventions, excluding agent comments", async () => {
+	it("PROJ-1076: counts review decisions (bounces plus the sign-off) as human interventions, not comments", async () => {
 		const now = Math.floor(Date.now() / 1000);
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Intervened" });
 		await stampFlowTimestamps(issue.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
 		await stampReviewFields(issue.id, { inReviewAt: now - 100, reviewBounceCount: 2 });
 		await seedComment(issue.id, userId, "Looks good", "human");
-		await seedComment(issue.id, userId, "wip update", "agent");
-		await seedComment(issue.id, userId, "legacy comment, no authorKind");
+		await seedComment(issue.id, userId, "Also this", "human");
+		const unreviewed = await seedIssue(workspaceId, projectId, userId, {
+			title: "Straight to done",
+		});
+		await stampFlowTimestamps(unreviewed.id, { claimedAt: now - 400, doneAt: now });
+
+		const metrics = await getFlowMetrics();
+
+		expect(metrics.humanInterventions.count).toBe(2);
+		expect(metrics.humanInterventions.p90).toBe(3);
+		expect(metrics.humanInterventions.avg).toBe(1.5);
+	});
+
+	it("PROJ-1076: a review approval made over MCP with a token counts as a review decision", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Approved via MCP" });
+		for (const status of ["in_progress", "in_review", "done"]) {
+			const res = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+				method: "POST",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({
+					jsonrpc: "2.0",
+					id: 1,
+					method: "tools/call",
+					params: { name: "update_issue", arguments: { id: issue.id, status } },
+				}),
+			});
+			expect(toolError(await res.json())).toBeUndefined();
+		}
 
 		const metrics = await getFlowMetrics();
 
 		expect(metrics.humanInterventions.count).toBe(1);
-		// 1 human comment + 2 review bounces; the agent comment and the authorKind-less
-		// legacy comment are both excluded.
-		expect(metrics.humanInterventions.avg).toBe(3);
+		expect(metrics.humanInterventions.avg).toBe(1);
+	});
+
+	it("PROJ-1076: autonomy ratio and flow efficiency skip issues that never had a lease", async () => {
+		const now = Math.floor(Date.now() / 1000);
+		const leased = await seedIssue(workspaceId, projectId, userId, { title: "Leased" });
+		await stampFlowTimestamps(leased.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
+		await stampLease(crypto.randomUUID(), leased.id, now - 400, now - 200);
+		const manual = await seedIssue(workspaceId, projectId, userId, { title: "Moved by hand" });
+		await stampFlowTimestamps(manual.id, { readyAt: now - 500, claimedAt: now - 400, doneAt: now });
+
+		const metrics = await getFlowMetrics();
+
+		expect(metrics.cycleTime.count).toBe(2);
+		expect(metrics.autonomyRatio.count).toBe(1);
+		expect(metrics.autonomyRatio.avg).toBeCloseTo(0.5, 1);
+		expect(metrics.flowEfficiency.count).toBe(1);
 	});
 
 	it("computes autonomy ratio as lease-held time over cycle time", async () => {
