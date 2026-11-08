@@ -107,6 +107,7 @@ export async function listProjectsAcrossWorkspaces(
       JOIN workspaces w         ON w.id  = p.workspace_id
       JOIN workspace_members wm ON wm.workspace_id = p.workspace_id AND wm.user_id = ?
       LEFT JOIN issues i        ON i.project_id = p.id
+                               AND COALESCE(NULLIF(i.status_category, ''), i.status) NOT IN ('done','cancelled')
       LEFT JOIN task_statuses ts ON ts.id = i.status_id AND ts.workspace_id = p.workspace_id
       -- PROJ-311: in each workspace the user sees all projects if owner/admin there,
       -- otherwise only projects their groups grant (indexed EXISTS).

@@ -2,7 +2,7 @@
 // total-issue count, and issues.status_category stays in sync with a status's
 // category on every write path that can change it.
 import { env, SELF } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import m0066 from "../../../../packages/db/migrations/0066_repair_status_category.sql?raw";
 import { listProjectsAcrossWorkspaces } from "../services/projects";
 import {
@@ -43,6 +43,39 @@ describe("listProjectsAcrossWorkspaces: open vs backlog counts (PROJ-849)", () =
 });
 
 describe("update_task_status re-syncs issues.status_category (PROJ-849)", () => {
+	it("joins only open issues via the partial index, keeping projects with none (PROJ-1072)", async () => {
+		const ws = await seedWorkspace();
+		const user = await seedUser(`u-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		await seedMember(ws.id, user.id, "owner");
+		const closed = await seedProject(ws.id, "SHUT");
+		const empty = await seedProject(ws.id, "NONE");
+		await seedIssue(ws.id, closed.id, user.id, { status: "done" });
+		await seedIssue(ws.id, closed.id, user.id, { status: "cancelled" });
+
+		let listSql = "";
+		const originalPrepare = env.DB.prepare.bind(env.DB);
+		const spy = vi.spyOn(env.DB, "prepare").mockImplementation((q: string) => {
+			if (q.includes("AS open_issue_count")) listSql = q;
+			return originalPrepare(q);
+		});
+		let rows: Awaited<ReturnType<typeof listProjectsAcrossWorkspaces>>;
+		try {
+			rows = await listProjectsAcrossWorkspaces(user.id, env.DB);
+		} finally {
+			spy.mockRestore();
+		}
+		for (const id of [closed.id, empty.id]) {
+			const row = rows.find((r) => r.id === id);
+			expect(row?.open_issue_count).toBe(0);
+			expect(row?.backlog_issue_count).toBe(0);
+		}
+
+		const { results } = await env.DB.prepare(`EXPLAIN QUERY PLAN ${listSql}`)
+			.bind(user.id, user.id)
+			.all<{ detail: string }>();
+		expect(results.map((r) => r.detail).join("\n")).toContain("idx_issues_open_by_project");
+	});
+
 	it("changing a status's category updates every issue currently on that status", async () => {
 		const ws = await seedWorkspace();
 		const user = await seedUser(`u-${crypto.randomUUID().slice(0, 8)}@example.com`);
