@@ -43,6 +43,8 @@ echo "==> Staging artifact"
 cp apps/api/dist/index.js "$STAGE/worker.js"
 cp -r apps/web/dist "$STAGE/web"
 cp -r packages/db/migrations "$STAGE/migrations"
+mkdir -p "$STAGE/demo"
+cp scripts/demo/*.mjs scripts/smoke-test-demo.sh "$STAGE/demo/"
 
 echo "==> Writing wrangler.example.toml (compatibility_date synced from apps/api/wrangler.toml)"
 COMPAT_DATE="$(sed -n 's/^compatibility_date = "\([^"]*\)".*/\1/p' apps/api/wrangler.toml)"
