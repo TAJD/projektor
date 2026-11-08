@@ -60,6 +60,7 @@ import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks, sanitizeFtsQuery } from "./sql";
 import { resolveStatus } from "./task-statuses";
 import type { ServiceCtx } from "./types";
+import { newSearchRowid } from "./wiki";
 
 // PROJ-870: turns a drizzle-built query into a D1PreparedStatement without executing it, so
 // it can be folded into a caller's own ctx.db.batch() array — same pattern as
@@ -933,15 +934,27 @@ function buildInsertIssueStatement(
 		);
 }
 
-function buildFtsInsertStatement(
+const FTS_ROWID_OF_ISSUE = "(SELECT search_rowid FROM issues WHERE id = ? AND workspace_id = ?)";
+
+function buildFtsInsertStatements(
 	ctx: ServiceCtx,
 	id: string,
 	title: string,
 	body: string
-): D1PreparedStatement {
-	return ctx.db
-		.prepare("INSERT INTO issues_fts (issue_id, workspace_id, title, body) VALUES (?, ?, ?, ?)")
-		.bind(id, ctx.workspaceId, title, body);
+): D1PreparedStatement[] {
+	return [
+		ctx.db
+			.prepare(
+				"UPDATE issues SET search_rowid = ? WHERE id = ? AND workspace_id = ? AND search_rowid IS NULL"
+			)
+			.bind(newSearchRowid(), id, ctx.workspaceId),
+		ctx.db
+			.prepare(
+				`INSERT INTO issues_fts (rowid, issue_id, workspace_id, title, body)
+				 VALUES (${FTS_ROWID_OF_ISSUE}, ?, ?, ?, ?)`
+			)
+			.bind(id, ctx.workspaceId, id, ctx.workspaceId, title, body),
+	];
 }
 
 // PROJ-870: build (without executing) an activity-log INSERT identical in shape to
@@ -1217,7 +1230,7 @@ async function prepareCreateIssue(
 			readyAt,
 			now: nowTs,
 		}),
-		buildFtsInsertStatement(ctx, id, title, resolvedBody),
+		...buildFtsInsertStatements(ctx, id, title, resolvedBody),
 		...buildCustomFieldUpsertStatements(ctx.db, id, cfWrites),
 		buildActivityInsertStatement(ctx, orm, {
 			entityType: "issue",
@@ -1835,11 +1848,9 @@ function buildFtsReindexStatements(
 ): D1PreparedStatement[] {
 	return [
 		ctx.db
-			.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
+			.prepare(`DELETE FROM issues_fts WHERE rowid = ${FTS_ROWID_OF_ISSUE}`)
 			.bind(id, ctx.workspaceId),
-		ctx.db
-			.prepare("INSERT INTO issues_fts (issue_id, workspace_id, title, body) VALUES (?, ?, ?, ?)")
-			.bind(id, ctx.workspaceId, title, body),
+		...buildFtsInsertStatements(ctx, id, title, body),
 	];
 }
 
@@ -2377,6 +2388,9 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 			)
 		);
 	const deleteStatements: D1PreparedStatement[] = [
+		ctx.db
+			.prepare(`DELETE FROM issues_fts WHERE rowid = ${FTS_ROWID_OF_ISSUE}`)
+			.bind(id, ctx.workspaceId),
 		toD1Statement(
 			ctx,
 			orm
@@ -2384,9 +2398,6 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 				.where(and(eq(schema.issues.id, id), eq(schema.issues.workspaceId, ctx.workspaceId)))
 				.toSQL()
 		),
-		ctx.db
-			.prepare("DELETE FROM issues_fts WHERE issue_id = ? AND workspace_id = ?")
-			.bind(id, ctx.workspaceId),
 		// share_tokens has no FK at all (0017), so nothing ever removed a deleted issue's
 		// public share links.
 		ctx.db
@@ -2845,7 +2856,7 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 				.prepare(
 					`SELECT ${columns}
 						 FROM issues_fts
-						 JOIN issues i ON i.id = issues_fts.issue_id
+						 JOIN issues i ON i.search_rowid = issues_fts.rowid
 						 LEFT JOIN projects p ON p.id = i.project_id
 						 WHERE issues_fts MATCH ? AND issues_fts.workspace_id = ?
 						   ${scope}
