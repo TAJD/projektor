@@ -410,7 +410,20 @@ commit, and push.
 
   Each run purges wiki pages that have been in the trash for over 30 days (permanently,
   with their attachments and history), expired OAuth data, and the retention tables
-  below, and runs the one-off search-index dedupe. Without the trigger none of this runs.
+  below, and runs any pending one-off index repairs. Without the trigger none of this runs.
+
+- **One-off index repairs after an upgrade:** migrations apply before the new Worker goes
+  live, so for a few minutes the old Worker keeps writing issues without updating the
+  search and label indexes those migrations added. Issues it creates or edits in that
+  window may be missing from search or label filters. The next nightly run repairs them.
+  Each repair runs once, and its KV key records that it has run. To run one again, delete
+  its key from the `KV` namespace and wait for the next run:
+
+  | KV key | Added in | Repairs |
+  |---|---|---|
+  | `maint:fts-dedupe-0065` | migration 0065 | wiki search index |
+  | `maint:issues-fts-adopt-0077` | migration 0077 | issue keyword search |
+  | `maint:issue-labels-resync-0079` | migration 0079 | issue label search and filters (rebuilt from each issue's labels) |
 
 - **Data retention (PROJ-869):** a daily cron (`scheduled` in `apps/api/src/index.ts`)
   prunes tables that would otherwise grow forever, in small bounded batches per run so a

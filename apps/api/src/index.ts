@@ -435,6 +435,7 @@ export async function scheduled(
 	ctx.waitUntil(purgeExpiredRetentionData(env));
 	ctx.waitUntil(runFtsDedupeOnce(env));
 	ctx.waitUntil(runIssueFtsAdoptOnce(env));
+	ctx.waitUntil(runIssueLabelsResyncOnce(env));
 }
 
 // PROJ-816 follow-up: migration 0065 rebuilt wiki_fts keyed by wiki_pages.search_rowid, but
@@ -494,6 +495,31 @@ export async function runIssueFtsAdoptOnce(env: Env): Promise<void> {
 		});
 	} catch (err) {
 		console.error("one-off issues_fts adopt failed (PROJ-1069)", {
+			err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+		});
+	}
+}
+
+const ISSUE_LABELS_RESYNC_ONCE_KV_KEY = "maint:issue-labels-resync-0079";
+
+export async function runIssueLabelsResyncOnce(env: Env): Promise<void> {
+	try {
+		if (await env.KV.get(ISSUE_LABELS_RESYNC_ONCE_KV_KEY)) return;
+		const [, inserted] = await env.DB.batch([
+			env.DB.prepare("DELETE FROM issue_labels"),
+			env.DB.prepare(
+				`INSERT OR IGNORE INTO issue_labels (issue_id, workspace_id, label)
+				 SELECT i.id, i.workspace_id, j.value
+				 FROM issues i, json_each(CASE WHEN json_valid(i.labels) THEN CASE WHEN json_type(i.labels) = 'array' THEN i.labels ELSE '[]' END ELSE '[]' END) j
+				 WHERE j.type = 'text'`
+			),
+		]);
+		await env.KV.put(ISSUE_LABELS_RESYNC_ONCE_KV_KEY, "1");
+		console.log("one-off issue_labels resync complete (PROJ-1070)", {
+			rows: inserted?.meta.changes ?? 0,
+		});
+	} catch (err) {
+		console.error("one-off issue_labels resync failed (PROJ-1070)", {
 			err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
 		});
 	}

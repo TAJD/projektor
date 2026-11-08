@@ -71,6 +71,20 @@ describe("PROJ-960: label filtering", () => {
 
 	const titles = (items: Array<{ title: string }>) => items.map((i) => i.title).sort();
 
+	async function setLabels(issueId: string, labels: string[]) {
+		await env.DB.batch([
+			env.DB.prepare("UPDATE issues SET labels = ? WHERE id = ?").bind(
+				JSON.stringify(labels),
+				issueId
+			),
+			...labels.map((l) =>
+				env.DB.prepare(
+					"INSERT INTO issue_labels (issue_id, workspace_id, label) VALUES (?, ?, ?)"
+				).bind(issueId, workspaceId, l)
+			),
+		]);
+	}
+
 	beforeEach(async () => {
 		({ token, slug, workspaceId, userId, projectId } = await seedProjectFixture());
 	});
@@ -171,9 +185,7 @@ describe("PROJ-960: label filtering", () => {
 			const hidden = await seedProject(workspaceId, "HIDN");
 			await createIssue("secret", ["bug"], projectId); // visible control
 			const secret = await seedIssue(workspaceId, hidden.id, userId, { title: "hidden-bug" });
-			await env.DB.prepare("UPDATE issues SET labels = ? WHERE id = ?")
-				.bind(JSON.stringify(["bug"]), secret.id)
-				.run();
+			await setLabels(secret.id, ["bug"]);
 			const { body } = await list("labels=bug");
 			expect(titles(body.items)).toContain("secret");
 			expect(titles(body.items)).not.toContain("hidden-bug");
@@ -241,9 +253,7 @@ describe("PROJ-960: label filtering", () => {
 		it("respects project visibility for label-text hits", async () => {
 			const hidden = await seedProject(workspaceId, "HIDN");
 			const secret = await seedIssue(workspaceId, hidden.id, userId, { title: "hidden" });
-			await env.DB.prepare("UPDATE issues SET labels = ? WHERE id = ?")
-				.bind(JSON.stringify(["found-in-tech-debt-2026-10"]), secret.id)
-				.run();
+			await setLabels(secret.id, ["found-in-tech-debt-2026-10"]);
 			const hits = await search("q=found-in-tech-debt-2026-10");
 			expect(titles(hits)).toContain("Unrelated title one");
 			expect(titles(hits)).not.toContain("hidden");
