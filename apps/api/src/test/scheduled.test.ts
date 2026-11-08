@@ -6,12 +6,15 @@ import {
 	purgeExpiredOAuthData,
 	purgeExpiredRetentionData,
 	runFtsDedupeOnce,
+	runIssueFtsAdoptOnce,
 } from "../index";
 import {
 	authHeaders,
 	seedAgentLease,
 	seedFixture,
+	seedIssue,
 	seedIssueFixture,
+	seedProjectFixture,
 	seedUser,
 	seedWorkspace,
 } from "./helpers";
@@ -483,6 +486,66 @@ describe("scheduled one-off wiki_fts dedupe (PROJ-816)", () => {
 			await env.DB.prepare("SELECT rowid FROM wiki_fts WHERE rowid = 999999999").first()
 		).toBeNull();
 		expect(await env.KV.get("maint:fts-dedupe-0065")).not.toBeNull();
+	});
+});
+
+describe("scheduled one-off issues_fts adopt (PROJ-1069)", () => {
+	it("makes issues indexed by pre-0077 code searchable again, drops strays, and runs once", async () => {
+		await env.KV.delete("maint:issues-fts-adopt-0077");
+		const f = await seedProjectFixture();
+		const created = await seedIssue(f.workspaceId, f.projectId, f.userId, { title: "Quokka new" });
+		const updated = await seedIssue(f.workspaceId, f.projectId, f.userId, {
+			title: "Quokka edited",
+		});
+		const oldStyleInsert = (id: string, title: string) =>
+			env.DB.prepare(
+				"INSERT INTO issues_fts (issue_id, workspace_id, title, body) VALUES (?, ?, ?, '')"
+			)
+				.bind(id, f.workspaceId, title)
+				.run();
+		await oldStyleInsert(created.id, "Quokka new");
+		await env.DB.prepare("UPDATE issues SET search_rowid = 424242 WHERE id = ?")
+			.bind(updated.id)
+			.run();
+		await oldStyleInsert(updated.id, "Quokka stale");
+		await oldStyleInsert(updated.id, "Quokka edited");
+
+		const search = async () => {
+			const res = await SELF.fetch(
+				`http://localhost/api/issues/search?q=Quokka&projectId=${f.projectId}`,
+				{ headers: authHeaders(f.token, f.slug) }
+			);
+			return ((await res.json()) as Array<{ id: string }>).map((h) => h.id).sort();
+		};
+		expect(await search()).toEqual([]);
+
+		let sweeps = 0;
+		const originalPrepare = env.DB.prepare.bind(env.DB);
+		const spyEnv = {
+			...env,
+			DB: new Proxy(env.DB, {
+				get(target, prop, receiver) {
+					if (prop === "prepare") {
+						return (sql: string) => {
+							if (sql.includes("DELETE FROM issues_fts WHERE rowid NOT IN")) sweeps++;
+							return originalPrepare(sql);
+						};
+					}
+					return Reflect.get(target, prop, receiver);
+				},
+			}),
+		} as unknown as Env;
+		await runIssueFtsAdoptOnce(spyEnv);
+		await runIssueFtsAdoptOnce(spyEnv);
+
+		expect(sweeps).toBe(1);
+		expect(await search()).toEqual([created.id, updated.id].sort());
+		const rows = await env.DB.prepare(
+			"SELECT title FROM issues_fts WHERE issue_id = ? ORDER BY rowid"
+		)
+			.bind(updated.id)
+			.all<{ title: string }>();
+		expect(rows.results).toEqual([{ title: "Quokka edited" }]);
 	});
 });
 

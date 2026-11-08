@@ -319,7 +319,7 @@ const PAGES_OF_PROJECT = "SELECT id FROM wiki_pages WHERE project_id = ?1 AND wo
 // deleteIssue's per-issue list (PROJ-922) and the wiki purge's per-page list.
 const PROJECT_CLEANUP_SQL: readonly string[] = [
 	// Issue dependents.
-	`DELETE FROM issues_fts WHERE workspace_id = ?2 AND issue_id IN (${ISSUES_OF_PROJECT})`,
+	"DELETE FROM issues_fts WHERE rowid IN (SELECT search_rowid FROM issues WHERE project_id = ?1 AND workspace_id = ?2)",
 	`DELETE FROM issue_comments WHERE issue_id IN (${ISSUES_OF_PROJECT})`,
 	`DELETE FROM issue_links WHERE source_issue_id IN (${ISSUES_OF_PROJECT}) OR target_issue_id IN (${ISSUES_OF_PROJECT})`,
 	`DELETE FROM custom_field_values WHERE issue_id IN (${ISSUES_OF_PROJECT})

@@ -223,6 +223,44 @@ describe("PROJ-870: issue write batching", () => {
 		expect(fts.results).toEqual([{ title: "Renamed", body: "kept body" }]);
 	});
 
+	it("keys issues_fts by the issue's search_rowid and never deletes by the UNINDEXED issue_id (PROJ-1069)", async () => {
+		const created = await createIssue(ctx, {
+			projectId: f.projectId,
+			title: "Zanzibar original",
+			body: "b",
+		});
+		const prepared: string[] = [];
+		const origPrepare = env.DB.prepare.bind(env.DB);
+		vi.spyOn(env.DB, "prepare").mockImplementation((q: string) => {
+			prepared.push(q);
+			return origPrepare(q);
+		});
+		await updateIssue(ctx, created.id, { title: "Zanzibar renamed" });
+		await updateIssue(ctx, created.id, { body: "second body" });
+		vi.restoreAllMocks();
+
+		const ftsDeletes = prepared.filter((q) => /DELETE FROM issues_fts/i.test(q));
+		expect(ftsDeletes.length).toBe(2);
+		for (const q of ftsDeletes) expect(q).toMatch(/WHERE rowid =/);
+
+		const rows = await env.DB.prepare(
+			`SELECT f.rowid AS rid, i.search_rowid AS sr, f.title, f.body FROM issues_fts f
+			 JOIN issues i ON i.id = f.issue_id WHERE f.issue_id = ?`
+		)
+			.bind(created.id)
+			.all<{ rid: number; sr: number; title: string; body: string }>();
+		expect(rows.results).toHaveLength(1);
+		expect(rows.results[0]).toMatchObject({ title: "Zanzibar renamed", body: "second body" });
+		expect(rows.results[0].rid).toBe(rows.results[0].sr);
+
+		const res = await SELF.fetch(
+			`http://localhost/api/issues/search?q=Zanzibar&projectId=${f.projectId}`,
+			{ headers: authHeaders(f.token, f.slug) }
+		);
+		const hits = (await res.json()) as Array<{ id: string; title: string }>;
+		expect(hits.map((h) => [h.id, h.title])).toEqual([[created.id, "Zanzibar renamed"]]);
+	});
+
 	it("entering review with a completion report batches the comment; review→in_progress batches the gate rejection", async () => {
 		const issue = await seedIssue(f.workspaceId, f.projectId, f.userId, {
 			title: "Agent work",

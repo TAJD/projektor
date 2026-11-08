@@ -77,6 +77,7 @@ import m0073 from "../../../../packages/db/migrations/0073_retention_indexes.sql
 import m0074 from "../../../../packages/db/migrations/0074_wiki_fts_workspace_scope.sql?raw";
 import m0075 from "../../../../packages/db/migrations/0075_drop_mcp_tool_usage.sql?raw";
 import m0076 from "../../../../packages/db/migrations/0076_drop_rate_limit.sql?raw";
+import m0077 from "../../../../packages/db/migrations/0077_issues_fts_rowid.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -156,4 +157,5 @@ export const MIGRATIONS = [
 	m0074,
 	m0075,
 	m0076,
+	m0077,
 ];
