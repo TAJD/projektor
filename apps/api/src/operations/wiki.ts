@@ -471,7 +471,9 @@ export const wikiOperations = [
 			"list_wiki_templates) to seed this page's content from an existing template page — " +
 			"its `template: true` flag is stripped from the seeded content (the new page is not " +
 			"itself a template). `templateSlug` and `content` are mutually exclusive; a " +
-			"`templateSlug` that doesn't resolve to a page flagged template:true is rejected.",
+			"`templateSlug` that doesn't resolve to a page flagged template:true is rejected. " +
+			"Returns the page's id, slug and url, and revisionId: null (a new page has no " +
+			"revisions; pass null as the first edit's baseRevisionId).",
 		input: z.object({
 			title: z.string().min(1).max(300),
 			slug: z.string().min(1).max(200).optional().meta({
@@ -637,8 +639,8 @@ export const wikiOperations = [
 		restAliases: { slug: "newSlug" },
 		summary:
 			"Update a wiki page by id or slug (saves a revision when content changes). Pass " +
-			"baseRevisionId (the current revision id from list_wiki_revisions/get_wiki_revision, " +
-			"or null if the page has never been revised) for conflict-safe writes: if the page " +
+			"baseRevisionId (the revisionId get_wiki_page returns, or the one this tool or " +
+			"patch_wiki_page returned for your last edit; null if the page has never been revised) for conflict-safe writes: if the page " +
 			"advanced since baseRevisionId, the write is rejected with a structured conflict " +
 			"(currentRevisionId + a unified diff) instead of silently overwriting. Omitting " +
 			"baseRevisionId is DEPRECATED — it keeps today's last-write-wins behavior during the " +
@@ -648,7 +650,8 @@ export const wikiOperations = [
 			"but any write that lands while your call is in flight returns a 409. `content` may include a YAML " +
 			"frontmatter block (see create_wiki_page); it's re-parsed on every content edit, " +
 			"replacing the page's previously-stored metadata. Omitting `content` leaves the " +
-			"page's existing frontmatter metadata unchanged.",
+			"page's existing frontmatter metadata unchanged. Returns {ok, url, revisionId}; pass " +
+			"revisionId as the next edit's baseRevisionId.",
 		input: z.object({
 			...ByIdOrSlug,
 			title: z.string().min(1).max(300).optional(),
@@ -701,15 +704,16 @@ export const wikiOperations = [
 			"heading needed), set_frontmatter (merge `values` into the page's YAML " +
 			"frontmatter block without touching the rest of the content — a key set to " +
 			"null is removed; a page with no frontmatter block gains one). " +
-			"baseRevisionId is required for every op except append_to_page (the current revision id from " +
-			"list_wiki_revisions/get_wiki_revision, or null if never revised) — conflict " +
+			"baseRevisionId is required for every op except append_to_page (the revisionId get_wiki_page " +
+			"returns, or the one your last update/patch returned; null if never revised) — conflict " +
 			"detection is SECTION-scoped, not whole-page: two agents patching different " +
 			"sections never conflict, even if the page's revision advanced between their " +
 			"reads — only the SAME section changing underneath the caller conflicts " +
 			"(append_to_page and set_frontmatter skip this check; baseRevisionId is only " +
 			"validated as belonging to the page). A heading miss (never existed, or " +
 			"deleted/renamed since baseRevisionId) returns the page's current headings so " +
-			"a caller can retry against reality. Creates a revision like update_wiki_page; " +
+			"a caller can retry against reality. Returns {ok, url, revisionId}; pass revisionId " +
+			"as the next edit's baseRevisionId. Creates a revision like update_wiki_page; " +
 			"ops other than set_frontmatter leave frontmatter metadata untouched beyond " +
 			"reparsing it (never stamps verified_at).",
 		input: z.object({

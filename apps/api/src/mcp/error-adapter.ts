@@ -222,6 +222,12 @@ function pickNotFoundHint(subject: string): string | undefined {
 }
 
 function conflictHint(message: string, details: Record<string, unknown> | undefined): string {
+	if (details && "currentRevisionId" in details && "diff" in details) {
+		return (
+			`The diff shows what changed; if your edit still applies, retry with baseRevisionId=${String(details.currentRevisionId)}. ` +
+			"For update_wiki_page, fold those changes into your content first, or it overwrites them."
+		);
+	}
 	if (details && "currentRevisionId" in details) {
 		return "The page changed since you read it. Re-read it with get_wiki_page, then apply your change with patch_wiki_page.";
 	}
