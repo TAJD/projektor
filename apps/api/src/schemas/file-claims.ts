@@ -28,8 +28,9 @@ export const ReleaseFilesSchema = z.object({
 		description:
 			"Restrict release to claims held by this issue, UUID or ref like PROJ-42 (optional)",
 	}),
-	agentId: z.string().uuid().optional().meta({
-		description: "Agent session UUID whose claims to release when paths is omitted (optional)",
+	agentId: z.string().min(1).max(200).optional().meta({
+		description:
+			"Agent session UUID, or the session name given to register_agent/start_work, whose claims to release when paths is omitted (optional)",
 	}),
 });
 

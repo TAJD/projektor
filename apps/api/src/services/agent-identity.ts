@@ -100,3 +100,47 @@ export async function resolveAgentSessionId(
 		},
 	});
 }
+
+/**
+ * PROJ-1078: agents on a shared credential get the "several sessions" error above, which
+ * names each session as `name (id)`, and retry with the name. Resolve a name among the
+ * calling credential's active sessions, preferring live ones; a name matching none or
+ * several is a validation error.
+ */
+export async function resolveAgentSessionByName(ctx: ServiceCtx, name: string): Promise<string> {
+	const fail = (message: string): never => {
+		throw new ValidationError({ formErrors: [], fieldErrors: { agentId: [message] } });
+	};
+	const credentialId = ctx.auth?.credentialId;
+	if (!credentialId) {
+		return fail(`"${name}" is not a session id — pass agentId from register_agent`);
+	}
+
+	const rows = await drizzle(ctx.db, { schema })
+		.select({
+			id: schema.agentSessions.id,
+			name: schema.agentSessions.name,
+			lastHeartbeatAt: schema.agentSessions.lastHeartbeatAt,
+		})
+		.from(schema.agentSessions)
+		.where(
+			and(
+				eq(schema.agentSessions.workspaceId, ctx.workspaceId),
+				eq(schema.agentSessions.credentialId, credentialId),
+				eq(schema.agentSessions.status, "active"),
+				eq(schema.agentSessions.name, name)
+			)
+		)
+		.orderBy(desc(schema.agentSessions.lastHeartbeatAt))
+		.limit(MAX_NAMED_SESSIONS + 1);
+
+	const cutoff = Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS;
+	const live = rows.filter((r) => r.lastHeartbeatAt > cutoff);
+	const candidates = live.length > 0 ? live : rows;
+	if (candidates.length === 1) return candidates[0].id;
+	return fail(
+		candidates.length === 0
+			? `no active session named "${name}" on this credential — pass agentId from register_agent`
+			: `several sessions named "${name}" on this credential: ${describeSessions(candidates)} — pass the session id`
+	);
+}
