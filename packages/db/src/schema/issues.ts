@@ -146,6 +146,11 @@ export const issues = sqliteTable(
 		parentIdx: index("issues_parent_idx").on(t.parentId),
 		assigneeIdx: index("issues_assignee_idx").on(t.assigneeId),
 		wsStatusIdx: index("issues_workspace_status_idx").on(t.workspaceId, t.status),
+		wsProjectStatusIdx: index("idx_issues_ws_project_status").on(
+			t.workspaceId,
+			t.projectId,
+			t.status
+		),
 		wsCategoryCreatedIdx: index("issues_workspace_category_created_idx").on(
 			t.workspaceId,
 			t.statusCategory,

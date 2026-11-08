@@ -70,6 +70,17 @@ describe("PROJ-1020: query plans and batching", () => {
 		expect(plan).toContain("idx_issues_dor_ready_null");
 	});
 
+	it("the listIssues status+project total is a covering index lookup (PROJ-1071)", async () => {
+		const { results } = await env.DB.prepare(
+			`EXPLAIN QUERY PLAN select count(*) from "issues"
+			 where ("issues"."workspace_id" = ? and "issues"."status" = ? and "issues"."project_id" = ?)`
+		)
+			.bind(f.workspaceId, "todo", f.projectId)
+			.all<{ detail: string }>();
+		const plan = results.map((r) => r.detail).join("\n");
+		expect(plan).toContain("COVERING INDEX idx_issues_ws_project_status");
+	});
+
 	it("searchIssues runs the label scan and FTS query in one round trip", async () => {
 		const tracker = trackD1RoundTrips();
 		const hits = await searchIssues(ctx, { query: "login" });
