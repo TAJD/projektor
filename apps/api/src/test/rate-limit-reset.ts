@@ -7,12 +7,10 @@ import { rateLimiterObjectName } from "../middleware/rate-limit";
  * Counters live in RateLimiter Durable Objects, one per key, held in memory, so there is
  * no table to wipe. Instead this moves the test env to a new RATE_LIMIT_TEST_EPOCH, which
  * the limiter folds into every object name outside production — the next request lands
- * in a brand-new object with a zero count. The D1 table is still cleared for the
- * deprecated no-binding fallback path (PROJ-924).
+ * in a brand-new object with a zero count.
  */
 export async function resetRateLimits(): Promise<void> {
 	env.RATE_LIMIT_TEST_EPOCH = crypto.randomUUID();
-	await env.DB.prepare("DELETE FROM rate_limit").run();
 }
 
 /**

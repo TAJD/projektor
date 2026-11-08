@@ -244,10 +244,11 @@ new_sqlite_classes = ["RateLimiter"]
 **Upgrading:** add these blocks, and the `v1` migration from step 7 if you don't have it,
 to your existing `wrangler.toml` (if you used the older `[durable_objects]
 bindings = [ … ]` table form, convert it to `[[durable_objects.bindings]]` entries —
-TOML can't mix the two). Deploying resets every rate-limit window. Until you add the
-binding, the Worker falls back to the deprecated D1 limiter and logs a warning; that fallback is
-removed in a later release (PROJ-924), after which a missing binding disables rate
-limiting.
+TOML can't mix the two). Deploying resets every rate-limit window. The binding is
+required: the deprecated D1 limiter and its `rate_limit` table are gone (PROJ-924).
+Without the binding, rate limiting is off. Requests still go through, the Worker
+logs an error once per isolate, and `/health` and `/api/health` return 503 with
+`{"ok":false,"degraded":[…]}`.
 
 ### 7b. MCP usage analytics (optional)
 

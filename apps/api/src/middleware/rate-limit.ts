@@ -6,9 +6,7 @@ import type { Context, Next } from "hono";
 // PROJ-867: counters live in the RateLimiter Durable Object (lib/rate-limiter-do.ts), one
 // object per key, held in memory. Before this every /api, /mcp, /oauth and /.well-known
 // request — GETs included — was a D1 write transaction on the database's single writer,
-// plus a 1% full-table prune. A deploy that hasn't added the RATE_LIMITER binding yet
-// falls back to the old D1 counter (logged once per isolate); that fallback and the
-// rate_limit table are removed in a later release (PROJ-924).
+// plus a 1% full-table prune.
 //
 // Key selection: when the request carries a bearer token the bucket is keyed by a
 // SHA-256 prefix of that token (own quota per credential, brute-force bounded).
@@ -155,19 +153,6 @@ async function sha256Hex(input: string): Promise<string> {
 		.join("");
 }
 
-// PROJ-361: rate_limit gets one permanent row per distinct IP/token (scanners,
-// crawlers, one-off visitors never come back to roll their window over) with no
-// cleanup path. Rather than a scheduled job for what's small, low-priority
-// housekeeping, prune opportunistically from inside the hot path — rows several
-// windows old are never read again by the fixed-window logic above.
-const PRUNE_PROBABILITY = 0.01;
-const PRUNE_RETENTION_WINDOWS = 10;
-
-function pruneStaleRateLimitRows(db: D1Database, windowSecs: number): D1PreparedStatement {
-	const cutoff = Math.floor(Date.now() / 1000) - windowSecs * PRUNE_RETENTION_WINDOWS;
-	return db.prepare("DELETE FROM rate_limit WHERE window_start < ?").bind(cutoff);
-}
-
 // A limiter call that hasn't answered by now is treated as an outage (fail open), so a
 // stalled or far-away Durable Object can't add more than this to every request.
 export const LIMITER_TIMEOUT_MS = 500;
@@ -181,7 +166,7 @@ export function rateLimiterObjectName(env: Env, key: string): string {
 	return epoch ? `${epoch}|${key}` : key;
 }
 
-let warnedD1Fallback = false;
+let warnedMissingBinding = false;
 
 async function incrementCounter(
 	env: Env,
@@ -190,61 +175,24 @@ async function incrementCounter(
 	nowSecs: number
 ): Promise<{ count: number; slot: number }> {
 	const ns = env.RATE_LIMITER;
-	if (ns) {
-		const stub = ns.get(ns.idFromName(rateLimiterObjectName(env, key)));
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		const timeout = new Promise<never>((_, reject) => {
-			timer = setTimeout(() => reject(new Error("rate limiter timed out")), LIMITER_TIMEOUT_MS);
-		});
-		try {
-			return await Promise.race([stub.increment(windowSecs, nowSecs), timeout]);
-		} finally {
-			clearTimeout(timer);
+	if (!ns) {
+		if (!warnedMissingBinding) {
+			warnedMissingBinding = true;
+			console.error(
+				"RATE_LIMITER Durable Object binding missing: rate limiting is off. " +
+					"Add the binding from wrangler.example.toml."
+			);
 		}
+		return { count: 0, slot: nowSecs };
 	}
-	if (!warnedD1Fallback) {
-		warnedD1Fallback = true;
-		console.warn(
-			"RATE_LIMITER Durable Object binding missing: using the deprecated D1 rate limiter. " +
-				"Add the binding from wrangler.example.toml; the D1 fallback will be removed."
-		);
+	const stub = ns.get(ns.idFromName(rateLimiterObjectName(env, key)));
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => reject(new Error("rate limiter timed out")), LIMITER_TIMEOUT_MS);
+	});
+	try {
+		return await Promise.race([stub.increment(windowSecs, nowSecs), timeout]);
+	} finally {
+		clearTimeout(timer);
 	}
-	const slot = Math.floor(nowSecs / windowSecs) * windowSecs;
-	return { count: await incrementD1Counter(env.DB, key, slot, windowSecs), slot };
-}
-
-async function incrementD1Counter(
-	db: D1Database,
-	key: string,
-	slot: number,
-	windowSecs: number
-): Promise<number> {
-	// Upsert: if same window slot, increment; if window has rolled over, reset to 1.
-	// We use a separate SELECT because D1's local runtime may not reliably return
-	// RETURNING values from DML statements.
-	//
-	// PROJ-432: sent as one batch rather than sequential awaits. D1 runs a batch in order
-	// inside an implicit transaction, so the SELECT still observes the upsert above it —
-	// but the whole thing costs one round trip instead of two (three when pruning).
-	const statements = [
-		db
-			.prepare(`
-    INSERT INTO rate_limit (key, count, window_start) VALUES (?, 1, ?)
-    ON CONFLICT(key) DO UPDATE SET
-      count = CASE WHEN rate_limit.window_start = ? THEN rate_limit.count + 1 ELSE 1 END,
-      window_start = ?
-  `)
-			.bind(key, slot, slot, slot),
-		db.prepare("SELECT count FROM rate_limit WHERE key = ?").bind(key),
-	];
-
-	// Last in the batch: it only ever deletes rows many windows older than the one just
-	// written, so it cannot race the count above.
-	if (Math.random() < PRUNE_PROBABILITY) {
-		statements.push(pruneStaleRateLimitRows(db, windowSecs));
-	}
-
-	const [, selected] = await db.batch<{ count: number }>(statements);
-
-	return selected.results[0]?.count ?? 1;
 }

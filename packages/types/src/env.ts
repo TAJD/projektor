@@ -67,7 +67,6 @@ export interface Env {
 	// free-tier/1-click deployments; present when opt-in real-time features are enabled.
 	WORKSPACE_HUB?: DurableObjectNamespace;
 	// PROJ-867: fixed-window rate-limit counters (apps/api/src/lib/rate-limiter-do.ts).
-	// Optional only for the one-release D1 fallback (PROJ-924).
 	RATE_LIMITER?: DurableObjectNamespace<RateLimiterRpc>;
 	// Test-only (ignored in production): changes every limiter key so each test starts fresh.
 	RATE_LIMIT_TEST_EPOCH?: string;
