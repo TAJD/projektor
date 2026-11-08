@@ -134,6 +134,7 @@ function isZeroRollup(v: unknown): boolean {
 const NULLABLE_DEFAULT_KEYS = [
 	"sprint_id",
 	"parent_id",
+	"parent_ref",
 	"completed_at",
 	"author_kind",
 	"status_category",
@@ -167,6 +168,16 @@ function refOf(issue: Record<string, unknown>): string | undefined {
 		: undefined;
 }
 
+function slimLink(link: Record<string, unknown>): Record<string, unknown> {
+	const key = link.linkedIssueProjectKey;
+	return {
+		type: link.type,
+		ref: key ? `${key}-${link.linkedIssueNumber}` : link.linkedIssueId,
+		title: link.linkedIssueTitle,
+		...(link.linkedIssueStatus ? { status: link.linkedIssueStatus } : {}),
+	};
+}
+
 /** The summary view: enough to triage and to address the issue again. */
 function summarize(issue: Record<string, unknown>): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
@@ -175,13 +186,17 @@ function summarize(issue: Record<string, unknown>): Record<string, unknown> {
 	else if (issue.id != null) out.id = issue.id;
 	out.title = issue.title;
 	out.status = issue.status;
+	if (typeof issue.status_key === "string" && issue.status_key !== issue.status) {
+		out.status_key = issue.status_key;
+	}
 	out.priority = issue.priority;
 	if (issue.type_key != null) out.type = issue.type_key;
-	// Until refs are available on parents (PROJ-890) this is the parent's id.
-	if (issue.parent_id != null) out.parent = issue.parent_id;
+	const parent = "parent_ref" in issue ? issue.parent_ref : issue.parent_id;
+	if (parent != null) out.parent = parent;
 	const assignee = issue.assignee_name ?? issue.assignee_id;
 	if (assignee != null) out.assignee = assignee;
 	out.updated = issue.updated_at;
+	if (issue.rollup && !isZeroRollup(issue.rollup)) out.rollup = issue.rollup;
 	// PROJ-892: present only when the caller asked for a body preview (bodyChars).
 	if (typeof issue.body === "string") out.body = issue.body;
 	if (issue.bodyTruncated) out.bodyTruncated = true;
@@ -224,6 +239,7 @@ export function shapeIssue(
 	if (labels && labels.length > 0) out.labels = labels;
 	else delete out.labels;
 	if (isEmptyArray(out.links)) delete out.links;
+	else if (Array.isArray(out.links)) out.links = out.links.map(slimLink);
 	if (isZeroRollup(out.rollup)) delete out.rollup;
 	if (isEmptyArray(out.customFields)) delete out.customFields;
 	if (out.assignee_id == null) {

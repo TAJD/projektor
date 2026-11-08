@@ -2948,7 +2948,7 @@ describe("PROJ-931 — compact MCP responses", () => {
 
 		const res = await mcpCall({ name: "list_issues", arguments: { open: true } });
 		const data = JSON.parse(res.result!.content[0].text) as {
-			items: Array<{ title: string; parent_ref?: string; status: string }>;
+			items: Array<{ title: string; parent?: string; status: string }>;
 			total: number;
 		};
 		const titles = data.items.map((i) => i.title);
@@ -2956,10 +2956,10 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(titles).not.toContain("Finished");
 		expect(titles).not.toContain("Dropped");
 		expect(data.total).toBe(data.items.length);
-		expect(data.items.find((i) => i.title === "Open child")?.parent_ref).toBe(
+		expect(data.items.find((i) => i.title === "Open child")?.parent).toBe(
 			`${key}-${parent.number}`
 		);
-		expect(data.items.find((i) => i.title === "Open parent")?.parent_ref ?? null).toBeNull();
+		expect(data.items.find((i) => i.title === "Open parent")).not.toHaveProperty("parent");
 
 		const conflict = await mcpCall({
 			name: "list_issues",

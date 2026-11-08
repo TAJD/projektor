@@ -41,6 +41,23 @@ describe("PROJ-891: serializer (unit)", () => {
 		customFields: [],
 	};
 
+	it("PROJ-1015: summary keeps a custom status_key, the parent's ref and a non-zero rollup", () => {
+		const out = shapeIssue(
+			{
+				...raw,
+				status: "in_progress",
+				status_key: "qa",
+				parent_id: "p-uuid",
+				parent_ref: "PROJ-1",
+				rollup: { total: 2 },
+			},
+			{ view: "summary" }
+		);
+		expect(out).toMatchObject({ status: "in_progress", status_key: "qa", parent: "PROJ-1" });
+		expect(out.rollup).toEqual({ total: 2 });
+		expect(shapeIssue(raw, { view: "summary" })).not.toHaveProperty("status_key");
+	});
+
 	it("full view drops nulls, empty arrays, false defaults and internal ids; parses labels; adds ref/type", () => {
 		const out = shapeIssue(raw, {});
 		expect(out.ref).toBe("PROJ-7");
@@ -228,6 +245,76 @@ describe("PROJ-891: MCP tools", () => {
 		expect(second.next).toBeUndefined();
 		const refs = [...first.items, ...second.items].map((i) => i.ref);
 		expect(new Set(refs).size).toBe(3);
+	});
+
+	it("PROJ-1015: list_issues defaults to summary rows, a 30-row page is under 4 KB, view:full restores rows", async () => {
+		const parent = await seedIssue(f.workspaceId, f.projectId, f.userId, { title: "Parent epic" });
+		for (let i = 0; i < 29; i++) {
+			await seedIssue(f.workspaceId, f.projectId, f.userId, {
+				title: `Fix the board filter bug ${i}`,
+				parentId: i % 2 ? parent.id : undefined,
+			});
+		}
+		const res = await SELF.fetch(`http://localhost/mcp/${f.workspaceId}`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${f.token}`, "Content-Type": "application/json" },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "list_issues", arguments: {} },
+			}),
+		});
+		const text = ((await res.json()) as Rpc).result?.content?.[0].text ?? "";
+		const page = JSON.parse(text) as { items: Array<Record<string, unknown>> };
+		expect(page.items).toHaveLength(30);
+		expect(new TextEncoder().encode(text).length).toBeLessThan(4096);
+
+		const { ref: parentRef } = await tool<{ ref: string }>("get_issue", {
+			id: parent.id,
+			fields: ["ref"],
+		});
+		const child = page.items.find((i) => i.parent !== undefined);
+		expect(child?.parent).toBe(parentRef);
+		for (const item of page.items) {
+			for (const k of ["id", "url", "created_at", "author_kind", "parent_id", "parent_ref"]) {
+				expect(item).not.toHaveProperty(k);
+			}
+		}
+
+		const full = await tool<{ items: Array<Record<string, unknown>> }>("list_issues", {
+			view: "full",
+			limit: 1,
+		});
+		expect(full.items[0]).toHaveProperty("id");
+		expect(full.items[0]).toHaveProperty("created_at");
+	});
+
+	it("PROJ-1015: full rows omit a null parent_ref; get_issue links are {type, ref, title, status}", async () => {
+		const a = await seedIssue(f.workspaceId, f.projectId, f.userId, { title: "Source" });
+		const b = await seedIssue(f.workspaceId, f.projectId, f.userId, { title: "Target" });
+		await env.DB.prepare(
+			`INSERT INTO issue_links (id, workspace_id, source_issue_id, target_issue_id, type, created_by_id, created_at)
+			 VALUES (?, ?, ?, ?, 'blocks', ?, ?)`
+		)
+			.bind(crypto.randomUUID(), f.workspaceId, a.id, b.id, f.userId, 1)
+			.run();
+
+		const got = await tool<{ links: unknown[]; parent_ref?: unknown }>("get_issue", { id: a.id });
+		expect(got).not.toHaveProperty("parent_ref");
+		const { ref: targetRef } = await tool<{ ref: string }>("get_issue", {
+			id: b.id,
+			fields: ["ref"],
+		});
+		expect(got.links).toEqual([
+			{ type: "blocks", ref: targetRef, title: "Target", status: "backlog" },
+		]);
+
+		const raw = await tool<{ links: Array<{ linkedIssueId: string }> }>("get_issue", {
+			id: a.id,
+			verbose: true,
+		});
+		expect(raw.links[0].linkedIssueId).toBe(b.id);
 	});
 
 	it("get_issue full view has ref, an array of labels and no internal ids", async () => {

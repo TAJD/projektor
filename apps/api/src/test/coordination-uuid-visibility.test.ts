@@ -154,18 +154,28 @@ describe("PROJ-976 coordination tools respect project visibility for UUIDs", () 
 		await env.DB.prepare("UPDATE issues SET parent_id = ? WHERE id = ?")
 			.bind(hiddenIssue, visibleIssue)
 			.run();
-		const res = await call("list_issues", { projectId: "VIS" });
+		const res = await call("list_issues", { projectId: "VIS", view: "full" });
 		const items = JSON.parse(res.result.content[0].text).items as Array<{
 			id: string;
 			parent_ref?: string | null;
 		}>;
 		expect(items.find((i) => i.id === visibleIssue)?.parent_ref ?? null).toBeNull();
-		const asOwner = await call("list_issues", { projectId: "VIS" }, ws.owner.token);
+		const asOwner = await call("list_issues", { projectId: "VIS", view: "full" }, ws.owner.token);
 		const ownerItems = JSON.parse(asOwner.result.content[0].text).items as Array<{
 			id: string;
 			parent_ref?: string | null;
 		}>;
 		expect(ownerItems.find((i) => i.id === visibleIssue)?.parent_ref).toMatch(/^HID-\d+$/);
+
+		const summary = JSON.parse(
+			(await call("list_issues", { projectId: "VIS" })).result.content[0].text
+		) as { items: Array<Record<string, unknown>> };
+		expect(summary.items).toHaveLength(1);
+		expect(summary.items[0]).not.toHaveProperty("parent");
+		const ownerSummary = JSON.parse(
+			(await call("list_issues", { projectId: "VIS" }, ws.owner.token)).result.content[0].text
+		) as { items: Array<Record<string, unknown>> };
+		expect(ownerSummary.items[0].parent).toMatch(/^HID-\d+$/);
 	});
 
 	it("a member with a grant on the project is unaffected", async () => {
