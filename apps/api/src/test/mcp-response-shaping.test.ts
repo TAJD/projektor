@@ -2,7 +2,7 @@
 // one `{items, next}` pagination shape, and a hard per-result size cap.
 
 import { env, SELF } from "cloudflare:test";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { capPage, shapeIssue, splitShapeOpts, toPage } from "../mcp/serialize";
 import { seedIssue, seedProjectFixture } from "./helpers";
 
@@ -288,6 +288,40 @@ describe("PROJ-891: MCP tools", () => {
 		});
 		expect(full.items[0]).toHaveProperty("id");
 		expect(full.items[0]).toHaveProperty("created_at");
+	});
+
+	it("list_issues loads custom fields only when the response can show them", async () => {
+		await seedIssue(f.workspaceId, f.projectId, f.userId, { title: "One" });
+		const loads: string[] = [];
+		const orig = env.DB.prepare.bind(env.DB);
+		const spy = vi.spyOn(env.DB, "prepare").mockImplementation((q: string) => {
+			if (q.includes("custom_field_values")) loads.push(q);
+			return orig(q);
+		});
+		try {
+			await tool("list_issues", {});
+			await tool("list_issues", { view: "summary" });
+			expect(loads).toHaveLength(0);
+
+			const verbose = await tool<{ items: Array<Record<string, unknown>> }>("list_issues", {
+				verbose: true,
+			});
+			expect(verbose.items[0]).toHaveProperty("customFields", []);
+			const picked = await tool<{ items: Array<Record<string, unknown>> }>("list_issues", {
+				fields: ["ref", "customFields"],
+			});
+			expect(picked.items[0]).toHaveProperty("customFields", []);
+			expect(loads).toHaveLength(2);
+
+			const res = await SELF.fetch("http://localhost/api/issues", {
+				headers: { Authorization: `Bearer ${f.token}`, "X-Workspace-Slug": f.slug },
+			});
+			const rest = (await res.json()) as { items: Array<Record<string, unknown>> };
+			expect(rest.items[0]).toHaveProperty("customFields", []);
+			expect(loads).toHaveLength(3);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
 	it("PROJ-1015: full rows omit a null parent_ref; get_issue links are {type, ref, title, status}", async () => {

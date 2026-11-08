@@ -832,7 +832,12 @@ async function resolveWikiPageByRedirect(
 export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 	const orm = drizzle(ctx.db, { schema });
 	const direct = await orm
-		.select(wikiPageDetailColumns)
+		.select({
+			...wikiPageDetailColumns,
+			latest_revision_id: sql<string | null>`(SELECT r.id FROM wiki_revisions r
+			  WHERE r.page_id = "wiki_pages"."id"
+			  ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)`,
+		})
 		.from(schema.wikiPages)
 		.where(
 			and(
@@ -847,14 +852,21 @@ export async function getWikiPage(ctx: ServiceCtx, slugOrId: string) {
 	// new/renamed page never leaves getWikiPage returning an ambiguous result.
 	const found = direct ?? (await resolveWikiPageByRedirect(orm, ctx.workspaceId, slugOrId));
 	if (!found) throw new NotFoundError("Wiki page not found");
-	const { version: _writeCounter, ...page } = found as typeof found & { version?: number };
+	const {
+		version: _writeCounter,
+		latest_revision_id: latestRevisionId,
+		...page
+	} = found as typeof found & { version?: number; latest_revision_id?: string | null };
 	await assertWikiPageVisible(ctx, page.project_id);
 	return {
 		...page,
 		// PROJ-809: the revision pointer for exactly this content — the value to send back
 		// as baseRevisionId. Read with the page, so a save that lands between a caller's
 		// read and a separate list_wiki_revisions call can't hand them a newer base.
-		revisionId: await getLatestRevisionId(ctx.db, page.id),
+		revisionId:
+			latestRevisionId !== undefined
+				? latestRevisionId
+				: await getLatestRevisionId(ctx.db, page.id),
 		url: wikiPagePath(page.slug),
 		// PROJ-489 (R7): computed/derived, not a stored column — surfaced for the page header.
 		freshness: computeFreshness({
