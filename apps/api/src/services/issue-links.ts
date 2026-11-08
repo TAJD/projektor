@@ -377,6 +377,7 @@ type LinkJoinRow = {
 	linked_id: string | null;
 	linked_title: string | null;
 	linked_number: number | null;
+	linked_status: string | null;
 	linked_status_category: string | null;
 	linked_project_key: string | null;
 };
@@ -387,7 +388,8 @@ export function buildLinksForIssueStatement(ctx: ServiceCtx, issueId: string): D
 		.prepare(
 			`SELECT l.id, l.source_issue_id, l.target_issue_id, l.type, l.created_by_id, l.created_at,
 				li.id AS linked_id, li.title AS linked_title, li.number AS linked_number,
-				li.status_category AS linked_status_category, p.key AS linked_project_key
+				li.status AS linked_status, li.status_category AS linked_status_category,
+				p.key AS linked_project_key
 			FROM issue_links l
 			LEFT JOIN issues li ON li.workspace_id = ?
 				AND li.id = CASE WHEN l.source_issue_id = ? THEN l.target_issue_id ELSE l.source_issue_id END
@@ -417,6 +419,7 @@ export function mapLinksForIssue(issueId: string, rows: ReadonlyArray<LinkJoinRo
 			linkedIssueTitle: row.linked_title ?? "",
 			linkedIssueNumber: row.linked_number ?? 0,
 			linkedIssueProjectKey: row.linked_project_key ?? "",
+			linkedIssueStatus: row.linked_status ?? "",
 			linkedIssueStatusCategory: row.linked_status_category ?? "",
 			createdById: row.created_by_id,
 			createdAt: row.created_at,

@@ -19,15 +19,17 @@ Unless you pass `verbose:true`, a result omits:
 
 ## `view=summary|full`
 
-List and get tools for issues take `view`. The default is `full` on the current surface.
+List and get tools for issues take `view`. `list_issues` and `search_issues` default to
+`summary`; `get_issue` and `get_issues` default to `full`.
 
 | View | Issue fields |
 | --- | --- |
-| `summary` | `ref`, `title`, `status`, `priority`, `type`, `parent?`, `assignee?`, `updated` |
-| `full` | everything non-empty: the summary fields plus `body` (when requested), `labels`, `status_category`, `assignee_id`/`assignee_name`, `sprint_id`, `created_at`, `updated_at`, `completed_at`, `needs_audit`, `rollup`, `links`, `customFields`, `url` |
+| `summary` | `ref`, `title`, `status`, `status_key?`, `priority`, `type?`, `parent?`, `assignee?`, `updated`, `rollup?` |
+| `full` | everything non-empty: the summary fields plus `body` (when requested), `labels`, `status_category`, `assignee_id`/`assignee_name`, `sprint_id`, `parent_ref`, `created_at`, `updated_at`, `completed_at`, `needs_audit`, `rollup`, `links`, `customFields`, `url` |
 
-`parent` is the parent's id until refs are returned everywhere. `assignee` is the
-assignee's name.
+`parent` is the parent's ref (e.g. `PROJ-42`); it is omitted when the parent is in a
+project you can't see. `assignee` is the assignee's name. Each of `get_issue`'s `links`
+is `{type, ref, title, status?}`; `list_issue_links` returns link ids.
 
 ## `fields=`
 

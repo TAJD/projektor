@@ -155,6 +155,7 @@ export const issueOperations = [
 		mcpDefaults: { bodyChars: 0 },
 		summary:
 			"List issues in the workspace, optionally filtered by status, priority, project, or assignee. " +
+			'Items are summary rows {ref,title,status,priority,type?,parent?,assignee?,updated,rollup?} by default; view:"full" returns every non-empty field. ' +
 			"Items omit `body` by default — pass bodyChars:N (max 1000) for a preview, or includeBody:true for whole bodies. Pass includeRollups:true " +
 			"to attach a `rollup` (child status counts: total/byStatus/done/remaining) to each item " +
 			"(a zero rollup is omitted unless verbose:true). " +
@@ -171,7 +172,7 @@ export const issueOperations = [
 				"Filter by a single status category (use `open` for todo + in_progress)"
 			),
 			open: flag(
-				"Only issues that are neither done nor cancelled. Cannot be combined with category. Items carry parent_ref (e.g. PROJ-42) next to parent_id."
+				"Only issues that are neither done nor cancelled. Cannot be combined with category."
 			),
 			priorities: d(
 				ListIssuesSchema.shape.priorities,
@@ -234,10 +235,18 @@ export const issueOperations = [
 			limit: d(z.number().min(1).max(100).default(30), "Max 100"),
 			bodyChars: BodyChars,
 			...Shape,
+			view: d(
+				ShapeOptsSchema.shape.view,
+				"summary (default) = {ref,title,status,priority,type?,parent?,assignee?,updated,rollup?} per issue; full = every non-empty field"
+			),
 		}),
 		run: (ctx, input) => listIssues(ctx, serviceInput(input)),
 		mcpResult: (result, input) => {
-			const { rest: _, ...shape } = splitShapeOpts(input);
+			const { rest: _, ...requested } = splitShapeOpts(input);
+			const shape =
+				requested.view || requested.fields || requested.verbose
+					? requested
+					: { view: "summary" as const };
 			const {
 				items: raw,
 				nextCursor,
@@ -383,7 +392,10 @@ export const issueOperations = [
 		summary:
 			`Get a single issue by ID or project key + number (e.g. "PROJ-42"). \`body\` is returned ` +
 			`up to ${ISSUE_BODY_MAX_CHARS} chars; if it is longer the result has \`bodyTruncated:true\`, ` +
-			`\`bodyTotalChars\` and \`next\` — pass \`next\` back as \`cursor\` for the rest. ${OMISSION_NOTE}`,
+			`\`bodyTotalChars\` and \`next\` — pass \`next\` back as \`cursor\` for the rest. ` +
+			"Each of `links` is {type, ref, title, status?} (raw objects under verbose or fields); " +
+			"list_issue_links returns link ids. " +
+			OMISSION_NOTE,
 		input: z.object({
 			id: IssueIdOrRef,
 			cursor: d(

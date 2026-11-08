@@ -470,7 +470,10 @@ describe("PROJ-1026 — links to projects the caller can't see", () => {
 					return data.items ?? data;
 				},
 			],
-			["MCP get_issue", async (t) => (await mcp("get_issue", { id: a1.id }, t)).links ?? []],
+			[
+				"MCP get_issue",
+				async (t) => (await mcp("get_issue", { id: a1.id, verbose: true }, t)).links ?? [],
+			],
 		];
 
 		beforeEach(async () => {
