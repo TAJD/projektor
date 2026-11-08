@@ -3335,7 +3335,7 @@
 					"issues"
 				],
 				"summary": "Update an issue",
-				"description": "Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. If the work is only partly done, pass completionReport.remainder when marking done: a follow-up issue (same parent and labels, linked follows_from) is created and its ref returned as followUp.ref.\n\nConstraints: Nothing to update (use add_comment for a comment alone).",
+				"description": "Update an issue — status, priority, title, body, assignee, or labels. Review gating: pass agentSessionId to identify yourself as an agent; entering in_review as an agent requires completionReport. Agents CAN transition directly to done (no human approval gate) — but if the completionReport.verification isn't externally checkable (no CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. If the work is only partly done, pass completionReport.remainder when marking done: a follow-up issue (same parent and labels, linked follows_from) is created and its ref returned as followUp.ref.\n\nConstraints: body cannot be combined with appendBody or bodyEdits; Nothing to update (use add_comment for a comment alone).",
 				"parameters": [
 					{
 						"name": "id",
@@ -3366,6 +3366,35 @@
 									"body": {
 										"type": "string",
 										"maxLength": 50000
+									},
+									"appendBody": {
+										"description": "Text to add to the end of the current body (joined with a blank line). Not with `body`",
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 50000
+									},
+									"bodyEdits": {
+										"description": "Find/replace edits applied to the current body in order; each `find` must match exactly once, or nothing is written. Not with `body`",
+										"minItems": 1,
+										"maxItems": 50,
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"find": {
+													"type": "string",
+													"minLength": 1
+												},
+												"replace": {
+													"type": "string"
+												}
+											},
+											"required": [
+												"find",
+												"replace"
+											],
+											"additionalProperties": false
+										}
 									},
 									"status": {
 										"type": "string",
