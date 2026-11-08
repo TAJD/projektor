@@ -19,7 +19,7 @@ not "who did the work."
 | `leadTime` | ready → done |
 | `cycleTime` | claimed → done |
 | `timeInProgress` | claimed → next stage |
-| `reviewLatency` | in_review → done — the primary human choke point, with a `reviewLatencyOverTime` trend |
+| `reviewLatency` | first entry into review → done — the primary human choke point, with a `reviewLatencyOverTime` trend. It measures from the *first* review entry, so an issue sent back for rework includes the rework and every later review wait. |
 | `agingWip` | every currently open (in_progress/in_review) issue with its age since claim — a present-state snapshot, not scoped to `since`/`until`. Read it against `cycleTime`'s p50/p90 as reference lines: it surfaces stuck items before they finish and skew the percentiles. |
 
 **When is an issue "ready"?** When it leaves backlog for an open status (todo, or
@@ -32,16 +32,30 @@ and `leadTimeExcluded` counts how many such issues finished in the window
 `isReviewStep` (`create_task_status` / `update_task_status`); the built-in
 `in_review` is flagged by default. Entering one requires a completion report when an
 agent holds the lease, stamps `in_review_at`, and leaving it for in_progress counts
-toward `reviewLatency`, `humanInterventions` and `gateRejections`. A status merely
+toward `humanInterventions` and `gateRejections`. A status merely
 *named* like a review (e.g. "Contract Review") is not one unless flagged.
 
 ## Collaboration shape
 
 | Metric | Definition |
 |---|---|
-| `humanInterventions` | human-authored comments plus status bounces out of review, per completed issue |
-| `autonomyRatio` | lease-held time ÷ **cycle time** (claimed → done), per completed issue |
-| `flowEfficiency` | lease-held time ÷ **lead time** (ready → done), for issues completed in the window |
+| `humanInterventions` | review decisions per completed issue: each time it was sent back out of review (`review_bounce_count`), plus one for the sign-off if it went through review at all. Issues that never entered review score 0. |
+| `autonomyRatio` | lease-held time ÷ **cycle time** (claimed → done), per completed issue that held an agent lease |
+| `flowEfficiency` | lease-held time ÷ **lead time** (ready → done), per completed issue that held an agent lease |
+
+**What "human" means here.** Review is a human-owned gate, so every decision on it
+counts as human attention whoever made the call and however they connected. A
+review approved over MCP with a personal token counts the same as one approved in
+the browser. Comments are not counted: the credential that wrote one doesn't say
+whether a person was behind it. Before PROJ-1076 this metric counted comments
+written through a browser session plus bounces, so it read near zero for anyone
+working through an MCP client.
+
+**Lease coverage.** Issues moved to in_progress without an agent lease (by hand, or
+`update_issue` with no `claim_issue`) are left out of `autonomyRatio` and
+`flowEfficiency`, so a 0 means a lease covered none of the time, not that the issue
+was never leased. Compare `autonomyRatio.count` with `cycleTime.count` to see what
+share of completed work was leased.
 
 `autonomyRatio` and `flowEfficiency` look similar but divide by different spans:
 `autonomyRatio` excludes queueing time before an issue was claimed; `flowEfficiency`

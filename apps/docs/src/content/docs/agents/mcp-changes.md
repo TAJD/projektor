@@ -11,6 +11,21 @@ against an older release may rely on fields or errors that have since changed. T
 lists those changes, newest first. The REST API (`/api/*`) is not covered here: its rows
 keep the full shape.
 
+## Unreleased
+
+- **`release_files` takes a session name as `agentId`.** It resolves among your
+  credential's active sessions, live ones first. A name that matches none, or several,
+  is a validation error that lists them. `issueRef` and `issue_ref` now name the issue
+  on every tool that takes one.
+- **`get_flow_metrics` collaboration and health figures were redefined.** The REST
+  `/flow-metrics` endpoint changed too. Figures from earlier releases aren't comparable.
+  See [Flow metrics](/projektor/agents/flow-metrics/).
+  - `humanInterventions` counts review decisions (bounces out of review plus the
+    sign-off), not comments.
+  - `autonomyRatio` and `flowEfficiency` skip issues that never held an agent lease.
+  - `factoryHealth.abandonedClaims` counts sessions that went silent holding claims,
+    once each, rather than every claim a clean `finish_work` left open.
+
 ## v0.10.1
 
 - **`fields` returns `labels` as an array.** `list_issues`, `get_issue` and `get_issues`

@@ -341,28 +341,6 @@ function buildCfdOverTime(
 	});
 }
 
-// PROJ-866: the per-issue lookups below join back to `issues` on the same project scope
-// plus `doneInWindow` (see getFlowMetrics) instead of binding an issue-id IN-list, so
-// each is one statement however many issues the window holds. doneInWindow is exactly
-// the set their consumers read: humanInterventions, autonomyRatio and flowEfficiency
-// all only look at issues done inside the window.
-
-// PROJ-328: human-authored comments per issue, keyed by the ctx.authKind stamped at
-// write time (comments.ts) — not the deprecated agent_sessions.kind. Rows written before
-// that column existed have author_kind NULL and are excluded rather than guessed.
-async function fetchHumanCommentCounts(
-	orm: ReturnType<typeof drizzle>,
-	issueScope: SQL
-): Promise<Map<string, number>> {
-	const rows = await orm
-		.select({ issueId: schema.issueComments.issueId, n: sql<number>`count(*)` })
-		.from(schema.issueComments)
-		.innerJoin(schema.issues, eq(schema.issueComments.issueId, schema.issues.id))
-		.where(and(issueScope, eq(schema.issueComments.authorKind, "human")))
-		.groupBy(schema.issueComments.issueId);
-	return new Map(rows.map((r) => [r.issueId, Number(r.n)]));
-}
-
 // PROJ-328: total lease-held seconds per issue, from issue_leases (already the
 // authoritative "an agent worked this issue" record — see issue-leases.ts). A lease
 // still held when the issue finished counts through doneAt, not "now".
@@ -424,16 +402,13 @@ function computeCoreDistributions(
 	return { leadTimes, cycleTimes, reviewLatencies, timeInProgress };
 }
 
-// PROJ-328: human interventions per completed issue = human comments + status bounces
-// out of review. The primary "how much human attention did this take" signal.
 function computeHumanInterventions(
 	issues: readonly FlowIssueRow[],
-	humanCommentCounts: Map<string, number>,
 	inWindow: (t: number) => boolean
 ): number[] {
 	return issues
 		.filter((i) => i.doneAt !== null && inWindow(i.doneAt))
-		.map((i) => (humanCommentCounts.get(i.id) ?? 0) + i.reviewBounceCount);
+		.map((i) => i.reviewBounceCount + (i.inReviewAt !== null ? 1 : 0));
 }
 
 // PROJ-328: autonomy ratio per completed issue = lease-held time / cycle time. Clamped
@@ -444,7 +419,13 @@ function computeAutonomyRatios(
 	inWindow: (t: number) => boolean
 ): number[] {
 	return issues
-		.filter((i) => i.claimedAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		.filter(
+			(i) =>
+				i.claimedAt !== null &&
+				i.doneAt !== null &&
+				inWindow(i.doneAt) &&
+				leaseHeldSeconds.has(i.id)
+		)
 		.map((i) => {
 			// biome-ignore lint/style/noNonNullAssertion: filtered above
 			const cycle = i.doneAt! - i.claimedAt!;
@@ -466,7 +447,10 @@ function computeFlowEfficiencies(
 	inWindow: (t: number) => boolean
 ): number[] {
 	return issues
-		.filter((i) => i.readyAt !== null && i.doneAt !== null && inWindow(i.doneAt))
+		.filter(
+			(i) =>
+				i.readyAt !== null && i.doneAt !== null && inWindow(i.doneAt) && leaseHeldSeconds.has(i.id)
+		)
 		.map((i) => {
 			// biome-ignore lint/style/noNonNullAssertion: filtered above
 			const leadTime = i.doneAt! - i.readyAt!;
@@ -732,8 +716,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	// PROJ-446: everything below depends only on the window bounds plus ctx/projectId —
 	// none of these reads depend on each other, so run them concurrently instead of one
 	// round trip at a time.
-	const [humanCommentCounts, leaseHeldSeconds, bugTypeExists, windowCounts] = await Promise.all([
-		fetchHumanCommentCounts(orm, doneInWindowScope),
+	const [leaseHeldSeconds, bugTypeExists, windowCounts] = await Promise.all([
 		fetchLeaseHeldSeconds(orm, ctx, doneInWindowScope),
 		// PROJ-341: buildBugShareOverTime identifies bugs via typeKey === "bug" — if the
 		// workspace has no type keyed "bug" (renamed/deleted default), that always reads 0%
@@ -757,7 +740,7 @@ export async function getFlowMetrics(ctx: ServiceCtx, raw: unknown) {
 	]);
 	const { doneBeforeWindow, ...factoryHealth } = windowCounts;
 
-	const humanInterventions = computeHumanInterventions(issues, humanCommentCounts, inWindow);
+	const humanInterventions = computeHumanInterventions(issues, inWindow);
 	const autonomyRatios = computeAutonomyRatios(issues, leaseHeldSeconds, inWindow);
 	const wipOverTime = buildWipOverTime(issues, wipSince, wipUntil);
 	const throughputOverTime = buildThroughputOverTime(

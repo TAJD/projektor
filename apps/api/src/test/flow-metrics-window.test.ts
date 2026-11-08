@@ -303,9 +303,9 @@ describe("PROJ-866: D1 query bound at scale", () => {
 		expect(queries).toBeLessThanOrEqual(10);
 		expect(metrics.cycleTime.count).toBe(IN_WINDOW);
 		expect(metrics.humanInterventions.count).toBe(IN_WINDOW);
-		expect(metrics.humanInterventions.avg).toBeCloseTo(0.1);
-		expect(metrics.autonomyRatio.count).toBe(IN_WINDOW);
-		expect(metrics.autonomyRatio.avg).toBeCloseTo(0.125);
+		expect(metrics.humanInterventions.avg).toBe(0);
+		expect(metrics.autonomyRatio.count).toBe(IN_WINDOW / 4);
+		expect(metrics.autonomyRatio.avg).toBeCloseTo(0.5);
 	});
 });
 
