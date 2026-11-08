@@ -119,7 +119,7 @@ describe("PROJ-893: MCP tool failures are isError results", () => {
 		expect(e?.hint).toContain("viewer");
 	});
 
-	it("conflict on a stale wiki save: re-read, then patch_wiki_page — and the current revision is in details", async () => {
+	it("conflict on a stale wiki save: retry with the current revision, which is in details (PROJ-1014)", async () => {
 		const created = JSON.parse(
 			(await call("create_wiki_page", { title: "Locked Doc", content: "v1" })).result?.content?.[0]
 				.text ?? "{}"
@@ -137,9 +137,11 @@ describe("PROJ-893: MCP tool failures are isError results", () => {
 			baseRevisionId: stale,
 		});
 		expect(e.code).toBe("conflict");
-		expect(e.hint).toContain("get_wiki_page");
-		expect(e.hint).toContain("patch_wiki_page");
 		expect(e.details?.currentRevisionId).toBeTypeOf("string");
+		expect(e.hint).toContain(
+			`The diff shows what changed; if your edit still applies, retry with baseRevisionId=${e.details?.currentRevisionId}.`
+		);
+		expect(e.hint).toContain("For update_wiki_page, fold those changes into your content first");
 	});
 
 	it("a successful call is not flagged", async () => {

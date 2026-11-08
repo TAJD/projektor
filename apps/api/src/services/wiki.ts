@@ -1112,7 +1112,14 @@ export async function createWikiPage(ctx: ServiceCtx, input: unknown) {
 		slug
 	);
 	await finalizeWikiPageCreate(ctx, { id, parentId, slug, title, meta });
-	return { id, slug, projectId: resolvedProjectId, url: wikiPagePath(slug), ...meta };
+	return {
+		id,
+		slug,
+		projectId: resolvedProjectId,
+		url: wikiPagePath(slug),
+		revisionId: null,
+		...meta,
+	};
 }
 
 // PROJ-484: id of the most recently created revision for a page, or null if the page
@@ -1507,6 +1514,7 @@ function buildUpdateWikiPageStatements(
 		now: number;
 		isRename: boolean;
 		meta: ReturnType<typeof parseWikiFrontmatter> | undefined;
+		revisionId: string;
 	}>,
 	fields: Readonly<{
 		title?: string;
@@ -1516,7 +1524,7 @@ function buildUpdateWikiPageStatements(
 		summary?: string;
 	}>
 ): D1PreparedStatement[] {
-	const { now, isRename, meta } = opts;
+	const { now, isRename, meta, revisionId } = opts;
 	const { title, content, parentId, slug, summary } = fields;
 	const statements: D1PreparedStatement[] = [];
 
@@ -1530,7 +1538,7 @@ function buildUpdateWikiPageStatements(
 				orm
 					.insert(schema.wikiRevisions)
 					.values({
-						id: crypto.randomUUID(),
+						id: revisionId,
 						pageId: page.id,
 						content: page.content,
 						title: page.title,
@@ -1733,11 +1741,12 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	// resolution work above (frontmatter parse, link-target resolution inside
 	// buildWikiLinksReindexStatements) happens before any of these exist, so it can no
 	// longer leave the page updated with a stale/wiped links or FTS row.
+	const revisionId = crypto.randomUUID();
 	const statements = buildUpdateWikiPageStatements(
 		ctx,
 		orm,
 		page,
-		{ now, isRename, meta },
+		{ now, isRename, meta, revisionId },
 		{ title, content, parentId, slug, summary }
 	);
 	statements.push(
@@ -1772,7 +1781,13 @@ export async function updateWikiPage(ctx: ServiceCtx, idOrSlug: string, input: u
 	await writeUpdateWikiPageBatch(ctx, page, statements, isRename, slug);
 	await finalizeWikiPageUpdate(ctx, page, { title, content, parentId, slug, meta });
 
-	return { ok: true, url: wikiPagePath(slug ?? page.slug) };
+	const currentRevisionId =
+		content !== undefined
+			? revisionId
+			: baseRevisionId !== undefined
+				? baseRevisionId
+				: await getLatestRevisionId(ctx.db, page.id);
+	return { ok: true, url: wikiPagePath(slug ?? page.slug), revisionId: currentRevisionId };
 }
 
 // PROJ-489 (R7): stamps verified_at/verified_by using the CALLING user's identity —
@@ -1807,7 +1822,11 @@ export async function verifyWikiPage(ctx: ServiceCtx, idOrSlug: string) {
 
 	const now = Math.floor(Date.now() / 1000);
 	const newContent = stampWikiFrontmatterVerification(current.content, now, user.email);
-	await updateWikiPage(ctx, page.id, { content: newContent, summary: "Verified", baseRevisionId });
+	const { revisionId } = await updateWikiPage(ctx, page.id, {
+		content: newContent,
+		summary: "Verified",
+		baseRevisionId,
+	});
 
 	// Re-derive from the same frontmatter just written, so the response matches exactly
 	// what a subsequent read would parse back out (rather than re-fetching the page).
@@ -1817,6 +1836,7 @@ export async function verifyWikiPage(ctx: ServiceCtx, idOrSlug: string) {
 		verifiedAt: meta.verifiedAt,
 		verifiedBy: meta.verifiedBy,
 		url: wikiPagePath(page.slug),
+		revisionId,
 		freshness: computeFreshness({
 			verifiedAt: meta.verifiedAt,
 			verifyInterval: meta.verifyInterval,
@@ -2160,7 +2180,13 @@ function patchValidationIssues(input: unknown, error: ZodError): ZodFlattenOutpu
 		string,
 		unknown
 	>;
-	if (typeof body.op === "string" && PATCH_OPS.includes(body.op)) return issues;
+	const knownOp = typeof body.op === "string" && PATCH_OPS.includes(body.op);
+	if (knownOp && body.op !== "append_to_page" && body.baseRevisionId === undefined) {
+		issues.fieldErrors.baseRevisionId = [
+			"baseRevisionId is required for every op except append_to_page; get_wiki_page returns revisionId (null if the page has never been revised)",
+		];
+	}
+	if (knownOp) return issues;
 	issues.fieldErrors.op = [`op must be one of: ${PATCH_OPS.join(", ")}`];
 	if (body.op !== "set_frontmatter" && body.text === undefined) {
 		issues.fieldErrors.text = [
@@ -2217,12 +2243,13 @@ async function patchWikiPageOnce(
 
 	// PROJ-511: same atomic-batch shape as updateWikiPage — content write, revision
 	// snapshot, FTS mirror, and wiki_links reindex all in one ctx.db.batch() call.
+	const revisionId = crypto.randomUUID();
 	const revisionStatement = toD1Statement(
 		ctx,
 		orm
 			.insert(schema.wikiRevisions)
 			.values({
-				id: crypto.randomUUID(),
+				id: revisionId,
 				pageId: page.id,
 				content: page.content,
 				title: page.title,
@@ -2272,7 +2299,7 @@ async function patchWikiPageOnce(
 		});
 	}
 
-	return { ok: true, url: wikiPagePath(page.slug) };
+	return { ok: true, url: wikiPagePath(page.slug), revisionId };
 }
 
 // PROJ-491 (R9): the template picker — pages carrying frontmatter `template: true`,

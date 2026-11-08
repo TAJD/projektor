@@ -11,6 +11,7 @@ import {
 	listWikiRevisions,
 	patchWikiPage,
 	updateWikiPage,
+	verifyWikiPage,
 } from "../services/wiki";
 import { authHeaders, seedFixture } from "./helpers";
 
@@ -213,5 +214,128 @@ describe("PROJ-919: metadata-only writes are guarded too", () => {
 			baseRevisionId: revisionId,
 		});
 		expect(await versionOf()).toBe(before + 2);
+	});
+});
+
+describe("PROJ-1014: edits return the revision to chain from", () => {
+	it("create, update and chained patches each hand back the next baseRevisionId", async () => {
+		const { ctx } = await setup();
+		const created = (await createWikiPage(ctx, {
+			title: "Chain",
+			content: "# Notes\nstart\n## Log\nfirst\n",
+		})) as { slug: string; revisionId: string | null };
+		expect(created.revisionId).toBeNull();
+
+		const updated = (await updateWikiPage(ctx, created.slug, {
+			content: "# Notes\nstart\n## Log\nfirst\n",
+			baseRevisionId: created.revisionId,
+		})) as { revisionId: string };
+		expect(typeof updated.revisionId).toBe("string");
+
+		let base = updated.revisionId;
+		for (const line of ["second", "third"]) {
+			const patched = (await patchWikiPage(ctx, created.slug, {
+				op: "append_to_section",
+				heading: "Log",
+				text: line,
+				baseRevisionId: base,
+			})) as { revisionId: string };
+			expect(patched.revisionId).not.toBe(base);
+			base = patched.revisionId;
+		}
+		const read = (await getWikiPage(ctx, created.slug)) as { revisionId: string; content: string };
+		expect(read.revisionId).toBe(base);
+		expect(read.content).toContain("second");
+		expect(read.content).toContain("third");
+
+		const renamed = (await updateWikiPage(ctx, created.slug, {
+			title: "Chain renamed",
+			baseRevisionId: base,
+		})) as { revisionId: string };
+		expect(renamed.revisionId).toBe(base);
+		const unbased = (await updateWikiPage(ctx, created.slug, { title: "Chain again" })) as {
+			revisionId: string;
+		};
+		expect(unbased.revisionId).toBe(base);
+		const after = (await getWikiPage(ctx, created.slug)) as { revisionId: string; title: string };
+		expect(after).toMatchObject({ revisionId: base, title: "Chain again" });
+
+		const verified = (await verifyWikiPage(ctx, created.slug)) as { revisionId: string };
+		expect(verified.revisionId).not.toBe(base);
+		expect(((await getWikiPage(ctx, created.slug)) as { revisionId: string }).revisionId).toBe(
+			verified.revisionId
+		);
+	});
+
+	it("a conflict with no diff (a write landing mid-flight) keeps the re-read hint", async () => {
+		const { ctx, slug, token, wsSlug } = await setup();
+		const base = ((await getWikiPage(ctx, slug)) as { revisionId: string }).revisionId;
+		interleaveBeforeNextBatch(1, async () => {
+			await updateWikiPage(ctx, slug, { content: "landed first", baseRevisionId: base });
+		});
+		const res = await SELF.fetch(`http://localhost/mcp/${wsSlug}`, {
+			method: "POST",
+			headers: authHeaders(token, wsSlug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: {
+					name: "update_wiki_page",
+					arguments: { slug, content: "mine", baseRevisionId: base },
+				},
+			}),
+		});
+		const text = ((await res.json()) as { result: { content: Array<{ text: string }> } }).result
+			.content[0].text;
+		expect(text).toContain("Re-read it with get_wiki_page");
+		expect(text).not.toContain("The diff shows what changed");
+		expect(await contentOf(ctx, slug)).toBe("landed first");
+	});
+
+	it("a missing baseRevisionId is reported with the other validation errors, pointing at get_wiki_page", async () => {
+		const { slug, token, wsSlug } = await setup();
+		const res = await SELF.fetch(`http://localhost/mcp/${wsSlug}`, {
+			method: "POST",
+			headers: authHeaders(token, wsSlug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "patch_wiki_page", arguments: { slug, op: "replace_section", text: "x" } },
+			}),
+		});
+		const text = ((await res.json()) as { result: { content: Array<{ text: string }> } }).result
+			.content[0].text;
+		expect(text).toContain("baseRevisionId");
+		expect(text).toContain("get_wiki_page returns revisionId");
+		expect(text).toContain("heading");
+		expect(text).not.toMatch(/baseRevisionId[^;]*received undefined/);
+	});
+
+	it("a conflict hint names the revision to retry with", async () => {
+		const { ctx, slug, token, wsSlug } = await setup();
+		const stale = ((await getWikiPage(ctx, slug)) as { revisionId: string }).revisionId;
+		const fresh = (await updateWikiPage(ctx, slug, {
+			content: "someone else",
+			baseRevisionId: stale,
+		})) as { revisionId: string };
+		const res = await SELF.fetch(`http://localhost/mcp/${wsSlug}`, {
+			method: "POST",
+			headers: authHeaders(token, wsSlug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: {
+					name: "update_wiki_page",
+					arguments: { slug, content: "mine", baseRevisionId: stale },
+				},
+			}),
+		});
+		const text = ((await res.json()) as { result: { content: Array<{ text: string }> } }).result
+			.content[0].text;
+		expect(text).toContain("The diff shows what changed");
+		expect(text).toContain(`retry with baseRevisionId=${fresh.revisionId}.`);
 	});
 });
