@@ -11,13 +11,14 @@ against an older release may rely on fields or errors that have since changed. T
 lists those changes, newest first. The REST API (`/api/*`) is not covered here: its rows
 keep the full shape.
 
-## Unreleased
+## v0.10.1
 
 - **`fields` returns `labels` as an array.** `list_issues`, `get_issue` and `get_issues`
   with `fields` naming `labels` returned the raw JSON string (`"[\"a\"]"`). They now
   return an array (`[]` if the issue has none), the same as the `full` view.
   `verbose:true` still returns the raw row.
-- Label search and label filters are faster. Results are unchanged.
+- Label search, label filters, `get_prioritized_issues` and the project list read far
+  fewer rows. Results are unchanged.
 
 ## v0.10.0
 
