@@ -20,7 +20,9 @@ Unless you pass `verbose:true`, a result omits:
 ## `view=summary|full`
 
 List and get tools for issues take `view`. `list_issues` and `search_issues` default to
-`summary`; `get_issue` and `get_issues` default to `full`.
+`summary`; `get_issue` and `get_issues` default to `full`. These defaults are the MCP
+tools'; REST `GET /api/issues` returns full rows unless you pass `view=summary`, and then
+its rows carry no `customFields`.
 
 | View | Issue fields |
 | --- | --- |
@@ -35,7 +37,8 @@ is `{type, ref, title, status?}`; `list_issue_links` returns link ids.
 
 `fields` is an explicit allowlist and wins over `view`. Pass an array or a comma-separated string:
 `fields: "ref,title,updated"`. Every named field is always present, with `null` if the
-issue has no value for it. Unknown names are a validation error.
+issue has no value for it. `labels` is an array here too (`[]` when the issue has none).
+Unknown names are a validation error.
 
 ## Lists: `{items, next}`
 
@@ -85,7 +88,7 @@ Long text is read in windows so one call never returns an unbounded blob.
 
 - **Lists**: `bodyChars=N` (0–1000, default 0) adds the first N characters of each item's `body`, with `bodyTruncated:true` when it was cut. `includeBody:true` still returns whole bodies. Read the rest with `get_issue`.
 - **`get_issue`**: `body` is returned up to 16,000 characters. If it is longer, the result has `bodyTruncated:true`, `bodyTotalChars` and `next`; pass `next` back as `cursor` for the rest.
-- **`get_wiki_page`**: `content` is at most `maxChars` (default 8,000, max 20,000). `totalChars` is the full length and `outline` lists the page's headings. When `next` is present, pass it back as `cursor`. `section=<heading text or slug>` returns just that section (through the next heading of the same or higher level). An unknown section returns `sectionFound:false` and the `outline`, not an error. Frontmatter fields (`type`, `tags`, `status`, …) are still returned parsed. `contentTruncated:true` means `content` is only part of the page: never send it back to `update_wiki_page`, which would overwrite the page with the fragment; use `patch_wiki_page`.
+- **`get_wiki_page`**: `content` is at most `maxChars` (default 8,000, max 20,000). `totalChars` is the full length and `outline` lists the page's headings. When `next` is present, pass it back as `cursor`. `section=<heading text or slug>` returns just that section (through the next heading of the same or higher level). An unknown section returns `sectionFound:false` and the `outline`, not an error. Frontmatter fields (`type`, `tags`, `status`, …) are still returned parsed. `revisionId` is the revision this content was read at; pass it as `baseRevisionId` on your next `update_wiki_page` or `patch_wiki_page`, and each of those returns the next `revisionId` to chain from. `contentTruncated:true` means `content` is only part of the page: never send it back to `update_wiki_page`, which would overwrite the page with the fragment; use `patch_wiki_page`.
 
 Cursors are character offsets and always fall on whole characters, so a window never splits an emoji.
 

@@ -356,7 +356,8 @@ credential on every call (PROJ-452 statelessness holds).
    the session is ended and nothing is left claimed. If the process crashes mid-call
    (so that cleanup never runs), the claims it made become reclaimable once the
    session's heartbeat goes stale after the 120s TTL, same as any other stale holder.
-   Save the returned `sessionId`.
+   Save the returned `sessionId`. When an issue was claimed, the result also carries
+   that `issue` (the `get_issue` shape), so no follow-up `get_issue` is needed.
 2. `finish_work({ sessionId, issue, completionReport?, status? })` when done — optionally
    transitions the issue via the same path `update_issue` uses (completion-report rules
    apply unchanged), then releases every claim/lease the session holds and ends it.

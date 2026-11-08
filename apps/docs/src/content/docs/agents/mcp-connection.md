@@ -444,8 +444,9 @@ failure and can correct itself. The single text content item is JSON:
 
 Each hint is a next step, not a restatement of the message: a `not_found` on an issue ref
 names the ref format and `search_issues`; on a wiki page it names `search_wiki`; a
-`conflict` on a wiki save says to re-read with `get_wiki_page` and apply the change with
-`patch_wiki_page`; `forbidden` says which role is missing. A `validation` failure has no
+`conflict` on a wiki save carrying a `diff` names the revision to retry with
+(`baseRevisionId=<currentRevisionId>`), and one without says to re-read with
+`get_wiki_page` and apply the change with `patch_wiki_page`; `forbidden` says which role is missing. A `validation` failure has no
 hint, because `fields` already names each problem. `fields`, `hint` and `details` are
 omitted when they don't apply.
 
