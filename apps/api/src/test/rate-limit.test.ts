@@ -256,9 +256,10 @@ describe("PROJ-867: counters live in the RateLimiter Durable Object, not D1", ()
 				for (let i = 0; i < AUTH_LIMIT + 2; i++) statuses.push((await SELF.fetch(ENDPOINT)).status);
 				expect(statuses).not.toContain(429);
 				expect(await bumpRateCounter(env, "authfail:203.0.113.9", WINDOW_SECS)).toBe(0);
+				expect(await bumpRateCounter(env, "authfail:203.0.113.9", WINDOW_SECS)).toBe(0);
 				expect(
 					errors.mock.calls.filter((args) => String(args[0]).includes("RATE_LIMITER")).length
-				).toBeLessThanOrEqual(1);
+				).toBe(1);
 			} finally {
 				errors.mockRestore();
 			}
