@@ -490,6 +490,12 @@ the next page. Long results from `list_issues`, `search_wiki`, `list_wiki_change
 `list_project_activity` are cut on an item boundary and flagged `truncated:true`. Issue tools take `view=summary|full` and `fields=`. See
 [Response conventions](/projektor/agents/response-conventions/).
 
+### After an upgrade
+
+Reconnect your MCP client so it picks up the new tool descriptions. Check
+[MCP changes by release](/projektor/agents/mcp-changes/) for results that changed shape
+or calls that now behave differently.
+
 ### Stable API contracts
 
 These are the load-bearing shapes the Worker enforces — verified against the source:

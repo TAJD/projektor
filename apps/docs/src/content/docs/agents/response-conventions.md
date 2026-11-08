@@ -5,7 +5,8 @@ sidebar:
   order: 3
 ---
 MCP tool results are metered in tokens, so they are shaped to carry only what an agent
-can act on. REST (`/api/*`) is unchanged: it always returns the full row shape.
+can act on. REST (`/api/*`) is unchanged: it always returns the full row shape. For what
+changed in each release, see [MCP changes by release](/projektor/agents/mcp-changes/).
 
 ## Dropped fields
 
