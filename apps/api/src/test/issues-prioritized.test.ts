@@ -177,6 +177,21 @@ describe("PROJ-859: bounded query count", () => {
 		expect(prepares).toBeLessThanOrEqual(10);
 	});
 
+	it("stops probing for unhealed rows once a workspace is healed", async () => {
+		const { ctx } = await seedWorkspaceWithIssues(6);
+		await getPrioritizedIssues(ctx, { limit: 10 });
+
+		const probes: string[] = [];
+		const orig = env.DB.prepare.bind(env.DB);
+		vi.spyOn(env.DB, "prepare").mockImplementation((q: string) => {
+			if (q.includes("dor_ready IS NULL")) probes.push(q);
+			return orig(q);
+		});
+		await getPrioritizedIssues(ctx, { limit: 10 });
+		await getPrioritizedIssues(ctx, { limit: 10 });
+		expect(probes).toEqual([]);
+	});
+
 	it("an issue body update keeps dor_ready current", async () => {
 		const { ctx } = await seedWorkspaceWithIssues(6);
 		await getPrioritizedIssues(ctx, { limit: 10 });

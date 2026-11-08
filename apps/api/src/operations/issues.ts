@@ -152,7 +152,7 @@ export const issueOperations = [
 		path: "/api/issues",
 		tier: "read",
 		restAliases: { project: "projectId" },
-		mcpDefaults: { bodyChars: 0 },
+		mcpDefaults: { bodyChars: 0, view: "summary" },
 		summary:
 			"List issues in the workspace, optionally filtered by status, priority, project, or assignee. " +
 			'Items are summary rows {ref,title,status,priority,type?,parent?,assignee?,updated,rollup?} by default; view:"full" returns every non-empty field. ' +
@@ -240,7 +240,10 @@ export const issueOperations = [
 				"summary (default) = {ref,title,status,priority,type?,parent?,assignee?,updated,rollup?} per issue; full = every non-empty field"
 			),
 		}),
-		run: (ctx, input) => listIssues(ctx, serviceInput(input)),
+		run: (ctx, input) =>
+			listIssues(ctx, serviceInput(input), {
+				customFields: !(input.view === "summary" && !input.fields && !input.verbose),
+			}),
 		mcpResult: (result, input) => {
 			const { rest: _, ...requested } = splitShapeOpts(input);
 			const shape =

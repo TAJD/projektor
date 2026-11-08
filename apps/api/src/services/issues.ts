@@ -351,7 +351,11 @@ async function buildListIssuesConditions(
 	return conditions;
 }
 
-export async function listIssues(ctx: ServiceCtx, raw: unknown) {
+export async function listIssues(
+	ctx: ServiceCtx,
+	raw: unknown,
+	opts: { customFields?: boolean } = {}
+) {
 	const result = ListIssuesSchema.safeParse(raw);
 	if (!result.success) throw new ValidationError(result.error.flatten());
 	const filters = {
@@ -443,12 +447,12 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 	const nextCursor = hasMore && lastItem ? `${lastItem.created_at}:${lastItem.id}` : null;
 
 	const issueIds = (items as Array<{ id: string }>).map((i) => i.id);
-	const customFieldsByIssue = await batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds);
-	// PROJ-441: computed in one grouped query for the whole page, rather than the
-	// frontend fanning out a getIssue call per row.
-	const rollupsByParent = filters.includeRollups
-		? await computeChildRollupsForParents(ctx, orm, issueIds)
-		: null;
+	const [customFieldsByIssue, rollupsByParent] = await Promise.all([
+		opts.customFields === false ? null : batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds),
+		// PROJ-441: computed in one grouped query for the whole page, rather than the
+		// frontend fanning out a getIssue call per row.
+		filters.includeRollups ? computeChildRollupsForParents(ctx, orm, issueIds) : null,
+	]);
 
 	const itemsWithFields = (items as Array<Record<string, unknown>>).map((i) => {
 		// PROJ-442: body is omitted by default — callers that need it pass includeBody=1.
@@ -456,7 +460,7 @@ export async function listIssues(ctx: ServiceCtx, raw: unknown) {
 		const item: Record<string, unknown> = {
 			...rest,
 			...(filters.includeBody ? { body: i.body } : {}),
-			customFields: customFieldsByIssue[i.id as string] ?? [],
+			...(customFieldsByIssue ? { customFields: customFieldsByIssue[i.id as string] ?? [] } : {}),
 			url: i.project_key
 				? issuePath(i.project_key as string, i.number as number, i.title as string)
 				: null,
@@ -971,20 +975,21 @@ function buildActivityInsertStatement(
 }
 
 async function resolveCreateIssueDeps(ctx: ServiceCtx, data: CreateIssueData) {
-	if (data.parentId) {
-		await validateParent(ctx, data.parentId, null);
-	}
-
-	const resolvedTypeId = await resolveTypeId(ctx, data.typeId);
+	const [parentCheck, typeRead, statusRead, cfRead] = await Promise.allSettled([
+		data.parentId ? validateParent(ctx, data.parentId, null) : undefined,
+		resolveTypeId(ctx, data.typeId),
+		resolveStatus(ctx, data.statusId, data.status),
+		data.customFields ? validateCustomFields(ctx.db, ctx.workspaceId, data.customFields) : [],
+	]);
+	settledValue(parentCheck);
+	const resolvedTypeId = settledValue(typeRead);
 	const {
 		id: resolvedStatusId,
 		key: resolvedStatusKey,
 		category: resolvedStatusCategory,
 		isReviewStep: resolvedIsReviewStep,
-	} = await resolveStatus(ctx, data.statusId, data.status);
-	const cfWrites = data.customFields
-		? await validateCustomFields(ctx.db, ctx.workspaceId, data.customFields)
-		: [];
+	} = settledValue(statusRead);
+	const cfWrites = settledValue(cfRead);
 
 	return {
 		resolvedTypeId,
@@ -2558,24 +2563,31 @@ function parsePrioritizedFilters(raw: unknown): PrioritizedFilters {
 const DOR_HEAL_BATCH = 200;
 const DOR_HEAL_MAX_BATCHES = 5;
 
+const dorHealedWorkspaces = new Set<string>();
+
 async function healDefinitionOfReady(ctx: ServiceCtx): Promise<void> {
+	if (dorHealedWorkspaces.has(ctx.workspaceId)) return;
 	for (let i = 0; i < DOR_HEAL_MAX_BATCHES; i++) {
 		const { results } = await ctx.db
 			.prepare("SELECT id, body FROM issues WHERE workspace_id = ? AND dor_ready IS NULL LIMIT ?")
 			.bind(ctx.workspaceId, DOR_HEAL_BATCH)
 			.all<{ id: string; body: string | null }>();
 		const rows = results ?? [];
-		if (rows.length === 0) return;
-		await ctx.db.batch(
-			rows.map((r) =>
-				ctx.db
-					.prepare(
-						"UPDATE issues SET dor_ready = ?, dor_missing = ? WHERE id = ? AND workspace_id = ?"
-					)
-					.bind(...dorColumns(r.body), r.id, ctx.workspaceId)
-			)
-		);
-		if (rows.length < DOR_HEAL_BATCH) return;
+		if (rows.length > 0) {
+			await ctx.db.batch(
+				rows.map((r) =>
+					ctx.db
+						.prepare(
+							"UPDATE issues SET dor_ready = ?, dor_missing = ? WHERE id = ? AND workspace_id = ?"
+						)
+						.bind(...dorColumns(r.body), r.id, ctx.workspaceId)
+				)
+			);
+		}
+		if (rows.length < DOR_HEAL_BATCH) {
+			dorHealedWorkspaces.add(ctx.workspaceId);
+			return;
+		}
 	}
 }
 
