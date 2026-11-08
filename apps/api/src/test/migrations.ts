@@ -81,6 +81,7 @@ import m0077 from "../../../../packages/db/migrations/0077_issues_fts_rowid.sql?
 import m0078 from "../../../../packages/db/migrations/0078_issues_ws_project_status_idx.sql?raw";
 import m0079 from "../../../../packages/db/migrations/0079_issue_labels.sql?raw";
 import m0080 from "../../../../packages/db/migrations/0080_issues_open_by_project_idx.sql?raw";
+import m0081 from "../../../../packages/db/migrations/0081_issues_open_by_workspace_idx.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -164,4 +165,5 @@ export const MIGRATIONS = [
 	m0078,
 	m0079,
 	m0080,
+	m0081,
 ];
