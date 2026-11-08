@@ -87,6 +87,19 @@ export const UpdateIssueSchema = z
 	.object({
 		title: z.string().min(1).max(500).optional(),
 		body: z.string().max(50000).optional(),
+		appendBody: z.string().min(1).max(50000).optional().meta({
+			description:
+				"Text to add to the end of the current body (joined with a blank line). Not with `body`",
+		}),
+		bodyEdits: z
+			.array(z.object({ find: z.string().min(1), replace: z.string() }).strict())
+			.min(1)
+			.max(50)
+			.optional()
+			.meta({
+				description:
+					"Find/replace edits applied to the current body in order; each `find` must match exactly once, or nothing is written. Not with `body`",
+			}),
 		status: StatusEnum.optional(),
 		statusId: TaxonomyIdSchema.nullable().optional(),
 		priority: PriorityEnum.optional(),
@@ -100,6 +113,11 @@ export const UpdateIssueSchema = z
 		comment: CommentBodySchema.optional(),
 	})
 	.strict()
+	.refine(
+		(obj) =>
+			obj.body === undefined || (obj.appendBody === undefined && obj.bodyEdits === undefined),
+		{ message: "body cannot be combined with appendBody or bodyEdits", path: ["body"] }
+	)
 	.refine(
 		(obj) =>
 			obj.comment === undefined

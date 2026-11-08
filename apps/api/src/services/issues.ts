@@ -32,6 +32,7 @@ import {
 } from "./custom-fields";
 import { dorColumns } from "./definition-of-ready";
 import {
+	ConflictError,
 	ForbiddenError,
 	flattenWithPaths,
 	NotFoundError,
@@ -1898,10 +1899,73 @@ function fetchExistingForUpdate(ctx: ServiceCtx, orm: ReturnType<typeof drizzle>
 // PROJ-1018: resolveStatus may answer from a cached status list that is up to 60 s stale.
 // If the status was deleted in that window, issues.status_id's foreign key rejects the
 // write; report it like any other unknown status rather than as an internal error.
-async function runIssueWriteBatch(ctx: ServiceCtx, statements: D1PreparedStatement[]) {
+const STALE_BODY_MARKER = "__projektor_stale_issue_body__";
+
+function issueBodyGuard(ctx: ServiceCtx, id: string, body: string): D1PreparedStatement {
+	return ctx.db
+		.prepare(
+			`SELECT CASE WHEN EXISTS (
+			   SELECT 1 FROM issues WHERE id = ? AND workspace_id = ? AND body = ?
+			 ) THEN 1 ELSE json('${STALE_BODY_MARKER}') END`
+		)
+		.bind(id, ctx.workspaceId, body);
+}
+
+function countOccurrences(text: string, find: string): number {
+	let count = 0;
+	for (let at = text.indexOf(find); at !== -1; at = text.indexOf(find, at + 1)) count++;
+	return count;
+}
+
+function applyBodyEdits(
+	body: string,
+	edits: ReadonlyArray<{ find: string; replace: string }> | undefined,
+	append: string | undefined
+): string {
+	let next = body;
+	for (const [i, { find, replace }] of (edits ?? []).entries()) {
+		const matches = countOccurrences(next, find);
+		if (matches !== 1) {
+			throw new ValidationError({
+				formErrors: [],
+				fieldErrors: {
+					bodyEdits: [
+						`bodyEdits[${i}].find matches ${matches} times; it must match exactly once. Nothing was written`,
+					],
+				},
+			});
+		}
+		const at = next.indexOf(find);
+		next = next.slice(0, at) + replace + next.slice(at + find.length);
+	}
+	if (append !== undefined)
+		next = next.trim() === "" ? append : `${next.replace(/\s+$/, "")}\n\n${append}`;
+	if (next.length > 50000) {
+		throw new ValidationError({
+			formErrors: [],
+			fieldErrors: {
+				[append !== undefined ? "appendBody" : "bodyEdits"]: [
+					`The edited body is ${next.length} chars; the limit is 50000`,
+				],
+			},
+		});
+	}
+	return next;
+}
+
+async function runIssueWriteBatch(
+	ctx: ServiceCtx,
+	statements: D1PreparedStatement[],
+	bodyGuarded = false
+) {
 	try {
 		return await ctx.db.batch(statements);
 	} catch (err) {
+		if (bodyGuarded && /malformed JSON|__projektor_stale_issue_body__/i.test(String(err))) {
+			throw new ConflictError(
+				"The issue body changed while this edit was being applied; nothing was written. Retry the call"
+			);
+		}
 		if (String(err).includes("FOREIGN KEY constraint failed")) {
 			throw new ValidationError({
 				formErrors: ["A referenced record no longer exists (e.g. a task status just deleted)"],
@@ -1931,7 +1995,8 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	const id = settledValue(idRead);
 	if (!result.success) throw new ValidationError(flattenWithPaths(result.error));
 	const parentId = settledValue(parentIdRead);
-	const data = parentId ? { ...result.data, parentId } : result.data;
+	const { appendBody, bodyEdits, ...fields } = result.data;
+	let data = parentId ? { ...fields, parentId } : fields;
 
 	const orm = drizzle(ctx.db, { schema });
 
@@ -1991,6 +2056,9 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 
 	settledValue(assigneeCheck);
 
+	const editingBody = appendBody !== undefined || bodyEdits !== undefined;
+	if (editingBody) data = { ...data, body: applyBodyEdits(existing.body, bodyEdits, appendBody) };
+
 	const {
 		setValues,
 		recordCompletionReport,
@@ -2020,7 +2088,9 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 			.toSQL()
 	);
 
-	const statements: D1PreparedStatement[] = [updateStatement];
+	const statements: D1PreparedStatement[] = editingBody
+		? [issueBodyGuard(ctx, id, existing.body), updateStatement]
+		: [updateStatement];
 
 	if (data.title !== undefined || data.body !== undefined) {
 		statements.push(
@@ -2089,7 +2159,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		statements.push(buildTouchAgentHeartbeatStatement(ctx, data.agentSessionId));
 	}
 
-	await runIssueWriteBatch(ctx, statements);
+	await runIssueWriteBatch(ctx, statements, editingBody);
 
 	if ((recordCompletionReport || reviseCompletionReport) && data.completionReport) {
 		await broadcastWorkspaceEvent(ctx, {
