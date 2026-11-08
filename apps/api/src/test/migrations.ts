@@ -79,6 +79,7 @@ import m0075 from "../../../../packages/db/migrations/0075_drop_mcp_tool_usage.s
 import m0076 from "../../../../packages/db/migrations/0076_drop_rate_limit.sql?raw";
 import m0077 from "../../../../packages/db/migrations/0077_issues_fts_rowid.sql?raw";
 import m0078 from "../../../../packages/db/migrations/0078_issues_ws_project_status_idx.sql?raw";
+import m0079 from "../../../../packages/db/migrations/0079_issue_labels.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -160,4 +161,5 @@ export const MIGRATIONS = [
 	m0076,
 	m0077,
 	m0078,
+	m0079,
 ];

@@ -143,58 +143,69 @@ async function validateParent(
 
 type ListIssuesFilters = z.infer<typeof ListIssuesSchema>;
 
-// PROJ-960: `issues.labels` is a JSON array string. json_each() raises on malformed JSON,
-// which would turn one bad row into a 500 for the whole list, so a non-JSON value reads as
-// an empty label set instead (the column is only ever written via JSON.stringify, so this
-// is insurance, not an expected path). Labels match exactly — they're tags, not text.
-const labelsJsonSql = (col: string) =>
-	`CASE WHEN json_valid(${col}) THEN CASE WHEN json_type(${col}) = 'array' THEN ${col} ELSE '[]' END ELSE '[]' END` as const;
-
 // Mirrors the per-label cap in schemas/issues.ts (z.string().max(50)).
 const MAX_LABEL_LENGTH = 50;
 
 type LabelFilter = Readonly<{ labels?: string[]; labelsMode?: "all" | "any" }>;
 
-/**
- * Raw-SQL form of the label filter, for the hand-written FTS query in searchIssues. `col`
- * is the (already table-qualified) labels column. All-of means one EXISTS per label, so
- * every label must be present; "any" is a single EXISTS over an IN list. At most 20 labels
- * (schema cap), well under D1's 100-parameter limit.
- */
-function labelFilterSql(col: string, filter: LabelFilter): { sql: string; params: string[] } {
+function labelMatch(filter: LabelFilter): { labels: string[]; having: string } | null {
 	const labels = [...new Set(filter.labels ?? [])];
-	if (labels.length === 0) return { sql: "", params: [] };
-	const json = labelsJsonSql(col);
-	if (filter.labelsMode === "any") {
-		return {
-			sql: ` AND EXISTS (SELECT 1 FROM json_each(${json}) WHERE value IN (${labels.map(() => "?").join(", ")}))`,
-			params: labels,
-		};
-	}
+	if (labels.length === 0) return null;
+	const having =
+		filter.labelsMode === "any" ? "" : ` GROUP BY issue_id HAVING COUNT(*) = ${labels.length}`;
+	return { labels, having };
+}
+
+function labelFilterSql(
+	idCol: string,
+	workspaceId: string,
+	filter: LabelFilter
+): { sql: string; params: string[] } {
+	const match = labelMatch(filter);
+	if (!match) return { sql: "", params: [] };
+	const marks = match.labels.map(() => "?").join(", ");
 	return {
-		sql: labels
-			.map(() => ` AND EXISTS (SELECT 1 FROM json_each(${json}) WHERE value = ?)`)
-			.join(""),
-		params: labels,
+		sql: ` AND ${idCol} IN (SELECT issue_id FROM issue_labels WHERE workspace_id = ? AND label IN (${marks})${match.having})`,
+		params: [workspaceId, ...match.labels],
 	};
 }
 
-function addLabelFilter(conditions: Condition[], filters: LabelFilter): void {
-	const labels = [...new Set(filters.labels ?? [])];
-	if (labels.length === 0) return;
-	const json = sql.raw(labelsJsonSql('"issues"."labels"'));
-	if (filters.labelsMode === "any") {
-		conditions.push(
-			sql`EXISTS (SELECT 1 FROM json_each(${json}) WHERE value IN (${sql.join(
-				labels.map((l) => sql`${l}`),
-				sql`, `
-			)}))`
+function addLabelFilter(conditions: Condition[], workspaceId: string, filters: LabelFilter): void {
+	const match = labelMatch(filters);
+	if (!match) return;
+	const values = sql.join(
+		match.labels.map((l) => sql`${l}`),
+		sql`, `
+	);
+	conditions.push(
+		sql`${schema.issues.id} IN (SELECT issue_id FROM issue_labels WHERE workspace_id = ${workspaceId} AND label IN (${values})${sql.raw(match.having)})`
+	);
+}
+
+function buildLabelIndexStatements(
+	ctx: ServiceCtx,
+	id: string,
+	labels: readonly string[],
+	replace: boolean
+): D1PreparedStatement[] {
+	const statements: D1PreparedStatement[] = [];
+	if (replace) {
+		statements.push(
+			ctx.db
+				.prepare("DELETE FROM issue_labels WHERE issue_id = ? AND workspace_id = ?")
+				.bind(id, ctx.workspaceId)
 		);
-		return;
 	}
-	for (const label of labels) {
-		conditions.push(sql`EXISTS (SELECT 1 FROM json_each(${json}) WHERE value = ${label})`);
+	if (labels.length > 0) {
+		statements.push(
+			ctx.db
+				.prepare(
+					"INSERT OR IGNORE INTO issue_labels (issue_id, workspace_id, label) SELECT ?, ?, value FROM json_each(?) WHERE type = 'text'"
+				)
+				.bind(id, ctx.workspaceId, JSON.stringify(labels))
+		);
 	}
+	return statements;
 }
 
 const MAX_STATUS_IDS_FILTER = 50;
@@ -346,7 +357,7 @@ async function buildListIssuesConditions(
 	if (visible) conditions.push(visible);
 	addStatusFilters(conditions, filters);
 	addAssociationFilters(conditions, ctx, filters);
-	addLabelFilter(conditions, filters);
+	addLabelFilter(conditions, ctx.workspaceId, filters);
 	await addCustomFieldFilter(orm, ctx, conditions, filters);
 	addDateRangeFilters(conditions, filters);
 	return conditions;
@@ -1231,6 +1242,7 @@ async function prepareCreateIssue(
 			now: nowTs,
 		}),
 		...buildFtsInsertStatements(ctx, id, title, resolvedBody),
+		...buildLabelIndexStatements(ctx, id, labels ?? [], false),
 		...buildCustomFieldUpsertStatements(ctx.db, id, cfWrites),
 		buildActivityInsertStatement(ctx, orm, {
 			entityType: "issue",
@@ -2119,6 +2131,10 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 		);
 	}
 
+	if (data.labels !== undefined) {
+		statements.push(...buildLabelIndexStatements(ctx, id, data.labels, true));
+	}
+
 	statements.push(...buildCustomFieldUpsertStatements(ctx.db, id, cfWrites));
 
 	if ((recordCompletionReport || reviseCompletionReport) && data.completionReport) {
@@ -2390,6 +2406,9 @@ export async function deleteIssue(ctx: ServiceCtx, rawId: string) {
 	const deleteStatements: D1PreparedStatement[] = [
 		ctx.db
 			.prepare(`DELETE FROM issues_fts WHERE rowid = ${FTS_ROWID_OF_ISSUE}`)
+			.bind(id, ctx.workspaceId),
+		ctx.db
+			.prepare("DELETE FROM issue_labels WHERE issue_id = ? AND workspace_id = ?")
 			.bind(id, ctx.workspaceId),
 		toD1Statement(
 			ctx,
@@ -2818,7 +2837,7 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 		scope += ` AND ${visible.sql}`;
 		scopeParams.push(...visible.params);
 	}
-	const labelScope = labelFilterSql("i.labels", result.data);
+	const labelScope = labelFilterSql("i.id", ctx.workspaceId, result.data);
 	scope += labelScope.sql;
 	scopeParams.push(...labelScope.params);
 
@@ -2829,8 +2848,6 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 	// found nothing even when dozens of issues carried it. An issue whose label equals the
 	// whole query (case-insensitive) is an exact hit, so those lead the results.
 	const trimmed = query.trim();
-	// A label is at most 50 characters (schemas/issues.ts), so a longer query can't be one —
-	// skip the json_each scan, which no index backs, for prose queries.
 	const mayBeLabel = trimmed.length > 0 && trimmed.length <= MAX_LABEL_LENGTH;
 	const ftsQuery = sanitizeFtsQuery(query);
 
@@ -2843,11 +2860,11 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 				 FROM issues i
 				 LEFT JOIN projects p ON p.id = i.project_id
 				 WHERE i.workspace_id = ?
-				   AND EXISTS (SELECT 1 FROM json_each(${labelsJsonSql("i.labels")}) WHERE lower(value) = lower(?))
+				   AND i.id IN (SELECT issue_id FROM issue_labels WHERE workspace_id = ? AND lower(label) = lower(?))
 				   ${scope}
 				 ORDER BY i.created_at DESC, i.id DESC LIMIT ?`
 				)
-				.bind(ctx.workspaceId, trimmed, ...scopeParams, limit)
+				.bind(ctx.workspaceId, ctx.workspaceId, trimmed, ...scopeParams, limit)
 		);
 	}
 	if (ftsQuery) {
