@@ -11,7 +11,7 @@ against an older release may rely on fields or errors that have since changed. T
 lists those changes, newest first. The REST API (`/api/*`) is not covered here: its rows
 keep the full shape.
 
-## Unreleased
+## v0.10.2
 
 - **`release_files` takes a session name as `agentId`.** It resolves among your
   credential's active sessions, live ones first. A name that matches none, or several,
