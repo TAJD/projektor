@@ -434,6 +434,7 @@ export async function scheduled(
 	ctx.waitUntil(purgeExpiredOAuthData(env));
 	ctx.waitUntil(purgeExpiredRetentionData(env));
 	ctx.waitUntil(runFtsDedupeOnce(env));
+	ctx.waitUntil(runIssueFtsAdoptOnce(env));
 }
 
 // PROJ-816 follow-up: migration 0065 rebuilt wiki_fts keyed by wiki_pages.search_rowid, but
@@ -467,6 +468,32 @@ export async function runFtsDedupeOnce(env: Env): Promise<void> {
 		});
 	} catch (err) {
 		console.error("one-off wiki_fts dedupe failed (PROJ-816)", {
+			err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
+		});
+	}
+}
+
+const ISSUE_FTS_ADOPT_ONCE_KV_KEY = "maint:issues-fts-adopt-0077";
+
+export async function runIssueFtsAdoptOnce(env: Env): Promise<void> {
+	try {
+		if (await env.KV.get(ISSUE_FTS_ADOPT_ONCE_KV_KEY)) return;
+		const adopted = await env.DB.prepare(
+			`UPDATE OR IGNORE issues SET search_rowid = (
+			   SELECT MAX(rowid) FROM issues_fts WHERE issue_id = issues.id)
+			 WHERE search_rowid IS NULL
+			    OR NOT EXISTS (SELECT 1 FROM issues_fts WHERE rowid = issues.search_rowid)`
+		).run();
+		const deleted = await env.DB.prepare(
+			"DELETE FROM issues_fts WHERE rowid NOT IN (SELECT search_rowid FROM issues WHERE search_rowid IS NOT NULL)"
+		).run();
+		await env.KV.put(ISSUE_FTS_ADOPT_ONCE_KV_KEY, "1");
+		console.log("one-off issues_fts adopt complete (PROJ-1069)", {
+			adopted: adopted.meta.changes ?? 0,
+			deleted: deleted.meta.changes ?? 0,
+		});
+	} catch (err) {
+		console.error("one-off issues_fts adopt failed (PROJ-1069)", {
 			err: err instanceof Error ? `${err.name}: ${err.message}` : String(err),
 		});
 	}
