@@ -18,6 +18,7 @@ import {
 	mondayAtOrBefore,
 } from "../schemas/flow-metrics";
 import { effectiveProjectRole, isWorkspaceAdmin } from "./access";
+import { SESSION_TTL_SECONDS } from "./agent-identity";
 import { NotFoundError, ValidationError } from "./errors";
 import type { ServiceCtx } from "./types";
 
@@ -546,16 +547,35 @@ async function fetchWindowCounts(
 			),
 			abandonedClaims: countOf(
 				orm
-					.select({ n: count })
+					.select({ n: sql<number>`count(distinct ${schema.issueFileClaims.agentId})` })
 					.from(schema.issueFileClaims)
 					.innerJoin(schema.issues, eq(schema.issueFileClaims.issueId, schema.issues.id))
+					.leftJoin(
+						schema.agentSessions,
+						eq(schema.issueFileClaims.agentId, schema.agentSessions.id)
+					)
 					.where(
 						and(
 							eq(schema.issueFileClaims.workspaceId, ctx.workspaceId),
 							eq(schema.issues.projectId, projectId),
-							eq(schema.issueFileClaims.releaseReason, "agent_ended"),
-							gte(schema.issueFileClaims.releasedAt, since),
-							lte(schema.issueFileClaims.releasedAt, until)
+							isNotNull(schema.issueFileClaims.agentId),
+							or(
+								and(
+									eq(schema.issueFileClaims.releaseReason, "expired"),
+									gte(schema.issueFileClaims.releasedAt, since),
+									lte(schema.issueFileClaims.releasedAt, until)
+								),
+								and(
+									isNull(schema.issueFileClaims.releasedAt),
+									eq(schema.agentSessions.status, "active"),
+									lte(
+										schema.agentSessions.lastHeartbeatAt,
+										Math.floor(Date.now() / 1000) - SESSION_TTL_SECONDS
+									),
+									gte(schema.agentSessions.lastHeartbeatAt, since),
+									lte(schema.agentSessions.lastHeartbeatAt, until)
+								)
+							)
 						)
 					)
 			),

@@ -672,14 +672,8 @@ export async function listFileClaims(ctx: ServiceCtx, raw: unknown) {
 	return { items };
 }
 
-// PROJ-334: "abandoned claim" for the factory-health tile — released because the
-// agent's session ended, not because the work was released deliberately.
-//
-// PROJ-636: this is no longer the only abandonment path. A claim whose holder stopped
-// heartbeating is reclaimed as `expired` by the next claim on the same path, so a crashed
-// agent no longer deadlocks its paths. Agent-end remains the *eager* path — it frees the
-// claim immediately rather than leaving it to the next claimant — and it is the one that
-// records `agent_ended` for the health tile, which distinguishes a clean exit from a crash.
+// Every caller is a deliberate session end, so `agent_ended` is a clean exit; a crashed
+// holder's claims are reclaimed as `expired` instead (PROJ-636, PROJ-1075).
 export function buildReleaseClaimsForAgentStatement(
 	ctx: ServiceCtx,
 	agentId: string,

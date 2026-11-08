@@ -1247,4 +1247,46 @@ describe("PROJ-1009: release_files without paths, slim claim rows", () => {
 			});
 		});
 	});
+
+	describe("PROJ-1075: abandonedClaims", () => {
+		async function abandoned(): Promise<number> {
+			const now = Math.floor(Date.now() / 1000);
+			const { data, error } = await tool("get_flow_metrics", {
+				projectId,
+				since: now - 3600,
+				until: now + 60,
+			});
+			expect(error).toBeUndefined();
+			return (
+				(data?.factoryHealth as { abandonedClaims: number } | undefined)?.abandonedClaims ?? -1
+			);
+		}
+
+		it("a clean finish_work to in_review leaving claims open is not abandonment", async () => {
+			const { data } = await tool("start_work", {
+				issue: issueId,
+				name: "clean",
+				paths: ["src/a.ts", "src/b.ts"],
+			});
+			const { error } = await tool("finish_work", {
+				sessionId: data?.sessionId,
+				issue: issueId,
+				status: "in_review",
+				completionReport: { summary: "s", verification: "v" },
+			});
+			expect(error).toBeUndefined();
+
+			expect(await abandoned()).toBe(0);
+		});
+
+		it("a holder that stopped heartbeating counts once, however many paths were reclaimed", async () => {
+			const crashed = await register("crashed");
+			await claim(issueId, ["src/a.ts", "src/b.ts"], crashed);
+			await lapse(crashed);
+			const next = await register("next");
+			await claim(otherIssueId, ["src/a.ts", "src/b.ts"], next);
+
+			expect(await abandoned()).toBe(1);
+		});
+	});
 });

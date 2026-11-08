@@ -120,9 +120,9 @@ export const METRIC_DEFINITIONS: Record<MetricId, MetricDefinition> = {
 	"abandoned-claims": {
 		label: "Abandoned claims",
 		definition:
-			"How often a file claim was released because an agent's session ended, not deliberately.",
+			"How often an agent went silent while holding file claims, instead of finishing or releasing them.",
 		computation:
-			"Count of file claims released by session end (not explicit release), in the window.",
+			"Count of agent sessions, in the window, whose claims were reclaimed after they stopped heartbeating or are still held by the stale session.",
 	},
 	"gate-rejections": {
 		label: "Gate rejections",

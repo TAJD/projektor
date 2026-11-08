@@ -67,7 +67,7 @@ Fault signals for the coordination layer itself, not the work, windowed by
 | Metric | Definition |
 |---|---|
 | `leaseExpiries` | issue leases reclaimed because the holder stopped heartbeating |
-| `abandonedClaims` | file claims released because the agent's session ended rather than being released deliberately |
+| `abandonedClaims` | agent sessions that went silent while holding file claims, counted once per session: their claims were reclaimed by another agent (`expired`), or are still held by the stale session. A deliberate `finish_work`/`end_agent` is not abandonment. Before PROJ-1075 it counted every claim released by any session end, so figures from earlier releases are inflated. |
 | `gateRejections` | in_review → in_progress bounces specifically — narrower than `humanInterventions`' bounce count, which also counts review → cancelled |
 | `wipCapPressure` | claims denied for hitting the project's per-agent WIP cap |
 

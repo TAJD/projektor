@@ -846,23 +846,37 @@ describe("Factory health tiles (PROJ-334)", () => {
 	async function seedFileClaim(
 		issueId: string,
 		releaseReason: string | null,
-		releasedAt: number | null
+		releasedAt: number | null,
+		agentId: string | null = null
 	) {
 		const now = Math.floor(Date.now() / 1000);
 		await env.DB.prepare(
 			"INSERT INTO issue_file_claims (id, workspace_id, issue_id, agent_id, path, claimed_at, " +
-				"released_at, release_reason) VALUES (?, ?, ?, NULL, ?, ?, ?, ?)"
+				"released_at, release_reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
 		)
 			.bind(
 				crypto.randomUUID(),
 				workspaceId,
 				issueId,
+				agentId,
 				`src/${crypto.randomUUID()}.ts`,
 				now,
 				releasedAt,
 				releaseReason
 			)
 			.run();
+	}
+
+	async function seedSession(issueId: string, status: string, lastHeartbeatAt: number) {
+		const id = crypto.randomUUID();
+		await env.DB.prepare(
+			`INSERT INTO agent_sessions
+			   (id, workspace_id, issue_id, token_id, name, kind, status, started_at, last_heartbeat_at, ended_at)
+			 VALUES (?, ?, ?, NULL, 'seed-agent', 'agent', ?, ?, ?, NULL)`
+		)
+			.bind(id, workspaceId, issueId, status, lastHeartbeatAt, lastHeartbeatAt)
+			.run();
+		return id;
 	}
 
 	async function seedGateRejection(issueId: string, occurredAt: number) {
@@ -892,22 +906,33 @@ describe("Factory health tiles (PROJ-334)", () => {
 
 		// In window: counts.
 		await seedLease(issue.id, "expired", now - 1 * DAY);
-		await seedFileClaim(issue.id, "agent_ended", now - 1 * DAY);
 		await seedGateRejection(issue.id, now - 1 * DAY);
 		await seedWipCapDenial(projectId, issue.id, now - 1 * DAY);
+		const reclaimed = await seedSession(issue.id, "active", now - 2 * DAY);
+		await seedFileClaim(issue.id, "expired", now - 1 * DAY, reclaimed);
+		await seedFileClaim(issue.id, "expired", now - 1 * DAY, reclaimed);
+		const silent = await seedSession(issue.id, "active", now - 1 * DAY);
+		await seedFileClaim(issue.id, null, null, silent);
 
 		// Out of window: excluded.
 		await seedLease(issue.id, "expired", now - 10 * DAY);
-		await seedFileClaim(issue.id, "agent_ended", now - 10 * DAY);
 		await seedGateRejection(issue.id, now - 10 * DAY);
 		await seedWipCapDenial(projectId, issue.id, now - 10 * DAY);
+		const oldReclaim = await seedSession(issue.id, "active", now - 11 * DAY);
+		await seedFileClaim(issue.id, "expired", now - 10 * DAY, oldReclaim);
+		const longSilent = await seedSession(issue.id, "active", now - 10 * DAY);
+		await seedFileClaim(issue.id, null, null, longSilent);
 
-		// Right reason but not a fault (deliberate release / reclaim by another agent) —
-		// excluded regardless of window.
+		// Not a fault, in or out of window.
 		await seedLease(issue.id, "released", now - 1 * DAY);
 		await seedLease(issue.id, "agent_ended", now - 1 * DAY);
 		await seedFileClaim(issue.id, "released", now - 1 * DAY);
 		await seedFileClaim(issue.id, "overridden", now - 1 * DAY);
+		const finished = await seedSession(issue.id, "ended", now - 1 * DAY);
+		await seedFileClaim(issue.id, "agent_ended", now - 1 * DAY, finished);
+		const working = await seedSession(issue.id, "active", now);
+		await seedFileClaim(issue.id, null, null, working);
+		await seedFileClaim(issue.id, "expired", now - 1 * DAY);
 
 		const res = await SELF.fetch(
 			`http://localhost/api/projects/${projectId}/flow-metrics?since=${since}&until=${until}`,
@@ -918,7 +943,7 @@ describe("Factory health tiles (PROJ-334)", () => {
 
 		expect(metrics.factoryHealth).toEqual({
 			leaseExpiries: 1,
-			abandonedClaims: 1,
+			abandonedClaims: 2,
 			gateRejections: 1,
 			wipCapPressure: 1,
 		});
