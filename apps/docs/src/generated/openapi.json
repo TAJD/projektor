@@ -1341,9 +1341,10 @@
 										"type": "string"
 									},
 									"agentId": {
-										"description": "Agent session UUID whose claims to release when paths is omitted (optional)",
+										"description": "Agent session UUID, or the session name given to register_agent/start_work, whose claims to release when paths is omitted (optional)",
 										"type": "string",
-										"format": "uuid"
+										"minLength": 1,
+										"maxLength": 200
 									}
 								}
 							}

@@ -1,9 +1,15 @@
 import { drizzle, schema } from "@projektor/db";
 import { and, eq, inArray, isNull, or, type SQL, sql } from "drizzle-orm";
+import { z } from "zod";
 import { PostMessageSchema } from "../schemas/agent-messages";
 import { ClaimFilesSchema, ListFileClaimsSchema, ReleaseFilesSchema } from "../schemas/file-claims";
 import { visibleProjectPredicate } from "./access";
-import { resolveAgentSessionId, SESSION_TTL_SECONDS, touchableSession } from "./agent-identity";
+import {
+	resolveAgentSessionByName,
+	resolveAgentSessionId,
+	SESSION_TTL_SECONDS,
+	touchableSession,
+} from "./agent-identity";
 import { buildPostMessageStatements } from "./agent-messages";
 import { ConflictError, NotFoundError, ValidationError } from "./errors";
 import { resolveOptionalIssueId, resolveVisibleIssueIdParam } from "./issue-ref";
@@ -467,6 +473,9 @@ async function heldByCaller(
 ) {
 	const heldBy = schema.issueFileClaims.agentId;
 	if (agentId) {
+		if (!z.string().uuid().safeParse(agentId).success) {
+			return eq(heldBy, await resolveAgentSessionByName(ctx, agentId));
+		}
 		await assertAgentInWorkspace(orm, ctx.workspaceId, agentId);
 		return eq(heldBy, agentId);
 	}

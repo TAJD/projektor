@@ -2,7 +2,8 @@ import { env, SELF } from "cloudflare:test";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { authHeaders, seedComment, seedIssue, seedProjectFixture, toolError } from "./helpers";
 
-const SPELLINGS = ["id", "issueId", "ref", "issue", "issue_id"] as const;
+const SPELLINGS = ["id", "issueId", "ref", "issue", "issue_id", "issueRef", "issue_ref"] as const;
+const isRef = (spelling: string) => /ref/i.test(spelling);
 
 describe("PROJ-998/PROJ-1007: MCP argument aliases", () => {
 	let token: string;
@@ -94,7 +95,7 @@ describe("PROJ-998/PROJ-1007: MCP argument aliases", () => {
 	for (const { tool, canonical, extra } of tools) {
 		for (const spelling of SPELLINGS) {
 			it(`${tool}: accepts the issue as ${spelling}`, async () => {
-				const value = spelling === "ref" ? issueRef : issueId;
+				const value = isRef(spelling) ? issueRef : issueId;
 				const res = await call(tool, { ...(await extra()), [spelling]: value });
 				expect(res.err).toBeUndefined();
 			});
@@ -124,7 +125,7 @@ describe("PROJ-998/PROJ-1007: MCP argument aliases", () => {
 
 	it("register_agent: links the session to the issue under any spelling", async () => {
 		for (const spelling of SPELLINGS) {
-			const value = spelling === "ref" ? issueRef : issueId;
+			const value = isRef(spelling) ? issueRef : issueId;
 			const res = await call("register_agent", {
 				name: `reg-${spelling}`,
 				[spelling]: value,
@@ -139,7 +140,7 @@ describe("PROJ-998/PROJ-1007: MCP argument aliases", () => {
 		const other = await seedIssue(workspaceId, projectId, userId, { title: "Other" });
 		await call("claim_files", { issueId, agentId: sessionId, paths: ["src/a.ts"] });
 		for (const spelling of SPELLINGS) {
-			const value = spelling === "ref" ? `PROJ-${other.number}` : other.id;
+			const value = isRef(spelling) ? `PROJ-${other.number}` : other.id;
 			const res = await call("release_files", { paths: ["src/a.ts"], [spelling]: value });
 			expect(res.err).toBeUndefined();
 			expect(res.data.released).toBe(0);

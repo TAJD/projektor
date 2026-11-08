@@ -2,7 +2,7 @@ import type { ArgIssue } from "./validate-args";
 
 type Schema = Record<string, unknown>;
 
-const ISSUE_KEY_SPELLINGS = ["id", "issueId", "ref", "issue", "issue_id"];
+const ISSUE_KEY_SPELLINGS = ["id", "issueId", "ref", "issue", "issue_id", "issueRef", "issue_ref"];
 
 const ISSUE_KEY = new Map([
 	["get_issue", "id"],

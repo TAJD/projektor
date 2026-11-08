@@ -1043,6 +1043,59 @@ describe("PROJ-1009: release_files without paths, slim claim rows", () => {
 			expect(await held()).toEqual(["src/a.ts"]);
 		});
 
+		it("PROJ-1078: agentId accepts the session name a shared-credential agent registered with", async () => {
+			const a = await register("agent-a");
+			const b = await register("agent-b");
+			await claim(issueId, ["src/a.ts"], a);
+			await claim(issueId, ["src/b.ts"], b);
+
+			const { data, error } = await tool("release_files", { agentId: "agent-a" });
+
+			expect(error).toBeUndefined();
+			expect(outcome(data)).toEqual({ released: 1, paths: ["src/a.ts"] });
+			expect(await held()).toEqual(["src/b.ts"]);
+		});
+
+		it("PROJ-1078: a session name prefers the live session over a stale one of the same name", async () => {
+			const stale = await register("worker");
+			const live = await register("worker");
+			await claim(issueId, ["src/stale.ts"], stale);
+			await claim(issueId, ["src/live.ts"], live);
+			await lapse(stale);
+
+			const { data, error } = await tool("release_files", { agentId: "worker" });
+
+			expect(error).toBeUndefined();
+			expect(outcome(data)).toEqual({ released: 1, paths: ["src/live.ts"] });
+		});
+
+		it("PROJ-1078: a name shared by several live sessions errors naming them, releasing nothing", async () => {
+			const first = await register("twin");
+			const second = await register("twin");
+			await claim(issueId, ["src/a.ts"], first);
+
+			const { data, error } = await tool("release_files", { agentId: "twin" });
+
+			expect(data).toBeUndefined();
+			expect(error?.code).toBe("validation");
+			const message = (error?.fields?.agentId ?? []).join(" ");
+			for (const expected of [first, second, "pass the session id"]) {
+				expect(message).toContain(expected);
+			}
+			expect(await held()).toEqual(["src/a.ts"]);
+		});
+
+		it("PROJ-1078: a name only another credential uses does not resolve to its session", async () => {
+			const theirs = await register("theirs", otherToken);
+			await claim(issueId, ["src/theirs.ts"], theirs, otherToken);
+
+			const { data, error } = await tool("release_files", { agentId: "theirs" });
+
+			expect(data).toBeUndefined();
+			expect(error?.fields?.agentId?.join(" ")).toContain('no active session named "theirs"');
+			expect(await held()).toEqual(["src/theirs.ts"]);
+		});
+
 		it("no live session and no agentId errors with the agentId hint instead of releasing everything", async () => {
 			await claim(issueId, ["src/agentless.ts"]);
 
