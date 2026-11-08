@@ -96,6 +96,8 @@ export interface McpUsageRow {
 	calls: number;
 	errors: number;
 	responseBytes: number;
+	latencyMs: number;
+	errorCodes: Record<string, number>;
 }
 
 export interface Plugin {

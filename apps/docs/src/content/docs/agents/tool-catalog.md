@@ -262,6 +262,6 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `get_tool_usage` | MCP tool-call telemetry for this workspace: per tool, the calls, error results and total/average response bytes (a proxy for the tokens agents spend reading results), sorted by bytes. Counted from the start of a UTC day; defaults to the last 7 days. Use it to find the tools whose results cost agents the most. Returns available:false when the deployment has not configured reading usage back from Analytics Engine. | read-only |
+| `get_tool_usage` | MCP tool-call telemetry for this workspace: per tool, the calls, error results (with counts per error code), average server latency and total/average response bytes (a proxy for the tokens agents spend reading results), sorted by bytes. Counted from the start of a UTC day; defaults to the last 7 days. Use it to find the tools whose results cost agents the most. Returns available:false when the deployment has not configured reading usage back from Analytics Engine. | read-only |
 
 <!-- gen-mcp-catalog:end -->

@@ -184,7 +184,24 @@ describe("PROJ-886: get_tool_usage reads Analytics Engine", () => {
 	it("queries the SQL API scoped to the workspace and maps the rows", async () => {
 		const fetchMock = vi.fn(async () =>
 			Response.json({
-				data: [{ tool: "list_issues", calls: "3", errors: "1", response_bytes: "900" }],
+				data: [
+					{
+						tool: "list_issues",
+						outcome: "ok",
+						calls: "2",
+						errors: "0",
+						response_bytes: "800",
+						latency_ms: "60",
+					},
+					{
+						tool: "list_issues",
+						outcome: "conflict",
+						calls: "1",
+						errors: "1",
+						response_bytes: "100",
+						latency_ms: "30",
+					},
+				],
 			})
 		);
 		vi.stubGlobal("fetch", fetchMock);
@@ -194,7 +211,16 @@ describe("PROJ-886: get_tool_usage reads Analytics Engine", () => {
 		);
 		const rows = await query?.({ since: 100, until: 200, tool: "list_issues" });
 
-		expect(rows).toEqual([{ tool: "list_issues", calls: 3, errors: 1, responseBytes: 900 }]);
+		expect(rows).toEqual([
+			{
+				tool: "list_issues",
+				calls: 3,
+				errors: 1,
+				responseBytes: 900,
+				latencyMs: 90,
+				errorCodes: { conflict: 1 },
+			},
+		]);
 		const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
 		expect(url).toBe("https://api.cloudflare.com/client/v4/accounts/acct/analytics_engine/sql");
 		expect(init.headers).toEqual({ Authorization: "Bearer tok" });
@@ -202,6 +228,8 @@ describe("PROJ-886: get_tool_usage reads Analytics Engine", () => {
 		expect(init.body).toContain("index1 = 'ws-1'");
 		expect(init.body).toContain("blob1 = 'list_issues'");
 		expect(init.body).toContain("toDateTime(100)");
+		expect(init.body).toContain("GROUP BY tool, outcome");
+		expect(init.body).toContain("SUM(_sample_interval * double1) AS latency_ms");
 	});
 
 	it("refuses a tool filter that is not a plain identifier without querying", async () => {
@@ -236,9 +264,16 @@ describe("PROJ-886: get_tool_usage reads Analytics Engine", () => {
 describe("PROJ-886: get_tool_usage aggregation", () => {
 	const ctxWith = (mcpUsage: () => Promise<unknown>) => ({ config: { mcpUsage } }) as never;
 	const rows = [
-		{ tool: "a", calls: 2, errors: 0, responseBytes: 100 },
-		{ tool: "b", calls: 4, errors: 1, responseBytes: 900 },
-		{ tool: "c", calls: 1, errors: 0, responseBytes: 300 },
+		{ tool: "a", calls: 2, errors: 0, responseBytes: 100, latencyMs: 40, errorCodes: {} },
+		{
+			tool: "b",
+			calls: 4,
+			errors: 1,
+			responseBytes: 900,
+			latencyMs: 410,
+			errorCodes: { conflict: 1 },
+		},
+		{ tool: "c", calls: 1, errors: 0, responseBytes: 300, latencyMs: 50, errorCodes: {} },
 	];
 
 	it("sorts by bytes, totals every tool and reports what the limit omitted", async () => {
@@ -248,13 +283,15 @@ describe("PROJ-886: get_tool_usage aggregation", () => {
 		);
 		expect(out).toMatchObject({
 			available: true,
-			total: { calls: 7, errors: 1, responseBytes: 1300 },
+			total: { calls: 7, errors: 1, responseBytes: 1300, avgLatencyMs: 71 },
 			tools: [
-				{ tool: "b", avgResponseBytes: 225 },
-				{ tool: "c", avgResponseBytes: 300 },
+				{ tool: "b", avgResponseBytes: 225, avgLatencyMs: 103, errorCodes: { conflict: 1 } },
+				{ tool: "c", avgResponseBytes: 300, avgLatencyMs: 50 },
 			],
 			omittedTools: 1,
 		});
+		expect(out.available && out.tools[1]).not.toHaveProperty("errorCodes");
+		expect(out.available && out.tools[1]).not.toHaveProperty("latencyMs");
 	});
 
 	it("rejects since after until even within the same UTC day", async () => {
