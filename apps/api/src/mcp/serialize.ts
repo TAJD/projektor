@@ -224,6 +224,7 @@ export function shapeIssue(
 			ref,
 			type: issue.type_key,
 			updated: issue.updated_at,
+			labels: parseLabels(issue.labels),
 		};
 		const picked: Record<string, unknown> = {};
 		for (const f of opts.fields) picked[f] = Object.hasOwn(source, f) ? (source[f] ?? null) : null;

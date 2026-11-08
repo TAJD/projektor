@@ -112,6 +112,17 @@ describe("PROJ-891: serializer (unit)", () => {
 		});
 	});
 
+	it("fields returns labels as the same array as the full view (GitHub #422)", () => {
+		expect(shapeIssue(raw, { fields: ["ref", "labels"] })).toEqual({
+			ref: "PROJ-7",
+			labels: ["a", "b"],
+		});
+		expect(shapeIssue({ ...raw, labels: "[]" }, { fields: ["labels"] })).toEqual({ labels: [] });
+		expect(shapeIssue({ ...raw, labels: undefined }, { fields: ["labels"] })).toEqual({
+			labels: null,
+		});
+	});
+
 	it("fields accepts a comma-separated string and rejects unknown names", () => {
 		expect(splitShapeOpts({ fields: "ref, title" }).fields).toEqual(["ref", "title"]);
 		expect(() => splitShapeOpts({ fields: "ref,nope" })).toThrow();

@@ -272,7 +272,10 @@ CF_ACCOUNT_ID = "<your account id>"
 `get_tool_usage` and `GET /api/tool-usage` read the dataset back through the Analytics
 Engine SQL API. That needs an account API token with **Account Analytics: Read**, stored
 as a secret: `wrangler secret put CF_ANALYTICS_TOKEN`. Without all three settings, they
-return `{"available": false, …}`, and calls are still logged.
+return `{"available": false, …}`, and calls are still logged. Otherwise each tool row has
+`calls`, `errors`, `responseBytes`, `avgResponseBytes`, `avgLatencyMs` and, when it has errors,
+`errorCodes` (calls per error code); `total` carries `calls`, `errors`,
+`responseBytes` and `avgLatencyMs`.
 
 Each data point is indexed by workspace id. `blob1` is the tool (`blob2` is reserved for
 an operation id), `blob3` the surface,
@@ -396,6 +399,18 @@ version, no manual step. To deploy by hand instead, bump `projektor.version`,
 commit, and push.
 
 ## Operating notes
+
+- **Nightly cron:** the Worker's `scheduled` handler only runs if `wrangler.toml` has a
+  trigger. `wrangler.example.toml` ships one; keep it if you write your own config:
+
+  ```toml
+  [triggers]
+  crons = ["0 3 * * *"]   # UTC
+  ```
+
+  Each run purges wiki pages that have been in the trash for over 30 days (permanently,
+  with their attachments and history), expired OAuth data, and the retention tables
+  below, and runs the one-off search-index dedupe. Without the trigger none of this runs.
 
 - **Data retention (PROJ-869):** a daily cron (`scheduled` in `apps/api/src/index.ts`)
   prunes tables that would otherwise grow forever, in small bounded batches per run so a
