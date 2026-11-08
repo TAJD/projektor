@@ -39,21 +39,20 @@ const channelFields = {
 		}),
 };
 
-function checkProjectId(data: { scope?: string; projectId?: string }, ctx: z.RefinementCtx): void {
-	if (data.scope === "project" && data.projectId === undefined) {
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			message: 'projectId is required when scope is "project"',
-			path: ["projectId"],
-		});
-	} else if (data.projectId !== undefined && data.scope !== undefined && data.scope !== "project") {
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			message: 'projectId only applies when scope is "project" or omitted',
-			path: ["projectId"],
-		});
-	}
-}
+type Channel = { scope?: string; projectId?: string };
+
+const projectIdGiven = (data: Channel) =>
+	!(data.scope === "project" && data.projectId === undefined);
+const PROJECT_ID_REQUIRED = {
+	message: 'projectId is required when scope is "project"',
+	path: ["projectId"],
+};
+const projectIdApplies = (data: Channel) =>
+	data.projectId === undefined || data.scope === undefined || data.scope === "project";
+const PROJECT_ID_ONLY_FOR_PROJECT = {
+	message: 'projectId only applies when scope is "project" or omitted',
+	path: ["projectId"],
+};
 
 export const PostMessageSchema = z
 	.object({
@@ -65,7 +64,8 @@ export const PostMessageSchema = z
 			.meta({ description: "Agent session UUID posting the message (optional)" }),
 		body: z.string().min(1).max(5000).meta({ description: "Message body (1–5000 characters)" }),
 	})
-	.superRefine(checkProjectId);
+	.refine(projectIdGiven, PROJECT_ID_REQUIRED)
+	.refine(projectIdApplies, PROJECT_ID_ONLY_FOR_PROJECT);
 
 export const ListMessagesSchema = z
 	.object({
@@ -91,4 +91,5 @@ export const ListMessagesSchema = z
 				"Unix seconds: only messages created at or after this time (rows' createdAt is in milliseconds)",
 		}),
 	})
-	.superRefine(checkProjectId);
+	.refine(projectIdGiven, PROJECT_ID_REQUIRED)
+	.refine(projectIdApplies, PROJECT_ID_ONLY_FOR_PROJECT);

@@ -70,9 +70,8 @@ const IfVersion = z
 			"{unchanged: true, version} instead of the full result",
 	});
 
-export function toMcpTool(op: Operation): MCPTool {
-	const advertised = op.versioned ? op.input.extend({ ifVersion: IfVersion }) : op.input;
-	const { $schema: _, ...inputSchema } = z.toJSONSchema(advertised, {
+export function inputJsonSchema(schema: z.ZodType): Record<string, unknown> {
+	const { $schema: _, ...jsonSchema } = z.toJSONSchema(schema, {
 		io: "input",
 		reused: "inline",
 		override: ({ jsonSchema: s }) => {
@@ -89,6 +88,12 @@ export function toMcpTool(op: Operation): MCPTool {
 			}
 		},
 	});
+	return jsonSchema;
+}
+
+export function toMcpTool(op: Operation): MCPTool {
+	const advertised = op.versioned ? op.input.extend({ ifVersion: IfVersion }) : op.input;
+	const inputSchema = inputJsonSchema(advertised);
 	const props = inputSchema.properties as Record<string, Record<string, unknown>> | undefined;
 	for (const [key, value] of Object.entries(op.mcpDefaults ?? {})) {
 		if (props?.[key]) props[key].default = value;
