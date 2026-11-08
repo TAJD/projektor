@@ -47,20 +47,25 @@ export async function getToolUsage(ctx: ServiceCtx, raw: unknown) {
 	const rows = fetched.sort(
 		(a, b) => b.responseBytes - a.responseBytes || a.tool.localeCompare(b.tool)
 	);
-	const total = { calls: 0, errors: 0, responseBytes: 0 };
+	const total = { calls: 0, errors: 0, responseBytes: 0, latencyMs: 0 };
 	for (const r of rows) {
 		total.calls += r.calls;
 		total.errors += r.errors;
 		total.responseBytes += r.responseBytes;
+		total.latencyMs += r.latencyMs;
 	}
+	const perCall = (sum: number, calls: number) => (calls > 0 ? Math.round(sum / calls) : 0);
+	const { latencyMs: totalLatencyMs, ...totals } = total;
 	return {
 		available: true as const,
 		since,
 		until,
-		total,
-		tools: rows.slice(0, limit).map((r) => ({
+		total: { ...totals, avgLatencyMs: perCall(totalLatencyMs, total.calls) },
+		tools: rows.slice(0, limit).map(({ latencyMs, errorCodes, ...r }) => ({
 			...r,
-			avgResponseBytes: r.calls > 0 ? Math.round(r.responseBytes / r.calls) : 0,
+			avgResponseBytes: perCall(r.responseBytes, r.calls),
+			avgLatencyMs: perCall(latencyMs, r.calls),
+			...(r.errors > 0 ? { errorCodes } : {}),
 		})),
 		...(rows.length > limit ? { omittedTools: rows.length - limit } : {}),
 	};

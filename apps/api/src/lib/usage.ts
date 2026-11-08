@@ -13,12 +13,13 @@ export function mcpUsageQuery(
 	return async ({ since, until, tool }) => {
 		if (!SQL_IDENTIFIER.test(dataset) || !SQL_SAFE.test(workspaceId)) return [];
 		if (tool !== undefined && !SQL_SAFE.test(tool)) return [];
-		const sql = `SELECT blob1 AS tool, SUM(_sample_interval) AS calls,
-  SUM(_sample_interval * double4) AS errors, SUM(_sample_interval * double2) AS response_bytes
+		const sql = `SELECT blob1 AS tool, blob8 AS outcome, SUM(_sample_interval) AS calls,
+  SUM(_sample_interval * double4) AS errors, SUM(_sample_interval * double2) AS response_bytes,
+  SUM(_sample_interval * double1) AS latency_ms
 FROM ${dataset}
 WHERE index1 = '${workspaceId}' AND blob10 = 'tools/call'
   AND timestamp >= toDateTime(${Math.trunc(since)}) AND timestamp <= toDateTime(${Math.trunc(until)})${tool ? ` AND blob1 = '${tool}'` : ""}
-GROUP BY tool
+GROUP BY tool, outcome
 FORMAT JSON`;
 		const res = await fetch(
 			`https://api.cloudflare.com/client/v4/accounts/${account}/analytics_engine/sql`,
@@ -31,14 +32,30 @@ FORMAT JSON`;
 		);
 		if (!res.ok) throw new Error(`analytics engine query failed: ${res.status}`);
 		const { data } = (await res.json()) as {
-			data: Array<{ tool: string; calls: unknown; errors: unknown; response_bytes: unknown }>;
+			data: Array<{
+				tool: string;
+				outcome: string;
+				calls: unknown;
+				errors: unknown;
+				response_bytes: unknown;
+				latency_ms: unknown;
+			}>;
 		};
-		return data.map((r) => ({
-			tool: r.tool,
-			calls: Number(r.calls),
-			errors: Number(r.errors),
-			responseBytes: Number(r.response_bytes),
-		}));
+		const byTool = new Map<string, McpUsageRow>();
+		for (const r of data) {
+			let row = byTool.get(r.tool);
+			if (!row) {
+				row = { tool: r.tool, calls: 0, errors: 0, responseBytes: 0, latencyMs: 0, errorCodes: {} };
+				byTool.set(r.tool, row);
+			}
+			const errors = Number(r.errors);
+			row.calls += Number(r.calls);
+			row.errors += errors;
+			row.responseBytes += Number(r.response_bytes);
+			row.latencyMs += Number(r.latency_ms);
+			if (errors > 0) row.errorCodes[r.outcome] = (row.errorCodes[r.outcome] ?? 0) + errors;
+		}
+		return [...byTool.values()];
 	};
 }
 
