@@ -24,6 +24,7 @@ jobs:
           git diff --exit-code -- apps/docs/src/content/docs/agents/tool-catalog.md \
             apps/docs/src/content/docs/agents/workflow-spec.md \
             apps/docs/src/generated/mcp-stats.json README.md \
+            apps/docs/src/generated/openapi.json apps/docs/src/generated/search-index.json \
             apps/docs/src/content/docs/contributing/conventions.md \
             apps/docs/src/content/docs/guides/feedback-widget-integration.md \
             || { echo "::error::Generated docs are stale. Run 'pnpm gen:docs' and commit the result."; exit 1; }

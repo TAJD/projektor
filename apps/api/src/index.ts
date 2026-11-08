@@ -22,6 +22,7 @@ import {
 	oauthApi,
 	tokenEndpointRateLimited,
 } from "./oauth/provider";
+import { buildOpenApi } from "./openapi";
 import { agentMessagesRouter } from "./routes/agent-messages";
 import { agentsRouter } from "./routes/agents";
 import { authRouter } from "./routes/auth";
@@ -285,6 +286,11 @@ app.use("/api/feedback-sources/*", authMiddleware, workspaceMiddleware);
 // No workspaceMiddleware: the workflow spec is global, not workspace-scoped.
 app.use("/api/workflow/*", authMiddleware);
 app.use("/api/playbooks/*", authMiddleware);
+let openApiJson: string | undefined;
+app.get("/api/openapi.json", authMiddleware, (c) => {
+	openApiJson ??= JSON.stringify(buildOpenApi());
+	return c.body(openApiJson, 200, { "Content-Type": "application/json" });
+});
 // PROJ-633: compose is the one exception to the line above. Reading a playbook is a pure
 // function of static templates, but composing one resolves a live epic, so it needs
 // workspace context. Scoped to this single path rather than the whole prefix: applying
@@ -974,3 +980,4 @@ export default {
 
 export { RateLimiter } from "./lib/rate-limiter-do";
 export { WorkspaceHub } from "./realtime/workspace-hub";
+export { app };

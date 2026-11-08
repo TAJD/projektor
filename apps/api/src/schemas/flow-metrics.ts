@@ -37,7 +37,8 @@ export const GetFlowMetricsSchema = z
 			description: "Only issues completed/active at/before this epoch-seconds time",
 		}),
 		granularity: z.enum(["day", "week"]).default("week").meta({
-			description: "Throughput bucket granularity, 'day' or 'week' (default 'week')",
+			description:
+				"Throughput bucket granularity, 'day' or 'week' (default 'week'). The window from since to until may span at most 366 days for 'day' and 5 years for 'week', and until must be >= since",
 		}),
 	})
 	.superRefine((data, ctx) => {
