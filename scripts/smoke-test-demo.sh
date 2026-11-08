@@ -36,8 +36,15 @@ projects_body="$(sed '$d' <<<"$projects_response")"
 check "GET /api/projects returns 200 (got $projects_status)" \
 	test "$projects_status" = "200"
 
-check "GET /api/projects returns an empty list (still unseeded)" \
-	bash -c '[[ "$1" == "[]" || "$1" =~ ^\{\"projects\":\[\]  ]]' _ "$projects_body"
+for key in SHOP MOB; do
+	check "GET /api/projects lists the seeded $key project" \
+		bash -c 'grep -q "\"key\":\"$2\"" <<<"$1"' _ "$projects_body" "$key"
+done
+
+write_status="$(curl -sS -m 15 -o /dev/null -w '%{http_code}' -X POST \
+	-H 'Content-Type: application/json' -d '{"name":"smoke","key":"SMOKE"}' "$DEMO_URL/api/projects")"
+check "anonymous POST /api/projects is refused (got $write_status)" \
+	bash -c '[[ "$1" == 401 || "$1" == 403 ]]' _ "$write_status"
 
 if [ "$fail" -ne 0 ]; then
 	echo
