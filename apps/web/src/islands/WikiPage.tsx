@@ -928,7 +928,7 @@ function WikiSidebar({
 				// biome-ignore lint/suspicious/noExplicitAny: Preact's JSX types don't declare onToggle on <details>
 				onToggle={((e: any) => onToggleStale(e.currentTarget.open)) as any}
 			>
-				<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">
+				<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none py-1">
 					Needs verification
 				</summary>
 				<div class="pt-2">
@@ -1893,7 +1893,7 @@ function PageArticleMeta(
 
 			{props.showToc && (
 				<details class="mb-4 max-[900px]:block min-[901px]:hidden">
-					<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">
+					<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none py-1">
 						Contents ({props.toc.length})
 					</summary>
 					<div class="pt-2">

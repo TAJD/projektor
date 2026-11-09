@@ -8,6 +8,7 @@ import { Card } from "./ui/Card";
 import { EmptyState } from "./ui/EmptyState";
 import { Field } from "./ui/Field";
 import { Input } from "./ui/Input";
+import { Switch } from "./ui/Switch";
 
 interface Project {
 	id: string;
@@ -319,14 +320,7 @@ export default function ProjectList({ workspaceSlug }: { workspaceSlug?: string 
 	return (
 		<>
 			<div class="flex justify-between items-center mb-4">
-				<label class="flex items-center gap-1.5 text-xs text-text-muted">
-					<input
-						type="checkbox"
-						checked={showArchived}
-						onChange={(e) => setShowArchived((e.target as HTMLInputElement).checked)}
-					/>
-					Show archived
-				</label>
+				<Switch checked={showArchived} onChange={setShowArchived} label="Show archived" />
 				{isPublicViewer ? (
 					<p class="text-xs text-text-muted m-0">
 						Read-only demo — projects can't be created here.

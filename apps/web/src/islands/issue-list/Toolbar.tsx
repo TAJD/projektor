@@ -4,6 +4,7 @@ import { useState } from "preact/hooks";
 import type { Issue, SortKey, TaskStatus } from "../board-utils";
 import { Button } from "../ui/Button";
 import Select from "../ui/Select";
+import { Switch } from "../ui/Switch";
 import type { DateField } from "./FiltersPopover";
 import FiltersPopover from "./FiltersPopover";
 import SavedViewsControl from "./SavedViewsControl";
@@ -106,14 +107,7 @@ function FilterSelects({
 			)}
 
 			{epics.length > 0 && (
-				<label class="flex items-center gap-1.5 text-[0.8rem] text-text-muted whitespace-nowrap cursor-pointer select-none">
-					<input
-						type="checkbox"
-						checked={hideEpics}
-						onChange={(e) => setHideEpics((e.target as HTMLInputElement).checked)}
-					/>
-					Hide epics
-				</label>
+				<Switch checked={hideEpics} onChange={setHideEpics} label="Hide epics" />
 			)}
 		</>
 	);

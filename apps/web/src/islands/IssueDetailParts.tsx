@@ -1465,7 +1465,9 @@ export function AttachmentsSection({
 			)}
 
 			{mode === "none" && (
-				<div class="flex flex-wrap gap-x-4 gap-y-2 max-sm:flex-col max-sm:gap-2">
+				// One wrapping row on every width — stacked, three one-word actions ate half
+				// a phone screen. Each keeps a 44px tap height on phones.
+				<div class="flex flex-wrap gap-x-4 gap-y-0" data-testid="attachment-actions">
 					<button
 						type="button"
 						onClick={() => setMode("file")}
@@ -1737,6 +1739,11 @@ export function CommentsSection({
 
 	const { newComment, setNewComment, postingComment, commentError, submitComment } =
 		useNewCommentForm(issueId, workspaceSlug, fetchComments);
+	// Open straight away when a saved draft exists, so it's never hidden behind a prompt.
+	const [composing, setComposing] = useState(() => newComment.trim() !== "");
+	useEffect(() => {
+		if (newComment.trim() !== "") setComposing(true);
+	}, [newComment]);
 
 	return (
 		<section>
@@ -1772,25 +1779,53 @@ export function CommentsSection({
 						{commentError}
 					</p>
 				)}
-				{/* PROJ-1037: the markdown editor (16px text on phones, like the textarea it
-				    replaced), so a pasted link becomes a card here too. */}
-				<div class="mb-2">
-					<MarkdownEditor
-						value={newComment}
-						onChange={setNewComment}
-						minHeight="120px"
-						ariaLabel="Add a comment"
-						workspaceSlug={workspaceSlug}
-					/>
-				</div>
-				<Button
-					type="submit"
-					disabled={postingComment || !newComment.trim()}
-					variant="primary"
-					class="max-sm:w-full min-h-[44px]"
-				>
-					{postingComment ? "Posting…" : "Comment"}
-				</Button>
+				{composing ? (
+					<>
+						{/* PROJ-1037: the markdown editor (16px text on phones, like the textarea it
+						    replaced), so a pasted link becomes a card here too. */}
+						<div class="mb-2">
+							<MarkdownEditor
+								value={newComment}
+								onChange={setNewComment}
+								minHeight="120px"
+								ariaLabel="Add a comment"
+								workspaceSlug={workspaceSlug}
+								autoFocus={!newComment}
+							/>
+						</div>
+						<div class="flex gap-2 max-sm:flex-col">
+							<Button
+								type="submit"
+								disabled={postingComment || !newComment.trim()}
+								variant="primary"
+								class="max-sm:w-full min-h-[44px]"
+							>
+								{postingComment ? "Posting…" : "Comment"}
+							</Button>
+							{!newComment.trim() && (
+								<Button
+									type="button"
+									variant="outline"
+									class="max-sm:w-full min-h-[44px]"
+									onClick={() => setComposing(false)}
+								>
+									Cancel
+								</Button>
+							)}
+						</div>
+					</>
+				) : (
+					// Progressive disclosure: a one-line prompt until you choose to write. The
+					// full editor (toolbar, preview pane, CodeMirror chunk) loads on demand.
+					<button
+						type="button"
+						onClick={() => setComposing(true)}
+						class="w-full min-h-[44px] px-3 py-2 text-left text-sm text-text-muted bg-bg
+							border border-border-control rounded cursor-text hover:border-text-muted"
+					>
+						Add a comment…
+					</button>
+				)}
 			</form>
 		</section>
 	);
@@ -1887,15 +1922,21 @@ function PointsField({
 	const [editingPoints, setEditingPoints] = useState(false);
 	const [pointsValue, setPointsValue] = useState("");
 	const [savingPoints, setSavingPoints] = useState(false);
+	const [pointsError, setPointsError] = useState<string | null>(null);
 
 	function startEditPoints() {
 		setPointsValue(storyPointsValue);
+		setPointsError(null);
 		setEditingPoints(true);
 	}
 
 	async function savePoints() {
 		const parsed = parseStoryPoints(pointsValue);
-		if (pointsValue !== "" && parsed === null) return;
+		if (pointsValue.trim() !== "" && parsed === null) {
+			setPointsError("Enter a number, like 3 or 0.5");
+			return;
+		}
+		setPointsError(null);
 		setSavingPoints(true);
 		try {
 			await apiFetch(`/api/issues/${issueId}`, {
@@ -1914,23 +1955,40 @@ function PointsField({
 
 	if (editingPoints) {
 		return (
-			<span class="inline-flex items-center gap-1">
-				<input
-					type="number"
-					value={pointsValue}
-					onInput={(e) => setPointsValue((e.target as HTMLInputElement).value)}
-					onKeyDown={(e) => {
-						if (e.key === "Enter") savePoints();
-						if (e.key === "Escape") setEditingPoints(false);
-					}}
-					onBlur={savePoints}
-					disabled={savingPoints}
-					// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline editor opens
-					autoFocus
-					class="w-16 px-[0.375rem] py-[0.125rem] border border-border rounded text-[0.8rem]
-						text-center bg-bg text-text-base"
-				/>
-				<span class="text-xs text-text-muted">pts</span>
+			<span class="inline-flex flex-col gap-1">
+				<span class="inline-flex items-center gap-1">
+					<input
+						type="text"
+						inputMode="decimal"
+						spellcheck={false}
+						autoComplete="off"
+						aria-label="Story points"
+						aria-invalid={pointsError ? true : undefined}
+						aria-describedby={pointsError ? "points-error" : undefined}
+						value={pointsValue}
+						onInput={(e) => {
+							setPointsValue((e.target as HTMLInputElement).value);
+							setPointsError(null);
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") savePoints();
+							if (e.key === "Escape") setEditingPoints(false);
+						}}
+						onBlur={savePoints}
+						disabled={savingPoints}
+						// biome-ignore lint/a11y/noAutofocus: intentional focus when the inline editor opens
+						autoFocus
+						class={`w-16 px-[0.375rem] py-[0.125rem] border rounded text-[0.8rem] text-center bg-bg text-text-base ${
+							pointsError ? "border-danger-text" : "border-border"
+						}`}
+					/>
+					<span class="text-xs text-text-muted">pts</span>
+				</span>
+				{pointsError && (
+					<span id="points-error" role="alert" class="text-xs text-danger-text">
+						{pointsError}
+					</span>
+				)}
 			</span>
 		);
 	}

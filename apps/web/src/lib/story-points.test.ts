@@ -27,10 +27,14 @@ describe("parseStoryPoints", () => {
 		expect(parseStoryPoints("   ")).toBeNull();
 	});
 
-	it("returns null for a string with letters mixed in after digits", () => {
-		// parseFloat("3abc") returns 3, but "3abc" is not a clean number
-		// — the function accepts what parseFloat accepts (leading numeric prefix)
-		expect(parseStoryPoints("3abc")).toBe(3);
+	it("rejects a string with letters mixed in, rather than silently keeping the prefix", () => {
+		// The field is free text now (no type="number"), so "3abc" must not save as 3.
+		expect(parseStoryPoints("3abc")).toBeNull();
+		expect(parseStoryPoints("1e3")).toBeNull();
+	});
+
+	it("tolerates surrounding whitespace", () => {
+		expect(parseStoryPoints(" 8 ")).toBe(8);
 	});
 
 	it("returns a negative number for a negative value", () => {
@@ -45,9 +49,7 @@ describe("parseStoryPoints", () => {
 		expect(parseStoryPoints("NaN")).toBeNull();
 	});
 
-	it("returns null for 'Infinity'", () => {
-		// parseFloat('Infinity') = Infinity, which is not NaN, so it's returned
-		// This documents the current behaviour rather than guarding against it
-		expect(parseStoryPoints("Infinity")).toBe(Number.POSITIVE_INFINITY);
+	it("returns null for 'Infinity' — only plain numbers are story points", () => {
+		expect(parseStoryPoints("Infinity")).toBeNull();
 	});
 });

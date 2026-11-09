@@ -52,18 +52,21 @@
 	--light-text-strong: #030712;
 	--light-text-muted: #6b7280;
 	--light-border: #e2e8f0;
+	/* WCAG 1.4.11: edges of text fields and selects need ≥3:1 against the page;
+	   --border (≈1.2:1) is for dividers and cards only. #7c8799 is 3.4:1 on --light-surface. */
+	--light-border-control: #7c8799;
 	--light-nav-bg: oklch(99% 0.003 250);
 	--light-accent: oklch(52% 0.11 205);
 	--light-on-accent: #fff;
 	--light-elevation-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
-	--light-priority-urgent-text: #dc2626;
+	--light-priority-urgent-text: #b91c1c;
 	--light-priority-urgent-bg: rgba(220, 38, 38, 0.15);
-	--light-priority-high-text: #d97706;
+	--light-priority-high-text: #a14a04;
 	--light-priority-high-bg: rgba(217, 119, 6, 0.15);
-	--light-priority-medium-text: var(--light-accent);
+	--light-priority-medium-text: color-mix(in oklch, var(--light-accent) 80%, black);
 	--light-priority-medium-bg: color-mix(in oklab, var(--light-accent) 12%, transparent);
 	--light-priority-medium-solid: var(--light-accent);
-	--light-priority-low-text: #6b7280;
+	--light-priority-low-text: #4b5563;
 	--light-priority-low-bg: rgba(107, 114, 128, 0.12);
 	--light-code-color: #1e293b;
 	--light-code-bg: #dde3ea;
@@ -102,6 +105,8 @@
 	--dark-text-strong: #ffffff;
 	--dark-text-muted: #94a3b8;
 	--dark-border: #2a3242;
+	/* 3.4:1 on --dark-surface (see --light-border-control). */
+	--dark-border-control: #64748b;
 	--dark-nav-bg: #12161f;
 	--dark-accent: oklch(73% 0.12 205);
 	--dark-on-accent: oklch(18% 0.03 205);
@@ -167,6 +172,7 @@
 	--text-strong: var(--light-text-strong);
 	--text-muted: var(--light-text-muted);
 	--border: var(--light-border);
+	--border-control: var(--light-border-control);
 	--nav-bg: var(--light-nav-bg);
 	--accent: var(--light-accent);
 	--on-accent: var(--light-on-accent);
@@ -219,6 +225,7 @@
 	--text-strong: var(--dark-text-strong);
 	--text-muted: var(--dark-text-muted);
 	--border: var(--dark-border);
+	--border-control: var(--dark-border-control);
 	--nav-bg: var(--dark-nav-bg);
 	--accent: var(--dark-accent);
 	--on-accent: var(--dark-on-accent);
@@ -272,6 +279,7 @@
 		--text-strong: var(--dark-text-strong);
 		--text-muted: var(--dark-text-muted);
 		--border: var(--dark-border);
+		--border-control: var(--dark-border-control);
 		--nav-bg: var(--dark-nav-bg);
 		--accent: var(--dark-accent);
 		--on-accent: var(--dark-on-accent);
