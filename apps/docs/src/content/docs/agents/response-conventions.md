@@ -43,11 +43,14 @@ Unknown names are a validation error.
 
 ## Lists: `{items, next}`
 
-MCP lists return `{items: [...], next?: "..."}`. When `next` is present, pass it
-back unchanged as `cursor` to get the following page. When it is absent there are no more.
+Lists that can grow large return `{items: [...], next?: "..."}`. When `next` is present,
+pass it back unchanged as `cursor` to get the following page. When it is absent there are
+no more. The table lists how each one pages; the coordination lists (`list_active_agents`,
+`list_file_claims`, `list_issue_leases`) return `{items}` without paging.
 
-Not yet converted: `list_messages` returns `{items, nextCursor}` (pass `nextCursor` back as
-`cursor`), and `list_projects` and `list_members` return a bare array.
+Short lists with no paging (projects, members, workspaces, task types and statuses, custom
+fields, groups, playbooks, and the wiki listing tools such as `list_wiki_pages`) return a
+plain array.
 
 | Tool | Continue with |
 | --- | --- |
@@ -55,6 +58,7 @@ Not yet converted: `list_messages` returns `{items, nextCursor}` (pass `nextCurs
 | `search_wiki` | `cursor` (the next offset) |
 | `list_wiki_changes` | `cursor` (in place of `since`); `next` is absent when there were no changes |
 | `list_comments` | `cursor` (the next offset); `total` is included; `latest:N` for the newest N |
+| `list_messages` | `cursor` (a `createdAt:id` cursor); `order`, `since` and `limit` also apply |
 | `list_project_activity`, `search_issues` | `{items}` only; use `limit`/`since` |
 | `wiki_tree` | `{items}` only, never cut |
 
@@ -104,7 +108,7 @@ No stored data changes: migration 0067 only adds two nullable columns to `agent_
 (apply it before deploying the new build). REST and the web app are unchanged. MCP clients
 need these manual changes:
 
-- **Lists**: read `{items, next}` and pass `next` back as `cursor`. `{changes, nextSince}` is gone on MCP; bare arrays and `nextCursor` remain only on the exceptions listed under [Lists](#lists-items-next).
+- **Lists**: read `{items, next}` and pass `next` back as `cursor`. The paged lists no longer return bare arrays, `nextCursor` or `{changes, nextSince}` on MCP (see [Lists](#lists-items-next)).
 - **Errors**: a failed tool call is a result with `isError:true` and a JSON body `{error:{code, message, hint, …}}`, not a JSON-RPC error.
 - **Issues**: `project_id`, `workspace_id`, `type_id`, `status_id` and `created_by_id` are dropped and `labels` is an array. Use `ref`, or pass `verbose:true` for the raw row.
 - **Wiki**: `get_wiki_page` returns at most `maxChars` (default 8,000) of `content`. Do not send a windowed `content` back to `update_wiki_page`; use `patch_wiki_page`, or read with `maxChars:20000` and check `contentTruncated` is absent.

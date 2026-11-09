@@ -491,8 +491,9 @@ A client that treated every `error` as "the call failed" must also check `result
 
 ### List results and the result cap
 
-List tools return `{"items": [...], "next": "…"}`; pass `next` back as `cursor` for
-the next page (exceptions: [response conventions](/projektor/agents/response-conventions/#lists-items-next)). Long results from `list_issues`, `search_wiki`, `list_wiki_changes` and
+Paged list tools return `{"items": [...], "next": "…"}`; pass `next` back as `cursor` for
+the next page. Short unpaged lists return a plain array; see
+[response conventions](/projektor/agents/response-conventions/#lists-items-next). Long results from `list_issues`, `search_wiki`, `list_wiki_changes` and
 `list_project_activity` are cut on an item boundary and flagged `truncated:true`. Issue tools take `view=summary|full` and `fields=`. See
 [Response conventions](/projektor/agents/response-conventions/).
 

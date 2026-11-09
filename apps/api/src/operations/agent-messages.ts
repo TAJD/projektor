@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PLAIN_WRITE } from "../mcp/annotations";
-import { OMISSION_NOTE } from "../mcp/serialize";
+import { OMISSION_NOTE, toPage } from "../mcp/serialize";
 import { ListMessagesSchema, PostMessageSchema } from "../schemas/agent-messages";
 import { listMessages, postMessage } from "../services/agent-messages";
 import { defineOperation } from "./define";
@@ -49,7 +49,7 @@ export const agentMessageOperations = [
 		mcpDefaults: { order: "desc", limit: 20 },
 		summary:
 			"List coordination messages for a channel (workspace by default, an issue, or a project), " +
-			"newest first by default. Returns {items, nextCursor}; rows omit workspaceId and null keys. " +
+			"newest first by default. Returns {items, next?}; pass next back as cursor. Rows omit workspaceId and null keys. " +
 			OMISSION_NOTE,
 		input: ListMessagesSchema.safeExtend({
 			verbose: z.boolean().optional().meta({
@@ -60,7 +60,7 @@ export const agentMessageOperations = [
 		run: (ctx, input) => listMessages(ctx, input),
 		mcpResult: (result, { verbose }) => {
 			const page = result as Awaited<ReturnType<typeof listMessages>>;
-			return verbose ? page : { ...page, items: page.items.map(slimMessage) };
+			return toPage(verbose ? page.items : page.items.map(slimMessage), page.nextCursor);
 		},
 	}),
 ];

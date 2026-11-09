@@ -131,16 +131,17 @@ describe("Agent Messages API", () => {
 		};
 		expect(mcpData.items).toHaveLength(3);
 
-		// PROJ-920: MCP paging round-trip — page 1's nextCursor (a "createdAt:id" string)
+		// PROJ-920: MCP paging round-trip — page 1's next (a "createdAt:id" string)
 		// must be accepted back by the argument validator.
 		const token5 = await seedToken(workspaceId, userId);
 		const p1Res = await mcpCall("list_messages", { scope, limit: 2 }, token5, slug);
 		const p1Body = (await p1Res.json()) as { result: { content: Array<{ text: string }> } };
-		const p1 = JSON.parse(p1Body.result.content[0].text) as { nextCursor: string | null };
-		expect(typeof p1.nextCursor).toBe("string");
+		const p1 = JSON.parse(p1Body.result.content[0].text) as { next?: string };
+		expect(typeof p1.next).toBe("string");
+		expect(p1).not.toHaveProperty("nextCursor");
 		const p2Res = await mcpCall(
 			"list_messages",
-			{ scope, limit: 2, cursor: p1.nextCursor },
+			{ scope, limit: 2, cursor: p1.next },
 			token5,
 			slug
 		);
@@ -404,7 +405,7 @@ describe("Agent messages: default scope, project channels, newest-first reads (P
 	type Posted = { id: string; scope: string; createdAt: number };
 	type Page = {
 		items: Array<Record<string, unknown> & { id: string; body: string }>;
-		nextCursor: string | null;
+		next?: string;
 	};
 
 	let ws: Awaited<ReturnType<typeof seedWorkspaceRoles>>;
@@ -700,7 +701,7 @@ describe("Agent messages: default scope, project channels, newest-first reads (P
 
 			const page = await tool<Page>("list_messages", {});
 			expect(ids(page)).toEqual(Array.from({ length: 20 }, (_, i) => pad(24 - i)));
-			expect(page.data.nextCursor).not.toBeNull();
+			expect(page.data.next).toBeDefined();
 
 			const wide = await tool<Page>("list_messages", { limit: 25 });
 			expect(wide.data.items).toHaveLength(25);
@@ -753,8 +754,8 @@ describe("Agent messages: default scope, project channels, newest-first reads (P
 						...(cursor ? { cursor } : {}),
 					});
 					seen.push(...ids(page));
-					if (!page.data.nextCursor) break;
-					cursor = page.data.nextCursor;
+					if (!page.data.next) break;
+					cursor = page.data.next;
 				}
 				expect(seen).toEqual(expected);
 			}
