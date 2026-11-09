@@ -126,6 +126,9 @@ export default defineConfig({
       proxy: {
         '/api': 'http://localhost:8787',
         '/mcp': 'http://localhost:8787',
+        // The account menu reads /auth/me; without this the dev header always
+        // showed "Log in" even when the dev auth bypass had signed you in.
+        '/auth': 'http://localhost:8787',
       },
     },
   },

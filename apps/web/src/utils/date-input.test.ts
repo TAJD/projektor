@@ -32,5 +32,6 @@ describe("date-input helpers", () => {
 		const ts = dateInputToUnix("2026-09-23") as number;
 		expect(formatUnixDate(ts)).not.toMatch(/1970/);
 		expect(formatUnixDate(null)).toBe("—");
+		expect(formatUnixDate(Date.UTC(2026, 10, 3, 12) / 1000)).toBe("Nov 3, 2026");
 	});
 });

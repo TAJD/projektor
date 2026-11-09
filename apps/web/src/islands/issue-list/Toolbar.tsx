@@ -1,8 +1,10 @@
 import type { RefObject } from "preact";
 import type { Dispatch, StateUpdater } from "preact/hooks";
+import { useState } from "preact/hooks";
 import type { Issue, SortKey, TaskStatus } from "../board-utils";
 import { Button } from "../ui/Button";
 import Select from "../ui/Select";
+import { Switch } from "../ui/Switch";
 import type { DateField } from "./FiltersPopover";
 import FiltersPopover from "./FiltersPopover";
 import SavedViewsControl from "./SavedViewsControl";
@@ -44,7 +46,9 @@ function FilterSelects({
 }: FilterSelectsProps) {
 	return (
 		<>
-			{uniqueProjects.length > 0 && (
+			{/* A picker with a single choice is noise — show it only when there is
+			    something to pick, or a stale filter (e.g. from a URL) to clear. */}
+			{(uniqueProjects.length > 1 || filterProject !== "") && (
 				<Select
 					ariaLabel="Filter by project"
 					value={filterProject}
@@ -74,7 +78,7 @@ function FilterSelects({
 				/>
 			)}
 
-			{uniqueTypes.length > 0 && (
+			{(uniqueTypes.length > 1 || filterType !== "") && (
 				<Select
 					ariaLabel="Filter by type"
 					value={filterType}
@@ -103,14 +107,7 @@ function FilterSelects({
 			)}
 
 			{epics.length > 0 && (
-				<label class="flex items-center gap-1.5 text-[0.8rem] text-text-muted whitespace-nowrap cursor-pointer select-none">
-					<input
-						type="checkbox"
-						checked={hideEpics}
-						onChange={(e) => setHideEpics((e.target as HTMLInputElement).checked)}
-					/>
-					Hide epics
-				</label>
+				<Switch checked={hideEpics} onChange={setHideEpics} label="Hide epics" />
 			)}
 		</>
 	);
@@ -128,8 +125,8 @@ function SortControls({
 	setSortDir: Dispatch<StateUpdater<"asc" | "desc">>;
 }) {
 	return (
-		<span class="ml-auto max-sm:ml-0 max-sm:w-full flex gap-2 items-center flex-wrap">
-			<span class="text-sm text-text-muted">Sort:</span>
+		<span class="ml-auto max-sm:ml-0 max-sm:w-full flex gap-2 items-center max-sm:flex-nowrap">
+			<span class="text-sm text-text-muted whitespace-nowrap">Sort</span>
 			<Select
 				ariaLabel="Sort by"
 				value={sortBy}
@@ -207,13 +204,12 @@ export default function Toolbar(props: ToolbarProps) {
 		setSortDir,
 	} = props;
 
+	// Phones: search + Filters stay visible; the rest folds behind one toggle so the
+	// issues themselves are on the first screen instead of a wall of dropdowns.
+	const [showMore, setShowMore] = useState(false);
+
 	return (
-		<div
-			class={[
-				"flex gap-2 flex-wrap items-center mb-4 p-3 bg-surface rounded-lg border border-border",
-				"shadow-elevation-sm",
-			].join(" ")}
-		>
+		<div class="flex gap-2 flex-wrap items-center mb-4">
 			<SearchBox
 				searchQuery={searchQuery}
 				setSearchQuery={setSearchQuery}
@@ -236,16 +232,35 @@ export default function Toolbar(props: ToolbarProps) {
 				isSearchActive={isSearchActive}
 			/>
 
-			<FilterSelects {...props} />
+			<span class="hidden max-sm:contents">
+				<Button
+					type="button"
+					variant="outline"
+					size="sm"
+					aria-expanded={showMore}
+					aria-controls="issue-toolbar-more"
+					onClick={() => setShowMore((v) => !v)}
+				>
+					{showMore ? "Fewer options" : "More options"}
+				</Button>
+			</span>
 
-			<SavedViewsControl saved={saved} />
+			<div
+				id="issue-toolbar-more"
+				data-testid="issue-toolbar-more"
+				class={`contents ${showMore ? "max-sm:flex" : "max-sm:hidden"} max-sm:w-full max-sm:flex-col max-sm:gap-2`}
+			>
+				<FilterSelects {...props} />
 
-			<SortControls
-				sortBy={sortBy}
-				setSortBy={setSortBy}
-				sortDir={sortDir}
-				setSortDir={setSortDir}
-			/>
+				<SavedViewsControl saved={saved} />
+
+				<SortControls
+					sortBy={sortBy}
+					setSortBy={setSortBy}
+					sortDir={sortDir}
+					setSortDir={setSortDir}
+				/>
+			</div>
 		</div>
 	);
 }

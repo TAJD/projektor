@@ -77,6 +77,22 @@ describe("SprintManager", () => {
 		expect(screen.getByText("Ship it")).toBeTruthy();
 	});
 
+	it("shows no date row for an undated sprint, and a compact range once dated", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		const start = Date.UTC(2026, 10, 3, 12) / 1000;
+		const end = Date.UTC(2026, 10, 17, 12) / 1000;
+		mockFetchSprints([
+			SPRINT,
+			{ ...SPRINT, id: "s2", name: "Sprint 2", startDate: start, endDate: end },
+		]);
+		render(<SprintManager />);
+		await screen.findByText("Sprint 2");
+		expect(screen.queryByText(/Start:/)).toBeNull();
+		const rows = screen.getAllByTestId("sprint-dates");
+		expect(rows).toHaveLength(1);
+		expect(rows[0].textContent).toMatch(/Nov \d+.*→.*Nov \d+/);
+	});
+
 	it("falls back to the stored project id when no URL param is present, matching ProjectNav (PROJ-723)", async () => {
 		localStorage.setItem("projektor-last-project-id", "p1");
 		mockFetchSprints([SPRINT]);

@@ -16,7 +16,7 @@
 // renders full-width instead of shrinking to content). jsdom doesn't lay out
 // real pixel widths, so this asserts the containing classes/rules rather than
 // measured overflow.
-import { render, screen, waitFor } from "@testing-library/preact";
+import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearLinkPreviewCache } from "../utils/link-cards";
 import {
@@ -217,10 +217,28 @@ describe("CommentsSection — link cards (PROJ-1037)", () => {
 				fetchComments={async () => {}}
 			/>
 		);
+		// Progressive disclosure: a one-line prompt first; the editor appears on click.
+		expect(document.querySelector('.cm-content[aria-label="Add a comment"]')).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "Add a comment…" }));
 		expect(await screen.findByLabelText("Add a comment")).toBeTruthy();
 		await waitFor(() =>
 			expect(document.querySelector('.cm-content[aria-label="Add a comment"]')).not.toBeNull()
 		);
+	});
+
+	it("collapses back to the prompt on Cancel when nothing was typed", async () => {
+		render(
+			<CommentsSection
+				issueId="i1"
+				workspaceSlug="ws"
+				comments={[]}
+				currentUserId={null}
+				fetchComments={async () => {}}
+			/>
+		);
+		fireEvent.click(screen.getByRole("button", { name: "Add a comment…" }));
+		fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+		expect(screen.getByRole("button", { name: "Add a comment…" })).toBeTruthy();
 	});
 
 	it("renders a bare issue link in a comment as a card", async () => {
@@ -357,5 +375,22 @@ describe("RelationsSection follow-ups (PROJ-961)", () => {
 	it("shows 'Follows from' on the follow-up itself", () => {
 		renderWith("todo", [{ ...followedBy, type: "follows_from" as never }]);
 		expect(screen.getByText("Follows from")).toBeTruthy();
+	});
+});
+
+describe("AttachmentsSection — add actions layout", () => {
+	it("keeps the three add actions in one wrapping row on phones (no stacked column)", () => {
+		render(
+			<AttachmentsSection
+				issueId="i1"
+				workspaceSlug="ws"
+				attachments={[]}
+				fetchAttachments={async () => {}}
+			/>
+		);
+		const row = screen.getByTestId("attachment-actions");
+		expect(row.className).toContain("flex-wrap");
+		expect(row.className).not.toContain("max-sm:flex-col");
+		expect(row.querySelectorAll("button")).toHaveLength(3);
 	});
 });

@@ -122,7 +122,7 @@ describe("WikiPage", () => {
 		);
 		render(<WikiPage />);
 		await waitFor(() => {
-			expect(screen.getByText(/Select a page from the sidebar/i)).toBeTruthy();
+			expect(screen.getByText(/No page open/i)).toBeTruthy();
 		});
 	});
 
@@ -350,7 +350,7 @@ describe("WikiPage — path-based routing (PROJ-487)", () => {
 		mockFetchWiki(PAGE);
 		render(<WikiPage />);
 		await waitFor(() => {
-			expect(screen.getByText(/Select a page from the sidebar/i)).toBeTruthy();
+			expect(screen.getByText(/No page open/i)).toBeTruthy();
 		});
 	});
 });
@@ -1143,6 +1143,31 @@ describe("WikiPage sidebar type filter — freeform types (PROJ-514)", () => {
 		});
 	});
 
+	it("folds the type/status/tag filters behind a closed 'Filters' disclosure by default", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		const combo = await screen.findByRole("combobox", { name: "Filter wiki pages by type" });
+		const details = combo.closest("details");
+		expect(details).not.toBeNull();
+		expect(details?.open).toBe(false);
+		expect(details?.querySelector("summary")?.textContent).toContain("Filters");
+	});
+
+	it("opens the filters and shows a count once one is active", async () => {
+		mockFetchWiki(PAGE);
+		render(<WikiPage slug="my-page" />);
+		await screen.findByText("My Page");
+		fireEvent.input(await screen.findByRole("textbox", { name: "Filter wiki pages by tags" }), {
+			target: { value: "launch" },
+		});
+		const details = screen
+			.getByRole("textbox", { name: "Filter wiki pages by tags" })
+			.closest("details");
+		await waitFor(() => expect(details?.open).toBe(true));
+		expect(details?.querySelector("summary")?.textContent).toContain("1");
+	});
+
 	it("still offers the well-known types when the workspace has no other distinct types", async () => {
 		mockFetchWiki(PAGE);
 		render(<WikiPage slug="my-page" />);
@@ -1794,7 +1819,7 @@ describe("WikiPage — mobile drawer + action overflow (PROJ-664)", () => {
 				vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
 			);
 			render(<WikiPage />);
-			await screen.findByText(/Select a page from the sidebar/i);
+			await screen.findByText(/No page open/i);
 
 			const trigger = screen.getByRole("button", { name: "Pages" });
 			expect(trigger.getAttribute("aria-expanded")).toBe("false");

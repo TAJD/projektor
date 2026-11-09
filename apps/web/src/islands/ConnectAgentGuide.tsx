@@ -35,8 +35,8 @@ export default function ConnectAgentGuide({ workspaceSlug: propWorkspaceSlug }: 
 
 	return (
 		<div class="mb-6 px-5 py-4 bg-surface border border-border rounded-lg">
-			<h3 class="m-0 mb-3 text-base font-semibold text-text-base">Connect Claude Code</h3>
-			<ol class="m-0 mb-3 pl-5 text-sm text-text-base [&>li]:mb-1.5">
+			<h3 class="m-0 mb-3 text-base font-semibold text-text-base">Set up in three steps</h3>
+			<ol class="m-0 mb-3 pl-5 list-decimal text-sm text-text-base [&>li]:mb-1.5">
 				<li>In Claude, go to Settings → Connectors and click "Add custom connector."</li>
 				<li>
 					Paste this server URL{mcpUrl ? "" : " (loading…)"}, leave request headers empty, and click

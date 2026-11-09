@@ -685,7 +685,41 @@ function AgingWipScatter({
 // title is omitted for the "Where work lands" band: its single panel (CodeHeatmap) already
 // renders its own SectionHeading with the same label, so a second h2 would be a literal
 // duplicate rather than a useful band header.
-function SectionBand({ title, children }: { title?: string; children: ComponentChildren }) {
+// Progressive disclosure: only Flow — the band most people come for — is open by default.
+// The specialist bands collapse to a heading plus a plain-language line saying what's
+// inside, so a first visit isn't ~20 panels of jargon (Hick's law).
+function SectionBand({
+	title,
+	summary,
+	collapsible = false,
+	children,
+}: {
+	title?: string;
+	summary?: string;
+	collapsible?: boolean;
+	children: ComponentChildren;
+}) {
+	if (collapsible && title) {
+		return (
+			<section class="mb-6">
+				<details class="metrics-band group">
+					<summary class="cursor-pointer list-none pb-2 border-b border-border">
+						<span class="flex items-center gap-2">
+							<span
+								aria-hidden="true"
+								class="inline-block text-text-muted text-sm transition-transform group-open:rotate-90"
+							>
+								▸
+							</span>
+							<h2 class="m-0 inline text-lg font-bold text-text-base">{title}</h2>
+						</span>
+						{summary && <p class="m-0 mt-1 ml-5 text-sm text-text-muted">{summary}</p>}
+					</summary>
+					<div class="flex flex-col pt-4">{children}</div>
+				</details>
+			</section>
+		);
+	}
 	return (
 		<section class="mb-10">
 			{title && (
@@ -760,7 +794,7 @@ function FlowBand({ metrics }: { metrics: FlowMetrics }) {
 				    Review-latency breakdown instead. */}
 				<DistributionTiles
 					metricId="time-in-progress"
-					caption="Review latency has its own breakdown in Efficiency & collaboration, below"
+					caption="Review latency has its own breakdown under Efficiency & collaboration, below"
 					dist={metrics.timeInProgress}
 				/>
 			</div>
@@ -780,7 +814,11 @@ function FlowBand({ metrics }: { metrics: FlowMetrics }) {
 
 function EfficiencyBand({ metrics }: { metrics: FlowMetrics }) {
 	return (
-		<SectionBand title="Efficiency & collaboration">
+		<SectionBand
+			title="Efficiency & collaboration"
+			collapsible
+			summary="How much work agents finished on their own, and how long reviews took."
+		>
 			<DistributionTiles
 				metricId="flow-efficiency"
 				caption="Lease-held time ÷ lead time — how much of the wait, not just the work, was agent-driven"
@@ -818,7 +856,11 @@ function EfficiencyBand({ metrics }: { metrics: FlowMetrics }) {
 
 function FactoryHealthBand({ factoryHealth }: { factoryHealth: FlowMetrics["factoryHealth"] }) {
 	return (
-		<SectionBand title="Factory health">
+		<SectionBand
+			title="Factory health"
+			collapsible
+			summary="Warning signs in how agents claim, hold and hand back work."
+		>
 			<div class="mb-8">
 				<p class="m-0 mb-3 text-[0.72rem] text-text-muted">
 					Fault signals for the factory itself, for the selected window — a low background rate is
@@ -860,7 +902,11 @@ export default function MetricsDashboard({ workspaceSlug }: Props) {
 					<FlowBand metrics={metrics} />
 					<EfficiencyBand metrics={metrics} />
 
-					<SectionBand>
+					<SectionBand
+						title="Code hotspots"
+						collapsible
+						summary="Which parts of the codebase agents are working in."
+					>
 						{projectId && (
 							<CodeHeatmap
 								workspaceSlug={workspaceSlug}

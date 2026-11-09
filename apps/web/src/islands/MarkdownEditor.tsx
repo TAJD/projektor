@@ -32,6 +32,9 @@ export interface Props {
 	// Sent with link preview lookups (pasted links, preview-pane cards). Optional: without
 	// it the API resolves the workspace from the Host header, as for every other call.
 	workspaceSlug?: string;
+	// Focus the editing surface on mount — for editors revealed by an explicit click
+	// (e.g. the collapsed comment composer), so the click lands you ready to type.
+	autoFocus?: boolean;
 }
 
 // Mirrors services/files.ts's INLINE_TYPES on the API side — the set of image types the
@@ -654,6 +657,7 @@ export default function MarkdownEditor({
 	onImageFile,
 	ariaLabel = "Markdown editor",
 	workspaceSlug,
+	autoFocus = false,
 }: Props) {
 	const [mobilePreview, setMobilePreview] = useState(false);
 	const [preview, setPreview] = useState("");
@@ -676,6 +680,12 @@ export default function MarkdownEditor({
 	);
 	const { bold, italic, heading, link, codeBlock, bulletList, numberedList } =
 		useMarkdownCommands(viewRef);
+
+	// Runs after useMarkdownEditorView's mount effect (declared first), so the view exists.
+	useEffect(() => {
+		if (autoFocus) viewRef.current?.focus();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
 
 	return (
 		<div class="flex flex-col border border-border rounded overflow-hidden bg-bg normal-case font-normal">

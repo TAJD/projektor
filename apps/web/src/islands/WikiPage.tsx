@@ -13,6 +13,7 @@ import AccessPending from "./AccessPending";
 import type { ProjectLookup as ProjectOption } from "./board-utils";
 import MarkdownEditor from "./LazyMarkdownEditor";
 import { Button } from "./ui/Button";
+import { EmptyState } from "./ui/EmptyState";
 import { Popover } from "./ui/Popover";
 import Select, { type SelectOption } from "./ui/Select";
 
@@ -760,29 +761,45 @@ function WikiFilterBar({
 	filterTags: string;
 	onFilterTagsChange: (v: string) => void;
 }) {
+	// Folded by default so the page tree — what you came for — sits near the top;
+	// opens itself whenever a filter is active so a narrowed list is never a mystery.
+	const activeCount = [filterType, filterStatus, filterTags.trim()].filter(Boolean).length;
 	return (
-		<div class="mb-3 flex flex-col gap-1.5">
-			<Select
-				value={filterType}
-				options={typeOptions}
-				ariaLabel="Filter wiki pages by type"
-				onChange={onFilterTypeChange}
-			/>
-			<Select
-				value={filterStatus}
-				options={WIKI_STATUS_FILTER_OPTIONS}
-				ariaLabel="Filter wiki pages by status"
-				onChange={onFilterStatusChange}
-			/>
-			<input
-				type="text"
-				value={filterTags}
-				onInput={(e) => onFilterTagsChange((e.target as HTMLInputElement).value)}
-				placeholder="Filter by tags (comma-separated)…"
-				class="w-full px-3 py-[0.375rem] border border-border rounded text-sm bg-bg text-text-base box-border"
-				aria-label="Filter wiki pages by tags"
-			/>
-		</div>
+		<details class="wiki-filters mb-3 group" open={activeCount > 0}>
+			<summary class="cursor-pointer select-none text-[0.8rem] text-text-muted py-1 list-none flex items-center gap-1.5">
+				<span aria-hidden="true" class="inline-block transition-transform group-open:rotate-90">
+					▸
+				</span>
+				Filters
+				{activeCount > 0 && (
+					<span class="ml-1 px-1.5 rounded-full bg-accent text-on-accent text-[0.7rem] leading-[1.1rem]">
+						{activeCount}
+					</span>
+				)}
+			</summary>
+			<div class="mt-1.5 flex flex-col gap-1.5">
+				<Select
+					value={filterType}
+					options={typeOptions}
+					ariaLabel="Filter wiki pages by type"
+					onChange={onFilterTypeChange}
+				/>
+				<Select
+					value={filterStatus}
+					options={WIKI_STATUS_FILTER_OPTIONS}
+					ariaLabel="Filter wiki pages by status"
+					onChange={onFilterStatusChange}
+				/>
+				<input
+					type="text"
+					value={filterTags}
+					onInput={(e) => onFilterTagsChange((e.target as HTMLInputElement).value)}
+					placeholder="Filter by tags (comma-separated)…"
+					class="w-full px-3 py-[0.375rem] border border-border rounded text-sm bg-bg text-text-base box-border"
+					aria-label="Filter wiki pages by tags"
+				/>
+			</div>
+		</details>
 	);
 }
 
@@ -911,7 +928,7 @@ function WikiSidebar({
 				// biome-ignore lint/suspicious/noExplicitAny: Preact's JSX types don't declare onToggle on <details>
 				onToggle={((e: any) => onToggleStale(e.currentTarget.open)) as any}
 			>
-				<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">
+				<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none py-1">
 					Needs verification
 				</summary>
 				<div class="pt-2">
@@ -1876,7 +1893,7 @@ function PageArticleMeta(
 
 			{props.showToc && (
 				<details class="mb-4 max-[900px]:block min-[901px]:hidden">
-					<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none">
+					<summary class="cursor-pointer text-[0.8rem] text-text-muted select-none py-1">
 						Contents ({props.toc.length})
 					</summary>
 					<div class="pt-2">
@@ -2084,7 +2101,12 @@ function WikiMainContent(
 ) {
 	if (props.creating) return <CreatePageForm {...props.createProps} />;
 	if (!props.slug) {
-		return <p class="text-text-muted">Select a page from the sidebar or create a new one.</p>;
+		return (
+			<EmptyState
+				title="No page open"
+				description="Pick a page from the list, search for one, or start a new page with “New page”."
+			/>
+		);
 	}
 	if (props.loading) return <p aria-live="polite">Loading…</p>;
 	if (props.error) {

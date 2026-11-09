@@ -161,6 +161,20 @@ describe("MetricsDashboard", () => {
 		expect(screen.getByText("Aging WIP")).toBeTruthy();
 	});
 
+	it("opens with only Flow expanded; specialist bands are collapsed with a plain-language summary", async () => {
+		history.replaceState(null, "", "?projectId=p1");
+		mockFetchMetrics(FULL_METRICS);
+		render(<MetricsDashboard />);
+
+		for (const title of ["Efficiency & collaboration", "Code hotspots", "Factory health"]) {
+			const details = (await screen.findByRole("heading", { name: title })).closest("details");
+			expect(details, title).not.toBeNull();
+			expect(details?.open, title).toBe(false);
+			expect(details?.querySelector("summary p")?.textContent?.length, title).toBeGreaterThan(10);
+		}
+		expect(screen.getByRole("heading", { name: "Flow" }).closest("details")).toBeNull();
+	});
+
 	it("renders factory health tiles with nonzero counts", async () => {
 		history.replaceState(null, "", "?projectId=p1");
 		mockFetchMetrics(FULL_METRICS);

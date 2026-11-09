@@ -642,25 +642,31 @@ function IssueDetailView(
 					/>
 				</div>
 
-				{/* ── Sidebar ── */}
-				<SidebarPanel
-					issue={issue}
-					issueId={issueId}
-					workspaceSlug={workspaceSlug}
-					statuses={props.statuses}
-					taskTypes={props.taskTypes}
-					members={props.members}
-					updatingStatus={props.updatingStatus}
-					updatingPriority={props.updatingPriority}
-					updatingAssignee={props.updatingAssignee}
-					updatingType={props.updatingType}
-					typeChangeError={props.typeChangeError}
-					changeStatus={props.changeStatus}
-					changePriority={props.changePriority}
-					changeAssignee={props.changeAssignee}
-					changeType={props.changeType}
-					fetchIssue={props.fetchIssue}
-				/>
+				{/* ── Sidebar ── (on phones it leads: status/priority/assignee are what
+				    you came to check or change, not something to scroll past comments for) */}
+				<div
+					data-testid="issue-sidebar"
+					class="contents max-sm:block max-sm:w-full max-sm:order-first"
+				>
+					<SidebarPanel
+						issue={issue}
+						issueId={issueId}
+						workspaceSlug={workspaceSlug}
+						statuses={props.statuses}
+						taskTypes={props.taskTypes}
+						members={props.members}
+						updatingStatus={props.updatingStatus}
+						updatingPriority={props.updatingPriority}
+						updatingAssignee={props.updatingAssignee}
+						updatingType={props.updatingType}
+						typeChangeError={props.typeChangeError}
+						changeStatus={props.changeStatus}
+						changePriority={props.changePriority}
+						changeAssignee={props.changeAssignee}
+						changeType={props.changeType}
+						fetchIssue={props.fetchIssue}
+					/>
+				</div>
 			</div>
 		</article>
 	);

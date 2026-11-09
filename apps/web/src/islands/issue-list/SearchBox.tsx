@@ -20,8 +20,8 @@ export default function SearchBox({
 				onInput={(e) => setSearchQuery((e.target as HTMLInputElement).value)}
 				placeholder="Search…"
 				aria-label="Search issues"
-				class={`py-1 px-[0.625rem] border border-border rounded bg-bg text-text-base text-[0.8rem]
-					outline-hidden max-sm:w-full transition-[width] duration-200 ${isSearchActive ? "w-48" : "w-28"}`}
+				class={`py-1.5 px-3 border border-border rounded-md bg-bg text-text-base text-[0.85rem] focus:border-accent
+					outline-hidden max-sm:w-full transition-[width] duration-200 ${isSearchActive ? "w-72" : "w-56"}`}
 			/>
 			{isSearchActive && (
 				<button

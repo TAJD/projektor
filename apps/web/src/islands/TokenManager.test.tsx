@@ -7,7 +7,7 @@
 import { buildMcpAddCommandMultiline } from "@projektor/types";
 import { fireEvent, render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
-import TokenManager from "./TokenManager";
+import TokenManager, { validateExpiryDays } from "./TokenManager";
 
 const TOKEN = {
 	id: "t1",
@@ -102,5 +102,51 @@ describe("TokenManager", () => {
 				'  -- projektor "https://example.com/mcp/w1"',
 			].join("\n")
 		);
+	});
+});
+
+// GOV.UK number-input pattern: the expiry field is free text (inputmode="numeric"), so
+// validation is ours — an unparseable value must never silently mean "no expiry".
+describe("validateExpiryDays", () => {
+	it("accepts blank (no expiry) and whole days in range", () => {
+		expect(validateExpiryDays("")).toBeNull();
+		expect(validateExpiryDays(" 90 ")).toBeNull();
+		expect(validateExpiryDays("1")).toBeNull();
+		expect(validateExpiryDays("365")).toBeNull();
+	});
+
+	it("rejects non-numbers, decimals and out-of-range values with a message", () => {
+		expect(validateExpiryDays("abc")).toMatch(/whole number of days/);
+		expect(validateExpiryDays("1e3")).toMatch(/whole number of days/);
+		expect(validateExpiryDays("2.5")).toMatch(/whole number of days/);
+		expect(validateExpiryDays("0")).toMatch(/between 1 and 365/);
+		expect(validateExpiryDays("400")).toMatch(/between 1 and 365/);
+	});
+});
+
+describe("expiry field", () => {
+	it("is a text input with a numeric keypad, not type=number", async () => {
+		mockFetchTokens();
+		render(<TokenManager workspaceSlug="ws" />);
+		fireEvent.click(await screen.findByRole("button", { name: /New token/i }));
+		const field = screen.getByLabelText(/Expires in/i) as HTMLInputElement;
+		expect(field.type).toBe("text");
+		expect(field.getAttribute("inputmode")).toBe("numeric");
+	});
+
+	it("shows an error instead of creating a never-expiring token from bad input", async () => {
+		mockFetchTokens();
+		render(<TokenManager workspaceSlug="ws" />);
+		fireEvent.click(await screen.findByRole("button", { name: /New token/i }));
+		fireEvent.input(screen.getByLabelText(/^Name/), { target: { value: "ci" } });
+		fireEvent.input(screen.getByLabelText(/Expires in/i), { target: { value: "ninety" } });
+		const posts = () =>
+			(fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+				(c) => (c[1] as RequestInit | undefined)?.method === "POST"
+			);
+		fireEvent.submit(screen.getByLabelText(/Expires in/i).closest("form") as HTMLFormElement);
+		expect(await screen.findByRole("alert")).toBeTruthy();
+		expect(screen.getByRole("alert").textContent).toMatch(/whole number of days/);
+		expect(posts()).toHaveLength(0);
 	});
 });

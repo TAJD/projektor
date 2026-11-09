@@ -6,6 +6,7 @@ import {
 	type DensityPref,
 	readPrefs,
 	type SidebarPref,
+	type ThemePref,
 	writePrefs,
 } from "../utils/prefs";
 import { PUBLIC_VIEWER_EMAIL } from "../utils/public-viewer";
@@ -32,19 +33,24 @@ function initials(name: string, email: string): string {
 function PreferencesSection() {
 	const [density, setDensity] = useState<DensityPref>("comfortable");
 	const [sidebar, setSidebar] = useState<SidebarPref>("expanded");
+	const [theme, setTheme] = useState<ThemePref>("system");
 
 	useEffect(() => {
 		const prefs = readPrefs();
 		setDensity(prefs.density);
 		setSidebar(prefs.sidebar);
+		setTheme(prefs.theme);
 	}, []);
 
-	function update(patch: Partial<{ density: DensityPref; sidebar: SidebarPref }>) {
+	function update(
+		patch: Partial<{ density: DensityPref; sidebar: SidebarPref; theme: ThemePref }>
+	) {
 		const prefs = { ...readPrefs(), ...patch };
 		writePrefs(prefs);
 		applyPrefsToDocument(prefs);
 		setDensity(prefs.density);
 		setSidebar(prefs.sidebar);
+		setTheme(prefs.theme);
 		const collapseToggle = document.querySelector(".sidebar-collapse-toggle");
 		collapseToggle?.setAttribute(
 			"aria-label",
@@ -55,6 +61,25 @@ function PreferencesSection() {
 
 	return (
 		<div class="preferences-section">
+			{/* NN/g: all three theme choices visible at once, instead of only the sidebar
+			    button that cycles through states it doesn't show. */}
+			<div class="preferences-row">
+				<span>Theme</span>
+				<fieldset class="preferences-toggle-group">
+					<legend class="sr-only">Theme</legend>
+					{(["system", "light", "dark"] as const).map((t) => (
+						<button
+							key={t}
+							type="button"
+							class="preferences-toggle-btn"
+							aria-pressed={theme === t}
+							onClick={() => update({ theme: t })}
+						>
+							{t === "system" ? "System" : t === "light" ? "Light" : "Dark"}
+						</button>
+					))}
+				</fieldset>
+			</div>
 			<div class="preferences-row">
 				<span>Density</span>
 				<fieldset class="preferences-toggle-group">

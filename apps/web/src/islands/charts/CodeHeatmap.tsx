@@ -96,7 +96,7 @@ function Breadcrumb({
 			<button
 				type="button"
 				onClick={() => onNavigate("")}
-				class={`px-1.5 py-0.5 rounded hover:bg-border ${
+				class={`px-1.5 py-1 rounded hover:bg-border ${
 					segments.length === 0 ? "font-semibold text-text-base" : "text-accent"
 				}`}
 			>
@@ -111,7 +111,7 @@ function Breadcrumb({
 						<button
 							type="button"
 							onClick={() => onNavigate(path)}
-							class={`px-1.5 py-0.5 rounded hover:bg-border ${
+							class={`px-1.5 py-1 rounded hover:bg-border ${
 								isLast ? "font-semibold text-text-base" : "text-accent"
 							}`}
 						>
@@ -136,7 +136,7 @@ function ModeToggle({
 			<button
 				type="button"
 				onClick={() => onChange("claims")}
-				class={`px-1.5 py-0.5 rounded hover:bg-border ${
+				class={`px-1.5 py-1 rounded hover:bg-border ${
 					mode === "claims" ? "font-semibold text-text-base" : "text-accent"
 				}`}
 			>
@@ -145,7 +145,7 @@ function ModeToggle({
 			<button
 				type="button"
 				onClick={() => onChange("contention")}
-				class={`px-1.5 py-0.5 rounded hover:bg-border ${
+				class={`px-1.5 py-1 rounded hover:bg-border ${
 					mode === "contention" ? "font-semibold text-text-base" : "text-accent"
 				}`}
 			>

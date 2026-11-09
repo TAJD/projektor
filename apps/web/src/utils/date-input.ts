@@ -25,5 +25,10 @@ export function unixToDateInput(ts: number | null | undefined): string {
 /** unix seconds → a short locale date for display; null → "—". */
 export function formatUnixDate(ts: number | null | undefined): string {
 	if (ts === null || ts === undefined) return "—";
-	return new Date(ts * 1000).toLocaleDateString();
+	// "Nov 3, 2026" — the style the rest of the app uses, not the locale's numeric form.
+	return new Date(ts * 1000).toLocaleDateString("en-US", {
+		month: "short",
+		day: "numeric",
+		year: "numeric",
+	});
 }

@@ -1,6 +1,7 @@
 import { buildMcpAddCommandMultiline } from "@projektor/types";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { formatUnixDate } from "../utils/date-input";
 import { resolveWorkspaceSlug } from "../utils/workspace";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./ui/EmptyState";
@@ -49,7 +50,7 @@ function parseScopes(raw: string): string[] {
 
 function formatDate(ts: number | null): string {
 	if (ts === null) return "Never";
-	return new Date(ts * 1000).toLocaleDateString();
+	return formatUnixDate(ts);
 }
 
 function formatScopes(raw: string): string {
@@ -141,9 +142,18 @@ function buildCreateTokenBody(
 ): Record<string, unknown> {
 	const scopes = scope === "read" ? SCOPE_READ : SCOPE_READWRITE;
 	const body: Record<string, unknown> = { name: name.trim(), scopes };
-	const days = parseInt(expiryDays, 10);
+	const days = parseInt(expiryDays.trim(), 10);
 	if (expiryDays && days > 0) body.expiresInDays = days;
 	return body;
+}
+
+export function validateExpiryDays(expiryDays: string): string | null {
+	const v = expiryDays.trim();
+	if (v === "") return null;
+	if (!/^\d+$/.test(v)) return "Enter the expiry as a whole number of days, like 90";
+	const n = Number(v);
+	if (n < 1 || n > 365) return "Expiry must be between 1 and 365 days";
+	return null;
 }
 
 interface CreateTokenInput {
@@ -166,6 +176,13 @@ async function performCreate(
 ) {
 	const { workspaceSlug, name, scope, expiryDays } = input;
 	if (!workspaceSlug || !name.trim()) return;
+	// The field is free text (GOV.UK pattern), so validate here: an unparseable value must
+	// not silently become "no expiry".
+	const expiryError = validateExpiryDays(expiryDays);
+	if (expiryError) {
+		setters.setCreateError(expiryError);
+		return;
+	}
 	setters.setCreating(true);
 	setters.setCreateError(null);
 	try {
@@ -346,9 +363,10 @@ function CreateTokenForm({
 				<Input
 					id="tok-expiry"
 					class="sm:max-w-[240px]"
-					type="number"
-					min={1}
-					max={365}
+					type="text"
+					inputMode="numeric"
+					spellcheck={false}
+					autoComplete="off"
 					placeholder="e.g. 90 (leave blank for no expiry)"
 					value={createExpiry}
 					onInput={(e) => setCreateExpiry((e.target as HTMLInputElement).value)}
@@ -441,7 +459,7 @@ function TokenTableRow({
 	onCancelRevoke,
 	onConfirmRevoke,
 }: TokenTableRowProps) {
-	const expiresClass = `font-mono text-[0.8rem] ${
+	const expiresClass = `text-[0.8rem] ${
 		tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-danger-text" : "text-text-muted"
 	}`;
 	return (

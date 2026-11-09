@@ -4,6 +4,7 @@ import { statusDisplayName } from "../lib/status";
 import { issueUrl } from "../utils/issue-url";
 import { fetchAllIssues } from "../utils/paginate";
 import { categoryColor, type Issue } from "./board-utils";
+import { Switch } from "./ui/Switch";
 
 interface Props {
 	workspaceSlug?: string;
@@ -217,15 +218,7 @@ export default function MyIssues({ workspaceSlug }: Props) {
 	return (
 		<div>
 			<div class="flex items-center gap-3 mb-5">
-				<label class="flex items-center gap-2 text-sm text-text-muted cursor-pointer select-none">
-					<input
-						type="checkbox"
-						checked={includeDone}
-						onChange={(e) => setIncludeDone((e.target as HTMLInputElement).checked)}
-						class="accent-accent w-4 h-4"
-					/>
-					Include done
-				</label>
+				<Switch checked={includeDone} onChange={setIncludeDone} label="Include done" />
 				<span class="text-sm text-text-muted">
 					{visible.length} issue{visible.length !== 1 ? "s" : ""}
 				</span>

@@ -24,6 +24,7 @@
 	--color-text-base: var(--text);
 	--color-text-muted: var(--text-muted);
 	--color-border: var(--border);
+	--color-border-control: var(--border-control);
 	/* An opacity modifier cannot be applied to any of the tokens above: Tailwind needs a
 	   literal colour to mix against, and given a var() it silently emits the colour at full
 	   strength instead. `bg-accent/30` on the wiki search highlight hit that — under v3 it

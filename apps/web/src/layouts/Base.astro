@@ -275,10 +275,17 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
           themeBtn.setAttribute('aria-label', 'Theme: ' + LABELS[state] + ' — switch to ' + LABELS[next]);
         }
 
+        var themeObserver = null;
         function bindThemeToggle() {
           var themeBtn = document.querySelector('button.theme-toggle');
           if (!themeBtn) return;
           updateThemeIcon(themeBtn, getCurrentState());
+          // Keep the icon honest when the theme changes elsewhere (account menu).
+          if (themeObserver) themeObserver.disconnect();
+          themeObserver = new MutationObserver(function () {
+            updateThemeIcon(themeBtn, getCurrentState());
+          });
+          themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
           themeBtn.addEventListener('click', function () {
             var next = ORDER[(ORDER.indexOf(getCurrentState()) + 1) % ORDER.length];
             try {

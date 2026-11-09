@@ -457,7 +457,7 @@ describe("hide epics (server-side, PROJ-211)", () => {
 		render(<IssueList />);
 		await waitForLoaded();
 
-		fireEvent.click(await screen.findByRole("checkbox", { name: /Hide epics/i }));
+		fireEvent.click(await screen.findByRole("switch", { name: /Hide epics/i }));
 
 		await waitFor(() => expect(lastListUrl(mockFetch)).toContain("excludeTypeIds=type-epic"));
 	});
