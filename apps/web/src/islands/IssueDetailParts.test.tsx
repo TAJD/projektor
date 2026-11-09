@@ -21,7 +21,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearLinkPreviewCache } from "../utils/link-cards";
 import {
 	AttachmentsSection,
-	AttachmentsSection as AttachmentsSectionForLayout,
 	BodySection,
 	CommentsSection,
 	RelationsSection,
