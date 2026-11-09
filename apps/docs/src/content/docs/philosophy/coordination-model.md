@@ -24,16 +24,13 @@ An agent's presence in the system is an `agent_sessions` row, created by
 `register_agent` and kept alive by periodic `heartbeat_agent` calls
 (`apps/api/src/services/agents.ts`). There is no separate presence/heartbeat service:
 liveness is a plain column comparison. A session counts as live when its `status` is
-`"active"` and its `last_heartbeat_at` is newer than `ACTIVE_TTL` seconds ago — currently
-**120 seconds**, defined as `ACTIVE_TTL` in `apps/api/src/services/agents.ts`. The same
-constant is duplicated (deliberately, to avoid a circular import between the two
-services) as `SESSION_TTL_SECONDS` in `apps/api/src/services/issue-leases.ts`, with a
-comment pointing back at the original.
+`"active"` and its `last_heartbeat_at` is newer than `SESSION_TTL_SECONDS` ago — currently
+**120 seconds**, defined once in `apps/api/src/services/agent-identity.ts` and imported by
+every service that judges liveness.
 
 That one number is the liveness window for the whole coordination layer: it decides
 when `list_active_agents` stops listing a session, when a lease on that session's issue
-becomes reclaimable, and when a claiming agent is rejected as not-live in
-`assertAgentSessionLive`. There's no separate expiry sweep — liveness is computed at
+becomes reclaimable, and when a claiming agent is rejected as not-live. There's no separate expiry sweep — liveness is computed at
 read time from `lastHeartbeatAt`, so nothing can drift out of sync with a background
 job that didn't run.
 
@@ -87,7 +84,7 @@ tooling, not just an error message that disappears once returned.
 ## Stale reclaim, not deadlock
 
 A lease's liveness is derived from its holder's session, not stored independently:
-`reclaimStaleLeaseOrThrow` in `issue-leases.ts` looks at the existing lease's owning
+the claim path in `issue-leases.ts` looks at the existing lease's owning
 session and only treats it as a genuine conflict if that session is still active and
 within the heartbeat TTL. If the holder stopped heartbeating — crashed, was killed,
 lost its process — the lease is released with `release_reason: "expired"` and the new
@@ -95,19 +92,14 @@ claim proceeds in the same call. There is no separate expiry job, no manual "for
 release" step, and no permanently stuck issue: a crashed agent can never leave a lease
 that outlives it by more than the TTL.
 
-**File claims work the same way** (`reclaimStaleClaims` in `file-claims.ts`, PROJ-636). The
+**File claims work the same way** (`file-claims.ts`, PROJ-636). The
 next `claim_files` on a contested path checks the holding claim's session the way the lease
 tier checks the holding lease's: if that session stopped heartbeating, the claim is released
 with `release_reason: "expired"` and the new claim proceeds. A crashed agent frees both its
 ticket and its files.
 
-This was not always true, and the asymmetry is worth recording because it shaped the design.
-File claims originally had no expiry of any kind: they released on `release_files`, on a
-formal session end via `releaseClaimsForAgent` (`release_reason: "agent_ended"`, PROJ-334),
-or on someone else's `force`. An agent that died without ending its session — the crash case
-the lease tier already handled — held its paths indefinitely. For spawned workers, dying
-without a clean exit is the normal case rather than the exception, so the tier that was
-supposed to prevent deadlock was the one that could cause it.
+File claims originally had no expiry, so an agent that died without ending its session held
+its paths forever. For spawned workers a crash is the normal exit, so that gap mattered.
 
 Two consequences of closing it that are easy to miss:
 
@@ -121,12 +113,12 @@ Two consequences of closing it that are easy to miss:
   live agents, and counting it as one would inflate the heatmap with deaths rather than
   disagreements.
 
-One case remains outside liveness: a claim with no `agent_id` — made without a session, or
+One case sits outside liveness: a claim with no `agent_id` — made without a session, or
 orphaned because the `agent_id` foreign key is `ON DELETE SET NULL`. There is no heartbeat to
-judge those by, so they are treated as held and `force` is still the only way past them.
-Falling back on claim age would work, but it would reintroduce exactly the wall-clock TTL
-this tier is built to avoid, and it would apply that TTL only to the minority of claims that
-happen to lack a session — an inconsistency worse than the gap it closes.
+judge those by, so they fall back on claim age: after `FILE_CLAIM_TTL_SECONDS` (default 24
+hours, PROJ-928) the next claimer reclaims them; before that, `force` is the only way past.
+The TTL is long on purpose, a backstop for the minority of claims without a session rather
+than a second liveness clock.
 
 ## Conflict routing
 
@@ -134,14 +126,14 @@ A collision resolves in one of two ways, and it is worth being exact about who l
 what, because the answer is narrower than "agents negotiate".
 
 **Rejection.** When `claim_files` finds an existing active claim on a requested path and
-the caller did not pass `force`, `assertNoConflicts` in `file-claims.ts` rejects the whole
+the caller did not pass `force`, `file-claims.ts` rejects the whole
 request — all-or-nothing, so no partial claim survives — and throws a `ConflictError`
 naming the holding issue and agent. The blocked agent therefore learns exactly who to
 talk to, and can do so with `post_message`. Nothing is pushed to the holder: it is still
 working and nothing about its claim changed.
 
 **Forced override.** When the caller passes `force`, the existing claim is released as
-`overridden` and `overrideConflictingClaims` posts two messages via `postMessage`
+`overridden` and two messages are posted via `postMessage`
 (`apps/api/src/services/agent-messages.ts`, PROJ-635): one to `issue:<claiming issue>` —
 an audit record naming the displaced issue — and one to `issue:<displaced issue>`, so the
 agent that lost the path is told directly rather than discovering it when its own next
