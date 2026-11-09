@@ -4,7 +4,7 @@ description: "A point-in-time comparison of Projektor against other tools agents
 sidebar:
   order: 4
 ---
-*Snapshot as of 2026-08-12.* This page compares Projektor against other tools
+*Snapshot as of 2026-08-12; the Linear and Agent Mail (Rust) sections were re-checked on 2026-11-09.* This page compares Projektor against other tools
 in the agent-coordination space, based on a survey of their public
 documentation, READMEs, and product pages on that date. Nothing was
 installed or run, and no source was read for closed-source products —
@@ -123,8 +123,8 @@ was reserved and when," just not "which paths are contended most."
 
 ### MCP Agent Mail (Rust) — `mcp_agent_mail_rust`
 
-The Rust rewrite is the most feature-dense tool in this list: roughly 34
-tools and a 16-screen TUI, including a Reservations screen described as
+The Rust rewrite is the most feature-dense tool in this list: 45 MCP
+tools and a 16-screen TUI (README, re-checked 2026-11-09), including a Reservations screen described as
 covering "file reservation status, conflicts, and create/release actions,"
 plus Tool Metrics, Analytics, Timeline, ATC, and System Health screens, and a
 dedicated `check_file_reservation_conflicts` tool. Its live conflict
@@ -164,8 +164,9 @@ file, beads' issue-level claim model has no mechanism to see that coming.
 
 ### Linear + MCP
 
-Linear shipped native MCP agent support in April 2026, with issue-level
-assignment to agents. Product polish and ecosystem breadth here are hard to
+Linear runs a hosted MCP server, and agents can be assigned issues and
+@mentioned like teammates. Since April 2026 its own Linear Agent can also call
+other tools over MCP ([changelog](https://linear.app/changelog/2026-04-23-linear-agent-mcp-support)). Product polish and ecosystem breadth here are hard to
 match — this is a mature, widely-integrated product, not a coordination
 experiment. It's hosted only; there's no self-hosted deployment path, which
 is a deliberate product decision on Linear's part, not an oversight.
