@@ -114,6 +114,8 @@ test.describe("Link preview cards", () => {
 		const source = await createIssue(request, ctx, "E2E paste source");
 		await openIssue(page, ctx, source.id);
 
+		// The composer is a one-line prompt until clicked (progressive disclosure).
+		await page.getByRole("button", { name: "Add a comment…" }).click({ timeout: 20_000 });
 		const editor = page.locator('.cm-content[aria-label="Add a comment"]');
 		await expect(editor).toBeVisible({ timeout: 20_000 });
 		await editor.click();

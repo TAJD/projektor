@@ -94,17 +94,27 @@ test.describe("Mobile issue list layout (375×812)", () => {
 		const ctx = readCtx();
 		await openIssues(page, ctx);
 
-		const projectSelect = page.locator('[aria-label="Filter by project"]');
-		await expect(projectSelect).toBeVisible();
+		// On phones the pickers fold behind "More options" so the issues lead the page.
+		await page.getByRole("button", { name: "More options" }).click();
+		const panel = page.getByTestId("issue-toolbar-more");
+		await expect(panel).toBeVisible();
 
-		const selectBox = await projectSelect.boundingBox();
 		const viewportSize = page.viewportSize();
-		if (!selectBox || !viewportSize) throw new Error("boundingBox()/viewportSize() null");
+		if (!viewportSize) throw new Error("viewportSize() null");
 
-		// Full-width dropdowns leave only the page's horizontal padding on
-		// either side — assert the select spans the large majority of the
-		// viewport rather than shrink-wrapping to its label text.
-		expect(selectBox.width).toBeGreaterThan(viewportSize.width * 0.7);
+		// Single-choice pickers (e.g. project, when only one has issues) are hidden, so
+		// assert on whatever pickers are present — Sort is always there. Each must span
+		// most of the row rather than shrink-wrap to its label text. Sort shares its row
+		// with a "Sort" label and the direction button, hence the slightly lower floor.
+		const pickers = panel.locator(".select");
+		const count = await pickers.count();
+		expect(count).toBeGreaterThan(0);
+		for (let i = 0; i < count; i++) {
+			const box = await pickers.nth(i).boundingBox();
+			if (!box) throw new Error("boundingBox() null");
+			const isSort = (await pickers.nth(i).locator('[aria-label="Sort by"]').count()) > 0;
+			expect(box.width).toBeGreaterThan(viewportSize.width * (isSort ? 0.6 : 0.7));
+		}
 	});
 
 	test("hamburger opens the navigation drawer, and tapping a link closes it", async ({
