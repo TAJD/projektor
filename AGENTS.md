@@ -104,53 +104,18 @@ services/<domain>.ts  ─►  D1     (ALL business logic + SQL live here)
 
 ### Deliberate REST↔MCP parity exceptions
 
-These surface-only features are intentional, not drift — don't re-flag them in future
-audits:
+These are REST-only on purpose; don't re-flag them in audits. The enforced list, with a
+reason per entry, is `REST_ONLY` in `apps/api/src/test/mcp-parity.node.test.ts`.
 
-- **File attachment upload/download (`POST /api/files`, `GET /api/files/:id`)** —
-  REST-only. Binary/multipart upload and streamed download can't cross JSON-RPC.
-  Metadata operations (list, get metadata, link-create, delete) have full MCP parity
-  via `mcp/files.ts`.
-- **Link card image (`GET /api/link-preview/image`)** — REST-only, same reason: it
-  streams image bytes for an `<img>`. The preview metadata is on both surfaces
-  (`get_link_preview`).
-- **Auth (`routes/auth.ts`): login redirect, API token minting/revocation** — REST-only.
-  CF Access login is a browser redirect flow; token minting/revocation is a sensitive
-  credential operation kept off the MCP surface.
-- **Workspace-scoped API tokens (`POST/GET/DELETE /api/workspaces/:slug/tokens`)** —
-  REST-only, same rationale as auth tokens above.
-- **`GET /api/workspaces/:slug/mcp-info`** — REST-only. Bootstraps how to connect an MCP
-  client in the first place; inherently can't be an MCP tool.
-- **Cross-workspace project list (`GET /api/projects` → `listAllProjects`)** — REST-only.
-  MCP connections are bound to a single workspace (`/mcp/<workspaceId>`), so a
-  cross-workspace listing doesn't fit the MCP connection model. The single-workspace
-  equivalent is `list_projects`, on both surfaces (REST: `GET /api/workspaces/:slug/projects`),
-  with a different, plainer shape — no `open_issue_count` / `workspace_name` rollups.
-- **Public issue sharing (`POST /api/issues/:id/share`, `GET /api/share/:token`)** —
-  REST-only. Share-link creation/redemption is a browser-facing feature (the redemption
-  endpoint is intentionally unauthenticated by token).
-- **Wiki export (`GET /api/wiki/export`)** — REST-only. Returns a binary zip
-  (markdown + attachments) which can't cross JSON-RPC the same way file download
-  can't (see the file-attachment exception above); import is explicitly out of
-  scope (PROJ-497) so there's no round-trip MCP surface to keep parity with either.
-- **Public feedback submission (`POST /api/feedback/submit`)** — REST-only.
-  Anonymous end-user feedback from a third-party product, authenticated by a per-source
-  bearer token, not a session — there's no ServiceCtx user/role for an MCP tool to act as.
-  Feedback *source management* (create/list/update/rotate/revoke) and authenticated
-  *read/triage* (`list_feedback`, `update_feedback_status`, `convert_feedback_to_issue`)
-  both have full REST+MCP parity, same as every other domain; only the anonymous submit
-  endpoint itself is the exception (PROJ-668).
-- **OAuth consent (`GET/POST /oauth/authorize`, `services/oauth.ts`)** — REST-only, and
-  browser-only. The whole point of the consent screen is that a *human* decides which
-  client may act as them; an agent is the subject of a grant, never the party that
-  approves one. `middleware/auth.ts` fails the route closed for API tokens and for the
-  shared PUBLIC_READ_ONLY viewer for the same reason. `/oauth/token` is not a projektor
-  route at all — the OAuth library serves it before Hono sees the request.
-- **Connector grants (`GET/DELETE /api/workspaces/:slug/connectors`)** — REST-only, for
-  the same reason token minting is: withdrawing a credential is a sensitive operation, and
-  a connector should not be able to enumerate or revoke credentials — least of all its
-  own siblings. The list is scoped to the requesting user, not the workspace: a grant is a
-  personal credential, so unlike `pk_` tokens no admin can see or revoke someone else's.
+| REST-only | Why |
+|-----------|-----|
+| File upload/download (`POST /api/files`, `GET /api/files/:id`), link card image, wiki export zip | Binary bodies can't cross JSON-RPC. Attachment metadata, link previews and wiki pages are on MCP. |
+| Auth login, API token and workspace token minting/revocation, connector grants (`/api/workspaces/:slug/connectors`) | Credential operations stay off the surface agents use; a connector must not list or revoke credentials. |
+| OAuth consent (`/oauth/authorize`) | A human approves a grant; an agent is only ever its subject. |
+| `GET /api/workspaces/:slug/mcp-info` | Bootstraps the MCP connection itself. |
+| Cross-workspace `GET /api/projects` | An MCP connection is bound to one workspace; use `list_projects`. |
+| Public sharing (`/api/issues/:id/share`, `/api/share/:token`), public feedback submit (`/api/feedback/submit`) | Browser or anonymous end-user flows with no user/role for a tool to act as. |
+| Feedback bulk triage and summary dashboard, workspace logo upload/delete | Human UI actions (PROJ-634); single-item feedback triage is on MCP. |
 
 ### The security invariant: always scope by workspace
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked — e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
@@ -327,7 +292,7 @@ pnpm --filter @projektor/web exec playwright test --project=mobile-webkit
 
 - **pre-commit** — `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages) and `pnpm biome check --changed --no-errors-on-unmatched` (lint, changed files only).
 
-There is deliberately no `pre-push` hook — CI (`.github/workflows/ci.yml`) is the authoritative gate before merge (main is PR-protected; direct pushes are rejected), so a local pre-push copy of the same checks was pure redundant overhead. It was also a source of real bugs: under concurrent local load its test step could fail while a backgrounded `git push` still reported exit code 0, masking a rejected push. It was removed for these reasons; don't re-add one without addressing both.
+There is deliberately no `pre-push` hook: CI is the gate (main is PR-protected), and the old hook could report a successful push after its test step failed. Don't re-add one without solving that.
 
 CI runs the full **Before opening a PR** set above; the hook is only a fast subset.
 
@@ -459,5 +424,3 @@ used by the fleet protocol above) from **Project data** tools.
 **Tip:** `get_issue` accepts `ref: "PROJ-42"` (project key + number) — you don't need the UUID when you have the display key.
 
 **Load only the tools you need (PROJ-1056):** append `?domains=<slug>,…` to the MCP URL, for example `?domains=agents,issues,comments,issue-links,workflow` for an issue-working agent. It filters `tools/list` (the full list is ~93KB of definitions); slugs are shown next to each domain in the tool catalog. `get_tool_usage` reports per-tool calls and response bytes, so you can see what your agents actually spend.
-
-**`tools/list` caching:** the response carries `ttlMs`/`cacheScope` hints (SEP-2549); `cacheScope` is `"private"` because the list varies per query string (`?domains=`, PROJ-716). These are advisory only — projektor has no server-side cache backing them — so a client that caches `tools/list` must key on the full request URL (path + query), not the path alone, or it will serve one caller's filtered catalog to another.
