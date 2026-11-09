@@ -17,8 +17,8 @@ An agent's presence in the system is an `agent_sessions` row, created by
 `register_agent` (or `start_work`) and kept alive by heartbeats; any session-scoped call
 counts as one. There is no separate presence service: liveness is a plain column
 comparison. A session is live when its `status` is `"active"` and its `last_heartbeat_at`
-is newer than one session TTL (120 seconds at the time of writing; `SESSION_TTL_SECONDS`
-is the source).
+is newer than one session TTL (`SESSION_TTL_SECONDS`, a couple of minutes; see
+[Where it lives](#where-it-lives)).
 
 A session also records the credential that created it, so an agent alone on its
 credential can omit its session id; a fleet sharing one token must still pass it.
