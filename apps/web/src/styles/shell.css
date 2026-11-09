@@ -303,3 +303,27 @@ h4 {
 		font-size: 16px;
 	}
 }
+
+/* WCAG 2.4.1 skip link: off-screen until focused, then pinned top-left above everything. */
+.skip-link {
+	position: absolute;
+	left: 0.5rem;
+	top: -3rem;
+	z-index: 1000;
+	padding: 0.5rem 0.875rem;
+	border-radius: var(--radius-sm);
+	background: var(--accent);
+	color: var(--on-accent);
+	font-weight: 600;
+	text-decoration: none;
+	transition: top 0.1s;
+}
+.skip-link:focus {
+	top: 0.5rem;
+	outline: 2px solid var(--text);
+	outline-offset: 2px;
+}
+/* The skip target takes programmatic focus only; don't draw a ring around the page. */
+.app-main:focus {
+	outline: none;
+}

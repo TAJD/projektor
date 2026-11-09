@@ -133,6 +133,8 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
     </style>
   </head>
   <body>
+    <!-- WCAG 2.4.1: lets keyboard users jump past the header and sidebar (11 tab stops). -->
+    <a href="#main-content" class="skip-link">Skip to content</a>
     <OfflineBanner client:load />
     <div class="app-shell">
       <header class="app-topbar" id="app-topbar">
@@ -201,9 +203,9 @@ const navItems: Array<{ href: string; label: string; icon: NavIcon; glossaryId?:
         <div class="sidebar-version">v{appVersion}</div>
       </aside>
 
-      <div class="app-main">
+      <main class="app-main" id="main-content" tabindex="-1">
         <slot />
-      </div>
+      </main>
     </div>
     <!-- Astro's ClientRouter replaces <body> wholesale on every client-side nav (the
          sidebar is deliberately not transition:persist'ed - see PROJ-350), so the

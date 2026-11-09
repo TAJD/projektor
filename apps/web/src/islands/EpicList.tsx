@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "preact/hooks";
+import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { useCurrentProject } from "../lib/project-context";
 import { statusDisplayName } from "../lib/status";
 import { apiFetch } from "../utils/api-client";
@@ -18,6 +18,7 @@ import type { DateField } from "./issue-list/FiltersPopover";
 import FiltersPopover from "./issue-list/FiltersPopover";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
+import { useModalFocus } from "./ui/Dialog";
 import { EmptyState } from "./ui/EmptyState";
 import { Input } from "./ui/Input";
 import Select from "./ui/Select";
@@ -631,6 +632,10 @@ function CreateEpicModal({
 	projects,
 	submitCreate,
 }: CreateEpicModalProps) {
+	// Focus into the form on open, Tab trapped, Escape closes, focus back to the trigger.
+	const panelRef = useRef<HTMLDivElement>(null);
+	const close = useCallback(() => setShowCreate(false), [setShowCreate]);
+	useModalFocus(showCreate, close, panelRef);
 	if (!showCreate) return null;
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: backdrop closes on click; Escape on the dialog covers keyboard
@@ -642,8 +647,14 @@ function CreateEpicModal({
 				if (e.target === e.currentTarget) setShowCreate(false);
 			}}
 		>
-			<div class={MODAL_CLASS} role="dialog" aria-modal="true" aria-label="Create new epic">
-				<h2 class="mb-5 text-lg font-bold text-text-base">New Epic</h2>
+			<div
+				ref={panelRef}
+				class={MODAL_CLASS}
+				role="dialog"
+				aria-modal="true"
+				aria-label="Create new epic"
+			>
+				<h2 class="mb-5 text-lg font-bold text-text-base">New epic</h2>
 
 				{createError && (
 					<p role="alert" class="text-danger-text mb-3 text-sm">

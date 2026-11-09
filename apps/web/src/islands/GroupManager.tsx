@@ -62,7 +62,7 @@ const INFO =
 	"flex items-center gap-2 border border-border rounded-lg bg-bg px-4 py-3 mb-4 text-[0.82rem] text-text-base";
 const ROLE_TAG =
 	"inline-flex items-center px-2 py-[0.1rem] rounded-full text-[0.72rem] font-semibold " +
-	"bg-accent text-white uppercase tracking-wide";
+	"bg-accent text-on-accent uppercase tracking-wide";
 const CHIP =
 	"inline-flex items-center px-2 py-[0.1rem] mr-1 mb-1 rounded-full text-[0.72rem] " +
 	"bg-bg border border-border text-text-base";

@@ -12,8 +12,17 @@ export interface DialogProps {
 	children: ComponentChildren;
 }
 
-export function Dialog({ open, onClose, ariaLabel, class: extraClass, children }: DialogProps) {
-	const panelRef = useRef<HTMLDivElement>(null);
+/**
+ * Modal focus management (WCAG 2.4.3 / 2.1.2): on open, remember the trigger and move
+ * focus into the panel; trap Tab/Shift+Tab inside it; Escape calls onClose; on close,
+ * return focus to the trigger and restore page scroll. Shared by <Dialog> and modals
+ * that need their own layout (e.g. the New issue form).
+ */
+export function useModalFocus(
+	open: boolean,
+	onClose: () => void,
+	panelRef: { current: HTMLElement | null }
+) {
 	const triggerRef = useRef<Element | null>(null);
 
 	useEffect(() => {
@@ -30,6 +39,7 @@ export function Dialog({ open, onClose, ariaLabel, class: extraClass, children }
 			document.body.style.overflow = prevOverflow;
 			if (triggerRef.current instanceof HTMLElement) triggerRef.current.focus();
 		};
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [open]);
 
 	useEffect(() => {
@@ -64,7 +74,12 @@ export function Dialog({ open, onClose, ariaLabel, class: extraClass, children }
 		}
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [open, onClose]);
+	}, [open, onClose, panelRef]);
+}
+
+export function Dialog({ open, onClose, ariaLabel, class: extraClass, children }: DialogProps) {
+	const panelRef = useRef<HTMLDivElement>(null);
+	useModalFocus(open, onClose, panelRef);
 
 	if (!open) return null;
 

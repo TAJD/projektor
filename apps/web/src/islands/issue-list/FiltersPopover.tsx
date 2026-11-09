@@ -203,30 +203,17 @@ function FiltersToggleButton({
 	activeFilterCount: number;
 	onToggle: () => void;
 }) {
-	const activeStyle =
-		activeFilterCount > 0
-			? { border: "none", background: "var(--accent)", color: "var(--on-accent)", fontWeight: 600 }
-			: {
-					border: "1px solid var(--border)",
-					background: "var(--bg)",
-					color: "var(--text)",
-					fontWeight: 400,
-				};
-	const searchState = isSearchActive
-		? { cursor: "default", opacity: 0.4 }
-		: { cursor: "pointer", opacity: 1 };
-
+	// Same shape as every other toolbar button (.btn-outline btn-sm); filled with the
+	// accent when filters are active so the state is visible at a glance.
+	const active = activeFilterCount > 0;
 	return (
 		<button
 			ref={buttonRef}
 			type="button"
 			disabled={isSearchActive}
 			onClick={onToggle}
-			class="py-1 px-[0.625rem] rounded-full text-[0.8rem] transition-opacity duration-150"
-			style={{
-				...activeStyle,
-				...searchState,
-			}}
+			aria-pressed={active}
+			class={`btn btn-sm ${active ? "btn-primary" : "btn-outline"}`}
 		>
 			{activeFilterCount > 0 ? `Filters (${activeFilterCount})` : "Filters"}
 		</button>

@@ -6,8 +6,14 @@ import { safeDecodeURIComponent } from "../lib/urls";
 import { useAccessGate } from "../utils/access-gate";
 import { apiFetch, undeleteWikiPage } from "../utils/api-client";
 import { getBrandName } from "../utils/brand";
+import { formatUnixDate } from "../utils/date-input";
 import { hydrateLinkCards } from "../utils/link-cards";
-import { renderMdWithWikilinks, renderMermaidDiagrams, stripFrontmatter } from "../utils/markdown";
+import {
+	renderMdWithWikilinks,
+	renderMermaidDiagrams,
+	stripFrontmatter,
+	stripLeadingTitle,
+} from "../utils/markdown";
 import { usePublicViewer } from "../utils/public-viewer";
 import AccessPending from "./AccessPending";
 import type { ProjectLookup as ProjectOption } from "./board-utils";
@@ -485,7 +491,7 @@ function TreeNodeItem({
 		<li>
 			<button
 				type="button"
-				class={`${TREE_ITEM_BASE_CLASS} ${isActive ? "!bg-accent !text-white font-semibold" : ""}`}
+				class={`${TREE_ITEM_BASE_CLASS} ${isActive ? "!bg-accent !text-on-accent font-semibold" : ""}`}
 				style={{ paddingLeft: `${0.5 + depth * 1}rem` }}
 				onClick={() => onNavigate(node.slug)}
 				aria-current={isActive ? "page" : undefined}
@@ -1344,7 +1350,6 @@ function PageHeader({
 	onDelete: () => void;
 	isPublicViewer: boolean;
 }) {
-	const isMobile = useIsMobileViewport();
 	return (
 		<header class="wiki-page-header flex items-start justify-between gap-4 mb-1">
 			{editing ? (
@@ -1371,7 +1376,10 @@ function PageHeader({
 								Cancel
 							</Button>
 						</>
-					) : isMobile ? (
+					) : (
+						// Edit is the one everyday action; Child page, Move and the destructive
+						// Delete live behind ⋯ on every screen size, so Delete never sits a
+						// mis-click away from Edit (Nielsen #5, error prevention).
 						<>
 							<Button variant="outline" onClick={onStartEdit}>
 								Edit
@@ -1382,21 +1390,6 @@ function PageHeader({
 								onStartMove={onStartMove}
 								onDelete={onDelete}
 							/>
-						</>
-					) : (
-						<>
-							<Button variant="outline" size="sm" onClick={() => onStartCreateChild(pageId)}>
-								+ Child page
-							</Button>
-							<Button variant="outline" size="sm" onClick={onStartMove}>
-								Move
-							</Button>
-							<Button variant="outline" onClick={onStartEdit}>
-								Edit
-							</Button>
-							<Button variant="danger" onClick={onDelete}>
-								Delete
-							</Button>
 						</>
 					)}
 				</div>
@@ -1943,8 +1936,13 @@ function PageArticleMeta(
 			{props.latestRevision && (
 				<p class="text-[0.8rem] text-text-muted mt-1 mb-5">
 					Last edited by{" "}
-					<strong class="text-text-base">{props.latestRevision.author_name ?? "Unknown"}</strong> at{" "}
-					{new Date(props.latestRevision.created_at * 1000).toLocaleString()}
+					<strong class="text-text-base">{props.latestRevision.author_name ?? "Unknown"}</strong> ·{" "}
+					<time
+						dateTime={new Date(props.latestRevision.created_at * 1000).toISOString()}
+						title={new Date(props.latestRevision.created_at * 1000).toLocaleString()}
+					>
+						{formatUnixDate(props.latestRevision.created_at)}
+					</time>
 				</p>
 			)}
 
@@ -2048,9 +2046,13 @@ function PageArticle(props: PageArticleProps) {
 					onDeleteAttachment={props.onDeleteAttachment}
 				/>
 
-				<footer class="mt-8 pt-4 border-t border-border text-xs text-text-muted">
-					Last updated: {new Date(page.updated_at * 1000).toLocaleString()}
-				</footer>
+				{/* The header already says who edited it and when; only fall back to this
+				    footer when there's no revision to name. */}
+				{!props.latestRevision && (
+					<footer class="mt-8 pt-4 border-t border-border text-xs text-text-muted">
+						Last updated {formatUnixDate(page.updated_at)}
+					</footer>
+				)}
 			</article>
 
 			{props.showToc && (
@@ -2599,7 +2601,8 @@ function useWikiPageMeta(page: WikiPageData | null) {
 // waste this exists to avoid. A real change to any title or slug still re-renders.
 function useRenderedPageHtml(
 	content: string | undefined,
-	wikiPages: ReadonlyArray<{ title: string; slug: string }>
+	wikiPages: ReadonlyArray<{ title: string; slug: string }>,
+	title?: string
 ): string {
 	const titleMapKey = useMemo(
 		() =>
@@ -2615,8 +2618,11 @@ function useRenderedPageHtml(
 	// carries the matching array into the parse.
 	return useMemo(() => {
 		if (content === undefined) return "";
-		return renderMdWithWikilinks(stripFrontmatter(content), pagesRef.current);
-	}, [content, titleMapKey]);
+		return renderMdWithWikilinks(
+			stripLeadingTitle(stripFrontmatter(content), title),
+			pagesRef.current
+		);
+	}, [content, titleMapKey, title]);
 }
 
 function useTableOfContents(
@@ -3946,9 +3952,9 @@ function WikiPageShell(
 				sidebarRef={drawer.sidebarRef}
 			/>
 
-			<main class="flex-1 p-8 max-sm:p-4 min-w-0">
+			<div class="flex-1 p-8 max-sm:p-4 min-w-0">
 				<WikiMainContent {...props.mainContentProps} />
-			</main>
+			</div>
 		</div>
 	);
 }
@@ -4147,7 +4153,7 @@ function useWikiPageState(
 	const pageData = useWikiPageData(workspaceSlug, slug);
 	useLegacyQuerySlugRedirect(pageData.page?.slug, slug);
 	useWikiPageMeta(pageData.page);
-	const renderedHtml = useRenderedPageHtml(pageData.page?.content, wikiPages);
+	const renderedHtml = useRenderedPageHtml(pageData.page?.content, wikiPages, pageData.page?.title);
 	const { toc, setToc, activeHeadingId } = useTableOfContents(
 		pageData.page,
 		pageData.contentRef,

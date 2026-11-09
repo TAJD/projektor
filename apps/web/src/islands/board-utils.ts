@@ -4,6 +4,8 @@ export interface TaskStatus {
 	name: string;
 	category: string;
 	color: string | null;
+	/** 1 for the status a new issue gets when none is picked (from GET /api/task-statuses). */
+	is_default?: number;
 }
 
 export interface CustomFieldValue {
