@@ -100,7 +100,7 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 // headers) and legacy-to-legacy is a fully supported combination. Adopting
 // the "modern" per-request-metadata era is real protocol surface, not a
 // bump — tracked separately, not attempted here. See PROJ-452 and
-// docs/superpowers/specs/2026-07-29-mcp-2026-07-28-update-plan.md.
+// the "Design records archive (July 2026)" wiki page (PROJ project).
 router.post("/:workspaceId", async (c) => {
 	const workspace = c.get("workspace") as { id: string };
 	// PROJ-877: malformed JSON is a JSON-RPC parse error (-32700), and a body that
