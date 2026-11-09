@@ -1813,6 +1813,7 @@ function StatusField({
 				ariaLabel="Change status"
 				value={issue.status_id ?? ""}
 				disabled={updatingStatus}
+				compact
 				onChange={(v) => changeStatus(v)}
 				options={statuses.map((s) => ({ value: s.id, label: s.name }))}
 				buttonStyle={{ color: categoryColor(issue.status_category), fontWeight: 500 }}
@@ -1849,6 +1850,7 @@ function TypeField({
 					ariaLabel="Change type"
 					value={issue.type_id ?? ""}
 					disabled={updatingType}
+					compact
 					onChange={(v) => changeType(v)}
 					options={[
 						{ value: "", label: "No type" },
@@ -2014,6 +2016,7 @@ export function SidebarPanel({
 						ariaLabel="Change priority"
 						value={issue.priority}
 						disabled={updatingPriority}
+						compact
 						capitalize
 						onChange={(v) => changePriority(v)}
 						options={PRIORITY_OPTIONS}
@@ -2032,6 +2035,7 @@ export function SidebarPanel({
 							ariaLabel="Change assignee"
 							value={issue.assignee_id ?? ""}
 							disabled={updatingAssignee}
+							compact
 							onChange={changeAssignee}
 							options={[
 								{ value: "", label: "Unassigned" },

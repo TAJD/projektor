@@ -148,17 +148,16 @@ function MobileCards({ issues, updatingPriorityId, changePriority }: RowsProps) 
 				<div key={issue.id} class="py-3 px-4 border border-border rounded-md bg-surface">
 					<a
 						href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
-						class="inline-block font-mono text-[0.8rem] text-text-muted no-underline hover:underline focus:underline mb-1"
+						class="block no-underline mb-2 group"
 					>
-						{formatIssueRef(issue.project_key, issue.number)}
+						<span class="block font-mono text-[0.75rem] text-text-muted mb-0.5">
+							{formatIssueRef(issue.project_key, issue.number)}
+						</span>
+						<span class="block text-[0.95rem] leading-snug text-text-base font-medium group-hover:underline group-focus:underline">
+							{issue.title}
+						</span>
 					</a>
-					<a
-						href={issueUrl(issue.project_key, issue.number, issue.title, issue.id)}
-						class="no-underline"
-					>
-						<div class="text-[0.9rem] text-text-base font-medium mb-2">{issue.title}</div>
-					</a>
-					<div class="flex gap-[0.375rem] flex-wrap">
+					<div class="flex gap-2 flex-wrap items-center">
 						<PrioritySelect
 							issue={issue}
 							busy={updatingPriorityId === issue.id}

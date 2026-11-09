@@ -60,7 +60,7 @@ const KEY_BADGE_CLASS =
 const TEXTAREA_CLASS =
 	"w-full px-3 py-2 border border-border rounded text-sm bg-bg text-text-base font-[inherit] leading-[1.5] resize-y";
 const DESC_VIEW_CLASS =
-	"cursor-pointer px-2 py-[0.375rem] rounded border border-transparent " +
+	"cursor-pointer -mx-2 px-2 py-[0.375rem] rounded border border-transparent " +
 	"transition-[border-color,background] duration-100 hover:border-border hover:bg-surface";
 const SECTION_HEADING_CLASS =
 	"text-xs font-semibold text-text-muted m-0 mb-3 uppercase tracking-[0.05em]";
@@ -257,11 +257,11 @@ function DescriptionView({
 }) {
 	if (!onStartEdit) {
 		return project.description ? (
-			<p class="m-0 text-text-base text-[0.9375rem] leading-[1.6] px-2 py-[0.375rem]">
+			<p class="m-0 text-text-base text-[0.9375rem] leading-[1.6] py-[0.375rem]">
 				{project.description}
 			</p>
 		) : (
-			<p class="m-0 text-text-muted text-sm italic px-2 py-[0.375rem]">No description.</p>
+			<p class="m-0 text-text-muted text-sm italic py-[0.375rem]">No description.</p>
 		);
 	}
 	return (
@@ -284,6 +284,16 @@ function DescriptionView({
 			)}
 		</div>
 	);
+}
+
+/** "Jan 15, 2026" — the same style the issue detail page uses (issue-detail-helpers'
+ * formatDate), done inline so this island doesn't pull that module into its chunk. */
+function shortDate(unixSeconds: number): string {
+	return new Date(unixSeconds * 1000).toLocaleDateString("en-US", {
+		month: "short",
+		day: "numeric",
+		year: "numeric",
+	});
 }
 
 function issueRef(issue: RecentIssue) {
@@ -315,9 +325,7 @@ function RecentIssuesSection({ issues }: { issues: RecentIssue[] }) {
 								<a href={`/issues/view?id=${issue.id}`} class={ISSUE_LINK_CLASS}>
 									{issue.title}
 								</a>
-								<span class="text-xs text-text-muted shrink-0">
-									{new Date(issue.updated_at * 1000).toLocaleDateString()}
-								</span>
+								<span class="text-xs text-text-muted shrink-0">{shortDate(issue.updated_at)}</span>
 							</div>
 						);
 					})}
@@ -346,9 +354,7 @@ function RecentWikiSection({ pages }: { pages: RecentWikiPage[] }) {
 								>
 									{page.title}
 								</a>
-								<span class="text-xs text-text-muted shrink-0">
-									{new Date(page.updated_at * 1000).toLocaleDateString()}
-								</span>
+								<span class="text-xs text-text-muted shrink-0">{shortDate(page.updated_at)}</span>
 							</div>
 						</div>
 					))}

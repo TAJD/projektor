@@ -13,6 +13,13 @@ describe("IssueDetail — mobile main-column width", () => {
 		const source = readFileSync(join(__dirname, "IssueDetail.tsx"), "utf-8");
 		expect(source).toMatch(/class="flex-1 min-w-0 max-sm:w-full"/);
 	});
+
+	// Status/priority/assignee are what you open an issue on a phone to check or change;
+	// they must lead the stacked column, not sit below the comment composer.
+	it("moves the properties sidebar above the main column on mobile", () => {
+		const source = readFileSync(join(__dirname, "IssueDetail.tsx"), "utf-8");
+		expect(source).toMatch(/data-testid="issue-sidebar"\s+class="[^"]*max-sm:order-first[^"]*"/);
+	});
 });
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────

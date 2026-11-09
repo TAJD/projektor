@@ -145,6 +145,14 @@
 		width: 100%;
 		justify-content: space-between;
 	}
+	/* Inline pickers (card chips, properties panel) keep their natural width. */
+	.select--compact {
+		width: auto;
+	}
+	.select--compact .select-button {
+		width: auto;
+		justify-content: flex-start;
+	}
 }
 
 /* CD-294: phone-sized Select menu. A fixed menu anchored under its trigger
@@ -529,4 +537,28 @@
 .link-paste-popover button:hover,
 .link-paste-popover button[aria-pressed="true"] {
 	background: var(--border);
+}
+
+/* uPlot's stock legend (multi-series charts, e.g. cumulative flow) is bold, large
+   and leads with an x-axis "Value: --" cell. Quiet it to match the rest of the UI.
+   Prefixed with `.uplot` so it wins over uPlot's own stylesheet, which loads lazily
+   with the chart chunk (after this file). */
+.uplot .u-legend {
+	font-size: 0.75rem;
+	color: var(--text-muted);
+	margin-top: 0.25rem;
+}
+.uplot .u-legend th {
+	font-weight: 500;
+}
+.uplot .u-legend .u-series:first-child {
+	display: none;
+}
+.uplot .u-legend .u-series > * {
+	padding: 2px 4px;
+}
+.uplot .u-legend .u-marker {
+	border-radius: 2px;
+	width: 0.75em;
+	height: 0.75em;
 }

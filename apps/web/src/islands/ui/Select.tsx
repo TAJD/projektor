@@ -330,6 +330,12 @@ interface Props {
 	 * yet). Falls back to the raw `value` when omitted, unchanged from prior behavior.
 	 */
 	placeholder?: string;
+	/**
+	 * Keep the trigger shrink-wrapped to its label on phones. By default selects go
+	 * full-width below 640px (tidy stacked toolbars); inline pickers that sit beside
+	 * other content — a card's priority chip, the issue properties panel — opt out.
+	 */
+	compact?: boolean;
 }
 
 /**
@@ -349,6 +355,7 @@ export default function Select({
 	capitalize = false,
 	buttonClass,
 	placeholder,
+	compact = false,
 }: Props) {
 	const [open, setOpen] = useState(false);
 	const [highlight, setHighlight] = useState(0);
@@ -419,7 +426,7 @@ export default function Select({
 	const label = selected?.label ?? (value || placeholder || "");
 
 	return (
-		<div class="select" ref={rootRef}>
+		<div class={compact ? "select select--compact" : "select"} ref={rootRef}>
 			<button
 				ref={buttonRef}
 				type="button"

@@ -122,6 +122,13 @@ describe("ProjectLanding", () => {
 		expect(await screen.findByText("Fix the bug")).toBeTruthy();
 	});
 
+	it("shows recent-issue dates in the app's 'Mon D, YYYY' style, not the locale's numeric one", async () => {
+		history.replaceState(null, "", "?id=p1");
+		mockFetchProject([{ ...ISSUE, updated_at: Date.UTC(2026, 0, 15, 12) / 1000 }]);
+		render(<ProjectLanding />);
+		expect(await screen.findByText("Jan 15, 2026")).toBeTruthy();
+	});
+
 	it("shows 'No issues yet.' when the project has no issues", async () => {
 		history.replaceState(null, "", "?id=p1");
 		mockFetchProject([]);

@@ -43,6 +43,17 @@ function rectAt(top: number, height = 24): DOMRect {
 }
 
 describe("Select", () => {
+	it("is full-width-on-phones by default; `compact` opts out (stays chip-sized)", () => {
+		const { container, rerender } = render(
+			<Select value="open" options={OPTIONS} onChange={() => {}} ariaLabel="Status" />
+		);
+		expect(container.querySelector(".select")?.classList.contains("select--compact")).toBe(false);
+		rerender(
+			<Select value="open" options={OPTIONS} onChange={() => {}} ariaLabel="Status" compact />
+		);
+		expect(container.querySelector(".select")?.classList.contains("select--compact")).toBe(true);
+	});
+
 	it("renders the placeholder (raw value) when no option matches", () => {
 		render(<Select value="" options={OPTIONS} onChange={() => {}} ariaLabel="Status" />);
 		// No option has value "", so the trigger falls back to the raw value ("").

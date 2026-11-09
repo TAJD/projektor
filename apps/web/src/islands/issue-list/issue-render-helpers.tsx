@@ -59,6 +59,7 @@ export function PrioritySelect({
 			ariaLabel={`Change priority for issue ${ref}`}
 			value={issue.priority}
 			disabled={busy}
+			compact
 			capitalize
 			onChange={onChange}
 			options={PRIORITY_OPTIONS}
@@ -89,6 +90,7 @@ export function StatusSelect({
 			ariaLabel={`Change status for issue ${formatIssueRef(issue.project_key, issue.number)}`}
 			value={issue.status_id ?? ""}
 			disabled={busy}
+			compact
 			onChange={onChange}
 			options={statuses.map((s) => ({ value: s.id, label: s.name }))}
 			buttonStyle={{
