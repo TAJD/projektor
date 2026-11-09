@@ -36,21 +36,22 @@ tool-vendor guidance:
 ## What the agent-engineering literature says
 
 - **Boundaries, not vibes.** Anthropic's engineering posts —
-  [Building effective agents](https://resources.anthropic.com/building-effective-ai-agents),
+  [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents),
   [the multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system),
   [context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) —
   converge on giving each agent explicit objectives, output formats, and task
   boundaries. Their early orchestrators spawned fifty subagents for simple
   queries; the fix was structural, not exhortative.
-- **The ticket is the dispatch unit.** Practitioner writing (for example
-  [this argument for trackers as agent infrastructure](https://www.mindstudio.ai/blog/issue-trackers-ai-agent-infrastructure-jira-linear))
-  suggests API-first trackers win because the ticket carries the spec, the audit
-  trail, and the coordination state.
-- **Checkpoints are architecture.** Practitioner writing on agent governance
-  ([InfoWorld](https://www.infoworld.com/article/4154570/best-practices-for-building-agentic-systems.html),
-  [enterprise patterns](https://virtido.com/blog/agentic-workflows-patterns-best-practices-enterprise))
-  suggests putting human-in-the-loop gates at defined workflow stages and enforces policy
-  at the point of action — not in the operator's memory.
+- **The ticket is the dispatch unit.** The standard coding-agent benchmark,
+  [SWE-bench](https://arxiv.org/abs/2310.06770), is built from real GitHub issues:
+  the issue text is the whole task spec, and tests verify the result. Anthropic
+  reports agents [solving such issues from the description alone](https://www.anthropic.com/engineering/building-effective-agents).
+  A tracker whose tickets carry the spec, the audit trail and the coordination state
+  is the natural dispatch surface.
+- **Checkpoints are architecture.** The same post recommends that agents "pause for
+  human feedback at checkpoints", with stopping conditions and guardrails. Projektor's
+  reading: the gates belong at defined workflow stages, enforced by the tool rather
+  than left to the operator's memory.
 
 ## The six principles
 
