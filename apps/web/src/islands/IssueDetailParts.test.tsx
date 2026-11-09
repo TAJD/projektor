@@ -16,6 +16,9 @@
 // renders full-width instead of shrinking to content). jsdom doesn't lay out
 // real pixel widths, so this asserts the containing classes/rules rather than
 // measured overflow.
+
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fireEvent, render, screen, waitFor } from "@testing-library/preact";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearLinkPreviewCache } from "../utils/link-cards";
@@ -23,6 +26,7 @@ import {
 	AttachmentsSection,
 	BodySection,
 	CommentsSection,
+	RefChip,
 	RelationsSection,
 } from "./IssueDetailParts";
 import type { Comment, IssueData } from "./issue-detail-helpers";
@@ -392,5 +396,22 @@ describe("AttachmentsSection — add actions layout", () => {
 		expect(row.className).toContain("flex-wrap");
 		expect(row.className).not.toContain("max-sm:flex-col");
 		expect(row.querySelectorAll("button")).toHaveLength(3);
+	});
+});
+
+// Screen readers announce a button by its accessible name; an icon's <title> used to
+// win, so every pencil button was just "Edit". Each now names what it edits.
+describe("Issue detail — distinct button names", () => {
+	it("names the copy-link chip after the issue", () => {
+		render(<RefChip issueRef="WEB-1" copyUrl="https://example.test/i/1" />);
+		expect(screen.getByRole("button", { name: "Copy link to WEB-1" })).toBeTruthy();
+	});
+
+	it("pencil icons are decorative (no <title> to override the button's name)", () => {
+		const source = readFileSync(join(__dirname, "IssueDetailParts.tsx"), "utf-8");
+		expect(source).not.toMatch(/<title>Edit<\/title>/);
+		for (const label of ["Edit title", "Edit description"]) {
+			expect(source).toContain(`aria-label="${label}"`);
+		}
 	});
 });

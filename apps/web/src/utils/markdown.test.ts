@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderMd, stripFrontmatter } from "./markdown";
+import { renderMd, stripFrontmatter, stripLeadingTitle } from "./markdown";
 
 // PROJ-488 (R6): frontmatter is metadata, not prose — the rendered view drops it.
 describe("stripFrontmatter", () => {
@@ -306,5 +306,21 @@ describe("renderMd — link card placeholders (PROJ-1036)", () => {
 		"mailto:me@example.com",
 	])("leaves %j as an ordinary link or text", (md) => {
 		expect(renderMd(md)).not.toContain("data-link-card");
+	});
+});
+
+describe("stripLeadingTitle", () => {
+	it("drops a leading # heading that repeats the page title (case-insensitive)", () => {
+		expect(stripLeadingTitle("# Launch plan\n\nBody", "Launch Plan").trim()).toBe("Body");
+	});
+	it("keeps a leading heading that differs from the title", () => {
+		expect(stripLeadingTitle("# Overview\n\nBody", "Launch plan")).toBe("# Overview\n\nBody");
+	});
+	it("keeps ## headings and bodies without a heading", () => {
+		expect(stripLeadingTitle("## Launch plan\nx", "Launch plan")).toBe("## Launch plan\nx");
+		expect(stripLeadingTitle("Body", "Launch plan")).toBe("Body");
+	});
+	it("handles a title-only body", () => {
+		expect(stripLeadingTitle("# Launch plan", "Launch plan")).toBe("");
 	});
 });

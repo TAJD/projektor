@@ -163,7 +163,8 @@ test.describe("Wiki editor — mobile layout (375×812)", () => {
 // spilled the document 153px past the viewport; (3) the h1 was squeezed to
 // one word per line by that same row. Fix: the sidebar became an off-canvas
 // drawer behind a "Pages" trigger, and the action row collapsed to
-// Edit + a "More page actions" overflow menu below 640px.
+// Edit + a "More page actions" overflow menu (since extended to every screen size, so
+// Delete never sits beside Edit).
 test.describe("Wiki reader — mobile layout (PROJ-664)", () => {
 	test("article renders without horizontal scroll and the h1 is visible without scrolling, at 375×667 and 390×844", async ({
 		page,

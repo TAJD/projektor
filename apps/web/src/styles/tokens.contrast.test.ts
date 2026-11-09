@@ -17,6 +17,9 @@ const token = (name: string): string => {
 type RGB = [number, number, number];
 
 function parseColor(v: string): { rgb: RGB; alpha: number } {
+	// Expand #rgb shorthand to #rrggbb.
+	const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(v);
+	if (short) v = `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`;
 	let m = /^#([0-9a-f]{6})$/i.exec(v);
 	if (m) {
 		const n = Number.parseInt(m[1], 16);
@@ -79,4 +82,16 @@ describe.each(["light", "dark"])("%s theme contrast floors", (theme) => {
 			expect(contrast(text, chip)).toBeGreaterThanOrEqual(4.5);
 		}
 	);
+
+	it("danger text is ≥4.5:1 on the danger tint (WCAG 1.4.3)", () => {
+		const tint = over(parseColor(token(`${theme}-danger-bg`)), bg);
+		const text = parseColor(token(`${theme}-danger-text`)).rgb;
+		expect(contrast(text, tint)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it("text on the accent colour (--on-accent) is ≥4.5:1 (WCAG 1.4.3)", () => {
+		const accent = parseColor(token(`${theme}-accent`)).rgb;
+		const onAccent = parseColor(token(`${theme}-on-accent`)).rgb;
+		expect(contrast(onAccent, accent)).toBeGreaterThanOrEqual(4.5);
+	});
 });

@@ -2,7 +2,11 @@
 .btn {
 	display: inline-flex;
 	align-items: center;
+	justify-content: center;
 	gap: 0.375rem;
+	/* Tap-target standard: 32px for buttons and selects (28px for the small size),
+	   44px on phones — see the max-width: 640px block below. */
+	min-height: 2rem;
 	padding: 0.375rem 0.75rem;
 	border-radius: var(--radius-sm);
 	font-size: 0.875rem;
@@ -31,7 +35,8 @@
 }
 .btn-outline {
 	background: var(--bg);
-	border-color: var(--border);
+	/* Same edge as fields and selects, so every bordered control reads as one family. */
+	border-color: var(--border-control);
 	color: var(--text);
 }
 .btn-danger {
@@ -40,8 +45,17 @@
 	color: var(--danger-text);
 }
 .btn-sm {
+	min-height: 1.75rem;
 	padding: 0.2rem 0.5rem;
 	font-size: 0.8rem;
+}
+
+/* Phones: every button and select is at least 44px tall (Apple HIG / WCAG 2.5.5). */
+@media (max-width: 640px) {
+	.btn,
+	.select-button {
+		min-height: 2.75rem;
+	}
 }
 
 /* ── Shared badge utility ──────────────────────────────────────── */
@@ -64,6 +78,7 @@
 	display: inline-flex;
 	align-items: center;
 	gap: 0.375rem;
+	min-height: 2rem;
 	padding: 0.25rem 0.5rem;
 	border: 1px solid var(--border-control);
 	border-radius: var(--radius-sm);

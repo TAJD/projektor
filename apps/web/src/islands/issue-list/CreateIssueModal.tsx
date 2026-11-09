@@ -1,8 +1,10 @@
 import type { Dispatch, StateUpdater } from "preact/hooks";
+import { useCallback, useRef } from "preact/hooks";
 import { PRIORITY_OPTIONS } from "../../utils/issue-utils";
 import type { TaskStatus } from "../board-utils";
 import MarkdownEditor from "../LazyMarkdownEditor";
 import { Button } from "../ui/Button";
+import { useModalFocus } from "../ui/Dialog";
 import Select from "../ui/Select";
 import type { ProjectMeta } from "./types";
 
@@ -33,6 +35,12 @@ interface CreateIssueModalProps {
 	projects: ProjectMeta[];
 	taskTypes: Array<{ id: string; key: string; name: string }>;
 	statuses: TaskStatus[];
+}
+
+/** "Default (Backlog)" — says which status "default" actually means. */
+export function defaultStatusLabel(statuses: readonly TaskStatus[]): string {
+	const def = statuses.find((s) => s.is_default === 1);
+	return def ? `Default (${def.name})` : "Default";
 }
 
 function CreateIssueModalFields({
@@ -116,7 +124,7 @@ function CreateIssueModalFields({
 						value={createStatusId}
 						onChange={setCreateStatusId}
 						options={[
-							{ value: "", label: "Default" },
+							{ value: "", label: defaultStatusLabel(statuses) },
 							...statuses.map((s) => ({ value: s.id, label: s.name })),
 						]}
 					/>
@@ -138,6 +146,11 @@ export default function CreateIssueModal(props: CreateIssueModalProps) {
 		setShowCreateModal,
 		createProjectId,
 	} = props;
+	// Focus moves into the form on open, Tab stays inside, and closing returns focus to
+	// the "New issue" button (WCAG 2.4.3). Escape is also handled by useCreateIssueModal.
+	const panelRef = useRef<HTMLDivElement>(null);
+	const close = useCallback(() => setShowCreateModal(false), [setShowCreateModal]);
+	useModalFocus(true, close, panelRef);
 	return (
 		// biome-ignore lint/a11y/noStaticElementInteractions: backdrop click-to-close; Escape handles keyboard
 		// biome-ignore lint/a11y/useKeyWithClickEvents: see above
@@ -161,6 +174,7 @@ export default function CreateIssueModal(props: CreateIssueModalProps) {
 					"flex flex-col overflow-hidden",
 					"max-sm:h-[100dvh] max-sm:max-h-[100dvh] max-sm:rounded-none max-sm:mx-0",
 				].join(" ")}
+				ref={panelRef}
 				role="dialog"
 				aria-modal="true"
 				aria-label="Create new issue"

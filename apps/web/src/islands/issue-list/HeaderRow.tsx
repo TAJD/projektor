@@ -3,11 +3,20 @@ import { Button } from "../ui/Button";
 import type { ViewMode } from "./types-view";
 import type { SearchResult } from "./useIssueSearch";
 
-function countLabel(view: ViewMode, filtered: Issue[], totalIssues: number): string {
+/**
+ * The Issues tab lives under a project's header but lists the whole workspace unless a
+ * project filter is set, so the count says which: "across all projects" or "in WEB".
+ */
+export function scopeSuffix(filterProject: string, projectsCount: number): string {
+	if (filterProject) return ` in ${filterProject}`;
+	return projectsCount > 1 ? " across all projects" : "";
+}
+
+function countLabel(view: ViewMode, filtered: Issue[], totalIssues: number, scope: string): string {
 	const listCount = view === "backlog" ? getBacklogIssues(filtered).length : filtered.length;
 	const suffix =
 		view !== "backlog" && totalIssues !== filtered.length ? ` (of ${totalIssues})` : "";
-	return `${listCount} issue${listCount !== 1 ? "s" : ""}${suffix}`;
+	return `${listCount} issue${listCount !== 1 ? "s" : ""}${scope}${suffix}`;
 }
 
 function searchCountLabel(results: readonly SearchResult[], query: string): string {
@@ -23,6 +32,8 @@ interface HeaderRowProps {
 	filtered: Issue[];
 	totalIssues: number;
 	projectsCount: number;
+	/** Active project filter (a project key), or "" for the whole workspace. */
+	filterProject?: string;
 	openCreateModal: () => void;
 }
 
@@ -35,12 +46,13 @@ export default function HeaderRow({
 	filtered,
 	totalIssues,
 	projectsCount,
+	filterProject = "",
 	openCreateModal,
 }: HeaderRowProps) {
 	const label =
 		isSearchActive && searchResults !== null
 			? searchCountLabel(searchResults, searchQuery)
-			: countLabel(view, filtered, totalIssues);
+			: countLabel(view, filtered, totalIssues, scopeSuffix(filterProject, projectsCount));
 
 	return (
 		<div class="flex justify-between items-center gap-2 mb-3 max-sm:flex-col max-sm:items-stretch">

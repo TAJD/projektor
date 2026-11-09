@@ -24,6 +24,8 @@ interface MainContentProps {
 	nextCursor: string | number | null;
 	loadingMore: boolean;
 	loadMore: () => void;
+	/** Switch to the Backlog view (the board links to it for issues it doesn't show). */
+	onShowBacklog?: () => void;
 }
 
 export default function MainContent({
@@ -44,6 +46,7 @@ export default function MainContent({
 	nextCursor,
 	loadingMore,
 	loadMore,
+	onShowBacklog,
 }: MainContentProps) {
 	if (isSearchActive) {
 		return (
@@ -55,7 +58,14 @@ export default function MainContent({
 		);
 	}
 	if (view === "board") {
-		return <BoardView issues={issues} statuses={statuses} changeStatus={changeStatus} />;
+		return (
+			<BoardView
+				issues={issues}
+				statuses={statuses}
+				changeStatus={changeStatus}
+				onShowBacklog={onShowBacklog}
+			/>
+		);
 	}
 	if (view === "backlog") {
 		return (

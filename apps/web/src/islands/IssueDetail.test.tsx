@@ -16,9 +16,16 @@ describe("IssueDetail — mobile main-column width", () => {
 
 	// Status/priority/assignee are what you open an issue on a phone to check or change;
 	// they must lead the stacked column, not sit below the comment composer.
-	it("moves the properties sidebar above the main column on mobile", () => {
+	it("puts the properties sidebar first in DOM order, shown on the right on desktop", () => {
 		const source = readFileSync(join(__dirname, "IssueDetail.tsx"), "utf-8");
-		expect(source).toMatch(/data-testid="issue-sidebar"\s+class="[^"]*max-sm:order-first[^"]*"/);
+		// DOM order = phone visual order = keyboard/screen-reader order (WCAG 1.3.2, 2.4.3).
+		expect(source.indexOf('data-testid="issue-sidebar"')).toBeLessThan(
+			source.indexOf("── Main column ──")
+		);
+		// No CSS reordering on phones that would desync focus order from what's seen.
+		expect(source).not.toMatch(/max-sm:order-first/);
+		// Desktop keeps the sidebar on the right.
+		expect(source).toMatch(/class="flex flex-row-reverse gap-8 items-start max-sm:flex-col"/);
 	});
 });
 

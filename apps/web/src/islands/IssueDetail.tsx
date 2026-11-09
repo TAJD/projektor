@@ -605,7 +605,31 @@ function IssueDetailView(
 			</header>
 
 			{/* Two-column body */}
-			<div class="flex gap-8 items-start max-sm:flex-col">
+			<div class="flex flex-row-reverse gap-8 items-start max-sm:flex-col">
+				{/* ── Sidebar ── First in the DOM so phones read it first visually, by keyboard
+				    and by screen reader alike (WCAG 1.3.2 / 2.4.3): status, priority and assignee
+				    are what you open an issue to check. Desktop shows it on the right via
+				    flex-row-reverse on the container. */}
+				<div data-testid="issue-sidebar" class="contents max-sm:block max-sm:w-full">
+					<SidebarPanel
+						issue={issue}
+						issueId={issueId}
+						workspaceSlug={workspaceSlug}
+						statuses={props.statuses}
+						taskTypes={props.taskTypes}
+						members={props.members}
+						updatingStatus={props.updatingStatus}
+						updatingPriority={props.updatingPriority}
+						updatingAssignee={props.updatingAssignee}
+						updatingType={props.updatingType}
+						typeChangeError={props.typeChangeError}
+						changeStatus={props.changeStatus}
+						changePriority={props.changePriority}
+						changeAssignee={props.changeAssignee}
+						changeType={props.changeType}
+						fetchIssue={props.fetchIssue}
+					/>
+				</div>
 				{/* ── Main column ── */}
 				<div class="flex-1 min-w-0 max-sm:w-full">
 					<BodySection
@@ -639,32 +663,6 @@ function IssueDetailView(
 						comments={props.comments}
 						currentUserId={props.currentUserId}
 						fetchComments={props.fetchComments}
-					/>
-				</div>
-
-				{/* ── Sidebar ── (on phones it leads: status/priority/assignee are what
-				    you came to check or change, not something to scroll past comments for) */}
-				<div
-					data-testid="issue-sidebar"
-					class="contents max-sm:block max-sm:w-full max-sm:order-first"
-				>
-					<SidebarPanel
-						issue={issue}
-						issueId={issueId}
-						workspaceSlug={workspaceSlug}
-						statuses={props.statuses}
-						taskTypes={props.taskTypes}
-						members={props.members}
-						updatingStatus={props.updatingStatus}
-						updatingPriority={props.updatingPriority}
-						updatingAssignee={props.updatingAssignee}
-						updatingType={props.updatingType}
-						typeChangeError={props.typeChangeError}
-						changeStatus={props.changeStatus}
-						changePriority={props.changePriority}
-						changeAssignee={props.changeAssignee}
-						changeType={props.changeType}
-						fetchIssue={props.fetchIssue}
 					/>
 				</div>
 			</div>

@@ -134,3 +134,31 @@ describe("BoardView — mobile status menu (PROJ-416)", () => {
 		expect(link.contains(trigger)).toBe(false);
 	});
 });
+
+// Backlog issues have no board column; the board says so instead of showing a count
+// over four empty columns.
+describe("BoardView — backlog note", () => {
+	const BACKLOG_ISSUE: Issue = { ...TODO_ISSUE, id: "b1", title: "Parked", status_key: "backlog" };
+
+	it("says how many backlog issues aren't shown and links to the Backlog view", () => {
+		const onShowBacklog = vi.fn();
+		render(
+			<BoardView
+				issues={[TODO_ISSUE, BACKLOG_ISSUE, { ...BACKLOG_ISSUE, id: "b2" }]}
+				statuses={STATUSES}
+				changeStatus={() => {}}
+				onShowBacklog={onShowBacklog}
+			/>
+		);
+		expect(screen.getByTestId("board-backlog-note").textContent).toContain(
+			"2 issues in Backlog aren't shown on the board"
+		);
+		fireEvent.click(screen.getByRole("button", { name: "View backlog" }));
+		expect(onShowBacklog).toHaveBeenCalled();
+	});
+
+	it("shows nothing when there are no backlog issues", () => {
+		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={() => {}} />);
+		expect(screen.queryByTestId("board-backlog-note")).toBeNull();
+	});
+});

@@ -35,11 +35,7 @@ function SaveViewControl({ saved }: { saved: Saved }) {
 
 	if (!showSaveInput) {
 		return (
-			<button
-				type="button"
-				onClick={() => setShowSaveInput(true)}
-				class="py-1 px-[0.625rem] rounded-full border border-border bg-bg text-text-muted cursor-pointer text-[0.8rem]"
-			>
+			<button type="button" onClick={() => setShowSaveInput(true)} class="btn btn-outline btn-sm">
 				Save view
 			</button>
 		);

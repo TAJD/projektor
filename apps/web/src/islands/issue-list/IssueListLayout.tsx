@@ -115,6 +115,7 @@ function IssueListTop({
 				filtered={filtered}
 				totalIssues={data.total}
 				projectsCount={data.projects.length}
+				filterProject={filters.filterProject}
 				openCreateModal={createModal.openCreateModal}
 			/>
 		</>
@@ -124,6 +125,7 @@ function IssueListTop({
 /** Main content area (search/board/backlog/list) + the create-issue modal. */
 function IssueListMain({
 	view,
+	setView,
 	filtered,
 	search,
 	data,
@@ -147,6 +149,7 @@ function IssueListMain({
 				sortBy={filters.sortBy}
 				sortDir={filters.sortDir}
 				onSort={filters.handleHeaderClick}
+				onShowBacklog={() => setView("backlog")}
 				nextCursor={data.nextCursor}
 				loadingMore={data.loadingMore}
 				loadMore={data.loadMore}

@@ -95,7 +95,8 @@ async function movePageToOther(fetchMock: ReturnType<typeof mockFetchMovePage>) 
 	render(<WikiPage slug="my-page" />);
 	await screen.findByText("My Page");
 
-	fireEvent.click(screen.getByRole("button", { name: "Move" }));
+	fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+	fireEvent.click(await screen.findByRole("menuitem", { name: "Move" }));
 	fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
 	fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
 	const moveButtons = screen.getAllByRole("button", { name: "Move" });
@@ -160,11 +161,12 @@ describe("WikiPage", () => {
 		expect(await screen.findByText(/No wiki page found at "does-not-exist"/i)).toBeTruthy();
 	});
 
-	it("shows Move button once the page is loaded", async () => {
+	it("offers Move in the page actions menu once the page is loaded", async () => {
 		mockFetchWiki(PAGE);
 		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
-		expect(screen.getByRole("button", { name: "Move" })).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+		expect(await screen.findByRole("menuitem", { name: "Move" })).toBeTruthy();
 	});
 
 	it("moves a page to a new parent via PUT and refetches tree/page", async () => {
@@ -186,8 +188,9 @@ describe("WikiPage — public read-only demo viewer (PROJ-580)", () => {
 		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
 		await waitFor(() => {
-			expect(screen.queryByRole("button", { name: "+ Child page" })).toBeNull();
+			expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
 		});
+		expect(screen.queryByRole("button", { name: "More page actions" })).toBeNull();
 
 		expect(screen.queryByRole("button", { name: "+ New page" })).toBeNull();
 		expect(screen.queryByRole("button", { name: "Move" })).toBeNull();
@@ -214,11 +217,12 @@ describe("WikiPage — public read-only demo viewer (PROJ-580)", () => {
 		await screen.findByText("My Page");
 
 		expect(await screen.findByRole("button", { name: "+ New page" })).toBeTruthy();
-		expect(screen.getByRole("button", { name: "+ Child page" })).toBeTruthy();
-		expect(screen.getByRole("button", { name: "Move" })).toBeTruthy();
 		expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
-		expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
 		expect(screen.getByRole("button", { name: /Attach file/i })).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+		expect(await screen.findByRole("menuitem", { name: "+ Child page" })).toBeTruthy();
+		expect(screen.getByRole("menuitem", { name: "Move" })).toBeTruthy();
+		expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
 	});
 });
 
@@ -1799,16 +1803,17 @@ describe("WikiPage — mobile drawer + action overflow (PROJ-664)", () => {
 		}
 	});
 
-	it("keeps the desktop action row (no overflow menu) when not on a mobile viewport", async () => {
+	it("uses the same Edit + 'More page actions' menu on desktop (Delete never sits beside Edit)", async () => {
 		mockFetchWiki(PAGE);
 		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
 
 		expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
-		expect(screen.getByRole("button", { name: "Move" })).toBeTruthy();
-		expect(screen.getByRole("button", { name: "Delete" })).toBeTruthy();
-		expect(screen.getByRole("button", { name: "+ Child page" })).toBeTruthy();
-		expect(screen.queryByRole("button", { name: "More page actions" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "Move" })).toBeNull();
+		expect(screen.queryByRole("button", { name: "+ Child page" })).toBeNull();
+		fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+		expect(await screen.findByRole("menuitem", { name: "Delete" })).toBeTruthy();
 	});
 
 	it("toggles the page-tree drawer open/closed via the mobile 'Pages' trigger", async () => {
@@ -2249,7 +2254,8 @@ describe("WikiPage — PROJ-803 post-render effects survive remounts", () => {
 		const before = await renderAndSettle();
 		const oldNode = document.querySelector(".prose");
 
-		fireEvent.click(screen.getByRole("button", { name: "Move" }));
+		fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Move" }));
 		fireEvent.click(await screen.findByRole("combobox", { name: /new parent page/i }));
 		fireEvent.click(await screen.findByRole("option", { name: "Other Page" }));
 		const moveButtons = screen.getAllByRole("button", { name: "Move" });
@@ -2943,7 +2949,8 @@ describe("WikiPage — PROJ-807 delete confirmation wording + undo toast", () =>
 	async function deleteMyPage() {
 		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
-		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
 		return screen.findByRole("status");
 	}
 
@@ -2958,7 +2965,8 @@ describe("WikiPage — PROJ-807 delete confirmation wording + undo toast", () =>
 		render(<WikiPage slug="my-page" />);
 		await screen.findByText("My Page");
 
-		fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+		fireEvent.click(screen.getByRole("button", { name: "More page actions" }));
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Delete" }));
 
 		expect(confirmSpy).toHaveBeenCalledTimes(1);
 		const message = confirmSpy.mock.calls[0][0];
@@ -3034,7 +3042,9 @@ describe("WikiPage — PROJ-807 delete confirmation wording + undo toast", () =>
 		mockConfirm(true);
 		render(<WikiPage slug="my-page" />);
 		await vi.advanceTimersByTimeAsync(0);
-		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		fireEvent.click(await screen.findByRole("button", { name: "More page actions" }));
+		await vi.advanceTimersByTimeAsync(0);
+		fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 		// Let the toast mount and its (after-paint) timer effect run.
 		await vi.advanceTimersByTimeAsync(200);
 		const toast = screen.getByRole("status");
@@ -3076,7 +3086,9 @@ describe("WikiPage — PROJ-807 delete confirmation wording + undo toast", () =>
 		mockConfirm(true);
 		render(<WikiPage slug="my-page" />);
 		await vi.advanceTimersByTimeAsync(0);
-		fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+		fireEvent.click(await screen.findByRole("button", { name: "More page actions" }));
+		await vi.advanceTimersByTimeAsync(0);
+		fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 		// Let the toast mount and its (after-paint) timer effect run.
 		await vi.advanceTimersByTimeAsync(200);
 		expect(screen.getByRole("status")).toBeTruthy();

@@ -93,7 +93,7 @@ function mobileToggleClass(active: boolean): string {
 	const base =
 		"min-h-[44px] px-[14px] py-[2px] border rounded-[3px] text-[0.8rem] font-[inherit] cursor-pointer";
 	const state = active
-		? " bg-accent text-white border-accent"
+		? " bg-accent text-on-accent border-accent"
 		: " border-border bg-transparent text-text-base";
 	return base + state;
 }

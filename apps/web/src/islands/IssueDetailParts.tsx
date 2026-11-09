@@ -55,8 +55,9 @@ const PencilIcon = () => (
 		stroke-width="2"
 		stroke-linecap="round"
 		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
 	>
-		<title>Edit</title>
 		<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
 		<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
 	</svg>
@@ -98,6 +99,7 @@ export function RefChip({ issueRef, copyUrl }: { issueRef: string; copyUrl: stri
 			type="button"
 			onClick={copyLink}
 			title={copiedRef ? "Copied!" : "Copy link"}
+			aria-label={copiedRef ? `Link to ${issueRef} copied` : `Copy link to ${issueRef}`}
 			class="font-mono text-xs font-semibold px-2 py-[0.2rem] rounded bg-surface border
 				border-border text-text-muted inline-flex items-center gap-1.5 cursor-pointer
 				hover:text-text-base transition-colors"
@@ -333,8 +335,9 @@ export function TitleSection({
 				type="button"
 				onClick={startEditTitle}
 				title="Edit title"
+				aria-label="Edit title"
 				class="shrink-0 mt-[0.35rem] text-text-muted opacity-0 group-hover:opacity-100
-					transition-opacity rounded p-0.5 hover:text-text-base"
+					focus-visible:opacity-100 transition-opacity rounded p-0.5 hover:text-text-base"
 			>
 				<PencilIcon />
 			</button>
@@ -500,6 +503,7 @@ export function BodySection({
 						type="button"
 						onClick={() => startEditBody()}
 						title="Edit description"
+						aria-label="Edit description"
 						class="text-text-muted hover:text-text-base transition-colors rounded p-0.5"
 					>
 						<PencilIcon />
@@ -1998,6 +2002,7 @@ function PointsField({
 			type="button"
 			onClick={startEditPoints}
 			title="Edit story points"
+			aria-label={storyPointsValue ? `Story points: ${storyPointsValue}. Edit` : "Set story points"}
 			class="inline-flex items-center gap-1.5 text-sm text-text-base hover:text-accent
 				transition-colors cursor-pointer bg-transparent border-none p-0 text-left"
 		>

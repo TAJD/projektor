@@ -158,6 +158,18 @@ async function drawMermaidDiagrams(container: Element): Promise<void> {
 // lands in the body and the table of contents. Mirrors the API's FRONTMATTER_RE.
 const FRONTMATTER_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
+/**
+ * Drops a leading `# Heading` that just repeats the page title. The wiki page header
+ * already shows the title as its h1, so authors (and agents) who start the body with the
+ * same `# Title` otherwise get it twice — and twice in the table of contents.
+ */
+export function stripLeadingTitle(md: string, title: string | undefined): string {
+	if (!title) return md;
+	const m = /^\s*#\s+(.+?)\s*#*\s*(?:\r?\n|$)/.exec(md);
+	if (!m || m[1].trim().toLowerCase() !== title.trim().toLowerCase()) return md;
+	return md.slice(m[0].length);
+}
+
 export function stripFrontmatter(markdown: string): string {
 	return markdown.replace(FRONTMATTER_RE, "");
 }
