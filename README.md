@@ -45,13 +45,10 @@ Headless agents use a workspace API token. See
 
 ## Docs
 
-| | |
-|---|---|
-| [Getting started](https://tajd.github.io/projektor/guides/getting-started/) | first workspace, projects, issues |
-| [Deploying](https://tajd.github.io/projektor/guides/deploying/) | Cloudflare setup, Access, updates |
-| [MCP connection](https://tajd.github.io/projektor/agents/mcp-connection/) and [tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) | wiring an agent up, every tool it gets |
-| [Agentic workflows](https://tajd.github.io/projektor/agents/agent-workflows/) | how agents are meant to use the tracker |
-| [System design](https://tajd.github.io/projektor/architecture/system-design/) | REST and MCP over one service layer |
+[Getting started](https://tajd.github.io/projektor/guides/getting-started/) ·
+[Tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) ·
+[Agentic workflows](https://tajd.github.io/projektor/agents/agent-workflows/) ·
+[System design](https://tajd.github.io/projektor/architecture/system-design/)
 
 ## Development
 
@@ -60,13 +57,13 @@ pnpm install
 cp apps/api/.dev.vars.example apps/api/.dev.vars   # DEV_USER_EMAIL + BOOTSTRAP_SECRET
 cp apps/web/.env.example      apps/web/.env        # PUBLIC_WORKSPACE_SLUG=projektor
 pnpm dev                                           # API :8787, web :4321
+curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap   # seed, then open :4321
 
 pnpm --filter @projektor/api test   # vitest against an in-process Worker + D1
 pnpm turbo type-check               # tsc --noEmit across the monorepo
 ```
 
-Seed a workspace with `curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap`,
-then open <http://localhost:4321>. Conventions and the pre-PR checklist are in [AGENTS.md](./AGENTS.md).
+Conventions and the pre-PR checklist are in [AGENTS.md](./AGENTS.md).
 
 ## Contributing
 
