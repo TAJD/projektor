@@ -372,7 +372,7 @@ boundary.
   "jsonrpc": "2.0", "id": 1,
   "result": {
     "protocolVersion": "2025-11-25",
-    "capabilities": { "tools": {} },
+    "capabilities": { "tools": {}, "prompts": {} },
     "serverInfo": { "name": "projektor", "version": "<the deployed release's version, e.g. from its git tag>" },
     "instructions": "<one-paragraph pointer to get_workflow>"
   }
@@ -407,6 +407,12 @@ stale or wrongly-filtered catalog.
 `cacheScope` follows HTTP `Cache-Control` semantics (`"private"` here, since the list
 isn't currently filtered per-caller, but isn't safe for a shared/intermediary cache to
 serve across different callers either).
+
+### prompts/list and prompts/get
+
+The playbooks are also exposed as MCP prompts (for example `epic-goal`, argument
+`epicRef`). `prompts/get` fills the template with live data the same way the
+`compose_playbook` tool does, and needs the same access.
 
 ### tools/call
 
@@ -485,8 +491,8 @@ A client that treated every `error` as "the call failed" must also check `result
 
 ### List results and the result cap
 
-Every list tool returns `{"items": [...], "next": "…"}`; pass `next` back as `cursor` for
-the next page. Long results from `list_issues`, `search_wiki`, `list_wiki_changes` and
+List tools return `{"items": [...], "next": "…"}`; pass `next` back as `cursor` for
+the next page (exceptions: [response conventions](/projektor/agents/response-conventions/#lists-items-next)). Long results from `list_issues`, `search_wiki`, `list_wiki_changes` and
 `list_project_activity` are cut on an item boundary and flagged `truncated:true`. Issue tools take `view=summary|full` and `fields=`. See
 [Response conventions](/projektor/agents/response-conventions/).
 

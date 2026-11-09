@@ -20,7 +20,7 @@ not "who did the work."
 | `cycleTime` | claimed → done |
 | `timeInProgress` | claimed → next stage |
 | `reviewLatency` | first entry into review → done — the primary human choke point, with a `reviewLatencyOverTime` trend. It measures from the *first* review entry, so an issue sent back for rework includes the rework and every later review wait. |
-| `agingWip` | every currently open (in_progress/in_review) issue with its age since claim — a present-state snapshot, not scoped to `since`/`until`. Read it against `cycleTime`'s p50/p90 as reference lines: it surfaces stuck items before they finish and skew the percentiles. |
+| `agingWip` | currently open (in_progress/in_review) issues with their age since claim — a present-state snapshot. Over MCP it lists the 10 oldest as `{ref,title,status,ageDays}` plus `agingWipTotal` (`agingWipLimit` up to 50, or `verbose:true` for all); REST returns every item. It is not scoped to `since`/`until`. Read it against `cycleTime`'s p50/p90 as reference lines: it surfaces stuck items before they finish and skew the percentiles. |
 
 **When is an issue "ready"?** When it leaves backlog for an open status (todo, or
 straight into in_progress), or is created in one. An issue that goes from backlog

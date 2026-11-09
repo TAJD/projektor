@@ -43,8 +43,11 @@ Unknown names are a validation error.
 
 ## Lists: `{items, next}`
 
-Every MCP list returns `{items: [...], next?: "..."}`. When `next` is present, pass it
+MCP lists return `{items: [...], next?: "..."}`. When `next` is present, pass it
 back unchanged as `cursor` to get the following page. When it is absent there are no more.
+
+Not yet converted: `list_messages` returns `{items, nextCursor}` (pass `nextCursor` back as
+`cursor`), and `list_projects` and `list_members` return a bare array.
 
 | Tool | Continue with |
 | --- | --- |
@@ -101,7 +104,7 @@ No stored data changes: migration 0067 only adds two nullable columns to `agent_
 (apply it before deploying the new build). REST and the web app are unchanged. MCP clients
 need these manual changes:
 
-- **Lists**: read `{items, next}` and pass `next` back as `cursor`. The old bare arrays, `nextCursor` and `{changes, nextSince}` are gone on MCP.
+- **Lists**: read `{items, next}` and pass `next` back as `cursor`. `{changes, nextSince}` is gone on MCP; bare arrays and `nextCursor` remain only on the exceptions listed under [Lists](#lists-items-next).
 - **Errors**: a failed tool call is a result with `isError:true` and a JSON body `{error:{code, message, hint, …}}`, not a JSON-RPC error.
 - **Issues**: `project_id`, `workspace_id`, `type_id`, `status_id` and `created_by_id` are dropped and `labels` is an array. Use `ref`, or pass `verbose:true` for the raw row.
 - **Wiki**: `get_wiki_page` returns at most `maxChars` (default 8,000) of `content`. Do not send a windowed `content` back to `update_wiki_page`; use `patch_wiki_page`, or read with `maxChars:20000` and check `contentTruncated` is absent.
