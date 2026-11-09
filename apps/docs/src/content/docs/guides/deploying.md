@@ -357,11 +357,12 @@ if you rely on subdomain-based tenant routing; otherwise clients must send the
 
 ## Cutting a release (maintainers)
 
-Releases are tag-driven. From the `projektor` repo:
+Releases go through a version-bump PR; don't tag by hand. In the `projektor` repo:
 
-```bash
-git tag v1.2.0 && git push --tags
-```
+1. Run the **Prepare release** workflow (`release-prepare.yml`, choose patch/minor/major).
+   It bumps `apps/web/package.json` and opens a PR labelled `release`.
+2. Merge the PR. `release-tag.yml` tags `vX.Y.Z` with the release-bot GitHub App
+   (`APP_ID` variable, `APP_PRIVATE_KEY` secret), so the tag can trigger other workflows.
 
 `.github/workflows/release.yml` then builds the artifact (web build → bundle worker
 → collect migrations → write `wrangler.example.toml`) and publishes a GitHub
@@ -375,18 +376,15 @@ release deploys within seconds and the producer stays generic.
 How it's wired:
 
 1. In `projektor`, set a repository **variable** `DEPLOY_DISPATCH_REPO` to your
-   deploy repo (e.g. `YOU/my-projektor-deploy`) and add a `WORKSPACE_PAT` secret
-   that can POST dispatches to it:
-   - **Classic PAT:** the `repo` scope.
-   - **Fine-grained PAT:** the deploy repo must be in *Repository access* **and**
-     the token must grant *Repository permissions → Contents: Read and write* -
-     you need **both**. Granting the permission without selecting the repo (or vice
-     versa) silently fails.
+   deploy repo (e.g. `YOU/my-projektor-deploy`), and install the release-bot GitHub
+   App (the one behind `APP_ID` / `APP_PRIVATE_KEY`) on that repo with
+   *Contents: Read and write*. The workflow mints a token scoped to that one repo.
 
-   > **Gotcha:** if the PAT can't see the repo or lacks `Contents: write`, the
-   > dispatch fails with **HTTP 404 "Not Found"** — *not* 403. GitHub masks a
-   > permission failure as a missing resource, so a 404 on the dispatch step means
-   > "fix the PAT's repo access / Contents permission," not "wrong URL."
+   > **Gotcha:** if the App isn't installed on the deploy repo or lacks
+   > `Contents: write`, the dispatch fails with **HTTP 404 "Not Found"** — *not* 403.
+   > GitHub masks a permission failure as a missing resource, so a 404 on the
+   > dispatch step means "fix the App's installation / Contents permission," not
+   > "wrong URL."
 
    The release workflow's final step fires a `repository_dispatch`
    (`projektor-release`, payload `version`) — but only if `DEPLOY_DISPATCH_REPO`
@@ -394,7 +392,7 @@ How it's wired:
 2. Your deploy workflow listens for that dispatch, records the released tag into
    `projektor.version` (a `[skip ci]` commit), and deploys.
 
-The result: `git push --tags` in `projektor` → your instance is running the new
+The result: merging a release PR in `projektor` → your instance is running the new
 version, no manual step. To deploy by hand instead, bump `projektor.version`,
 commit, and push.
 
@@ -461,6 +459,6 @@ commit, and push.
 | Discovery or token requests return `302` to a Cloudflare login page | Cloudflare Access is in front of them. Add the two bypass applications from step 6 — and leave `/oauth/authorize` protected. |
 | Consent screen renders but pressing **Allow access** is blocked by CSP | You are on a build before v0.6.2: `form-action 'self'` blocked the redirect to the client, and Chrome reports it against `/oauth/authorize`, which looks like a false positive. Upgrade. |
 | `Wrangler requires at least Node.js v22` | Your workflow uses an older Node. wrangler 4.x needs **Node ≥ 22** — set `node-version: '22'` in `setup-node`. |
-| Release published but the instance didn't auto-deploy | The `DEPLOY_DISPATCH_REPO` variable is unset, or `WORKSPACE_PAT` can't dispatch to the deploy repo. The dispatch step fails with **HTTP 404** (GitHub masks a permission failure as "Not Found"). Fix: a fine-grained `WORKSPACE_PAT` needs the deploy repo selected in *Repository access* **and** *Contents: Read and write*. |
+| Release published but the instance didn't auto-deploy | The `DEPLOY_DISPATCH_REPO` variable is unset, or the release-bot GitHub App can't dispatch to the deploy repo. The dispatch step fails with **HTTP 404** (GitHub masks a permission failure as "Not Found"). Fix: install the App on the deploy repo with *Contents: Read and write*. |
 | `gh release download` 404 in CI | `projektor` is private and `PROJEKTOR_RELEASE_PAT` (with `Contents: Read`) is missing or expired. |
 | Auto-bump commit triggers a second deploy | The bump commit must include `[skip ci]` and be pushed by `GITHUB_TOKEN` (which doesn't re-trigger workflows). |

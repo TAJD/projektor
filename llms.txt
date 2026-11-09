@@ -32,9 +32,9 @@ Headers:
   X-Workspace-Slug: <slug>   (optional on /mcp/; the UUID names the workspace)
 
 Protocol: JSON-RPC 2.0 (MCP Streamable HTTP - not SSE)
-Methods: initialize  tools/list  tools/call
+Methods: initialize  tools/list  tools/call  prompts/list  prompts/get
 
-## Core tools (13 essentials; 113 total - see https://tajd.github.io/projektor/agents/tool-catalog/)
+## Core tools (13 essentials; full list: https://tajd.github.io/projektor/agents/tool-catalog/)
 
 Projects:   list_projects  create_project
 Issues:     list_issues  get_issue  create_issue  update_issue
@@ -45,10 +45,11 @@ Wiki:       list_wiki_pages  search_wiki  get_wiki_page  create_wiki_page  updat
 
 Claim before editing: claim_files (exact path strings, no globs) and claim_issue
 (work-item-level) are independent — you need both. Your session goes stale if you stop
-heartbeating: liveness TTL is 120s (ACTIVE_TTL, apps/api/src/services/agents.ts), and a
-stale session cannot claim. An issue lease held by a stale session is reclaimed by the
-next claimer automatically; file claims are NOT — they release only on release_files, on
-end_agent, or when someone claims with force. Each project caps concurrent agent-leased
+heartbeating: liveness TTL is 120s (SESSION_TTL_SECONDS, apps/api/src/services/agent-identity.ts),
+and a stale session cannot claim. Issue leases and file claims held by a stale session are
+reclaimed by the next claimer automatically; a file claim with no agent session lapses after
+FILE_CLAIM_TTL_SECONDS (default 24h). Still call finish_work (or release_files + end_agent)
+when done. Easiest path: start_work at session start, finish_work at the end. Each project caps concurrent agent-leased
 issues (DEFAULT_AGENT_WIP_LIMIT = 3, admission control, not a rate limit). A refused
 claim does not notify the holder: it returns an error naming the holding issue and agent,
 so message them yourself with post_message. Every contended path is recorded either way.
@@ -58,7 +59,8 @@ See https://tajd.github.io/projektor/philosophy/coordination-model/ for the full
 
 ## Key docs
 
-- https://tajd.github.io/projektor/agents/mcp-connection/        - full connection guide + tool catalog with inputs/outputs
+- https://tajd.github.io/projektor/agents/mcp-connection/        - full connection guide
+- https://tajd.github.io/projektor/agents/tool-catalog/           - every tool, grouped by domain
 - AGENTS.md                                                      - contributor conventions and service-layer contract (in the repo)
 - https://tajd.github.io/projektor/architecture/system-design/   - system design: how it works, diagram, layers, request flow
 - https://tajd.github.io/projektor/guides/self-hosting/          - self-host on Cloudflare in five minutes

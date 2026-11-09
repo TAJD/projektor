@@ -42,8 +42,7 @@ editing anything:
   same way the rest of the fleet does. Issue leases (`claim_issue`) are work-item-level —
   they stop two agents picking up the same ticket. The two are independent; you need both.
 - **Your session goes stale if it goes quiet.** Liveness is heartbeat-based:
-  `ACTIVE_TTL` in `apps/api/src/services/agents.ts` (mirrored as `SESSION_TTL_SECONDS` in
-  `apps/api/src/services/issue-leases.ts`) is **120 seconds**. Any call made with your
+  `SESSION_TTL_SECONDS` in `apps/api/src/services/agent-identity.ts` is **120 seconds**. Any call made with your
   session id (`claim_issue`, `claim_files`, `update_issue`, `post_message`) refreshes it,
   so use the two-call path below and you will rarely need an explicit `heartbeat_agent`.
   Go quiet for two minutes with no such call and your session goes stale: you must
@@ -52,8 +51,9 @@ editing anything:
   reclaimed by the next claimer in the same call (`release_reason: "expired"`). Still call
   `release_files` and `end_agent` when you finish: reclaim only happens when someone else
   wants the path, so until then your claims sit there looking held, and a clean exit is
-  what distinguishes you from a crash in the health data. A claim with no `agent_id` has no
-  heartbeat to judge and is never auto-reclaimed — `force` is the only way past it.
+  what distinguishes you from a crash in the health data. A file claim with no `agent_id` has
+  no heartbeat to judge, so it lapses by age instead: `FILE_CLAIM_TTL_SECONDS` (default 24h,
+  PROJ-928), after which the next claimer reclaims it; before that, only `force` gets past it.
 - **There's a per-project cap on concurrently leased issues** —
   `DEFAULT_AGENT_WIP_LIMIT = 3` in `apps/api/src/services/issue-leases.ts`,
   overridable per project via `projects.agent_wip_limit`. It's admission control on
@@ -75,7 +75,7 @@ gates) live in exactly one place, the [workflow spec](https://tajd.github.io/pro
 
 ## Planning and design docs live in the wiki, not the repo
 
-Design records, implementation plans, and specs belong in the projektor wiki (`create_wiki_page`/`update_wiki_page`), not in a repo `docs/` folder. Keeping them in the wiki makes them discoverable and searchable (`search_wiki`) instead of buried in git history. Root-level user-facing docs (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`) are the only docs that belong in the repo itself.
+Design records, implementation plans, and specs belong in the projektor wiki (`create_wiki_page`/`update_wiki_page`), not in a repo `docs/` folder. Keeping them in the wiki makes them discoverable and searchable (`search_wiki`) instead of buried in git history. The only docs that belong in the repo are the root-level files (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `llms.txt`) and the public docs site (`apps/docs`).
 
 ## Human-authored files
 
@@ -92,19 +92,23 @@ There are **two surfaces** over the same data — a REST API and an MCP (JSON-RP
 They MUST behave identically. The mechanism that guarantees this:
 
 ```
-routes/<domain>.ts   (REST wrapper)  ─┐
-                                       ├─►  services/<domain>.ts   ─►  D1
-mcp/<domain>.ts      (MCP wrapper)   ─┘     (ALL business logic + SQL live here)
+                              ┌─► routes/<domain>.ts  (REST: operationsRouter(...))
+operations/<domain>.ts  ──────┤
+(one defineOperation per op)  └─► mcp/<domain>.ts     (MCP:  ops.map(toMcpTool))
+        │ run(ctx, input)
+        ▼
+services/<domain>.ts  ─►  D1     (ALL business logic + SQL live here)
 ```
 
 **Rules:**
-1. **All business logic and SQL live in `services/<domain>.ts`.** Routes and MCP tools are thin wrappers — resolve context, call the service, adapt the result/error. No SQL in `routes/` or `mcp/`.
-2. **REST and MCP must stay at parity.** If you add or change behavior, do it in the service so *both* surfaces get it. Adding a feature to only one surface is a bug.
-3. **Validation happens inside the service** via a shared Zod schema in `schemas/<domain>.ts` — so REST and MCP are validated identically. Never trust raw `unknown` input in a wrapper.
-4. **Services throw typed errors** from `services/errors.ts` (`ValidationError`, `NotFoundError`, `ForbiddenError`, `ConflictError`). The wrappers translate them:
+1. **Each operation is declared once** in `operations/<domain>.ts` with `defineOperation` (id, method + path, tier/role, input schema, `run` → service call, optional `mcpResult` shaping). `routes/<domain>.ts` and `mcp/<domain>.ts` are one-line adapters over that list (`operations/define.ts`); the OpenAPI spec and tool catalog are generated from it too (PROJ-895).
+2. **All business logic and SQL live in `services/<domain>.ts`.** No SQL in `operations/`, `routes/` or `mcp/`.
+3. **REST and MCP must stay at parity.** Add or change behavior in the service and operation so *both* surfaces get it. Adding a feature to only one surface is a bug; `mcp-parity.node.test.ts` fails on drift.
+4. **Validation uses one shared Zod schema** in `schemas/<domain>.ts` (the operation's `input`, re-checked in the service) — so REST and MCP are validated identically. Never trust raw `unknown` input in a wrapper.
+5. **Services throw typed errors** from `services/errors.ts` (`ValidationError`, `NotFoundError`, `ForbiddenError`, `ConflictError`). The wrappers translate them:
    - REST: `http/error-adapter.ts` → HTTP status (400/404/403/409)
    - MCP: `mcp/error-adapter.ts` → a tool result with `isError: true` and `{error: {code, message, fields?, hint?, details?}}` (PROJ-893; `code` is the service error kind). JSON-RPC `error` is only for protocol faults and unexpected internal errors. Never return raw `String(err)` to clients.
-5. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role? }`. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
+6. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role? }`. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
 
 ### Deliberate REST↔MCP parity exceptions
 
@@ -185,6 +189,12 @@ workspace-internal and not independently released, so their version field is unu
 and intentionally never bumped. `plugins/*` packages carry their own unused
 placeholder versions (e.g. `0.0.0`, `0.0.1`), not `0.0.0-workspace`.
 
+**Releasing:** run the `release-prepare.yml` workflow (patch/minor/major); it opens a
+`release`-labelled version-bump PR. Merging it fires `release-tag.yml`, which tags `vX.Y.Z`
+and triggers `release.yml` to build the artifact that the config-only deploy repo
+(`projektor-deploy-example`) ships. Don't tag by hand. See the
+[deploy guide](https://tajd.github.io/projektor/guides/deploying/).
+
 ## File layout per domain
 
 When adding/changing a domain (issues, projects, wiki, comments, …):
@@ -193,8 +203,9 @@ When adding/changing a domain (issues, projects, wiki, comments, …):
 |------|------|
 | `apps/api/src/services/<domain>.ts` | business logic, SQL, validation, typed errors |
 | `apps/api/src/schemas/<domain>.ts` | Zod schemas (single source of truth; shared primitives in `schemas/common.ts`) |
-| `apps/api/src/routes/<domain>.ts` | REST wrapper (mounted in `index.ts`) |
-| `apps/api/src/mcp/<domain>.ts` | MCP tool array (composed in `routes/mcp.ts`) |
+| `apps/api/src/operations/<domain>.ts` | operation definitions: path, role, input schema, service call, MCP result shape |
+| `apps/api/src/routes/<domain>.ts` | REST adapter over the operations (mounted in `index.ts`) |
+| `apps/api/src/mcp/<domain>.ts` | MCP adapter over the operations (composed in `routes/mcp.ts`) |
 | `apps/api/src/test/<domain>.test.ts` | **domain tests go here** |
 
 **Test convention (don't skip this):** put a domain's tests in its own `<domain>.test.ts`. Do **not** pile MCP tests into the shared `test/mcp.test.ts` — parallel work on multiple domains will collide there on merge. (`mcp.test.ts` is for cross-cutting dispatch behavior only.)
@@ -292,7 +303,18 @@ curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 Then open **http://localhost:4321** — with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
-**Before opening a PR:** `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, `pnpm --filter @projektor/api test:coverage`, `pnpm --filter @projektor/web test:coverage`, `pnpm --filter @projektor/web build`, and `pnpm --filter @projektor/docs build` must all be green, and `pnpm gen:docs` must produce no diff. CI runs these plus the island API and design system convention checks (`.github/workflows/ci.yml`).
+**Before opening a PR**, run what CI runs (`.github/workflows/ci.yml`) — all must be green:
+
+```bash
+pnpm gen:docs                              # must leave no diff (catalog, specs, README stats, conventions page)
+pnpm lint
+pnpm turbo type-check
+pnpm --filter @projektor/db test
+pnpm --filter @projektor/api test:coverage
+pnpm --filter @projektor/web test:coverage
+pnpm --filter @projektor/web build && pnpm --filter @projektor/api build && pnpm bundle-budget
+pnpm --filter @projektor/docs build
+```
 
 ## E2E testing (`apps/web/e2e`, Playwright)
 
@@ -315,7 +337,7 @@ pnpm --filter @projektor/web exec playwright test --project=mobile-webkit
 
 There is deliberately no `pre-push` hook — CI (`.github/workflows/ci.yml`) is the authoritative gate before merge (main is PR-protected; direct pushes are rejected), so a local pre-push copy of the same checks was pure redundant overhead. It was also a source of real bugs: under concurrent local load its test step could fail while a backgrounded `git push` still reported exit code 0, masking a rejected push. It was removed for these reasons; don't re-add one without addressing both.
 
-CI runs a superset of the pre-commit checks: the generated-docs freshness check, `pnpm lint`, `pnpm turbo type-check`, `pnpm --filter @projektor/db test`, coverage-enforced test runs for `@projektor/api` and `@projektor/web`, and both the web and docs builds. New contributors get the pre-commit hook automatically after `pnpm install`. See **Before opening a PR** above for the full local command set to run before pushing.
+CI runs the full **Before opening a PR** set above; the hook is only a fast subset.
 
 **Bypass for WIP commits:** pass `--no-verify` (or `-n`) to git:
 
@@ -411,40 +433,13 @@ These are the constraints the fleet skill reads to plan batches. Keep them curre
 | `apps/api/src/index.ts` | Hono app root — route mounting |
 | `apps/api/src/test/mcp.test.ts` | Cross-cutting dispatch tests — domain tests go in `test/<domain>.test.ts` |
 
-**Domain → file ownership** — one agent per row, no overlap:
-
-| Domain | Service | Schema | Routes | MCP | Tests |
-|--------|---------|--------|--------|-----|-------|
-| issues | `services/issues.ts` | `schemas/issues.ts` | `routes/issues.ts` | `mcp/issues.ts` | `test/issues.test.ts` |
-| projects | `services/projects.ts` | `schemas/projects.ts` | `routes/projects.ts` | `mcp/projects.ts` | `test/projects.test.ts` |
-| wiki | `services/wiki.ts` | `schemas/wiki.ts` | `routes/wiki.ts` | `mcp/wiki.ts` | `test/wiki.test.ts` |
-| files | `services/files.ts` | `schemas/files.ts` | `routes/files.ts` | `mcp/files.ts` | `test/files.test.ts` |
-| sprints | `services/sprints.ts` | `schemas/sprints.ts` | `routes/sprints.ts` | `mcp/sprints.ts` | `test/sprints.test.ts` |
-| comments | `services/comments.ts` | `schemas/comments.ts` | `routes/comments.ts` | `mcp/comments.ts` | `test/comments.test.ts` |
-| task-types | `services/task-types.ts` | `schemas/task-types.ts` | `routes/task-types.ts` | `mcp/task-types.ts` | `test/task-types.test.ts` |
-| custom-fields | `services/custom-fields.ts` | `schemas/custom-fields.ts` | `routes/custom-fields.ts` | `mcp/custom-fields.ts` | `test/custom-fields.test.ts` |
-| workflow | `services/workflow.ts` | — (no input) | `routes/workflow.ts` | `mcp/workflow.ts` | `test/workflow.test.ts` |
-| flow-metrics | `services/flow-metrics.ts` | `schemas/flow-metrics.ts` | `routes/flow-metrics.ts` | `mcp/flow-metrics.ts` | `test/flow-metrics.test.ts` |
-| groups | `services/groups.ts` | `schemas/groups.ts` | `routes/groups.ts` | `mcp/groups.ts` | `test/groups.test.ts` |
+**Domain → file ownership** — one agent per domain, no overlap. A domain owns the files named after it in
+`services/`, `schemas/`, `operations/`, `routes/`, `mcp/` and `test/` (see "File layout per domain").
 
 Frontend islands are **not** domain-locked in the same way, but two agents must never
 own the same island file. Assign each island to exactly one agent per batch.
 
-**Deploy:** tag a release (`git tag vX.Y.Z && git push --tags`) — `release.yml`
-builds the artifact and the config-only deploy repo (`projektor-deploy-example`) picks
-it up. See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/).
-
-**CI commands** (must all pass before opening a PR):
-```bash
-pnpm gen:docs   # must produce no diff
-pnpm lint
-pnpm turbo type-check
-pnpm --filter @projektor/db test
-pnpm --filter @projektor/api test:coverage
-pnpm --filter @projektor/web test:coverage
-pnpm --filter @projektor/web build
-pnpm --filter @projektor/docs build
-```
+**CI commands:** see **Before opening a PR** under "Dev workflow".
 
 **Merge ordering rule:** if two agents both touch the same frontend file (e.g.
 `IssueList.tsx`), assign one as "primary" and one as "secondary". Primary merges
@@ -458,14 +453,14 @@ and in the fleet manifest.
 All tools are available via `POST /mcp/<workspaceId>` (JSON-RPC 2.0). Connect with:
 
 ```bash
-claude mcp add --transport http --header "Authorization: Bearer <token>" \
-  projektor https://<host>/mcp/<workspaceId>
+claude mcp add --transport http projektor "https://<host>/mcp/<workspaceId>" \
+  --header "Authorization: Bearer pk_<token>"   # name + URL before --header (it's variadic)
 ```
 
 **The full tool list is generated from source — do not hand-maintain a copy here.**
 See the **[MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/)**
 (generated into `apps/docs/src/content/docs/agents/tool-catalog.md` by
-`apps/api/scripts/gen-mcp-catalog.ts` from `apps/api/src/mcp/*.ts`; CI fails if it is
+`apps/api/scripts/gen-mcp-catalog.ts` from the MCP tool registry; CI fails if it is
 stale). The grouping there separates **Coordination** tools (the agent-native primitives
 used by the fleet protocol above) from **Project data** tools.
 
