@@ -314,14 +314,8 @@ Agent workers should also use `--no-verify` for intermediate commits; run the fu
 
 ## Fleet coordination protocol
 
-The workflow rules (definition of ready, state machine, human review gates, WIP
-limits) have exactly one home: the [workflow spec](https://tajd.github.io/projektor/agents/workflow-spec/),
-served live via the `get_workflow` MCP tool / `GET /api/workflow`. Call it before
-claiming work — don't rely on a copy of the rules here, they aren't restated in this
-file.
-
-What *is* repo-specific and stays here: the mechanical call sequence agents use to
-avoid colliding in this particular repo's git worktree/file layout.
+The workflow rules live only in `get_workflow` (see "Coordination model" above). This
+section is the call sequence agents use to avoid colliding in this repo.
 
 ### Session identity (PROJ-894)
 
@@ -338,23 +332,16 @@ credential on every call (PROJ-452 statelessness holds).
 `start_work` and `finish_work` collapse the sequence below into two calls:
 
 1. `start_work({ issue, paths, name })` at session start — registers the session, claims
-   the issue and files (if given), and posts the start message. All-or-nothing with
-   compensating cleanup, not a single atomic write (D1 has no cross-call interactive
-   transaction): on any conflict (the same `claim_issue`/`claim_files` errors as before)
-   the session is ended and nothing is left claimed. If the process crashes mid-call
-   (so that cleanup never runs), the claims it made become reclaimable once the
-   session's heartbeat goes stale after the 120s TTL, same as any other stale holder.
-   Save the returned `sessionId`. When an issue was claimed, the result also carries
-   that `issue` (the `get_issue` shape), so no follow-up `get_issue` is needed.
+   the issue and files (if given), and posts the start message. On any conflict the
+   session is ended and nothing is left claimed (compensating cleanup; a crash mid-call
+   leaves claims that go stale after the TTL). Save the returned `sessionId`; the result
+   also carries the claimed `issue`, so no follow-up `get_issue` is needed.
 2. `finish_work({ sessionId, issue, completionReport?, status? })` when done — optionally
    transitions the issue via the same path `update_issue` uses (completion-report rules
    apply unchanged), then releases every claim/lease the session holds and ends it.
 
-`claim_issue`/`claim_files`/`update_issue`/`post_message` calls made with a live agent
-session id refresh that session's heartbeat as a side effect, and `finish_work` ends the
-session outright, so an explicit `heartbeat_agent` is optional on this path — call it
-anyway if a lot of work happens between `start_work` and `finish_work` with no other
-agent-scoped call in between.
+Session-scoped calls refresh the heartbeat (see "Coordination model"), so call
+`heartbeat_agent` only if more than ~2 minutes pass with none.
 
 ### The five-call path (still supported)
 
@@ -365,7 +352,7 @@ before deciding whether to `force`):
 1. `register_agent` at session start, linking the issue you're implementing — save the returned `id`.
 2. `claim_files` before touching any file (check `list_file_claims` first; back off, don't `force`).
 3. `post_message` to `scope: "issue:<uuid>"` when you start/blocker/finish; `scope: "workspace"` for fleet-wide notices.
-4. `heartbeat_agent` only if more than ~2 minutes pass between calls that carry your session id (those refresh it already; sessions time out after 120 s of silence).
+4. `heartbeat_agent` only if more than ~2 minutes pass without a session-scoped call.
 5. `release_files` then `end_agent` when done.
 
 See the [MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) for each tool's exact input schema.
