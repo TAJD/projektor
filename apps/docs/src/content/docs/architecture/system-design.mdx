@@ -123,7 +123,9 @@ service-layer contract), but a small, documented subset of REST endpoints — fi
 attachments, tokens, public share links, feedback submission — has no MCP
 equivalent and is safe to depend on; see [REST endpoints](/projektor/agents/rest-endpoints/).
 
-Parity is checked by a test, not held by review. `mcp-parity.node.test.ts` cross-references
+Each operation is declared once, in `apps/api/src/operations/<domain>.ts`, and both the
+REST route and the MCP tool (plus the OpenAPI spec and tool catalog) are generated from
+that declaration, calling the same service function. Parity is checked by a test, not held by review. `mcp-parity.node.test.ts` cross-references
 every exported service function against the REST routes, the runtime MCP registry and the
 documented tool catalog, and fails the build on drift, including a catalog reordered
 without the dispatch table. Operations deliberately on one surface only are listed in the

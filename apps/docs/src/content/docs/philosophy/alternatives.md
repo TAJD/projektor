@@ -1,10 +1,10 @@
 ---
-title: "Projektor and the agent-coordination field"
+title: "How Projektor differs"
 description: "A point-in-time comparison of Projektor against other tools agents use to coordinate work — what each is genuinely good at, and where the differences are deliberate design choices rather than gaps."
 sidebar:
   order: 4
 ---
-*Snapshot as of 2026-08-12.* This page compares Projektor against other tools
+*Snapshot as of 2026-08-12; the Linear and Agent Mail (Rust) sections were re-checked on 2026-11-09.* This page compares Projektor against other tools
 in the agent-coordination space, based on a survey of their public
 documentation, READMEs, and product pages on that date. Nothing was
 installed or run, and no source was read for closed-source products —
@@ -14,9 +14,10 @@ quickly in this space; treat every claim here as dated the moment you read
 it, not as a permanent ranking.
 
 The goal isn't to declare a winner. Several of these tools are better than
-Projektor at the thing they're built for. The point of writing this down is
-to be specific about which thing that is, so the comparison holds up rather
-than reading as marketing.
+Projektor at the thing they're built for; the point is to be specific about
+which thing that is. (Projektor's own backlog is tracked in Projektor, and this
+page was written by an agent working a PROJ ticket through the mechanism it
+describes.)
 
 ## The axes Projektor is making a bet on
 
@@ -38,9 +39,6 @@ than reading as marketing.
    as far as this survey found is uncontested — nobody else in the list below
    occupies it. This is also a scaling difference rather than a preference,
    and the section below is specific about why.
-4. **Validated by use.** Projektor's own backlog is tracked in Projektor, and
-   this comparison page is itself a PROJ ticket worked by an agent claiming
-   it through the mechanism described above.
 
 Claims 1 and 3 above are checked directly against
 `apps/api/src/services/issue-leases.ts`, `apps/api/src/services/file-claims.ts`,
@@ -54,29 +52,17 @@ deployed one. It is a different shape, and the difference is a hard limit
 rather than a tuning problem.
 
 **Reach.** A local coordination store can only be consulted by processes on
-that machine. A CI runner cannot take a lease before it starts work. An agent
-on a second developer's laptop cannot see the first one's reservations. A
-hosted agent — one running in someone else's cloud, with no filesystem you
-share — cannot participate. This is not a matter of throughput; those
-participants are excluded by construction, and no amount of optimisation
-admits them. Every mechanism the local tool has works perfectly, for exactly
-the agents that happen to share a kernel.
-
-To be fair to the tools rather than the argument: several of them run a local
-MCP server, and a localhost server can be exposed to a network. But doing that
-means taking on TLS, authentication, an address other machines can resolve, and
-uptime — the deployment problem the local-first design exists to avoid. The
-option is real; it just converts the tool into a deployed one, badly, rather
-than showing the ceiling was never there.
+that machine. A CI runner can't take a lease before it starts work, an agent on a
+second laptop can't see the first one's reservations, and a hosted agent with no
+shared filesystem can't participate at all. Those participants are excluded by
+construction, not by throughput. (A local MCP server can be exposed to a network,
+but that means taking on TLS, auth, addressing and uptime — the deployment problem
+local-first exists to avoid.)
 
 **Ceiling.** The local tool's concurrency limit is one machine's, and that
-machine is also running the agents. Every agent added competes with the
-coordination store for the same CPU and the same disk, so the coordination
-layer gets slower precisely as the fleet it coordinates grows. Projektor's
-request tier has no equivalent coupling: Workers isolates are created per
-request across Cloudflare's network, so a fleet of forty agents and a fleet of
-four cost the same per call, and none of them are contending with the
-machines running the work.
+machine is also running the agents, so the coordination layer slows as the fleet
+grows. Projektor's request tier doesn't contend with the machines running the
+agents: Workers isolates are created per request across Cloudflare's network.
 
 **Where Projektor's own ceiling actually is.** Not the request tier — D1.
 It is one logical SQLite database, so writes serialise, and the
@@ -86,12 +72,10 @@ transactions, a compound-`SELECT` term limit, and a 128 MB isolate budget.
 A workspace whose write rate exceeds what one D1 database will take needs
 sharding by workspace, which is not built.
 
-So the honest form of the claim is narrow but strong: **Projektor's ceiling is
-a property of the deployment, and a local tool's ceiling is a property of
-somebody's laptop.** The first can be raised without changing how anything
-works. The second cannot be raised at all — and it sits well below the point
-where a fleet spanning CI, several machines, and hosted agents becomes
-possible, because that point is not on the local axis in the first place.
+So the honest claim is narrow: **Projektor's ceiling is a property of the
+deployment; a local tool's is a property of somebody's laptop.** The first can be
+raised without changing how anything works. The second can't, and a fleet spanning
+CI, several machines and hosted agents isn't on the local axis at all.
 
 This cuts the other way too, and the git-native section below says so: if
 every agent genuinely does share one machine, none of the above is a cost you
@@ -139,8 +123,8 @@ was reserved and when," just not "which paths are contended most."
 
 ### MCP Agent Mail (Rust) — `mcp_agent_mail_rust`
 
-The Rust rewrite is the most feature-dense tool in this list: roughly 34
-tools and a 16-screen TUI, including a Reservations screen described as
+The Rust rewrite is the most feature-dense tool in this list: 45 MCP
+tools and a 16-screen TUI (README, re-checked 2026-11-09), including a Reservations screen described as
 covering "file reservation status, conflicts, and create/release actions,"
 plus Tool Metrics, Analytics, Timeline, ATC, and System Health screens, and a
 dedicated `check_file_reservation_conflicts` tool. Its live conflict
@@ -180,8 +164,9 @@ file, beads' issue-level claim model has no mechanism to see that coming.
 
 ### Linear + MCP
 
-Linear shipped native MCP agent support in April 2026, with issue-level
-assignment to agents. Product polish and ecosystem breadth here are hard to
+Linear runs a hosted MCP server, and agents can be assigned issues and
+@mentioned like teammates. Since April 2026 its own Linear Agent can also call
+other tools over MCP ([changelog](https://linear.app/changelog/2026-04-23-linear-agent-mcp-support)). Product polish and ecosystem breadth here are hard to
 match — this is a mature, widely-integrated product, not a coordination
 experiment. It's hosted only; there's no self-hosted deployment path, which
 is a deliberate product decision on Linear's part, not an oversight.
@@ -223,7 +208,7 @@ analytics screen, in particular, is easy to misread from a checkmark alone).
 | Projektor | yes (leases + WIP cap) | yes | yes (rejection) | yes | self-hosted, deployed |
 | MCP Agent Mail (Python) | no | yes (reservations) | yes | no (reservation history only) | self-hosted |
 | MCP Agent Mail (Rust) | no | yes (reservations) | yes | no (system-anomaly analytics, not path contention) | self-hosted |
-| Hiveship | yes | not documented | not documented | not documented | hosted |
+| Hiveship | not documented | not documented | not documented | not documented | hosted |
 | beads / Gas Town | yes (`--claim`) | no | no | no | local-first |
 | Linear + MCP | yes | no | no | no | hosted only |
 | Atlassian MCP | yes | no | no | no | hosted only |

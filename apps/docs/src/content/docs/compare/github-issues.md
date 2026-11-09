@@ -17,7 +17,7 @@ document. They also work together: Projektor does not replace your Git host.
 
 *Checked against GitHub's docs, pricing page and the GitHub MCP server README
 on 2026-10-03. Sources are listed at the end of the page. For the longer
-argument, see [Projektor and the agent-coordination field](/projektor/philosophy/alternatives/).*
+argument, see [How Projektor differs](/projektor/philosophy/alternatives/).*
 
 ## At a glance
 

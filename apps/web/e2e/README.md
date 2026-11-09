@@ -1,7 +1,8 @@
-# Playwright E2E - Kanban Board (PROJ-61)
+# Playwright E2E
 
-End-to-end tests for the board drag-and-drop feature and its mobile guards.
-These tests target a **deployed dev instance**, not a local dev server.
+End-to-end tests for the web app (board, issues, wiki, sprints, groups, sharing,
+settings and mobile layouts; one `*.spec.ts` per area). They target a **deployed
+dev instance**, not a local dev server, and don't run in CI.
 
 ---
 
@@ -9,7 +10,7 @@ These tests target a **deployed dev instance**, not a local dev server.
 
 | Requirement | Detail |
 |---|---|
-| Node ≥ 18 | Built-in `fetch` used in global setup |
+| Node ≥ 22.12 | Repo engine requirement (`package.json`) |
 | Playwright browsers | `pnpm --filter @projektor/web exec playwright install --with-deps chromium webkit` |
 | Dev deployment | `ENVIRONMENT=development`, `DEV_USER_EMAIL` set on the Worker |
 

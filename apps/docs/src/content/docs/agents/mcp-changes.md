@@ -11,6 +11,12 @@ against an older release may rely on fields or errors that have since changed. T
 lists those changes, newest first. The REST API (`/api/*`) is not covered here: its rows
 keep the full shape.
 
+## Unreleased
+
+- **`list_messages` returns `{items, next?}`** like the other paged lists, instead of
+  `{items, nextCursor}`. Pass `next` back as `cursor`; the cursor value is unchanged. The
+  REST endpoint still returns `nextCursor`.
+
 ## v0.10.2
 
 - **`release_files` takes a session name as `agentId`.** It resolves among your

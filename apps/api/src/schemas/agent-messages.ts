@@ -71,10 +71,10 @@ export const ListMessagesSchema = z
 	.object({
 		...channelFields,
 		// Opaque composite cursor: "createdAt:id" — stable across same-second inserts
-		cursor: z
-			.string()
-			.optional()
-			.meta({ description: "Pagination cursor: pass the previous page's `nextCursor` unchanged" }),
+		cursor: z.string().optional().meta({
+			description:
+				"Pagination cursor: pass the previous page's `next` (MCP) or `nextCursor` (REST) unchanged",
+		}),
 		limit: z.coerce
 			.number()
 			.int()

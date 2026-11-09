@@ -108,7 +108,7 @@
 					"agent-messages"
 				],
 				"summary": "List coordination messages for a channel (workspace by default, an issue, or a project), newest first by default",
-				"description": "List coordination messages for a channel (workspace by default, an issue, or a project), newest first by default. Returns {items, nextCursor}; rows omit workspaceId and null keys. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/.\n\nConstraints: projectId is required when scope is \"project\"; projectId only applies when scope is \"project\" or omitted.",
+				"description": "List coordination messages for a channel (workspace by default, an issue, or a project), newest first by default. Returns {items, next?}; pass next back as cursor. Rows omit workspaceId and null keys. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/.\n\nConstraints: projectId is required when scope is \"project\"; projectId only applies when scope is \"project\" or omitted.",
 				"parameters": [
 					{
 						"$ref": "#/components/parameters/WorkspaceSlug"
@@ -135,7 +135,7 @@
 						"name": "cursor",
 						"in": "query",
 						"required": false,
-						"description": "Pagination cursor: pass the previous page's `nextCursor` unchanged",
+						"description": "Pagination cursor: pass the previous page's `next` (MCP) or `nextCursor` (REST) unchanged",
 						"schema": {
 							"type": "string"
 						}

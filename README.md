@@ -14,11 +14,10 @@
 
 ## What it is
 
-Projektor is an issue tracker and wiki that an AI coding agent runs as well as you do.
-Issues, boards, sprints and a wiki are exposed over MCP
-(<!-- gen-mcp-stats:start -->126 tools across 24 domains<!-- gen-mcp-stats:end -->), so the
-agent files the ticket, moves it and writes the page instead of asking you to. The whole thing is one
-Cloudflare Worker (Hono, D1, KV, R2) in your own account. No servers, no containers.
+An issue tracker and wiki that your AI coding agent can run as well as you do. Everything
+is exposed over MCP (<!-- gen-mcp-stats:start -->126 tools across 24 domains<!-- gen-mcp-stats:end -->),
+so the agent files, moves and documents the work itself. It runs as one Cloudflare Worker
+(Hono, D1, KV, R2) in your own account: no servers, no containers.
 
 ## Why it's different
 
@@ -34,25 +33,22 @@ Cloudflare Worker (Hono, D1, KV, R2) in your own account. No servers, no contain
 
 ## Get started
 
-**Deploy.** The one-click **Deploy to Cloudflare** button in
-[projektor-deploy-example](https://github.com/TAJD/projektor-deploy-example) provisions D1,
-KV and R2 and installs a pre-built release. Put Cloudflare Access in front of the Worker
-before anyone logs in. See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/).
+**Deploy.** Use the **Deploy to Cloudflare** button in
+[projektor-deploy-example](https://github.com/TAJD/projektor-deploy-example), then put
+Cloudflare Access in front of the Worker before anyone logs in.
+See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/).
 
-**Connect Claude.** Add your instance as a connector and sign in with your web UI account;
-Claude Code does it with `claude mcp add --transport http projektor "https://<host>/mcp/<workspace-id>"`.
-Headless agents use a workspace API token instead. See
+**Connect Claude.** Add your instance as a connector and sign in with your web account.
+In Claude Code: `claude mcp add --transport http projektor "https://<host>/mcp/<workspace-id>"`.
+Headless agents use a workspace API token. See
 [connecting an agent](https://tajd.github.io/projektor/agents/mcp-connection/).
 
 ## Docs
 
-| | |
-|---|---|
-| [Getting started](https://tajd.github.io/projektor/guides/getting-started/) | first workspace, projects, issues |
-| [Deploying](https://tajd.github.io/projektor/guides/deploying/) | Cloudflare setup, Access, updates |
-| [MCP connection](https://tajd.github.io/projektor/agents/mcp-connection/) and [tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) | wiring an agent up, every tool it gets |
-| [Agentic workflows](https://tajd.github.io/projektor/agents/agent-workflows/) | how agents are meant to use the tracker |
-| [System design](https://tajd.github.io/projektor/architecture/system-design/) | REST and MCP over one service layer |
+[Getting started](https://tajd.github.io/projektor/guides/getting-started/) ·
+[Tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) ·
+[Agentic workflows](https://tajd.github.io/projektor/agents/agent-workflows/) ·
+[System design](https://tajd.github.io/projektor/architecture/system-design/)
 
 ## Development
 
@@ -61,17 +57,15 @@ pnpm install
 cp apps/api/.dev.vars.example apps/api/.dev.vars   # DEV_USER_EMAIL + BOOTSTRAP_SECRET
 cp apps/web/.env.example      apps/web/.env        # PUBLIC_WORKSPACE_SLUG=projektor
 pnpm dev                                           # API :8787, web :4321
+curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap   # seed, then open :4321
 
 pnpm --filter @projektor/api test   # vitest against an in-process Worker + D1
 pnpm turbo type-check               # tsc --noEmit across the monorepo
 ```
 
-Seed a workspace with `curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap`,
-then open <http://localhost:4321>. [AGENTS.md](./AGENTS.md) has the full pre-PR checklist
-and the conventions.
+Conventions and the pre-PR checklist are in [AGENTS.md](./AGENTS.md).
 
 ## Contributing
 
-Projektor is built with itself. [CONTRIBUTING.md](./CONTRIBUTING.md) explains how issues
-and PRs are handled, [SECURITY.md](./SECURITY.md) how to report a vulnerability. Licensed
-under [MIT](./LICENSE).
+Projektor is built with itself. See [CONTRIBUTING.md](./CONTRIBUTING.md) for issues and PRs,
+[SECURITY.md](./SECURITY.md) to report a vulnerability. [MIT](./LICENSE) licensed.

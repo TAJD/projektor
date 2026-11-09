@@ -17,7 +17,7 @@ reserve files, on infrastructure you run yourself.**
 
 *Checked against the MCP Agent Mail README on 2026-10-03. Sources are listed
 at the end of the page. For the longer argument, including the Rust rewrite,
-see [Projektor and the agent-coordination field](/projektor/philosophy/alternatives/).*
+see [How Projektor differs](/projektor/philosophy/alternatives/).*
 
 ## At a glance
 

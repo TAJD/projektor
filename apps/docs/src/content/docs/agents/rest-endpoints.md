@@ -29,7 +29,9 @@ see [Response conventions](/projektor/agents/response-conventions/).
 
 ## File attachments
 
-Binary upload/download doesn't fit JSON-RPC, so attachments are REST-only.
+Binary upload/download doesn't fit JSON-RPC, so those two are REST-only. Listing, link
+attachments and delete are also MCP tools (`list_attachments`, `get_attachment`,
+`create_link_attachment`, `delete_attachment`).
 
 | Method | Path | Notes |
 |--------|------|-------|
@@ -102,17 +104,14 @@ prefer those; the REST form is for everything that isn't an MCP client.
 | `GET` | `/api/playbooks` | List the shipped playbooks |
 | `GET` | `/api/playbooks/:name` | One playbook's full markdown |
 
-`compose_playbook` — which fills a playbook's template with live epic data — is MCP-only,
-so these return the templates as shipped rather than a composed directive.
+These return the templates as shipped. To fill one with live epic data, use
+`compose_playbook` (REST: `POST /api/playbooks/:name/compose`).
 
 ## The inverse case
 
-Two tools have no REST equivalent. `get_prioritized_issues` (the "what should I work
-on next?" ranking) is MCP-only — it's an agent-facing entry point the SPA doesn't
-need, since a human browsing issues doesn't want a single ranked queue. So is
-`compose_playbook`, for the same reason: it exists to hand an agent a filled-in
-directive, which is not something a browser has any use for.
+The agent-facing tools have REST routes too: `get_prioritized_issues` is
+`GET /api/issues/prioritized` and `compose_playbook` is `POST /api/playbooks/:name/compose`.
 
-Everything else — issues, sprints, wiki, comments, links, members, projects — is
+Everything — issues, sprints, wiki, comments, links, members, projects — is
 available over MCP and should be called there. See the
 [MCP tool catalog](/projektor/agents/tool-catalog/) for the full list.

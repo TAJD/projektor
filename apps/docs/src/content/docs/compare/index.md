@@ -33,5 +33,5 @@ space change quickly; if you find something out of date,
 [open an issue](https://github.com/TAJD/projektor/issues).
 
 For the long-form argument behind Projektor's design choices, read
-[Projektor and the agent-coordination field](/projektor/philosophy/alternatives/).
+[How Projektor differs](/projektor/philosophy/alternatives/).
 For short answers to common questions, see the [FAQ](/projektor/faq/).

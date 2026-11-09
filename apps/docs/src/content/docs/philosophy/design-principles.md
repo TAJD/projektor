@@ -4,21 +4,25 @@ description: "The research behind Projektor's workflow design: flow literature, 
 sidebar:
   order: 2
 ---
-Projektor combines AI-native design with tried-and-tested principles. This
-page presents the evidence: the two bodies of research the design draws on, and
-the principles that fall out where they agree.
+Projektor's design draws on two literatures: a decades-old one on how *humans* move
+work through a tracker, and a few-years-old one on how *agents* fail. Strikingly, they
+often reach the same conclusion from opposite directions, and those conclusions are the
+principles below.
 
-Two literatures matter. One is decades old and studies how *humans* move work
-through a tracker. The other is a few years old and studies how *agents* fail.
-Strikingly, they often reach the same conclusion from opposite directions.
+## What this deliberately isn't
+
+Projektor defers the fashionable automations — triage bots, grooming bots,
+status-rollup agents — until the measurement and gating described below exist. The
+literature suggests them as low-risk starting points; the same literature says
+you can't evaluate them without flow metrics. Measure first.
 
 ## What the flow literature says
 
 The strongest empirical work on project management is lean/flow research, not
 tool-vendor guidance:
 
-- **Small batches win.** The [Accelerate/DORA research](https://openpracticelibrary.com/blog/accelerate-metrics-software-delivery-performance-measurement/)
-  (Forsgren, Humble, Kim) links small batch sizes, short lead times, and
+- **Small batches win.** The [DORA research program](https://dora.dev/research/), and the
+  book *Accelerate* (Forsgren, Humble, Kim) that reports it, links small batch sizes, short lead times, and
   frequent integration to organisational performance — the most rigorous
   evidence in the field.
 - **There is no magic WIP number.** An [empirical study of WIP in kanban teams](https://dl.acm.org/doi/10.1145/3239235.3239238)
@@ -32,21 +36,22 @@ tool-vendor guidance:
 ## What the agent-engineering literature says
 
 - **Boundaries, not vibes.** Anthropic's engineering posts —
-  [Building effective agents](https://resources.anthropic.com/building-effective-ai-agents),
+  [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents),
   [the multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system),
   [context engineering](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) —
   converge on giving each agent explicit objectives, output formats, and task
   boundaries. Their early orchestrators spawned fifty subagents for simple
   queries; the fix was structural, not exhortative.
-- **The ticket is the dispatch unit.** The emerging
-  [trackers-as-agent-infrastructure argument](https://www.mindstudio.ai/blog/issue-trackers-ai-agent-infrastructure-jira-linear):
-  API-first trackers win because the ticket carries the spec, the audit trail,
-  and the coordination state.
-- **Checkpoints are architecture.** Governance work
-  ([InfoWorld](https://www.infoworld.com/article/4154570/best-practices-for-building-agentic-systems.html),
-  [enterprise patterns](https://virtido.com/blog/agentic-workflows-patterns-best-practices-enterprise))
-  puts human-in-the-loop gates at defined workflow stages and enforces policy
-  at the point of action — not in the operator's memory.
+- **The ticket is the dispatch unit.** The standard coding-agent benchmark,
+  [SWE-bench](https://arxiv.org/abs/2310.06770), is built from real GitHub issues:
+  the issue text is the whole task spec, and tests verify the result. Anthropic
+  reports agents [solving such issues from the description alone](https://www.anthropic.com/engineering/building-effective-agents).
+  A tracker whose tickets carry the spec, the audit trail and the coordination state
+  is the natural dispatch surface.
+- **Checkpoints are architecture.** The same post recommends that agents "pause for
+  human feedback at checkpoints", with stopping conditions and guardrails. Projektor's
+  reading: the gates belong at defined workflow stages, enforced by the tool rather
+  than left to the operator's memory.
 
 ## The six principles
 
@@ -79,18 +84,18 @@ the events. (This is the thesis of
 
 ### 4. One canonical workflow spec, looked up — not copied
 
-Workflow rules drift the moment they exist in two places. The rules get
-exactly one home — this documentation site — and every consumer (the MCP
-server's instructions, contributor docs, skills, spawn prompts) points at it
-rather than restating it. The server *serves* the spec so the deployed version
-and its rules cannot diverge.
+Workflow rules drift the moment they exist in two places. Their source is one file in
+the server (`services/workflow-content.ts`): `get_workflow` serves it, so a deployment and
+its rules cannot diverge, and the [workflow spec](/projektor/agents/workflow-spec/) page is
+generated from it. That's the aim for every consumer; some docs still restate a rule or a
+number by hand, and PROJ-907 tracks replacing those with links.
 
 ### 5. Measure flow before tuning it
 
 The WIP research is blunt: nobody can tell you your optimal limit. So the
 tracker stamps transition timestamps and exposes lead time, cycle time, and
 WIP-over-time — the measurements a team needs before tuning defaults like the
-agent concurrency cap (currently a flat default of 3) against its own baseline,
+agent [concurrency cap](/projektor/philosophy/coordination-model/#wip-limit-as-admission-control) against its own baseline,
 not folklore.
 
 ### 6. Evidence is checked, not just collected
@@ -105,12 +110,7 @@ human to pull later. The discipline isn't blocking the transition; it's
 making sure a transition without evidence doesn't disappear into the
 timeline unmarked.
 
-## What this deliberately isn't
-
-Projektor defers the fashionable automations — triage bots, grooming bots,
-status-rollup agents — until the measurement and gating above exist. The
-literature suggests them as low-risk starting points; the same literature says
-you can't evaluate them without flow metrics. Measure first.
+## Further reading
 
 For how these principles play out in practice — the multi-agent loop,
 coordination primitives, and the tool catalog — see
