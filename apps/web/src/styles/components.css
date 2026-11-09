@@ -562,3 +562,8 @@
 	width: 0.75em;
 	height: 0.75em;
 }
+
+/* Wiki filter disclosure: drop the native marker; WikiFilterBar draws its own chevron. */
+.wiki-filters > summary::-webkit-details-marker {
+	display: none;
+}

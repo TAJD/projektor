@@ -1,6 +1,7 @@
 import { buildMcpAddCommandMultiline } from "@projektor/types";
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import { apiFetch } from "../utils/api-client";
+import { formatUnixDate } from "../utils/date-input";
 import { resolveWorkspaceSlug } from "../utils/workspace";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./ui/EmptyState";
@@ -49,7 +50,7 @@ function parseScopes(raw: string): string[] {
 
 function formatDate(ts: number | null): string {
 	if (ts === null) return "Never";
-	return new Date(ts * 1000).toLocaleDateString();
+	return formatUnixDate(ts);
 }
 
 function formatScopes(raw: string): string {
@@ -441,7 +442,7 @@ function TokenTableRow({
 	onCancelRevoke,
 	onConfirmRevoke,
 }: TokenTableRowProps) {
-	const expiresClass = `font-mono text-[0.8rem] ${
+	const expiresClass = `text-[0.8rem] ${
 		tok.expiresAt && tok.expiresAt < Date.now() / 1000 ? "text-danger-text" : "text-text-muted"
 	}`;
 	return (

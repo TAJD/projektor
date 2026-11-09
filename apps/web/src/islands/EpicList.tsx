@@ -155,7 +155,7 @@ function EpicListHeader(props: EpicListHeaderProps) {
 			/>
 			{props.epicTypeId && (
 				<Button variant="primary" size="sm" onClick={props.onOpenCreate}>
-					+ New Epic
+					+ New epic
 				</Button>
 			)}
 		</div>
@@ -491,7 +491,12 @@ interface EpicsTableProps {
 
 function EpicsTable({ epics, filteredEpics, sortBy, sortDir, toggleSort }: EpicsTableProps) {
 	if (epics.length === 0) {
-		return <EmptyState title="No epics found. Use the button above to create one." />;
+		return (
+			<EmptyState
+				title="No epics yet"
+				description="Epics group related issues into a larger goal so you can track progress at a glance. Create one with “New epic”."
+			/>
+		);
 	}
 	if (filteredEpics.length === 0) {
 		return <EmptyState title="No epics match the active filters." />;

@@ -58,9 +58,7 @@ export function readChartSeqColors() {
 }
 
 export function EmptyChartState({ message }: { message: string }) {
-	return (
-		<div class="flex items-center justify-center h-[220px] text-sm text-text-muted">{message}</div>
-	);
+	return <div class="flex items-center justify-center h-24 text-sm text-text-muted">{message}</div>;
 }
 
 export function tickIndices(width: number, labels: readonly string[]): number[] {

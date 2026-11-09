@@ -130,7 +130,7 @@ describe("EpicList", () => {
 		mockFetchEpics([]);
 		render(<EpicList />);
 		// No projectId → fetchEpics sets loading=false and returns early → empty state
-		expect(await screen.findByText(/No epics found/i)).toBeTruthy();
+		expect(await screen.findByText(/No epics yet/i)).toBeTruthy();
 	});
 
 	it("ignores a stale localStorage project id not present in the project list", async () => {

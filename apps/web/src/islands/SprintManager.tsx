@@ -803,6 +803,23 @@ interface SprintCompleteControlsProps {
 	onCancel: () => void;
 }
 
+/** "Nov 3 → Nov 17, 2026"-style range; a sprint with no dates shows nothing rather
+ * than a row of "Start: — End: —" placeholders. */
+function SprintDates({
+	startDate,
+	endDate,
+}: Readonly<{ startDate: number | null; endDate: number | null }>) {
+	if (!startDate && !endDate) return null;
+	return (
+		<p class="text-[0.8rem] text-text-muted mb-2" data-testid="sprint-dates">
+			{startDate ? formatDate(startDate) : "No start date"}
+			<span aria-hidden="true"> → </span>
+			<span class="sr-only"> to </span>
+			{endDate ? formatDate(endDate) : "no end date"}
+		</p>
+	);
+}
+
 function SprintCompleteControls({
 	sprintId,
 	active,
@@ -859,14 +876,7 @@ function SprintRow({
 				{statusBadge(sprint.status)}
 			</div>
 			{sprint.goal && <p class="text-sm text-text-muted italic mb-2">{sprint.goal}</p>}
-			<div class="text-[0.8rem] text-text-muted flex gap-4 flex-wrap mb-2">
-				<span>
-					Start: <strong class="text-text-base">{formatDate(sprint.startDate)}</strong>
-				</span>
-				<span>
-					End: <strong class="text-text-base">{formatDate(sprint.endDate)}</strong>
-				</span>
-			</div>
+			<SprintDates startDate={sprint.startDate} endDate={sprint.endDate} />
 			<div class="flex gap-2 items-center flex-wrap">
 				<Button
 					as="a"
