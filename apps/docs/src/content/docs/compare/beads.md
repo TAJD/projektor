@@ -16,7 +16,7 @@ Projektor is built for a fleet that does not share a disk.
 
 *Checked against beads' README and docs on 2026-10-03. Sources are listed at the
 end of the page. For the longer argument, see
-[Projektor and the agent-coordination field](/projektor/philosophy/alternatives/).*
+[How Projektor differs](/projektor/philosophy/alternatives/).*
 
 ## At a glance
 

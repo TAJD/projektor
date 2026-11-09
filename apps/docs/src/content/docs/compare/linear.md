@@ -15,7 +15,7 @@ features that Linear does not document.
 
 *Checked against Linear's docs and pricing page on 2026-10-03. Sources are
 listed at the end of the page. For the longer argument, see
-[Projektor and the agent-coordination field](/projektor/philosophy/alternatives/).*
+[How Projektor differs](/projektor/philosophy/alternatives/).*
 
 ## At a glance
 
