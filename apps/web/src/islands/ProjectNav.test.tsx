@@ -86,6 +86,15 @@ describe("ProjectNav", () => {
 		expect(wikiTab.getAttribute("aria-current")).toBeNull();
 	});
 
+	it("marks the tab active on a trailing-slash pathname, as a deployed instance serves it", async () => {
+		window.history.pushState({}, "", "/issues/?id=p1");
+		mockFetchProject(PROJECT);
+		render(<ProjectNav />);
+		await screen.findByText("Projektor");
+		expect(screen.getByRole("link", { name: "Issues" }).getAttribute("aria-current")).toBe("page");
+		expect(screen.getByRole("link", { name: "Wiki" }).getAttribute("aria-current")).toBeNull();
+	});
+
 	it("sets the document title to '<pageLabel> — <project name>' once resolved", async () => {
 		window.history.pushState({}, "", "/epics?id=p1");
 		mockFetchProject(PROJECT);

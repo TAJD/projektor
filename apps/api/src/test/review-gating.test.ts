@@ -244,6 +244,22 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 		};
 		expect(await sessionOf(issue.id)).toEqual([agentSessionId]);
 		expect(await sessionOf(other.id)).toEqual([undefined]);
+
+		// The MCP surface shapes each comment; the session id must survive that shaping.
+		const mcp = await SELF.fetch(`http://localhost/mcp/${workspaceId}`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "tools/call",
+				params: { name: "list_comments", arguments: { issueId: issue.id } },
+			}),
+		});
+		const text = ((await mcp.json()) as { result: { content: Array<{ text: string }> } }).result
+			.content[0].text;
+		const items = (JSON.parse(text) as { items: Array<{ agentSessionId?: string }> }).items;
+		expect(items.map((c) => c.agentSessionId)).toEqual([agentSessionId]);
 	});
 
 	it("flags needsAudit even once the agent's lease has been released before closing", async () => {

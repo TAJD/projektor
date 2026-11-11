@@ -65,9 +65,12 @@ Before an agent-held issue can move into \`In Review\` or \`Done\`, it must subm
 completion report with:
 
 - **\`summary\`** — what changed, in plain language.
-- **\`verification\`** — the command(s) run and their outcome (the same ones named in
-  the issue's Verification criteria).
+- **\`verification\`** — the command(s) run and their outcome, with a PR, CI run or
+  commit link where one exists (see Evidence audit below).
 - **\`prLink\`** *(optional)* — link to the pull request, if one exists.
+- **\`remainder\`** *(optional, when marking done)* — the part of the work left undone.
+  Projektor files it as a follow-up issue (same parent and labels, linked
+  \`follows_from\`) and returns its ref.
 
 \`summary\` and \`verification\` are required; if either is missing, projektor rejects the
 transition and names the missing field(s). The report is recorded as a normal issue

@@ -26,4 +26,6 @@ pnpm --filter @projektor/api test   # vitest against an in-process Worker + Mini
 pnpm turbo type-check               # tsc --noEmit across the monorepo
 ```
 
-CI runs the full set; see "Before opening a PR" in [AGENTS.md](./AGENTS.md).
+CI runs the full set; see "Before opening a PR" in [AGENTS.md](./AGENTS.md). To run a
+single test file, see the
+[testing reference](./apps/docs/src/content/docs/contributing/testing.md).

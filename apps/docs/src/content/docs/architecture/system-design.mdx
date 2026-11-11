@@ -105,7 +105,7 @@ flowchart TB
 
 | Layer | Tech | Package | Notes |
 |-------|------|---------|-------|
-| Frontend | Astro + Preact | `apps/web` | Full SPA — issues, board, sprints, wiki, settings, tokens. Dev-proxies `/api` + `/mcp` to `:8787`. |
+| Frontend | Astro + Preact | `apps/web` | Full SPA — issues, board, sprints, wiki, settings, tokens. Dev-proxies `/api`, `/mcp` and `/auth` to `:8787`. |
 | API / edge runtime | Hono on Cloudflare Workers | `apps/api` | REST + MCP, two-mode auth, workspace tenancy. |
 | MCP server | JSON-RPC 2.0 over HTTP | `apps/api/src/routes/mcp.ts` | {mcpStats.tools} tools across {mcpStats.domains} domains (coordination + project data). Primary surface. |
 | Plugin system | Registry + SDK | `apps/api/src/plugins`, `packages/plugin-sdk` | `definePlugin` / `defineMCPTool`. **Not loaded at runtime.** |

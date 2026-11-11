@@ -42,7 +42,10 @@ function isTabActive(path: string, activePath: string): boolean {
 	if (path === "/projects/view") {
 		return activePath === "/projects/view" || activePath.startsWith("/projects/view/");
 	}
-	return activePath === path;
+	// A deployed instance serves each page at its trailing-slash URL ("/issues/"), while
+	// the dev server uses "/issues". Compare without the slash so the tab is marked
+	// active on both.
+	return activePath.replace(/\/+$/, "") === path;
 }
 
 const MORE_TRIGGER_RESERVE_PX = 84;

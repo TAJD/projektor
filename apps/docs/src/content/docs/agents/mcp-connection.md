@@ -85,7 +85,7 @@ form the token dialog and `/bootstrap` print.
 `X-Workspace-Slug` is optional on the MCP endpoint, because the UUID in the URL already
 names the workspace.
 
-**Load only the tools you need.** The full tool list is about 93KB of definitions. An agent
+**Load only the tools you need.** The full tool list is over 100KB of definitions. An agent
 that only works issues doesn't need the wiki or admin tools in its context, so add
 `?domains=` to the URL with the domain slugs it uses:
 
@@ -290,11 +290,12 @@ Agents should use a workspace token or the sign-in flow instead.
 
 ## For operators
 
-The sign-in flow needs three things in the Worker configuration. Without them, the
+The sign-in flow needs four things in the Worker configuration. Without them, the
 instance still serves `pk_` tokens but cannot complete a sign-in. Details are in the
 [deployment guide](/projektor/guides/deploying/).
 
 - An `OAUTH_KV` namespace binding. The name is fixed.
+- The `JWT_SECRET` secret (`wrangler secret put JWT_SECRET`), which signs the consent step.
 - `/.well-known/*` in `run_worker_first`, so discovery reaches the Worker instead of the
   site's HTML shell.
 - The `global_fetch_strictly_public` and `cache_option_enabled` compatibility flags.
@@ -442,7 +443,7 @@ failure and can correct itself. The single text content item is JSON:
 
 | Field | Meaning |
 |-------|---------|
-| `code` | One of `validation`, `not_found`, `forbidden`, `conflict`, `payload_too_large`, `rate_limited` |
+| `code` | One of `validation`, `not_found`, `forbidden`, `conflict`, `payload_too_large`. `rate_limited` is reserved and not emitted yet: a rate-limited request is rejected at the HTTP layer with `429` |
 | `message` | What went wrong, in plain words |
 | `fields` | `validation` only: the offending argument names, each with its problems |
 | `hint` | A concrete next step (which tool finds the thing, which role is needed, how to recover from a conflict) |
@@ -493,7 +494,7 @@ A client that treated every `error` as "the call failed" must also check `result
 
 Paged list tools return `{"items": [...], "next": "…"}`; pass `next` back as `cursor` for
 the next page. Short unpaged lists return a plain array; see
-[response conventions](/projektor/agents/response-conventions/#lists-items-next). Long results from `list_issues`, `search_wiki`, `list_wiki_changes` and
+[response conventions](/projektor/agents/response-conventions/#lists-items-next). Long results from `list_issues`, `list_comments`, `search_wiki`, `list_wiki_changes` and
 `list_project_activity` are cut on an item boundary and flagged `truncated:true`. Issue tools take `view=summary|full` and `fields=`. See
 [Response conventions](/projektor/agents/response-conventions/).
 

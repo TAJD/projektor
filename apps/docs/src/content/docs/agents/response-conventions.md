@@ -94,7 +94,7 @@ A result is never a partial JSON document.
 
 Long text is read in windows so one call never returns an unbounded blob.
 
-- **Lists**: `bodyChars=N` (0–1000, default 0) adds the first N characters of each item's `body`, with `bodyTruncated:true` when it was cut. `includeBody:true` still returns whole bodies. Read the rest with `get_issue`.
+- **Lists**: `bodyChars=N` (0–1000, default 0) adds the first N characters of each item's `body`, with `bodyTruncated:true` when it was cut. `includeBody:true` still returns whole bodies. Read the rest with `get_issue`. `list_comments` is the exception: it returns whole bodies by default, and its `bodyChars` (1–10,000) shortens them to a preview.
 - **`get_issue`**: `body` is returned up to 16,000 characters. If it is longer, the result has `bodyTruncated:true`, `bodyTotalChars` and `next`; pass `next` back as `cursor` for the rest.
 - **`get_wiki_page`**: `content` is at most `maxChars` (default 8,000, max 20,000). `totalChars` is the full length and `outline` lists the page's headings. When `next` is present, pass it back as `cursor`. `section=<heading text or slug>` returns just that section (through the next heading of the same or higher level). An unknown section returns `sectionFound:false` and the `outline`, not an error. Frontmatter fields (`type`, `tags`, `status`, …) are still returned parsed. `revisionId` is the revision this content was read at; pass it as `baseRevisionId` on your next `update_wiki_page` or `patch_wiki_page`, and each of those returns the next `revisionId` to chain from. `contentTruncated:true` means `content` is only part of the page: never send it back to `update_wiki_page`, which would overwrite the page with the fragment; use `patch_wiki_page`.
 

@@ -2,7 +2,8 @@
  * Playwright global teardown — runs once after all test workers finish.
  *
  * The test workspace created in globalSetup is intentionally left on the dev
- * deployment — there is no DELETE /api/workspaces endpoint.  The context file
+ * deployment — teardown does not delete it (DELETE /api/workspaces/<slug> exists, but
+ * needs the workspace's projects removed first).  The context file
  * is removed so stale run data does not bleed into the next invocation.
  */
 

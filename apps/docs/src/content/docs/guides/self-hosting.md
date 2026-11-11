@@ -35,8 +35,9 @@ let it run the same flow. See
 ## Then: configure access
 
 The Worker is live, but **Cloudflare Access** must front it before anyone can log in
-(a `*.workers.dev` toggle, or a custom domain). Then log in — the first user in
-`ADMIN_EMAILS` becomes owner — and mint a token for agents. Full handoff:
+(a `*.workers.dev` toggle, or a custom domain). Then log in — every address in
+`ADMIN_EMAILS` becomes an owner, and the first of them to log in creates the default
+workspace — and mint a token for agents. Full handoff:
 [CONFIGURE.md](https://github.com/TAJD/projektor-deploy-example/blob/main/CONFIGURE.md).
 
 **Updating later:** bump `projektor.version` and re-deploy (or push, if you wired CI).
