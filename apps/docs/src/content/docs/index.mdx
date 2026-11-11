@@ -17,7 +17,9 @@ import backlogScreenshot from '../../../../../docs/images/backlog.png';
 
 export const quickstart = `git clone ${REPO_URL} && cd projektor && pnpm install
 cp apps/api/.dev.vars.example apps/api/.dev.vars && cp apps/web/.env.example apps/web/.env
-pnpm dev`;
+pnpm dev
+# in a second terminal, once: create the workspace, user and an API token
+curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap`;
 
 export const connect = `claude mcp add --transport http projektor "http://127.0.0.1:8787/mcp/<workspace-id>" \\
   --header "Authorization: Bearer <api-token>"`;
@@ -27,8 +29,9 @@ export const connect = `claude mcp add --transport http projektor "http://127.0.
 <Code code={quickstart} lang="bash" title="Run Projektor locally" wrap />
 
 You need Node.js 22.12 or later and pnpm. `pnpm dev` applies the database migrations
-to a local database and starts the API on port 8787 and the web app on port 4321. To
-connect Claude Code, copy your workspace's server URL and an API token from **Connect
+to a local database and starts the API on port 8787 and the web app on port 4321. The
+`curl` seeds a workspace for the local dev user and prints the command that connects
+Claude Code; without it the app opens with no workspace. To connect Claude Code later, copy your workspace's server URL and an API token from **Connect
 Agent** in the sidebar and add them:
 
 <Code code={connect} lang="bash" title="Connect Claude Code" wrap />

@@ -96,9 +96,8 @@ new_sqlite_classes = ["WorkspaceHub"]
 # PROJ-867 rate limiter (required): request rate-limit counters, one Durable Object
 # per key, kept in memory (no storage writes). SQLite-backed, so it works on the
 # Workers Free plan. Keep this migration AFTER the WorkspaceHub "v1" above:
-# wrangler applies migration tags in file order. Without this binding projektor falls
-# back to the deprecated D1 limiter (a D1 write on every request) and logs a warning;
-# that fallback is removed in a later release (PROJ-924).
+# wrangler applies migration tags in file order. Without this binding rate limiting is
+# off and /health returns 503 (the old D1 fallback was removed, PROJ-924).
 [[durable_objects.bindings]]
 name = "RATE_LIMITER"
 class_name = "RateLimiter"
@@ -133,5 +132,6 @@ AUTO_JOIN_ROLE = "viewer"
 
 # ─── Secrets (set ONCE; they persist on the Worker across every deploy) ────────
 #   wrangler secret put JWT_SECRET
-# JWT_SECRET - random string used for API token signing. CI does NOT manage this;
-# set it once and it survives future deploys.
+# JWT_SECRET - random string that signs the short-lived OAuth consent token. Sign-in
+# fails without it; pk_ API tokens do not depend on it. CI does NOT manage this; set it
+# once and it survives future deploys.

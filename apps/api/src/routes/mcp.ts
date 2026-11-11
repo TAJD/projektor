@@ -53,7 +53,7 @@ const TOOLS_LIST_TTL_MS = 60_000;
 // only the requesting client may cache this response, not a shared
 // intermediary. tools/list is filtered by `?domains=` (PROJ-716), so the
 // cache key must be the full request URL including the query string, not
-// the path alone — see AGENTS.md. This is an advisory hint; no server-side
+// the path alone (documented in the docs site's agents/mcp-connection.md). This is an advisory hint; no server-side
 // cache backs it (PROJ-717).
 const TOOLS_LIST_CACHE_SCOPE = "private";
 
@@ -75,7 +75,7 @@ function buildServerInstructions(workflowVersion: string | null): string {
 		'is available here as a tool. Handy entry points: get_issue accepts a ref like "PROJ-42"; ' +
 		'get_prioritized_issues answers "what should I work on next?"; search_issues / search_wiki ground you in ' +
 		"existing context. Call get_workflow before claiming work — it returns the definition of ready, the state " +
-		"machine, human review gates, and fleet coordination rules. " +
+		"machine, human review gates, completion-report and audit rules, and WIP limits. " +
 		versionHint +
 		"Working an epic end-to-end? Call " +
 		'get_playbook("epic-goal") (or compose_playbook to have it filled in with the epic\'s live data).'

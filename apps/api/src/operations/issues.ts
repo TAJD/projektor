@@ -461,10 +461,11 @@ export const issueOperations = [
 		tier: "write",
 		summary:
 			"Update an issue — status, priority, title, body, assignee, or labels. Review gating: " +
-			"pass agentSessionId to identify yourself as an agent; entering in_review as " +
-			"an agent requires completionReport. Agents CAN transition directly to done (no human " +
-			"approval gate) — but if the completionReport.verification isn't externally checkable (no " +
-			"CI run/PR/commit link), the issue is flagged needsAudit:true for after-the-fact human review. " +
+			"moving an issue that holds a live agent lease into in_review requires completionReport. " +
+			"Agents CAN transition directly to done (no human approval gate) — but if the " +
+			"completionReport.verification isn't externally checkable (no CI run/PR/commit link), the " +
+			"issue is flagged needsAudit:true for after-the-fact human review. A token or OAuth caller " +
+			"is audited as an agent with or without agentSessionId. " +
 			"If the work is only partly done, pass completionReport.remainder when marking done: a follow-up " +
 			"issue (same parent and labels, linked follows_from) is created and its ref returned as followUp.ref.",
 		input: UpdateIssueSchema.safeExtend({
@@ -480,7 +481,7 @@ export const issueOperations = [
 			),
 			agentSessionId: d(
 				UpdateIssueSchema.shape.agentSessionId,
-				"Your agent session id (from register_agent) — identifies this update as agent-initiated"
+				"Your agent session id (from register_agent or start_work): links this update and its comment to your session and refreshes its heartbeat"
 			),
 			completionReport: d(
 				UpdateIssueSchema.shape.completionReport,

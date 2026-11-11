@@ -4,6 +4,14 @@ End-to-end tests for the web app (board, issues, wiki, sprints, groups, sharing,
 settings and mobile layouts; one `*.spec.ts` per area). They target a **deployed
 dev instance**, not a local dev server, and don't run in CI.
 
+> **Known stale (checked 2026-11-11, not run):** because the suite is outside CI, parts
+> of it have fallen behind the app. `board.spec.ts` asserts on a `.board-columns`
+> element that no longer exists (the board is now
+> `src/islands/issue-list/BoardView.tsx`, which stacks columns with a `max-sm:flex-col`
+> utility class), and several specs set `localStorage["workspace-slug"]`, which the app
+> no longer reads. Expect failures in those tests until the specs are updated against a
+> live deployment.
+
 ---
 
 ## Prerequisites
@@ -16,16 +24,20 @@ dev instance**, not a local dev server, and don't run in CI.
 
 ### Why a deployed dev instance?
 
-The island makes API calls to the *same origin* (`/api/issues`, `/api/task-statuses`, …).
-Locally, the API runs on `:8787` while the Astro dev server runs on `:4321`; the
-relative API paths would 404.  A Cloudflare Workers dev deployment (e.g. via
-`wrangler deploy --env dev`) serves both from the same origin.
+The suite is written against a real deployment: one origin serving the built frontend
+and the Worker, with the production routing (static assets first, trailing-slash page
+URLs) that the local dev server does not reproduce. Locally the Astro dev server on
+`:4321` proxies `/api`, `/mcp` and `/auth` to the API on `:8787`, so the app itself
+works there, but the specs have not been run that way. Use a separate dev deployment
+of your own; the repo's `apps/api/wrangler.toml` defines no `dev` environment.
 
 ### Server-side dev bypass
 
 Auth is handled transparently: when `ENVIRONMENT=development` and `DEV_USER_EMAIL`
 are set on the deployment, the API auto-authenticates every request as that user.
-No credentials are needed in the test runner itself.
+If the deployment sits behind Cloudflare Access, or you want requests to carry an API
+token, set the optional variables in the table below; `playwright.config.ts` adds them
+as headers on every browser request.
 
 ---
 
@@ -81,6 +93,11 @@ schedule against a dev deployment.
 | `E2E_BASE_URL` | **Yes** | Root URL of the dev deployment. API must be at `<url>/api/*`. |
 | `E2E_MEMBER_EMAIL` | No | Email invited as a `member` into the ephemeral e2e workspace during `globalSetup`. Defaults to `e2e-member-<slug>@example.com`. Required (alongside `E2E_MEMBER_TOKEN`) to run `confinement.spec.ts`. |
 | `E2E_MEMBER_TOKEN` | No | A real, workspace-scoped API token owned by `E2E_MEMBER_EMAIL`. Required to run `confinement.spec.ts`. |
+| `PUBLIC_WORKSPACE_SLUG` | No | Sent as `X-Workspace-Slug` on every browser request. Defaults to `projektor`. |
+| `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` | No | A Cloudflare Access service token, sent as `CF-Access-Client-Id` / `CF-Access-Client-Secret`. Needed when the deployment is behind Access. |
+| `PROJEKTOR_API_TOKEN` | No | Sent as `Authorization: Bearer <token>`. |
+
+`apps/web/.env.example` lists the same variables.
 
 ---
 
@@ -131,8 +148,8 @@ the group ID/name, and the member's email/userId are written to
 ### Global teardown (`e2e/global-teardown.ts`)
 
 Removes `e2e/.e2e-ctx.json`.  The test workspace itself is left on the deployment
-(no delete-workspace API endpoint exists); old `e2e-*` workspaces can be cleaned
-up manually via the API if needed.
+(teardown does not delete it); clean up old `e2e-*` workspaces with
+`DELETE /api/workspaces/<slug>` after removing their projects.
 
 ### Test: Desktop drag (`board.spec.ts` - `desktop` project)
 
@@ -147,12 +164,13 @@ up manually via the API if needed.
 
 ### Test: Mobile columns stacked (`mobile` project, viewport 375×812)
 
-Asserts that `.board-columns` has computed `flex-direction: column`, which is
-applied by the `@media(max-width:640px)` rule in `MOBILE_CSS` (IssueList.tsx).
+Asserts that `.board-columns` has computed `flex-direction: column`. That class no
+longer exists (see the note at the top); the columns container in `BoardView.tsx` now
+stacks through `max-sm:flex-col`.
 
 ### Test: Mobile drag suppressed (`mobile` project, viewport 375×812)
 
-The `onDragStart` handler in IssueList.tsx calls `e.preventDefault()` when
+The `onDragStart` handler in `src/islands/issue-list/BoardView.tsx` calls `e.preventDefault()` when
 `window.innerWidth < 640`.  This test:
 
 1. Monitors `PATCH /api/issues/**` requests via `page.route`.
@@ -222,10 +240,10 @@ Uses only internal links, so it never depends on a third-party site.
 
 ## Architecture notes
 
-- **Isolation**: each run creates its own `e2e-<timestamp>` workspace.  Tests set
-  `localStorage["workspace-slug"]` so the island queries that workspace, not production.
-- **No production data touched**: the suite never reads from or writes to the default
-  `projektor` workspace.
+- **Isolation**: each run creates its own `e2e-<timestamp>` workspace. The specs select it
+  by setting `localStorage["workspace-slug"]`, which the app no longer reads, so do not
+  rely on this isolation: point `E2E_BASE_URL` only at a deployment whose data you can
+  afford to change.
 - **No hardcoded ports**: `E2E_BASE_URL` is the single source of truth for all
   API and page navigation URLs.
 - **Mobile guard tested indirectly**: the spec verifies `window.innerWidth < 640` and

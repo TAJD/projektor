@@ -40,7 +40,9 @@ See the [deploy guide](https://tajd.github.io/projektor/guides/deploying/).
 
 **Connect Claude.** Add your instance as a connector and sign in with your web account.
 In Claude Code: `claude mcp add --transport http projektor "https://<host>/mcp/<workspace-id>"`.
-Headless agents use a workspace API token. See
+Headless agents use a workspace API token, and so does an instance from the one-click
+button for now: it deploys a release from before sign-in existed, so use a token or the
+manual deploy. See
 [connecting an agent](https://tajd.github.io/projektor/agents/mcp-connection/).
 
 ## Docs

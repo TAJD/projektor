@@ -65,9 +65,8 @@ new_sqlite_classes = ["WorkspaceHub"]
 # PROJ-867 rate limiter (required): request rate-limit counters, one Durable Object
 # per key, kept in memory (no storage writes). SQLite-backed, so it works on the
 # Workers Free plan. Keep this migration AFTER the WorkspaceHub "v1" above:
-# wrangler applies migration tags in file order. Without this binding projektor falls
-# back to the deprecated D1 limiter (a D1 write on every request) and logs a warning;
-# that fallback is removed in a later release (PROJ-924).
+# wrangler applies migration tags in file order. Without this binding rate limiting is
+# off and /health returns 503 (the old D1 fallback was removed, PROJ-924).
 [[durable_objects.bindings]]
 name = "RATE_LIMITER"
 class_name = "RateLimiter"
@@ -81,8 +80,10 @@ ENVIRONMENT = "development"
 CF_ACCESS_TEAM_DOMAIN = ""
 CF_ACCESS_AUDIENCE = ""
 
-# Login provisioning (services/provisioning.ts). ADMIN_EMAILS should include your
-# DEV_USER_EMAIL so the first local login auto-creates the default workspace as owner.
+# Login provisioning (services/provisioning.ts). A login by an ADMIN_EMAILS user creates
+# the default workspace and owns it. Locally, the default DEV_USER_EMAIL
+# (dev@projektor.dev) is not in this list: seed its workspace with GET /bootstrap
+# (see AGENTS.md "Dev workflow"), or add the address here.
 ADMIN_EMAILS = "admin@projektor.dev"
 DEFAULT_WORKSPACE_SLUG = "projektor"
 DEFAULT_WORKSPACE_NAME = "Projektor"

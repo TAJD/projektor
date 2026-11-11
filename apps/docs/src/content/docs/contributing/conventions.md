@@ -8,10 +8,23 @@ sidebar:
 > in the repo root by `scripts/gen-conventions-page.ts`. Edit that file, not this page — it is
 > overwritten on every generate.
 
-Guidance for AI agents (and humans) working **on** the projektor codebase.
-Read this before making changes — it captures conventions that aren't obvious from the code alone.
+Rules for AI agents (and humans) working **on** the projektor codebase. Everything here
+applies to every change. Detail that only some tasks need lives in the reference pages
+below; read the one that matches your task.
 
 > Portable source of truth across agent tools (Claude Code, Codex, Cursor, …). `CLAUDE.md` points here.
+
+## Reference, read when the task needs it
+
+| If you are… | Read |
+|---|---|
+| Running one test, the end-to-end suite, or hitting the pre-commit hook | `apps/docs/src/content/docs/contributing/testing.md` |
+| Adding an island that needs the current project, or touching project tabs | `apps/docs/src/content/docs/contributing/frontend.md` |
+| Cutting a release, or asking what ships and how versions work | `apps/docs/src/content/docs/contributing/releasing.md` |
+| Splitting work across parallel workers and writing their spawn prompts | `apps/docs/src/content/docs/contributing/fleet-planning.md` |
+| Picking up a ticket: definition of ready, states, completion reports, audit | `get_workflow` (MCP), or the [workflow spec](https://tajd.github.io/projektor/agents/workflow-spec/) |
+| Calling an MCP tool: exact input schema | [MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/), generated from source |
+| Changing who can see a project | [Access control](https://tajd.github.io/projektor/architecture/access-control/) |
 
 ## What projektor is
 
@@ -28,8 +41,8 @@ Implementation details:
 - **Runtime:** Hono on Cloudflare Workers
 - **Data:** D1 (SQLite) for relational data, KV for caching (Access certs, user-by-email), R2 for file attachments
 - **Schema:** Drizzle is the schema and primary query layer; raw `DB.prepare` remains in the auth/workspace middleware hot path, the dev bootstrap, and a handful of service queries (FTS, counters) where hand-written SQL is clearer.
-- **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets — see below), `apps/docs` (the Astro docs site linked throughout this file), `packages/*` (db, types, plugin-sdk), `plugins/*`
-- **Deploy:** projektor publishes a self-contained **release artifact** on each `v*` tag; a config-only deploy repo (e.g. `projektor-deploy-example`) downloads it and ships it with `wrangler` — no submodule, no source checkout downstream. The Worker (`apps/api`) and the built frontend (`apps/web/dist`) ship together: `wrangler.toml` declares an `[assets]` binding with `run_worker_first = ["/api/*", "/mcp/*", "/wiki", "/.well-known/*"]`, so those paths always hit the Hono Worker while every other path serves the static Astro output (per-route HTML, asset-first). The release build compiles `apps/web` and bundles the Worker into a single `worker.js`.
+- **Monorepo:** pnpm workspaces + turbo. `apps/api` (the Worker), `apps/web` (Astro + Preact static site, served in production via CF Workers Static Assets), `apps/docs` (the Astro docs site linked throughout this file), `packages/*` (db, types, plugin-sdk), `plugins/*`
+- **Deploy:** a self-contained release artifact per `v*` tag, shipped by a config-only deploy repo. The Worker and the built frontend ship together. See the releasing reference.
 
 ## Coordination model (read this first)
 
@@ -46,7 +59,8 @@ editing anything:
   session id (`claim_issue`, `claim_files`, `update_issue`, `post_message`) refreshes it,
   so use the two-call path below and you will rarely need an explicit `heartbeat_agent`.
   Go quiet for two minutes with no such call and your session goes stale: you must
-  heartbeat again before you can claim.
+  heartbeat again before you can claim, and your leases and claims are up for grabs in
+  the meantime.
 - **Both tiers self-heal.** An issue lease or file claim held by a stale session is
   reclaimed by the next claimer in the same call (`release_reason: "expired"`). Still call
   `release_files` and `end_agent` when you finish: reclaim only happens when someone else
@@ -75,7 +89,7 @@ gates) live in exactly one place, the [workflow spec](https://tajd.github.io/pro
 
 ## Planning and design docs live in the wiki, not the repo
 
-Design records, implementation plans, and specs belong in the projektor wiki (`create_wiki_page`/`update_wiki_page`), not in a repo `docs/` folder. Keeping them in the wiki makes them discoverable and searchable (`search_wiki`) instead of buried in git history. The only docs that belong in the repo are the root-level files (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `llms.txt`) and the public docs site (`apps/docs`).
+Design records, implementation plans, and specs belong in the projektor wiki (`create_wiki_page`/`update_wiki_page`), not in a repo `docs/` folder. Keeping them in the wiki makes them discoverable and searchable (`search_wiki`) instead of buried in git history. The only docs that belong in the repo are the root-level files (`README.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `llms.txt`), the public docs site (`apps/docs`, including the contributor reference pages above), `apps/web/e2e/README.md` and the images in `docs/images/`.
 
 ## Human-authored files
 
@@ -103,27 +117,12 @@ services/<domain>.ts  ─►  D1     (ALL business logic + SQL live here)
 **Rules:**
 1. **Each operation is declared once** in `operations/<domain>.ts` with `defineOperation` (id, method + path, tier/role, input schema, `run` → service call, optional `mcpResult` shaping). `routes/<domain>.ts` and `mcp/<domain>.ts` are one-line adapters over that list (`operations/define.ts`); the OpenAPI spec and tool catalog are generated from it too (PROJ-895).
 2. **All business logic and SQL live in `services/<domain>.ts`.** No SQL in `operations/`, `routes/` or `mcp/`.
-3. **REST and MCP must stay at parity.** Add or change behavior in the service and operation so *both* surfaces get it. Adding a feature to only one surface is a bug; `mcp-parity.node.test.ts` fails on drift.
+3. **REST and MCP must stay at parity.** Add or change behavior in the service and operation so *both* surfaces get it. Adding a feature to only one surface is a bug; `mcp-parity.node.test.ts` fails on drift. An operation's `mcpResult` reshapes rows for MCP, so a field added in the service reaches MCP only if that mapper passes it on. The deliberate REST-only operations (binary bodies, credential minting, OAuth consent, public share and feedback flows, human-only UI actions) are the `REST_ONLY` list in `apps/api/src/test/mcp-parity.node.test.ts`, each with its reason; don't re-flag them in audits.
 4. **Validation uses one shared Zod schema** in `schemas/<domain>.ts` (the operation's `input`, re-checked in the service) — so REST and MCP are validated identically. Never trust raw `unknown` input in a wrapper.
-5. **Services throw typed errors** from `services/errors.ts` (`ValidationError`, `NotFoundError`, `ForbiddenError`, `ConflictError`). The wrappers translate them:
-   - REST: `http/error-adapter.ts` → HTTP status (400/404/403/409)
+5. **Services throw typed errors** from `services/errors.ts` (`ValidationError`, `NotFoundError`, `ForbiddenError`, `ConflictError`, plus `PayloadTooLargeError` and `UnsupportedMediaTypeError` for uploads). The wrappers translate them:
+   - REST: `http/error-adapter.ts` → HTTP status (400/404/403/409/413/415)
    - MCP: `mcp/error-adapter.ts` → a tool result with `isError: true` and `{error: {code, message, fields?, hint?, details?}}` (PROJ-893; `code` is the service error kind). JSON-RPC `error` is only for protocol faults and unexpected internal errors. Never return raw `String(err)` to clients.
-6. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role? }`. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
-
-### Deliberate REST↔MCP parity exceptions
-
-These are REST-only on purpose; don't re-flag them in audits. The enforced list, with a
-reason per entry, is `REST_ONLY` in `apps/api/src/test/mcp-parity.node.test.ts`.
-
-| REST-only | Why |
-|-----------|-----|
-| File upload/download (`POST /api/files`, `GET /api/files/:id`), link card image, wiki export zip | Binary bodies can't cross JSON-RPC. Attachment metadata, link previews and wiki pages are on MCP. |
-| Auth login, API token and workspace token minting/revocation, connector grants (`/api/workspaces/:slug/connectors`) | Credential operations stay off the surface agents use; a connector must not list or revoke credentials. |
-| OAuth consent (`/oauth/authorize`) | A human approves a grant; an agent is only ever its subject. |
-| `GET /api/workspaces/:slug/mcp-info` | Bootstraps the MCP connection itself. |
-| Cross-workspace `GET /api/projects` | An MCP connection is bound to one workspace; use `list_projects`. |
-| Public sharing (`/api/issues/:id/share`, `/api/share/:token`), public feedback submit (`/api/feedback/submit`) | Browser or anonymous end-user flows with no user/role for a tool to act as. |
-| Feedback bulk triage and summary dashboard, workspace logo upload/delete | Human UI actions (PROJ-634); single-item feedback triage is on MCP. |
+6. **Context** is a `ServiceCtx` (`services/types.ts`): `{ db, kv, r2, workspaceId, userId, role?, authKind?, auth?, config }`. `authKind` is `"agent"` for a token or OAuth grant and `"human"` for a browser login; it is set by the auth middleware, never by the caller, so use it (not a caller-supplied field) when behavior depends on who is calling. Build it with `ctxFromHono(c)` in REST; the MCP dispatch (`routes/mcp.ts`) builds the equivalent and passes `role` through `PluginContext`.
 
 ### The security invariant: always scope by workspace
 Every query MUST be scoped by `workspace_id` (directly, or via a parent entity that was itself workspace-checked — e.g. comments verify their issue belongs to the workspace first). A missing scope is a cross-tenant data leak. This is the single most important correctness rule in the codebase.
@@ -145,24 +144,6 @@ Bounded arrays (enums like priority) are fine to bind directly. When in doubt, c
 inside an `inChunks` callback nor a fixed array literal; a provably bounded one needs an entry
 with its reason in `apps/api/src/test/architecture/in-array-chunking-allowlist.ts`. The test
 does not see raw SQL `IN (...)`, so the rule still applies there by hand.
-
-## Versioning
-
-**`apps/web/package.json` is the single version source** for the whole monorepo -
-bumped by `release-prepare.yml`, tagged by `release-tag.yml`, and read by
-`release.yml`/`scripts/build-release.sh` to produce the release artifact (embedded
-as `VERSION` in the tarball and injected into the MCP `serverInfo.version` via
-esbuild `--define`). Every other `apps/*`/`packages/*` package's `package.json`
-`version` field is a fixed `0.0.0-workspace` placeholder — those packages are
-workspace-internal and not independently released, so their version field is unused
-and intentionally never bumped. `plugins/*` packages carry their own unused
-placeholder versions (e.g. `0.0.0`, `0.0.1`), not `0.0.0-workspace`.
-
-**Releasing:** run the `release-prepare.yml` workflow (patch/minor/major); it opens a
-`release`-labelled version-bump PR. Merging it fires `release-tag.yml`, which tags `vX.Y.Z`
-and triggers `release.yml` to build the artifact that the config-only deploy repo
-(`projektor-deploy-example`) ships. Don't tag by hand. See the
-[deploy guide](https://tajd.github.io/projektor/guides/deploying/).
 
 ## File layout per domain
 
@@ -188,7 +169,7 @@ When adding/changing a domain (issues, projects, wiki, comments, …):
 - **JSON columns** (`labels`, `scopes`) are stored via `JSON.stringify` and returned as raw JSON strings — callers `JSON.parse` on read. There is no automatic (de)serialization.
 - **Timestamps** are unix seconds: `Math.floor(Date.now() / 1000)`.
 - **IDs** are `crypto.randomUUID()`.
-- **Issue numbers** use `COALESCE(MAX(number),0)+1` per project — known race under concurrency (tracked as a follow-up).
+- **Issue numbers** are allocated as `COALESCE(MAX(number),0)+1` per project inside the INSERT itself, one statement, with the UNIQUE index on `(project_id, number)` as the backstop. Keep allocation in that statement; a separate read then write reintroduces the race.
 - **Auth** (`middleware/auth.ts`): Cloudflare Access JWT (browser) OR `Authorization: Bearer <token>` (agents) OR a dev bypass (`DEV_USER_EMAIL`, non-prod only, and never on `/mcp/` — a remote MCP client learns it must authenticate from the 401 challenge, so answering 200 makes the connector flow unreachable). API tokens are workspace-scoped — don't widen that.
 - **Login provisioning** (`services/provisioning.ts`): runs on every CF Access / dev-bypass login (not the token path). Cloudflare Access is the gate; config decides what a user gets inside — `ADMIN_EMAILS` → `owner` (first admin login also creates the `DEFAULT_WORKSPACE_SLUG` workspace), everyone else → `AUTO_JOIN_ROLE` (default `none` = invite-only; set it, e.g. `viewer`, to auto-join). Idempotent; safe to run per request.
 - **Roles** (`owner`/`admin`/`member`/`viewer`) are enforced in services via `ctx.role`. Mutations generally block `viewer`; destructive ops may require `owner`.
@@ -219,33 +200,6 @@ All island↔API calls go through `apps/web/src/utils/api-client.ts`:
 No raw `fetch(` calls in island components. No local `buildHeaders` copies.
 This mirrors the backend service-layer contract: routes are thin wrappers; islands are thin callers.
 
-## Frontend: project identity (`apps/web/src/lib/project-context.ts`)
-
-Islands are separate `client:load` roots (each its own Preact tree), so Preact context can't
-cross between them. Project identity instead lives in a module-level `@preact/signals` store:
-`currentProject`, `projectsList`, `projectError`, `projectReady`. Module state survives Astro's
-`ClientRouter` navigations, so whichever island resolves first writes it and every sibling
-island, plus the next in-app navigation, reads it without a refetch.
-
-Islands call `ensureProjectResolved(workspaceSlug, urlHint?, matches?)` (or the `useCurrentProject`
-hook) instead of parsing `?projectId=`/`?id=` or fetching `/api/projects` themselves. Resolution
-persists the resolved id back to the address bar via `history.replaceState` (see
-`resolve-project-id.ts`'s `persistProjectId`), so copied URLs stay shareable. This is the only
-`@preact/signals` usage in the codebase and the only module-level store pattern for cross-island
-state — reach for it, don't invent a second one, before adding a new island that needs project
-identity.
-
-The identity param is a boundary concern, not a transport mechanism: links between pages that
-stay within the resolved project (`ProjectNav`'s tabs, in-app links to a project's own issues,
-wiki pages, etc.) carry no project param at all — the store survives the `ClientRouter`
-navigation those `<a>` tags trigger, so the destination resolves instantly with no refetch.
-`?projectId=` (the project UUID) is written only where identity actually crosses a boundary: the
-cold-start entry point (`ProjectList`'s project cards), a full non-SPA reload
-(`window.location.href` assignments, which drop all in-memory state), or an explicit project
-switch. `?id=` is reserved for a page's own entity (an issue on `/issues/view`, for example) and
-is never used for project identity in newly-written links — the resolver still accepts it (along
-with `?project=`) on read, for backward compatibility with existing shared URLs.
-
 ## Dev workflow
 
 ```bash
@@ -272,6 +226,8 @@ curl -H "X-Bootstrap-Secret: localdev" http://127.0.0.1:8787/bootstrap
 Then open **http://localhost:4321** — with `DEV_USER_EMAIL` set, the dev auth bypass logs you in
 as that user (a member of the seeded `projektor` workspace), and the islands load real data.
 
+To run one test file or one test, see the testing reference.
+
 **Before opening a PR**, run what CI runs (`.github/workflows/ci.yml`) — all must be green:
 
 ```bash
@@ -284,37 +240,6 @@ pnpm --filter @projektor/web test:coverage
 pnpm --filter @projektor/web build && pnpm --filter @projektor/api build && pnpm bundle-budget
 pnpm --filter @projektor/docs build
 ```
-
-## E2E testing (`apps/web/e2e`, Playwright)
-
-Targets a **deployed dev instance** (`E2E_BASE_URL`), not local dev — see `apps/web/e2e/README.md` for the full setup, fixtures, and per-spec breakdown. Not run in CI (no live deployment there); run manually or on a schedule.
-
-Three projects, pick the narrowest one that answers your question:
-- `desktop` — default viewport, Chromium.
-- `mobile` — 375×812 viewport via Chromium's mobile emulation. Fast, good for layout/CSS regressions.
-- `mobile-webkit` — real WebKit engine (`devices["iPhone 13"]`). Reach for this specifically when investigating iOS Safari engine-level behavior that Chromium can't reproduce (visual-viewport/on-screen-keyboard resize events, `position: fixed` under scroll, etc.) — it caught the PROJ-397/PROJ-566 class of mobile-modal bugs. Still not a substitute for a real device: no Safari chrome, no PWA install/Add-to-Home-Screen coverage.
-
-```bash
-pnpm --filter @projektor/web exec playwright test --project=mobile-webkit
-```
-
-## Git hooks (lefthook)
-
-`pnpm install` runs `prepare`, which calls `lefthook install` and wires one hook:
-
-- **pre-commit** — `pnpm turbo type-check` (fast; leverages turbo's cache, near-instant on unchanged packages) and `pnpm biome check --changed --no-errors-on-unmatched` (lint, changed files only).
-
-There is deliberately no `pre-push` hook: CI is the gate (main is PR-protected), and the old hook could report a successful push after its test step failed. Don't re-add one without solving that.
-
-CI runs the full **Before opening a PR** set above; the hook is only a fast subset.
-
-**Bypass for WIP commits:** pass `--no-verify` (or `-n`) to git:
-
-```bash
-git commit --no-verify -m "wip: …"
-```
-
-Agent workers should also use `--no-verify` for intermediate commits; run the full checks (listed under "Before opening a PR" above) before opening a PR.
 
 ## Fleet coordination protocol
 
@@ -333,7 +258,7 @@ credential on every call (PROJ-452 statelessness holds).
 
 ### The two-call path (PROJ-929)
 
-`start_work` and `finish_work` collapse the sequence below into two calls:
+`start_work` and `finish_work` cover a whole session in two calls:
 
 1. `start_work({ issue, paths, name })` at session start — registers the session, claims
    the issue and files (if given), and posts the start message. On any conflict the
@@ -345,81 +270,27 @@ credential on every call (PROJ-452 statelessness holds).
    apply unchanged), then releases every claim/lease the session holds and ends it.
 
 Session-scoped calls refresh the heartbeat (see "Coordination model"), so call
-`heartbeat_agent` only if more than ~2 minutes pass with none.
+`heartbeat_agent` only if about a minute passes with none. Don't wait for the 120-second
+TTL: once it lapses, another agent can reclaim your lease and file claims.
 
-### The five-call path (still supported)
+`start_work` and `finish_work` compose from five primitives (`register_agent`,
+`claim_files`, `post_message`, `heartbeat_agent`, `release_files` + `end_agent`) that
+remain available for finer control; the fleet-planning reference lists that sequence.
 
-The primitives above compose from these, which remain available for finer-grained
-control (e.g. claiming files separately from the issue, or checking `list_file_claims`
-before deciding whether to `force`):
+**Spawning workers?** They will not use these primitives unless told to. Every spawn
+prompt needs a `## Coordination (required)` section and a **Finish** section; the
+fleet-planning reference has the rules, the serialized files and the merge order.
 
-1. `register_agent` at session start, linking the issue you're implementing — save the returned `id`.
-2. `claim_files` before touching any file (check `list_file_claims` first; back off, don't `force`).
-3. `post_message` to `scope: "issue:<uuid>"` when you start/blocker/finish; `scope: "workspace"` for fleet-wide notices.
-4. `heartbeat_agent` only if more than ~2 minutes pass without a session-scoped call.
-5. `release_files` then `end_agent` when done.
+Commits run a fast pre-commit hook (type-check plus lint on changed files). Use
+`git commit --no-verify` for intermediate commits, then run the full list above before
+opening a PR. There is deliberately no pre-push hook; CI is the gate.
 
-See the [MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/) for each tool's exact input schema.
+## MCP tools
 
----
+The tool list is generated from source into the
+[MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/)
+(`apps/api/scripts/gen-mcp-catalog.ts`; CI fails if it is stale). Do not hand-maintain a
+copy anywhere.
 
-## Working in parallel (multi-agent)
-
-This repo is built out via parallel workers in separate git worktrees. To avoid conflicts:
-- Give each worker a **disjoint file set** (one domain = its 4-5 files above). Domains don't share files *except* read-only shared scaffolding (`services/types.ts`, `services/errors.ts`, `schemas/common.ts`, the adapters) and `routes/mcp.ts`/`index.ts`.
-- **Never let two parallel workers edit `routes/mcp.ts`, `index.ts`, or `test/mcp.test.ts`** — serialize those, or assign to exactly one worker.
-- Large refactors that touch shared files go in a **foundation phase first** (behavior-preserving), then fan out per-domain.
-
-### Spawn prompt requirement
-
-Workers will not use the coordination primitives unless explicitly told to. Every spawn prompt for a parallel worker **must** include a `## Coordination (required)` section stating the call sequence from "Fleet coordination protocol" above. Default to the two-call `start_work`/`finish_work` path and tell workers not to call `heartbeat_agent`, `register_agent` or `release_*` separately; use the five-call path only when a task needs finer-grained control.
-
-A full spawn prompt also needs a **Finish** section (what "done" means for the task,
-and what to report back) alongside the Coordination section above.
-
-### Fleet planning rules
-
-These are the constraints the fleet skill reads to plan batches. Keep them current when the codebase changes.
-
-**Serialized files** — only one worker at a time, ever:
-
-| File | Reason |
-|------|--------|
-| `apps/api/src/routes/mcp.ts` | MCP tool registry — all domains compose here |
-| `apps/api/src/index.ts` | Hono app root — route mounting |
-| `apps/api/src/test/mcp.test.ts` | Cross-cutting dispatch tests — domain tests go in `test/<domain>.test.ts` |
-
-**Domain → file ownership** — one agent per domain, no overlap. A domain owns the files named after it in
-`services/`, `schemas/`, `operations/`, `routes/`, `mcp/` and `test/` (see "File layout per domain").
-
-Frontend islands are **not** domain-locked in the same way, but two agents must never
-own the same island file. Assign each island to exactly one agent per batch.
-
-**CI commands:** see **Before opening a PR** under "Dev workflow".
-
-**Merge ordering rule:** if two agents both touch the same frontend file (e.g.
-`IssueList.tsx`), assign one as "primary" and one as "secondary". Primary merges
-first; secondary rebases onto main before merging. Document this in the spawn prompts
-and in the fleet manifest.
-
----
-
-## MCP tool catalog
-
-All tools are available via `POST /mcp/<workspaceId>` (JSON-RPC 2.0). Connect with:
-
-```bash
-claude mcp add --transport http projektor "https://<host>/mcp/<workspaceId>" \
-  --header "Authorization: Bearer pk_<token>"   # name + URL before --header (it's variadic)
-```
-
-**The full tool list is generated from source — do not hand-maintain a copy here.**
-See the **[MCP tool catalog](https://tajd.github.io/projektor/agents/tool-catalog/)**
-(generated into `apps/docs/src/content/docs/agents/tool-catalog.md` by
-`apps/api/scripts/gen-mcp-catalog.ts` from the MCP tool registry; CI fails if it is
-stale). The grouping there separates **Coordination** tools (the agent-native primitives
-used by the fleet protocol above) from **Project data** tools.
-
-**Tip:** `get_issue` accepts `ref: "PROJ-42"` (project key + number) — you don't need the UUID when you have the display key.
-
-**Load only the tools you need (PROJ-1056):** append `?domains=<slug>,…` to the MCP URL, for example `?domains=agents,issues,comments,issue-links,workflow` for an issue-working agent. It filters `tools/list` (the full list is ~93KB of definitions); slugs are shown next to each domain in the tool catalog. `get_tool_usage` reports per-tool calls and response bytes, so you can see what your agents actually spend.
+- `get_issue` accepts `ref: "PROJ-42"` (project key + number), so you rarely need the UUID.
+- **Load only the tools you need (PROJ-1056):** append `?domains=<slug>,…` to the MCP URL, for example `?domains=agents,issues,comments,issue-links,workflow` for an issue-working agent. It filters `tools/list`, whose full definitions run to over 100KB; slugs are shown next to each domain in the tool catalog. `get_tool_usage` reports per-tool calls and response bytes, so you can see what your agents actually spend.

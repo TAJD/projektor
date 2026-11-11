@@ -11,7 +11,26 @@ against an older release may rely on fields or errors that have since changed. T
 lists those changes, newest first. The REST API (`/api/*`) is not covered here: its rows
 keep the full shape.
 
-## Unreleased
+## v0.11.1
+
+- **Closing with a token is audited with or without `agentSessionId`.** A `done`
+  transition made with an API token or OAuth grant is treated as agent-initiated when it
+  closes an issue an agent has leased, or supplies a `completionReport`. Freeform
+  verification then sets `needsAudit:true`, where leaving out `agentSessionId` used to
+  avoid it. To stay unflagged, put a PR, CI run or commit link in
+  `completionReport.verification`.
+- **A bare commit SHA must mix digits and letters to count as evidence.** A plain number
+  or a hex-looking word in `verification` no longer clears the audit. A link is the
+  reliable form.
+- **`list_comments` items carry `agentSessionId`** when an agent session wrote the
+  comment (completion reports, and comments sent with `create_issue` or `update_issue`
+  alongside an `agentSessionId`). Other comments are unchanged.
+- **`mark_wiki_notifications_read` accepts its full 200 ids.** More than about 98 used to
+  fail on a deployed instance.
+- **`list_issues` `priorities` ignores unknown and repeated values.** A filter made up
+  only of unknown values still matches nothing.
+
+## v0.11.0
 
 - **`list_messages` returns `{items, next?}`** like the other paged lists, instead of
   `{items, nextCursor}`. Pass `next` back as `cursor`; the cursor value is unchanged. The

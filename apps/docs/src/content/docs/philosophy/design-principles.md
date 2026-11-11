@@ -102,9 +102,9 @@ not folklore.
 
 Agents pull work autonomously, and close it autonomously too: there's no
 pre-close block waiting on a human. What replaces the gate is
-a check on the way out. Every agent-closed issue must carry a completion
-report (what changed, how it was verified), and that verification text is
-classified: a resolvable link — a PR, a CI run, a commit — passes silently;
+a check on the way out. Every issue an agent has worked must carry a completion
+report (what changed, how it was verified) before it closes, and that verification
+text is classified: a resolvable link — a PR, a CI run, a commit — passes silently;
 plain prose like "manually tested" gets flagged `needsAudit: true` for a
 human to pull later. The discipline isn't blocking the transition; it's
 making sure a transition without evidence doesn't disappear into the

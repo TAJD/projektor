@@ -55,7 +55,7 @@ Each `projektor-<version>.tar.gz`, extracted into `./vendor`:
 | `vendor/wrangler.example.toml` | the config template (`compatibility_date` baked from source) |
 | `vendor/VERSION` | the version string |
 
-These four travel together at one version — a migration, the code that reads it,
+These travel together at one version — a migration, the code that reads it,
 and the frontend that calls it are always in lockstep.
 
 ## Deploy your own instance
@@ -95,7 +95,7 @@ scaffolds your `wrangler.toml` from the template:
 
 ```bash
 gh release list -R TAJD/projektor          # find a real tag - releases are all v0.x so far
-echo "v0.3.7" > projektor.version          # pin whichever tag you picked
+echo "vX.Y.Z" > projektor.version          # pin the tag you picked (sign-in needs v0.6.1 or later)
 ./deploy.sh                                 # creates wrangler.toml, then asks you to fill it
 ```
 
@@ -150,11 +150,14 @@ If `d1 list` errors, the token is missing the D1 permission.
 **On the Worker** (set once; persists across every deploy — *not* a GitHub secret):
 
 ```bash
-wrangler secret put JWT_SECRET     # any long random string, used to sign API tokens
+wrangler secret put JWT_SECRET     # any long random string, signs the sign-in consent step
 ```
 
-CI never manages runtime secrets — it only needs the deploy token. Rotating
-`JWT_SECRET` invalidates existing API tokens, so set it once and leave it.
+CI never manages runtime secrets — it only needs the deploy token. `JWT_SECRET` signs
+the short-lived (10 minute) token that carries a browser sign-in through the OAuth
+consent screen. Without it, sign-in fails with a message naming the missing secret;
+`pk_` API tokens keep working, because they are checked by hash and are not signed with
+it. Rotating it only interrupts sign-ins that are mid-consent at that moment.
 
 ### 6. Cloudflare Access carve-outs for OAuth
 
@@ -226,9 +229,21 @@ tag it deployed, so a `v1` added after `v2` is skipped and WorkspaceHub is never
 
 ### 7a. Rate limiter (required)
 
-Request rate limits (`RATE_LIMIT_*` vars) are counted in the `RateLimiter` Durable
-Object, one object per API token or client IP, held in memory — no D1 write per
-request (PROJ-867). It is SQLite-backed, so it works on the Workers Free plan.
+Request rate limits are counted in the `RateLimiter` Durable Object, one object per API
+token or client IP, held in memory — no D1 write per request (PROJ-867). It is
+SQLite-backed, so it works on the Workers Free plan. Without the binding, rate limiting
+is off and `/health` returns 503.
+
+The limits are plain `[vars]`, each a count per window:
+
+| Variable | Applies to | Default |
+|---|---|---|
+| `RATE_LIMIT_WINDOW_SECS` | the window length, in seconds, for every limit below | `60` |
+| `RATE_LIMIT_API_MAX` | requests carrying a bearer token (API and MCP), per token | `600` |
+| `RATE_LIMIT_AUTH_MAX` | requests with no bearer token (browser sessions, sign-in, OAuth), per client IP | `300` |
+| `RATE_LIMIT_AUTH_FAIL_MAX` | failed bearer-token authentications, per client IP | `50` |
+| `RATE_LIMIT_FEEDBACK_MAX` | public feedback submissions, per feedback source | `30` |
+| `RATE_LIMIT_FEEDBACK_IP_MAX` | public feedback submissions, per client IP | `100` |
 `wrangler.example.toml` already includes it:
 
 ```toml
@@ -335,8 +350,8 @@ BRAND_LOGO_URL = "/brand/logo.svg"
 |-----|--------|---------|
 | `BRAND_NAME` | Topbar text, page title, PWA/OG metadata | `Projektor` |
 | `BRAND_MARK` | The single-character topbar mark | first letter of `BRAND_NAME`, or `P` |
-| `BRAND_ACCENT` | Overrides `--accent` in both light and dark themes, and `theme-color` | `#4f46e5` light / `#6366f1` dark |
-| `BRAND_ON_ACCENT` | Text colour drawn on top of `--accent` — set this if your accent is pale, since it is not auto-derived | `#ffffff` |
+| `BRAND_ACCENT` | Overrides `--accent` in both light and dark themes, and `theme-color` | teal: `oklch(52% 0.11 205)` light / `oklch(73% 0.12 205)` dark |
+| `BRAND_ON_ACCENT` | Text colour drawn on top of `--accent`, in both themes. Set it whenever you set `BRAND_ACCENT`, since it is not auto-derived: buttons, badges, the skip link and the active wiki item all use it | `#fff` light / `oklch(18% 0.03 205)` (near-black) dark |
 | `BRAND_LOGO_URL` | Replaces the favicon and Apple touch icon | Projektor's own icons |
 
 `BRAND_LOGO_URL` must be same-origin (an absolute path served by your own instance) or
@@ -397,6 +412,14 @@ version, no manual step. To deploy by hand instead, bump `projektor.version`,
 commit, and push.
 
 ## Operating notes
+
+- **Other optional `[vars]`:**
+
+  | Variable | What it does | Default |
+  |---|---|---|
+  | `STORAGE_QUOTA_BYTES` | Attachment storage allowed per workspace | `1073741824` (1 GiB) |
+  | `FILE_CLAIM_TTL_SECONDS` | How long a file claim with no agent session is held before the next claimer can take it | `86400` (24 hours) |
+  | `WORKSPACE_DOMAIN_MAP` | JSON mapping an email domain to the workspace and role its non-admin users get, for example `{"example.com": {"slug": "example-team", "role": "member"}}` | unset: everyone uses the default workspace |
 
 - **Nightly cron:** the Worker's `scheduled` handler only runs if `wrangler.toml` has a
   trigger. `wrangler.example.toml` ships one; keep it if you write your own config:
