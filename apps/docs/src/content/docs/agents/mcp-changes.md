@@ -11,7 +11,7 @@ against an older release may rely on fields or errors that have since changed. T
 lists those changes, newest first. The REST API (`/api/*`) is not covered here: its rows
 keep the full shape.
 
-## Unreleased
+## v0.11.1
 
 - **Closing with a token is audited with or without `agentSessionId`.** A `done`
   transition made with an API token or OAuth grant is treated as agent-initiated when it
