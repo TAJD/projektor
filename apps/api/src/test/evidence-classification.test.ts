@@ -33,6 +33,12 @@ describe("isExternallyVerifiableEvidence (PROJ-375)", () => {
 		expect(isExternallyVerifiableEvidence("Verified at commit b6ca8a7f927")).toBe(true);
 	});
 
+	it("rejects plain numbers and hex-looking words as a commit SHA", () => {
+		expect(isExternallyVerifiableEvidence("ran 1000000 iterations, fine")).toBe(false);
+		expect(isExternallyVerifiableEvidence("timestamp 1783092705 checked")).toBe(false);
+		expect(isExternallyVerifiableEvidence("the old path was defaced")).toBe(false);
+	});
+
 	it("is not verifiable for a short non-hex word that happens to look like a token", () => {
 		expect(isExternallyVerifiableEvidence("looks good, ship it")).toBe(false);
 	});

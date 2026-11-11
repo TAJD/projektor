@@ -82,6 +82,7 @@ import m0078 from "../../../../packages/db/migrations/0078_issues_ws_project_sta
 import m0079 from "../../../../packages/db/migrations/0079_issue_labels.sql?raw";
 import m0080 from "../../../../packages/db/migrations/0080_issues_open_by_project_idx.sql?raw";
 import m0081 from "../../../../packages/db/migrations/0081_issues_open_by_workspace_idx.sql?raw";
+import m0082 from "../../../../packages/db/migrations/0082_comment_agent_session.sql?raw";
 
 export const MIGRATIONS = [
 	m0000,
@@ -166,4 +167,5 @@ export const MIGRATIONS = [
 	m0079,
 	m0080,
 	m0081,
+	m0082,
 ];

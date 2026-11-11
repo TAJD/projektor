@@ -1064,6 +1064,24 @@ describe("Issues API", () => {
 		expect(titles).toEqual(["High issue", "Urgent issue"]);
 	});
 
+	it("priorities ignores unknown and repeated values; only-unknown matches nothing", async () => {
+		await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "High issue", priority: "high" }),
+		});
+
+		// 150 values would exceed D1's 100-bound-parameter cap if bound as given.
+		const repeated = Array.from({ length: 150 }, (_, i) => (i % 2 ? "high" : `bogus${i}`));
+		const mixed = await listIssues(`http://localhost/api/issues?priorities=${repeated.join(",")}`);
+		expect((mixed.page.items as Array<{ title: string }>).map((i) => i.title)).toEqual([
+			"High issue",
+		]);
+
+		const unknown = await listIssues("http://localhost/api/issues?priorities=bogus,nope");
+		expect(unknown.page.items).toHaveLength(0);
+	});
+
 	it("filters by projectId", async () => {
 		const project2 = await seedProject(workspaceId);
 

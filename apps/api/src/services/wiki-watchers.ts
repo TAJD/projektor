@@ -6,7 +6,7 @@
 // duplicated in miniature here rather than imported, mirroring services/wiki-links.ts's
 // resolveSlugTargets precedent.
 import { drizzle, schema } from "@projektor/db";
-import { and, desc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, type SQL, sql } from "drizzle-orm";
 import { wikiPagePath } from "../lib/urls";
 import {
 	ListWikiChangesInputSchema,
@@ -434,16 +434,25 @@ export async function markWikiNotificationsRead(ctx: ServiceCtx, input: unknown)
 
 	const orm = drizzle(ctx.db, { schema });
 	const now = Math.floor(Date.now() / 1000);
-	const conditions = [
+	const mine = [
 		eq(schema.wikiNotifications.workspaceId, ctx.workspaceId),
 		eq(schema.wikiNotifications.userId, ctx.userId),
 	];
-	if (!all && ids) conditions.push(inArray(schema.wikiNotifications.id, ids));
+	const markRead = (idFilter?: SQL) =>
+		orm
+			.update(schema.wikiNotifications)
+			.set({ readAt: now })
+			.where(and(...mine, idFilter));
 
-	await orm
-		.update(schema.wikiNotifications)
-		.set({ readAt: now })
-		.where(and(...conditions));
+	if (all || !ids) {
+		await markRead();
+	} else {
+		// The schema allows up to 200 ids, over D1's 100-bound-parameter cap in one query.
+		await inChunks(ids, async (chunk) => {
+			await markRead(inArray(schema.wikiNotifications.id, chunk));
+			return [];
+		});
+	}
 
 	return { ok: true };
 }

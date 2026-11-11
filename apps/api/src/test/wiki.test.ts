@@ -5381,6 +5381,35 @@ describe("Wiki watchers + list_wiki_changes (PROJ-493)", () => {
 		expect((await notifications(watcher.token, "?unreadOnly=true")).length).toBe(0);
 	});
 
+	it("mark_wiki_notifications_read: an id list longer than one D1 chunk marks every id", async () => {
+		const page = await createPage("read-many", "Read Many", "content");
+		const watcher = await seedWatcher();
+		await req(`http://localhost/api/wiki/${page.slug}/watch`, {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({}),
+		});
+		for (const content of ["v2", "v3"]) {
+			await req(`http://localhost/api/wiki/${page.slug}`, {
+				method: "PUT",
+				headers: authHeaders(token, slug),
+				body: JSON.stringify({ content }),
+			});
+		}
+		const unread = await notifications(watcher.token, "?unreadOnly=true");
+		expect(unread.length).toBe(2);
+
+		// 200 ids (the schema cap) with the two real ones in the first and last chunk.
+		const padding = Array.from({ length: 198 }, () => crypto.randomUUID());
+		const res = await req("http://localhost/api/wiki/notifications/read", {
+			method: "POST",
+			headers: authHeaders(watcher.token, slug),
+			body: JSON.stringify({ ids: [unread[0].id, ...padding, unread[1].id] }),
+		});
+		expect(res.status).toBe(200);
+		expect((await notifications(watcher.token, "?unreadOnly=true")).length).toBe(0);
+	});
+
 	it("list_wiki_changes: since is exclusive, nextSince advances, default scope isn't watched-only", async () => {
 		const t0 = Math.floor(Date.now() / 1000) - 1;
 		const page = await createPage("delta-doc", "Delta Doc", "content");

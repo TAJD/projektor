@@ -182,6 +182,9 @@ export const issueComments = sqliteTable(
 		// write time ("human" = Cloudflare Access JWT, "agent" = Bearer API token — see
 		// middleware/auth.ts). NULL for comments written before this column existed.
 		authorKind: text("author_kind", { enum: ["human", "agent"] }),
+		// The agent session that wrote the comment, when the write carried one that exists
+		// in this workspace. No FK (migration 0082): it outlives the session's liveness.
+		agentSessionId: text("agent_session_id"),
 	},
 	(t) => ({
 		issueIdx: index("issue_comments_issue_idx").on(t.issueId),

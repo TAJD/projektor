@@ -141,6 +141,10 @@ const rows = await inChunks(issueIds, (chunk) =>
 ```
 
 Bounded arrays (enums like priority) are fine to bind directly. When in doubt, chunk.
+`in-array-chunking.node.test.ts` fails on a drizzle `inArray` in `services/` that is neither
+inside an `inChunks` callback nor a fixed array literal; a provably bounded one needs an entry
+with its reason in `apps/api/src/test/architecture/in-array-chunking-allowlist.ts`. The test
+does not see raw SQL `IN (...)`, so the rule still applies there by hand.
 
 ## Versioning
 
