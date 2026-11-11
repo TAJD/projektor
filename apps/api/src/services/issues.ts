@@ -3,7 +3,7 @@ import { and, desc, eq, gte, inArray, isNull, lte, notInArray, or, sql } from "d
 import type { z } from "zod";
 import { issuePath } from "../lib/urls";
 import { AddCommentSchema } from "../schemas/comments";
-import { BooleanQueryParam, IdSchema } from "../schemas/common";
+import { BooleanQueryParam, IdSchema, PriorityEnum } from "../schemas/common";
 import {
 	CreateIssueSchema,
 	CreateIssuesSchema,
@@ -258,11 +258,16 @@ function addStatusFilters(conditions: Condition[], filters: ListIssuesFilters): 
 			eq(schema.issues.priority, priority as "urgent" | "high" | "medium" | "low" | "none")
 		);
 	if (priorities) {
-		const vals = priorities
+		const requested = priorities
 			.split(",")
 			.map((s) => s.trim())
-			.filter(Boolean) as ("urgent" | "high" | "medium" | "low" | "none")[];
+			.filter(Boolean);
+		// Keep only known priorities, de-duplicated, so the bound-parameter count can't
+		// grow with the caller's string (D1 caps a query at 100). An unknown value never
+		// matched a row, so a filter made up only of unknown values still matches nothing.
+		const vals = PriorityEnum.options.filter((p) => requested.includes(p));
 		if (vals.length) conditions.push(inArray(schema.issues.priority, vals));
+		else if (requested.length) conditions.push(sql`0 = 1`);
 	}
 }
 
@@ -1210,7 +1215,11 @@ async function prepareCreateIssue(
 		}).setValues,
 	};
 	if (completionReport) stamps.completionReportAt = nowTs;
-	if (agentWork?.sessionLive && enteringDone) {
+	// Same rule as computeNeedsAudit: a live session, or an agent credential supplying a
+	// report (a new issue has never been leased).
+	const agentInitiated =
+		agentWork?.sessionLive || (isAgentCredential(ctx) && Boolean(completionReport));
+	if (agentInitiated && enteringDone) {
 		stamps.needsAudit =
 			!completionReport || !isExternallyVerifiableEvidence(completionReport.verification);
 	}
@@ -1269,6 +1278,7 @@ async function prepareCreateIssue(
 				issueId: id,
 				body: completionReportCommentBody(completionReport, false),
 				now: nowTs,
+				agentSessionId,
 			})
 		);
 	}
@@ -1279,6 +1289,7 @@ async function prepareCreateIssue(
 				issueId: id,
 				body: comment,
 				now: nowTs,
+				agentSessionId,
 			})
 		);
 	}
@@ -1569,13 +1580,31 @@ async function assertReviewGate(
 }
 
 // PROJ-375: audit-after-the-fact replacement for the removed done-gate block. Only
-// flags a call that's actually agent-initiated — `sessionLive` checks the session is
-// real and live, not just a self-declared string, so a caller can't get flagged/unflagged
-// by lease state. A caller can still dodge the flag by omitting agentSessionId
-// entirely — accepted limitation, see the module doc on evidence-classification.ts.
-async function computeNeedsAudit(data: UpdateIssueData, reads: StatusReads): Promise<boolean> {
-	if (!data.agentSessionId) return false;
-	if (!(await agentFlags(reads)).sessionLive) return false;
+// flags a call that's actually agent-initiated. Two things make it so:
+//   - a live agent session: `sessionLive` checks the session is real and live, not just
+//     a self-declared string; or
+//   - an agent credential (a token or OAuth grant, never a browser login) that either
+//     closes an issue an agent has worked or supplies a completion report. This is what
+//     stops a caller dodging the flag by leaving agentSessionId out: the credential type
+//     comes from the auth middleware, not from the caller.
+// A browser (human) close is never flagged, and neither is an agent credential closing a
+// never-leased issue with no report (duplicates, chores).
+function isAgentCredential(ctx: ServiceCtx): boolean {
+	return ctx.authKind === "agent";
+}
+
+async function computeNeedsAudit(
+	ctx: ServiceCtx,
+	data: UpdateIssueData,
+	reads: StatusReads
+): Promise<boolean> {
+	const agentCredential = isAgentCredential(ctx);
+	if (!data.agentSessionId && !agentCredential) return false;
+	const flags = await agentFlags(reads);
+	const agentInitiated =
+		(Boolean(data.agentSessionId) && flags.sessionLive) ||
+		(agentCredential && (flags.everLeased || Boolean(data.completionReport)));
+	if (!agentInitiated) return false;
 	if (!data.completionReport) return true;
 	return !isExternallyVerifiableEvidence(data.completionReport.verification);
 }
@@ -1648,7 +1677,7 @@ async function applyStatusFields(
 		statusCategory: resolved.category ?? "",
 	};
 	if (transition.enteringDone) {
-		setValues.needsAudit = await computeNeedsAudit(data, reads);
+		setValues.needsAudit = await computeNeedsAudit(ctx, data, reads);
 	}
 
 	Object.assign(
@@ -1822,9 +1851,9 @@ async function buildUpdateSetValues(
 		!reviewOrDoneTransition &&
 		!statusMoves &&
 		(isDoneState(existing.statusCategory, existing.status) || existing.statusIsReviewStep);
-	if (reviseCompletionReport && data.agentSessionId) {
+	if (reviseCompletionReport && (data.agentSessionId || isAgentCredential(ctx))) {
 		if (isDoneState(existing.statusCategory, existing.status)) {
-			setValues.needsAudit = await computeNeedsAudit(data, reads);
+			setValues.needsAudit = await computeNeedsAudit(ctx, data, reads);
 		}
 	}
 	if (data.completionReport && !statusMoves && !reviseCompletionReport && !recordCompletionReport) {
@@ -2036,7 +2065,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 	const statusReads: StatusReads = {
 		status: statusRead,
 		flags:
-			data.agentSessionId && data.completionReport
+			(data.agentSessionId || isAgentCredential(ctx)) && data.completionReport
 				? startedEarly(readFlags())
 				: statusRead &&
 					startedEarly(
@@ -2144,6 +2173,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 				issueId: id,
 				body: completionReportCommentBody(data.completionReport, reviseCompletionReport),
 				now: commentNow,
+				agentSessionId: data.agentSessionId,
 			})
 		);
 	}
@@ -2156,6 +2186,7 @@ export async function updateIssue(ctx: ServiceCtx, rawId: string, raw: unknown) 
 				issueId: id,
 				body: data.comment,
 				now: commentNow,
+				agentSessionId: data.agentSessionId,
 			})
 		);
 	}

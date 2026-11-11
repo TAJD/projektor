@@ -174,15 +174,18 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 		expect(await needsAuditOf(issue.id)).toBe(false);
 	});
 
-	it("does not flag a human-initiated done closure (no agentSessionId) even with freeform evidence", async () => {
-		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Human closes" });
+	// These calls authenticate with an API token, so the credential is an agent's
+	// (authKind "agent") whether or not the caller passes agentSessionId.
+
+	it("flags a token close of an agent-worked issue with freeform evidence and no agentSessionId", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "No session id" });
 		await seedAgentLease(workspaceId, issue.id, { live: false });
 
 		await patch(issue.id, { status: "done", completionReport: report });
-		expect(await needsAuditOf(issue.id)).toBe(false);
+		expect(await needsAuditOf(issue.id)).toBe(true);
 	});
 
-	it("does not flag when the agentSessionId given is not a live session (accepted limitation)", async () => {
+	it("flags a token close whose agentSessionId is not a live session", async () => {
 		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Stale session close" });
 		await seedAgentLease(workspaceId, issue.id, { live: false });
 
@@ -191,7 +194,56 @@ describe("Review gating (PROJ-254/287/289/292/293/375)", () => {
 			agentSessionId: crypto.randomUUID(), // never existed — can't resolve to a live session
 			completionReport: report,
 		});
+		expect(await needsAuditOf(issue.id)).toBe(true);
+	});
+
+	it("flags a token close of a never-leased issue when it supplies freeform evidence", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Never leased" });
+
+		await patch(issue.id, { status: "done", completionReport: report });
+		expect(await needsAuditOf(issue.id)).toBe(true);
+	});
+
+	it("does not flag a token close with no agentSessionId when the evidence is checkable", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Checkable" });
+		await seedAgentLease(workspaceId, issue.id, { live: false });
+
+		await patch(issue.id, {
+			status: "done",
+			completionReport: { summary: "Did the thing", verification: "Merged in commit b6ca8a7f927" },
+		});
 		expect(await needsAuditOf(issue.id)).toBe(false);
+	});
+
+	it("does not flag a token close of a never-leased issue with no report (chores, duplicates)", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Chore" });
+
+		expect((await patch(issue.id, { status: "done" })).status).toBe(200);
+		expect(await needsAuditOf(issue.id)).toBe(false);
+	});
+
+	it("records the agent session on the completion-report comment, and only a real one", async () => {
+		const issue = await seedIssue(workspaceId, projectId, userId, { title: "Traceable" });
+		const { agentSessionId } = await seedAgentLease(workspaceId, issue.id);
+		await patch(issue.id, { status: "done", agentSessionId, completionReport: report });
+
+		const other = await seedIssue(workspaceId, projectId, userId, { title: "Made-up session" });
+		await patch(other.id, {
+			status: "done",
+			agentSessionId: crypto.randomUUID(),
+			completionReport: report,
+		});
+
+		const sessionOf = async (id: string) => {
+			const res = await SELF.fetch(`http://localhost/api/issues/${id}/comments`, {
+				headers: authHeaders(token, slug),
+			});
+			return ((await res.json()) as Array<{ agent_session_id?: string }>).map(
+				(c) => c.agent_session_id
+			);
+		};
+		expect(await sessionOf(issue.id)).toEqual([agentSessionId]);
+		expect(await sessionOf(other.id)).toEqual([undefined]);
 	});
 
 	it("flags needsAudit even once the agent's lease has been released before closing", async () => {

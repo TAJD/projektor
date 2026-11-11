@@ -75,11 +75,19 @@ comment, so it's visible in the same timeline as everything else.
 
 ## Evidence audit
 
-Every agent-initiated \`done\` transition — one that passes \`agentSessionId\` for a
-live agent session — has its \`completionReport.verification\` text classified:
+Every agent-initiated \`done\` transition has its \`completionReport.verification\`
+text classified. A transition is agent-initiated when either:
+
+- it passes \`agentSessionId\` for a live agent session; or
+- the caller's credential is an API token or OAuth grant (not a browser login), and it
+  either closes an issue an agent has leased or supplies a completion report. Leaving
+  \`agentSessionId\` out does not avoid the audit.
+
+A browser close is never flagged, and neither is a token closing a never-leased issue
+with no report (a duplicate, a chore). The classification:
 
 - **Externally-verifiable** — contains a resolvable link or reference (a PR URL, a CI
-  run URL, a commit URL, or a bare commit SHA) that a human (or a future automated
+  run URL, a commit URL, or a bare commit SHA of 7+ hex characters mixing digits and letters) that a human (or a future automated
   check) could independently open and check. Not flagged.
 - **Freeform/unverifiable** — plain prose ("manually tested", "confirmed visually")
   with nothing external to check. Flagged \`needsAudit: true\` on the issue.

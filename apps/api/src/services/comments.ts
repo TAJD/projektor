@@ -14,6 +14,8 @@ import type { ServiceCtx } from "./types";
 
 interface CommentRow {
 	id: string;
+	/** Present only when an agent session wrote the comment. */
+	agent_session_id?: string;
 	body: string;
 	created_at: number;
 	updated_at: number;
@@ -61,6 +63,8 @@ export async function listComments(ctx: ServiceCtx, input: unknown): Promise<Com
 			author_name: schema.users.name,
 			// eslint-disable-next-line camelcase
 			author_email: schema.users.email,
+			// eslint-disable-next-line camelcase
+			agent_session_id: schema.issueComments.agentSessionId,
 		})
 		.from(schema.issueComments)
 		.innerJoin(schema.users, eq(schema.issueComments.authorId, schema.users.id))
@@ -69,7 +73,10 @@ export async function listComments(ctx: ServiceCtx, input: unknown): Promise<Com
 		// calls — MCP list_comments pages by offset (PROJ-1053).
 		.orderBy(asc(schema.issueComments.createdAt), sql`${schema.issueComments}.rowid`);
 
-	return rows as CommentRow[];
+	// Most comments have no session; leave the key out instead of sending a null per row.
+	return rows.map(({ agent_session_id, ...row }) =>
+		agent_session_id ? { ...row, agent_session_id } : row
+	);
 }
 
 export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id: string }> {
@@ -104,7 +111,16 @@ export async function addComment(ctx: ServiceCtx, input: unknown): Promise<{ id:
 export function buildAddCommentInsertStatement(
 	ctx: ServiceCtx,
 	orm: ReturnType<typeof drizzle>,
-	opts: Readonly<{ id: string; issueId: string; body: string; now: number }>
+	opts: Readonly<{
+		id: string;
+		issueId: string;
+		body: string;
+		now: number;
+		// The caller-supplied agent session, if any. It is stored only when it names a
+		// session in this workspace (checked in the INSERT itself, no extra round trip),
+		// so a made-up id is recorded as NULL.
+		agentSessionId?: string;
+	}>
 ) {
 	const query = orm
 		.insert(schema.issueComments)
@@ -118,6 +134,9 @@ export function buildAddCommentInsertStatement(
 			// PROJ-328: stamped from the authenticated principal type, not a caller-supplied
 			// field — see ServiceCtx.authKind.
 			authorKind: ctx.authKind ?? null,
+			agentSessionId: opts.agentSessionId
+				? sql`(SELECT id FROM agent_sessions WHERE id = ${opts.agentSessionId} AND workspace_id = ${ctx.workspaceId})`
+				: null,
 		})
 		.toSQL();
 	return ctx.db.prepare(query.sql).bind(...query.params);
