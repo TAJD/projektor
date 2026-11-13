@@ -1,6 +1,6 @@
 ---
 title: "MCP changes by release"
-description: "What changed in Projektor's MCP tools in each release: results shaped differently, new validation, new tools and parameters, and how to get the old behaviour back."
+description: "What changed in Projektor's MCP tools in each release: reshaped results, new validation, new tools and parameters, and how to get the old behaviour back."
 sidebar:
   order: 7
 ---
