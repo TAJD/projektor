@@ -98,6 +98,7 @@ export default defineConfig({
 						{ label: "Overview", link: "/" },
 						{ label: "Your first ten minutes", slug: "guides/getting-started" },
 						{ label: "Self-hosting", slug: "guides/self-hosting" },
+						{ label: "Where your data lives", slug: "guides/data-and-privacy" },
 						{ label: "Connect Claude", slug: "agents/mcp-connection" },
 						{ label: "Deploying & operating", slug: "guides/deploying" },
 						{ label: "Live demo", slug: "guides/live-demo" },
