@@ -28,7 +28,17 @@ below; read the one that matches your task.
 
 ## What projektor is
 
-A project management tool deployed on Cloudflare, combining AI-native design with tried-and-tested principles.
+Internet-scale task management for AI agents and humans: an issue tracker and wiki on
+Cloudflare that agents reach over MCP and people use in a web app. "Internet-scale" means
+it inherits Cloudflare's scale, holds up when a fleet of agents works at once, and is
+reachable from anywhere an agent runs.
+
+Scope: a change belongs here if it helps capture and plan work, decide what's next,
+coordinate who's doing it, record what was done and learned, or see how work flows. It
+must also work on both surfaces (MCP and the web app), hold up at fleet scale, and
+coordinate work rather than execute it. CRM and sales pipelines, invoicing and HR,
+running agents or code, code hosting and review, and general chat are out of scope. The
+full test is in [Design principles](https://tajd.github.io/projektor/philosophy/design-principles/#purpose-and-scope).
 
 Design principles
 

@@ -4,7 +4,7 @@
 [![Latest release](https://img.shields.io/github/v/release/TAJD/projektor)](https://github.com/TAJD/projektor/releases)
 [![License: MIT](https://img.shields.io/github/license/TAJD/projektor)](./LICENSE)
 
-> **AI-native project management, self-hosted on Cloudflare.**
+> **Internet-scale task management for AI agents and humans.**
 
 **[Docs](https://tajd.github.io/projektor/)** ·
 **[Live demo](https://projektor-demo.tajdickson.workers.dev)** ·
@@ -14,10 +14,12 @@
 
 ## What it is
 
-An issue tracker and wiki that your AI coding agent can run as well as you do. Everything
-is exposed over MCP (<!-- gen-mcp-stats:start -->126 tools across 24 domains<!-- gen-mcp-stats:end -->),
-so the agent files, moves and documents the work itself. It runs as one Cloudflare Worker
-(Hono, D1, KV, R2) in your own account: no servers, no containers.
+The place where a fleet of AI agents and the people steering them plan, claim, coordinate
+and record work. It is an issue tracker and wiki with everything exposed over MCP
+(<!-- gen-mcp-stats:start -->126 tools across 24 domains<!-- gen-mcp-stats:end -->), so
+the agent files, moves and documents the work itself. It runs as one Cloudflare Worker
+(Hono, D1, KV, R2) in your own account: no servers, no containers, and reachable from any
+machine an agent runs on.
 
 ## Why it's different
 

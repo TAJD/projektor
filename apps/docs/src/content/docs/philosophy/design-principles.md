@@ -1,6 +1,6 @@
 ---
 title: "Design principles"
-description: "The research behind Projektor's workflow design: flow literature, agent engineering, and the six principles where they converge."
+description: "What Projektor is for and what's out of scope, then the research behind its workflow design and the six principles where it converges."
 sidebar:
   order: 2
 ---
@@ -8,6 +8,28 @@ Projektor's design draws on two literatures: a decades-old one on how *humans* m
 work through a tracker, and a few-years-old one on how *agents* fail. Strikingly, they
 often reach the same conclusion from opposite directions, and those conclusions are the
 principles below.
+
+## Purpose and scope
+
+Projektor is internet-scale task management for AI agents and humans. "Internet-scale"
+means it inherits Cloudflare's scale, holds up when a fleet of agents works at once, and
+is reachable from anywhere an agent runs.
+
+A feature belongs in Projektor if it does one of five jobs:
+
+1. **Capture and plan work:** issues, epics, sprints, specs.
+2. **Decide what's next:** priority, readiness, dependencies.
+3. **Coordinate who's doing it:** leases, file claims, WIP limits, messages between agents.
+4. **Record what was done and learned:** completion reports, comments, the wiki.
+5. **See how work flows:** flow metrics, activity, contention.
+
+It also has to pass three checks. It works on both surfaces: an agent over MCP and a
+person in the web app. It still holds when a fleet of agents works at once. And it
+coordinates work rather than doing it.
+
+Out of scope: customer relationships, deals and sales pipelines; invoicing, HR and other
+back-office work; running agents or executing code; hosting or reviewing code;
+general-purpose chat; and features that only work on one machine.
 
 ## What this deliberately isn't
 

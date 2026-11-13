@@ -7,8 +7,9 @@ answer stands on its own and links to the page with the detail.
 
 ## What is Projektor?
 
-Projektor is an open-source, self-hosted, MCP-native issue tracker and wiki
-that runs in a single Cloudflare Worker. AI agents use it through an MCP
+Projektor is open-source, internet-scale task management for AI agents and
+humans: an MCP-native issue tracker and wiki that runs in a single Cloudflare
+Worker, so a fleet of agents can reach it from anywhere. AI agents use it through an MCP
 server that exposes everything a browser user can do, and humans use the same
 data through a web UI with list and board views, sprints and a wiki. It is MIT
 licensed and you deploy it to your own Cloudflare account.

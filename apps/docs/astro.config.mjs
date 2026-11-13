@@ -57,7 +57,7 @@ export default defineConfig({
 				},
 				{
 					tag: "meta",
-					attrs: { property: "og:image:alt", content: "Projektor: open-source MCP issue tracker and wiki on Cloudflare" },
+					attrs: { property: "og:image:alt", content: "Projektor: internet-scale task management for AI agents and humans" },
 				},
 				{
 					tag: "meta",
