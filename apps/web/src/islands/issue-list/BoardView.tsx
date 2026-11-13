@@ -1,4 +1,4 @@
-import { useState } from "preact/hooks";
+import { useLayoutEffect, useRef, useState } from "preact/hooks";
 import { issueUrl } from "../../utils/issue-url";
 import {
 	assigneeInitials,
@@ -126,11 +126,38 @@ export default function BoardView({
 }) {
 	const [dragIssueId, setDragIssueId] = useState<string | null>(null);
 	const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+	const rowRef = useRef<HTMLDivElement>(null);
+	const [rowHeight, setRowHeight] = useState<string | undefined>(undefined);
+
+	useLayoutEffect(() => {
+		const row = rowRef.current;
+		if (!row) return;
+		const fitToViewport = () => {
+			if (window.innerWidth < 640) {
+				setRowHeight(undefined);
+				return;
+			}
+			const top = Math.round(row.getBoundingClientRect().top + window.scrollY);
+			setRowHeight(`max(24rem, calc(100dvh - ${top}px - 2rem))`);
+		};
+		fitToViewport();
+		const observer = new ResizeObserver(fitToViewport);
+		observer.observe(document.body);
+		window.addEventListener("resize", fitToViewport);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("resize", fitToViewport);
+		};
+	}, []);
 
 	return (
 		<>
 			<BacklogNote count={getBacklogIssues(issues).length} onShowBacklog={onShowBacklog} />
-			<div class="flex gap-4 overflow-x-auto items-start max-sm:flex-col">
+			<div
+				ref={rowRef}
+				class="flex gap-4 overflow-x-auto max-sm:flex-col"
+				style={{ height: rowHeight }}
+			>
 				{BOARD_COLUMNS.map((col) => {
 					const colIssues = getBoardColumnIssues(issues, col.category);
 					const isOver = dragOverColumn === col.category;
@@ -140,7 +167,7 @@ export default function BoardView({
 						<section
 							key={col.category}
 							aria-label={`${col.label} column`}
-							class="shrink-0 w-[270px] max-sm:w-full"
+							class="flex-1 min-w-[240px] min-h-0 flex flex-col max-sm:flex-none max-sm:w-full max-sm:min-w-0"
 							onDragOver={(e: DragEvent) => {
 								e.preventDefault();
 								setDragOverColumn(col.category);
@@ -175,7 +202,7 @@ export default function BoardView({
 
 							<div
 								class={[
-									"rounded-b-md min-h-24 max-h-[62vh] overflow-y-auto p-2 flex flex-col gap-2",
+									"flex-1 rounded-b-md min-h-24 max-sm:max-h-[62vh] overflow-y-auto p-2 flex flex-col gap-2",
 									"transition-[border-color,background] duration-100",
 								].join(" ")}
 								style={{

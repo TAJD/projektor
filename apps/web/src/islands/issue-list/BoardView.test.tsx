@@ -4,7 +4,7 @@
 // on touch devices) by checking `window.innerWidth` directly in its drag
 // handlers. This exercises that branch with the shared viewport helper,
 // rather than relying on the `max-sm:` CSS classes alone.
-import { fireEvent, render, screen } from "@testing-library/preact";
+import { act, fireEvent, render, screen } from "@testing-library/preact";
 import { describe, expect, it, vi } from "vitest";
 import { MOBILE_WIDTH, setViewportWidth } from "../../test/viewport";
 import type { Issue, TaskStatus } from "../board-utils";
@@ -132,6 +132,24 @@ describe("BoardView — mobile status menu (PROJ-416)", () => {
 		const trigger = screen.getByRole("combobox", { name: "Change status for issue PROJ-1" });
 
 		expect(link.contains(trigger)).toBe(false);
+	});
+});
+
+describe("BoardView — fills the viewport (PROJ-1083)", () => {
+	const row = () =>
+		screen.getByRole("region", { name: "Todo column" }).parentElement as HTMLElement;
+
+	it("sizes the column row to the viewport below it at desktop widths", () => {
+		setViewportWidth(1440);
+		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={() => {}} />);
+		expect(row().style.height).toContain("100dvh");
+	});
+
+	it("leaves the stacked mobile layout at its natural height", () => {
+		setViewportWidth(1440);
+		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={() => {}} />);
+		act(() => setViewportWidth(MOBILE_WIDTH));
+		expect(row().style.height).toBe("");
 	});
 });
 
