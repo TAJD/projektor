@@ -3,12 +3,9 @@
 // scripts/gen-llms-txt.mjs, so changing the product sentence or the domain is a one-line
 // edit here.
 
-/**
- * Canonical one-sentence product description. PROVISIONAL until PROJ-937 records the
- * final wording; when it does, change this line and nothing else.
- */
+/** Canonical one-sentence product description (PROJ-937). */
 export const DESCRIPTION =
-	"Projektor is an open-source, self-hosted, MCP-native issue tracker and wiki that runs in a single Cloudflare Worker.";
+	"Projektor is open-source, internet-scale task management for AI agents and humans: a tracker and wiki on Cloudflare that any agent can reach over MCP.";
 
 /** Origin the site is served from (Astro `site`). PROJ-949: no custom domain, stays on GitHub Pages. */
 export const SITE_ORIGIN = "https://tajd.github.io";

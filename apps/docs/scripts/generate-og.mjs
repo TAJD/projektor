@@ -28,7 +28,7 @@ const svg = `
   <rect x="80" y="80" width="64" height="64" rx="14" fill="${ACCENT}"/>
   <text x="103" y="129" font-family="${MARK_FONT}" font-size="40" font-weight="700" fill="${ON_ACCENT}" text-anchor="middle">${MARK}</text>
   <text x="80" y="260" font-family="system-ui, sans-serif" font-size="72" font-weight="700" fill="#f3f5f9">Projektor</text>
-  <text x="80" y="330" font-family="system-ui, sans-serif" font-size="34" fill="${ACCENT_TINT}">AI-native project management on Cloudflare</text>
+  <text x="80" y="330" font-family="system-ui, sans-serif" font-size="30" fill="${ACCENT_TINT}">Internet-scale task management for AI agents and humans</text>
   <text x="80" y="420" font-family="system-ui, sans-serif" font-size="28" fill="#94a3b8">
     <tspan x="80" dy="0">A self-hosted issue tracker and wiki where every action</tspan>
     <tspan x="80" dy="40">a person takes in the browser, an agent takes over MCP.</tspan>

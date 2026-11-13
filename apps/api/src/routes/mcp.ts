@@ -71,7 +71,8 @@ function buildServerInstructions(workflowVersion: string | null): string {
 		? `Its current version is "${workflowVersion}" — pass that as get_workflow's \`ifVersion\` to skip re-reading an unchanged spec. `
 		: "";
 	return (
-		"Projektor is an MCP-native issue tracker + wiki. Every project-management action a browser user can do " +
+		"Projektor is internet-scale task management for AI agents and humans: an MCP-native issue tracker + wiki. " +
+			"Every project-management action a browser user can do " +
 		'is available here as a tool. Handy entry points: get_issue accepts a ref like "PROJ-42"; ' +
 		'get_prioritized_issues answers "what should I work on next?"; search_issues / search_wiki ground you in ' +
 		"existing context. Call get_workflow before claiming work — it returns the definition of ready, the state " +

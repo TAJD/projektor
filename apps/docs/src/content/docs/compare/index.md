@@ -5,8 +5,9 @@ sidebar:
   label: "Overview"
   order: 0
 ---
-Projektor is an open-source, self-hosted, MCP-native issue tracker and wiki
-that runs in a single Cloudflare Worker. These pages compare it with the tools
+Projektor is open-source, internet-scale task management for AI agents and
+humans: a self-hosted, MCP-native issue tracker and wiki that runs in a single
+Cloudflare Worker. These pages compare it with the tools
 people most often weigh it against when they give AI coding agents a task
 tracker. Each page starts with a short verdict, including where the other tool
 is the better choice, then uses the same comparison table so the pages can be

@@ -1,6 +1,7 @@
 # projektor
 
-> Wiki + Jira-style issue tracker. MCP-native: AI agents are the primary client.
+> Internet-scale task management for AI agents and humans: an issue tracker and wiki.
+> MCP-native: AI agents are the primary client.
 > Runs on Cloudflare Workers (Hono). No Node.js. No containers.
 
 ## Connect your agent

@@ -51,6 +51,8 @@ changed files.
   and I can point you at anything useful.
 - For a larger change or a new feature, please open an issue (or comment on an
   existing one) first, so we can agree the shape before you put time into it.
+  [Purpose and scope](https://tajd.github.io/projektor/philosophy/design-principles/#purpose-and-scope)
+  says what's in and out.
 
 ## How the code is organised
 
