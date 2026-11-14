@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { type AnyColumn, and, eq, or, type SQL, sql } from "drizzle-orm";
+import { type AnyColumn, and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ISSUE_REF_PATTERN } from "../schemas/common";
 import {
 	assertProjectAccess,
@@ -9,6 +9,7 @@ import {
 } from "./access";
 import { NotFoundError } from "./errors";
 import { resolveProjectIdParam } from "./projects";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 export { ISSUE_REF_PATTERN };
@@ -152,16 +153,12 @@ export async function resolveOptionalIssueId(
 	}
 }
 
-// Each (key, number) pair binds two parameters. D1 rejects a query binding more than 100,
-// and the same statement also binds the workspace id and the visibility predicate's user
-// id, so 40 pairs (80 params) leaves comfortable headroom.
-const REF_PAIRS_PER_QUERY = 40;
-
 /**
  * Resolve a batch (e.g. move_issues_to_sprint's `issueIds`, up to 500), preserving order.
- * UUIDs cost nothing. Refs are looked up as (project key, number) pairs, REF_PAIRS_PER_QUERY
- * to a query — so 500 refs cost at most 13 queries however many distinct project keys they
- * span — and only resolve to issues in projects the caller can see.
+ * UUIDs cost nothing. Refs are grouped by project key and looked up as `number IN (…)` per
+ * key (inChunks keeps each query under D1's parameter cap), and only resolve to issues in
+ * projects the caller can see. PROJ-1100: one query per key, not ORed (key, number) pairs:
+ * SQLite answered the OR form by walking every issue in the workspace or the project.
  *
  * Any ref that doesn't resolve fails the whole batch as "Issue not found: <the ref as the
  * caller wrote it>". Unknown and hidden refs are indistinguishable, and the error never
@@ -191,30 +188,22 @@ export async function resolveIssueIdsIfFound(
 
 	const orm = drizzle(ctx.db, { schema });
 	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
-	const all = [...pairs.values()];
+	const numbersByKey = new Map<string, number[]>();
+	for (const { key, number } of pairs.values()) {
+		const list = numbersByKey.get(key);
+		if (list) list.push(number);
+		else numbersByKey.set(key, [number]);
+	}
 	const resolved = new Map<string, string>();
-	for (let i = 0; i < all.length; i += REF_PAIRS_PER_QUERY) {
-		const chunk = all.slice(i, i + REF_PAIRS_PER_QUERY);
-		const rows = await orm
-			.select({
-				id: schema.issues.id,
-				key: schema.projects.key,
-				number: schema.issues.number,
-			})
-			.from(schema.issues)
-			.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-			.where(
-				and(
-					eq(schema.issues.workspaceId, ctx.workspaceId),
-					or(
-						...chunk.map((p) =>
-							and(eq(schema.projects.key, p.key), eq(schema.issues.number, p.number))
-						)
-					),
-					visible
-				)
-			);
-		for (const row of rows) resolved.set(`${row.key}-${row.number}`, row.id);
+	for (const [key, numbers] of numbersByKey) {
+		const rows = await inChunks(numbers, (chunk) =>
+			orm
+				.select({ id: schema.issues.id, number: schema.issues.number })
+				.from(schema.issues)
+				.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+				.where(and(...issueRefConditions(ctx, key, inArray(schema.issues.number, chunk)), visible))
+		);
+		for (const row of rows) resolved.set(`${key}-${row.number}`, row.id);
 	}
 
 	return params.map((p) => {

@@ -1,7 +1,15 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { createLinks } from "../services/issue-links";
 import { resolveIssueIdParam, resolveVisibleIssueIdParam } from "../services/issue-ref";
-import { createIssues, getIssue, getIssuesBatch, updateIssue } from "../services/issues";
+import {
+	createIssues,
+	getIssue,
+	getIssuesBatch,
+	searchIssues,
+	updateIssue,
+} from "../services/issues";
+import { createSprint, moveIssuesToSprint } from "../services/sprints";
 import type { ServiceCtx } from "../services/types";
 import { seedProjectFixture } from "./helpers";
 
@@ -72,6 +80,7 @@ function countRowsRead() {
 describe("PROJ-1099: issue lookups read a bounded number of rows", () => {
 	let ctx: ServiceCtx;
 	let parentId: string;
+	let projectId: string;
 	const ids: string[] = [];
 
 	beforeAll(async () => {
@@ -91,6 +100,11 @@ describe("PROJ-1099: issue lookups read a bounded number of rows", () => {
 			})) as { results: Array<{ id: string }> };
 			ids.push(...results.map((r) => r.id));
 		}
+		projectId = f.projectId;
+		await createIssues(ctx, {
+			projectId: f.projectId,
+			items: [{ title: "zebracorn rollout", labels: ["zebracorn-label"] }],
+		});
 		parentId = ids[0];
 		for (const child of ids.slice(1, 4)) {
 			await updateIssue(ctx, child, { parentId });
@@ -135,6 +149,44 @@ describe("PROJ-1099: issue lookups read a bounded number of rows", () => {
 		};
 		expect(items.map((i) => i.id)).toEqual(refs.map((_, i) => ids[(i + 1) * 25 - 1]));
 		// Ten point lookups plus the batched loads; a scan would be over ISSUES on its own.
+		expect(rowsRead()).toBeLessThan(ISSUES / 2);
+	});
+
+	// PROJ-1100: search_issues' exact-label query walked every issue by created_at and probed
+	// the label list for each. Its cost now follows the matches, like the FTS query's.
+	it("search_issues for a rare word reads a bounded number of rows", async () => {
+		const rowsRead = countRowsRead();
+		const hits = (await searchIssues(ctx, { query: "zebracorn" })) as unknown as Array<{
+			title: string;
+		}>;
+		expect(hits.map((h) => h.title)).toEqual(["zebracorn rollout"]);
+		expect(rowsRead()).toBeLessThan(POINT_LOOKUP_BUDGET);
+	});
+
+	it("search_issues by exact label reads a bounded number of rows", async () => {
+		const rowsRead = countRowsRead();
+		const hits = (await searchIssues(ctx, { query: "zebracorn-label" })) as unknown as Array<{
+			title: string;
+		}>;
+		expect(hits.map((h) => h.title)).toEqual(["zebracorn rollout"]);
+		expect(rowsRead()).toBeLessThan(POINT_LOOKUP_BUDGET);
+	});
+
+	it("create_issue_links for five refs reads a bounded number of rows", async () => {
+		const links = Array.from({ length: 5 }, (_, i) => ({
+			source: `PROJ-${200 + i}`,
+			target: `PROJ-${250 + i}`,
+			type: "relates_to",
+		}));
+		const rowsRead = countRowsRead();
+		await createLinks(ctx, { links });
+		expect(rowsRead()).toBeLessThan(ISSUES / 2);
+	});
+
+	it("move_issues_to_sprint with ten issues reads a bounded number of rows", async () => {
+		const sprint = (await createSprint(ctx, { projectId, name: "S1" })) as { id: string };
+		const rowsRead = countRowsRead();
+		await moveIssuesToSprint(ctx, { sprintId: sprint.id, issueIds: ids.slice(100, 110) });
 		expect(rowsRead()).toBeLessThan(ISSUES / 2);
 	});
 

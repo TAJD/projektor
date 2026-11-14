@@ -2884,6 +2884,10 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 	const ftsQuery = sanitizeFtsQuery(query);
 
 	const statements: D1PreparedStatement[] = [];
+	// PROJ-1100: `+i.workspace_id` (scoped, not index-driving) makes the label query start
+	// from idx_issue_labels_ws_label_lower and look issues up by id. Without it SQLite walks
+	// every issue in the workspace by created_at and probes the label list for each, about
+	// one row per issue on every search, even for a label nobody uses.
 	if (mayBeLabel) {
 		statements.push(
 			ctx.db
@@ -2891,7 +2895,7 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 					`SELECT ${columns}
 				 FROM issues i
 				 LEFT JOIN projects p ON p.id = i.project_id
-				 WHERE i.workspace_id = ?
+				 WHERE +i.workspace_id = ?
 				   AND i.id IN (SELECT issue_id FROM issue_labels WHERE workspace_id = ? AND lower(label) = lower(?))
 				   ${scope}
 				 ORDER BY i.created_at DESC, i.id DESC LIMIT ?`
