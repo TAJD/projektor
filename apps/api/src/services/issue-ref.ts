@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, or } from "drizzle-orm";
+import { type AnyColumn, and, eq, or, type SQL, sql } from "drizzle-orm";
 import { ISSUE_REF_PATTERN } from "../schemas/common";
 import {
 	assertProjectAccess,
@@ -12,6 +12,36 @@ import { resolveProjectIdParam } from "./projects";
 import type { ServiceCtx } from "./types";
 
 export { ISSUE_REF_PATTERN };
+
+/**
+ * PROJ-1099: a workspace-scope term that SQLite will not pick an index for.
+ *
+ * `issues` has several indexes that lead with `workspace_id`. With no `sqlite_stat1` rows
+ * (the migrations' `PRAGMA optimize` runs on empty tables), SQLite guesses an equality on
+ * any indexed column is selective, picks a `workspace_id` index, and walks every issue in
+ * the workspace: about two rows read per issue, on every ref lookup. The unary `+` keeps
+ * the filter (the security invariant: every query is scoped by workspace) but takes it
+ * out of index selection, so the planner uses the selective index the query was written
+ * for. `ANALYZE` is not a substitute: it fixes some plans and makes others worse.
+ */
+export function workspaceScopeNoIndex(column: AnyColumn | SQL, workspaceId: string): SQL {
+	return sql`+${column} = ${workspaceId}`;
+}
+
+/**
+ * PROJ-1099: WHERE terms for "issues numbered `number` in project `key`, in this
+ * workspace". Use with `issues INNER JOIN projects`. The project is found through
+ * `idx_projects_ws_key`, then the issue through the `(project_id, number)` unique index,
+ * whatever the table statistics say.
+ */
+export function issueRefConditions(ctx: ServiceCtx, key: string, numberTerm: SQL): SQL[] {
+	return [
+		eq(schema.projects.workspaceId, ctx.workspaceId),
+		eq(schema.projects.key, key),
+		numberTerm,
+		workspaceScopeNoIndex(schema.issues.workspaceId, ctx.workspaceId),
+	];
+}
 
 /**
  * Accept either identifier wherever an issue id is taken: a UUID passes straight through
@@ -46,13 +76,7 @@ export async function resolveIssueIdParam(
 		.select({ id: schema.issues.id })
 		.from(schema.issues)
 		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-		.where(
-			and(
-				eq(schema.projects.key, m[1]),
-				eq(schema.issues.number, parseInt(m[2], 10)),
-				eq(schema.issues.workspaceId, ctx.workspaceId)
-			)
-		)
+		.where(and(...issueRefConditions(ctx, m[1], eq(schema.issues.number, parseInt(m[2], 10)))))
 		.get();
 	if (!row) throw new NotFoundError(notFoundMessage);
 	return row.id;
@@ -96,13 +120,7 @@ export async function resolveVisibleIssueIdParam(
 		.select({ id: schema.issues.id, projectId: schema.issues.projectId })
 		.from(schema.issues)
 		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-		.where(
-			and(
-				eq(schema.projects.key, m[1]),
-				eq(schema.issues.number, parseInt(m[2], 10)),
-				eq(schema.issues.workspaceId, ctx.workspaceId)
-			)
-		)
+		.where(and(...issueRefConditions(ctx, m[1], eq(schema.issues.number, parseInt(m[2], 10)))))
 		.get();
 	if (!row) throw new NotFoundError(notFoundMessage);
 	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, row.projectId)) === null) {
