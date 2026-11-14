@@ -23,7 +23,12 @@ import {
 	toItemError,
 	ValidationError,
 } from "./errors";
-import { resolveIssueIdParam, resolveIssueIdsIfFound, resolveIssueIdsParam } from "./issue-ref";
+import {
+	resolveIssueIdParam,
+	resolveIssueIdsIfFound,
+	resolveIssueIdsParam,
+	workspaceScopeNoIndex,
+} from "./issue-ref";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -163,7 +168,7 @@ export async function prepareNewIssueLinks(
 		.where(
 			and(
 				inArray(schema.issues.id, [...new Set(targetIds)]),
-				eq(schema.issues.workspaceId, ctx.workspaceId)
+				workspaceScopeNoIndex(schema.issues.workspaceId, ctx.workspaceId)
 			)
 		);
 	const projectOf = new Map(rows.map((r) => [r.id, r.projectId]));
@@ -227,7 +232,10 @@ export async function createLinks(ctx: ServiceCtx, raw: unknown) {
 				.select({ id: schema.issues.id, projectId: schema.issues.projectId })
 				.from(schema.issues)
 				.where(
-					and(inArray(schema.issues.id, chunk), eq(schema.issues.workspaceId, ctx.workspaceId))
+					and(
+						inArray(schema.issues.id, chunk),
+						workspaceScopeNoIndex(schema.issues.workspaceId, ctx.workspaceId)
+					)
 				)
 	);
 	const projectOf = new Map(rows.map((r) => [r.id, r.projectId]));
@@ -347,7 +355,7 @@ export async function deleteLink(ctx: ServiceCtx, raw: unknown) {
 			.from(schema.issues)
 			.where(
 				and(
-					eq(schema.issues.workspaceId, ctx.workspaceId),
+					workspaceScopeNoIndex(schema.issues.workspaceId, ctx.workspaceId),
 					inArray(schema.issues.id, [existing.sourceIssueId, existing.targetIssueId])
 				)
 			);

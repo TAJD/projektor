@@ -1,5 +1,5 @@
 import { drizzle, schema } from "@projektor/db";
-import { and, eq, or } from "drizzle-orm";
+import { type AnyColumn, and, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ISSUE_REF_PATTERN } from "../schemas/common";
 import {
 	assertProjectAccess,
@@ -9,9 +9,40 @@ import {
 } from "./access";
 import { NotFoundError } from "./errors";
 import { resolveProjectIdParam } from "./projects";
+import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
 export { ISSUE_REF_PATTERN };
+
+/**
+ * PROJ-1099: a workspace-scope term that SQLite will not pick an index for.
+ *
+ * `issues` has several indexes that lead with `workspace_id`. With no `sqlite_stat1` rows
+ * (the migrations' `PRAGMA optimize` runs on empty tables), SQLite guesses an equality on
+ * any indexed column is selective, picks a `workspace_id` index, and walks every issue in
+ * the workspace: about two rows read per issue, on every ref lookup. The unary `+` keeps
+ * the filter (the security invariant: every query is scoped by workspace) but takes it
+ * out of index selection, so the planner uses the selective index the query was written
+ * for. `ANALYZE` is not a substitute: it fixes some plans and makes others worse.
+ */
+export function workspaceScopeNoIndex(column: AnyColumn | SQL, workspaceId: string): SQL {
+	return sql`+${column} = ${workspaceId}`;
+}
+
+/**
+ * PROJ-1099: WHERE terms for "issues numbered `number` in project `key`, in this
+ * workspace". Use with `issues INNER JOIN projects`. The project is found through
+ * `idx_projects_ws_key`, then the issue through the `(project_id, number)` unique index,
+ * whatever the table statistics say.
+ */
+export function issueRefConditions(ctx: ServiceCtx, key: string, numberTerm: SQL): SQL[] {
+	return [
+		eq(schema.projects.workspaceId, ctx.workspaceId),
+		eq(schema.projects.key, key),
+		numberTerm,
+		workspaceScopeNoIndex(schema.issues.workspaceId, ctx.workspaceId),
+	];
+}
 
 /**
  * Accept either identifier wherever an issue id is taken: a UUID passes straight through
@@ -46,13 +77,7 @@ export async function resolveIssueIdParam(
 		.select({ id: schema.issues.id })
 		.from(schema.issues)
 		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-		.where(
-			and(
-				eq(schema.projects.key, m[1]),
-				eq(schema.issues.number, parseInt(m[2], 10)),
-				eq(schema.issues.workspaceId, ctx.workspaceId)
-			)
-		)
+		.where(and(...issueRefConditions(ctx, m[1], eq(schema.issues.number, parseInt(m[2], 10)))))
 		.get();
 	if (!row) throw new NotFoundError(notFoundMessage);
 	return row.id;
@@ -96,13 +121,7 @@ export async function resolveVisibleIssueIdParam(
 		.select({ id: schema.issues.id, projectId: schema.issues.projectId })
 		.from(schema.issues)
 		.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-		.where(
-			and(
-				eq(schema.projects.key, m[1]),
-				eq(schema.issues.number, parseInt(m[2], 10)),
-				eq(schema.issues.workspaceId, ctx.workspaceId)
-			)
-		)
+		.where(and(...issueRefConditions(ctx, m[1], eq(schema.issues.number, parseInt(m[2], 10)))))
 		.get();
 	if (!row) throw new NotFoundError(notFoundMessage);
 	if (!isWorkspaceAdmin(ctx.role) && (await effectiveProjectRole(ctx, row.projectId)) === null) {
@@ -134,16 +153,12 @@ export async function resolveOptionalIssueId(
 	}
 }
 
-// Each (key, number) pair binds two parameters. D1 rejects a query binding more than 100,
-// and the same statement also binds the workspace id and the visibility predicate's user
-// id, so 40 pairs (80 params) leaves comfortable headroom.
-const REF_PAIRS_PER_QUERY = 40;
-
 /**
  * Resolve a batch (e.g. move_issues_to_sprint's `issueIds`, up to 500), preserving order.
- * UUIDs cost nothing. Refs are looked up as (project key, number) pairs, REF_PAIRS_PER_QUERY
- * to a query — so 500 refs cost at most 13 queries however many distinct project keys they
- * span — and only resolve to issues in projects the caller can see.
+ * UUIDs cost nothing. Refs are grouped by project key and looked up as `number IN (…)` per
+ * key (inChunks keeps each query under D1's parameter cap), and only resolve to issues in
+ * projects the caller can see. PROJ-1100: one query per key, not ORed (key, number) pairs:
+ * SQLite answered the OR form by walking every issue in the workspace or the project.
  *
  * Any ref that doesn't resolve fails the whole batch as "Issue not found: <the ref as the
  * caller wrote it>". Unknown and hidden refs are indistinguishable, and the error never
@@ -173,30 +188,22 @@ export async function resolveIssueIdsIfFound(
 
 	const orm = drizzle(ctx.db, { schema });
 	const visible = visibleProjectPredicate(ctx, schema.issues.projectId);
-	const all = [...pairs.values()];
+	const numbersByKey = new Map<string, number[]>();
+	for (const { key, number } of pairs.values()) {
+		const list = numbersByKey.get(key);
+		if (list) list.push(number);
+		else numbersByKey.set(key, [number]);
+	}
 	const resolved = new Map<string, string>();
-	for (let i = 0; i < all.length; i += REF_PAIRS_PER_QUERY) {
-		const chunk = all.slice(i, i + REF_PAIRS_PER_QUERY);
-		const rows = await orm
-			.select({
-				id: schema.issues.id,
-				key: schema.projects.key,
-				number: schema.issues.number,
-			})
-			.from(schema.issues)
-			.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-			.where(
-				and(
-					eq(schema.issues.workspaceId, ctx.workspaceId),
-					or(
-						...chunk.map((p) =>
-							and(eq(schema.projects.key, p.key), eq(schema.issues.number, p.number))
-						)
-					),
-					visible
-				)
-			);
-		for (const row of rows) resolved.set(`${row.key}-${row.number}`, row.id);
+	for (const [key, numbers] of numbersByKey) {
+		const rows = await inChunks(numbers, (chunk) =>
+			orm
+				.select({ id: schema.issues.id, number: schema.issues.number })
+				.from(schema.issues)
+				.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
+				.where(and(...issueRefConditions(ctx, key, inArray(schema.issues.number, chunk)), visible))
+		);
+		for (const row of rows) resolved.set(`${key}-${row.number}`, row.id);
 	}
 
 	return params.map((p) => {

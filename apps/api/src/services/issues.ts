@@ -54,7 +54,13 @@ import {
 	type ProjectRoleCache,
 	prepareNewIssueLinks,
 } from "./issue-links";
-import { ISSUE_REF_PATTERN, resolveIssueIdParam, resolveVisibleIssueIdParam } from "./issue-ref";
+import {
+	ISSUE_REF_PATTERN,
+	issueRefConditions,
+	resolveIssueIdParam,
+	resolveVisibleIssueIdParam,
+	workspaceScopeNoIndex,
+} from "./issue-ref";
 import { resolveProjectIdParam, resolveVisibleProjectIdParam } from "./projects";
 import { broadcastWorkspaceEvent } from "./realtime";
 import { inChunks, sanitizeFtsQuery } from "./sql";
@@ -628,9 +634,7 @@ async function fetchIssueByRef(
 			.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
 			.where(
 				and(
-					eq(schema.projects.key, m[1]),
-					eq(schema.issues.number, parseInt(m[2], 10)),
-					eq(schema.issues.workspaceId, ctx.workspaceId),
+					...issueRefConditions(ctx, m[1], eq(schema.issues.number, parseInt(m[2], 10))),
 					opts.visibleOnly ? visibleProjectPredicate(ctx, schema.issues.projectId) : undefined
 				)
 			)
@@ -699,7 +703,10 @@ export async function getIssue(ctx: ServiceCtx, raw: unknown) {
 		// PROJ-1029: only children in projects the caller can see are counted.
 		ctx.db
 			.prepare(
-				`SELECT c.status, COUNT(*) AS count FROM issues c
+				// PROJ-1099: pinned to issues_parent_idx. Without stats SQLite picks a
+				// workspace_id index; with stats it sees that most issues share parent_id NULL
+				// and scans. Either way it walked every issue in the workspace.
+				`SELECT c.status, COUNT(*) AS count FROM issues c INDEXED BY issues_parent_idx
 				WHERE c.parent_id = ? AND c.workspace_id = ? ${childVisible ? `AND ${childVisible.sql}` : ""}
 				GROUP BY c.status`
 			)
@@ -772,13 +779,7 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 				.select({ id: schema.issues.id, number: schema.issues.number })
 				.from(schema.issues)
 				.innerJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-				.where(
-					and(
-						eq(schema.projects.key, key),
-						eq(schema.issues.workspaceId, ctx.workspaceId),
-						inArray(schema.issues.number, chunk)
-					)
-				)
+				.where(and(...issueRefConditions(ctx, key, inArray(schema.issues.number, chunk))))
 		);
 		for (const row of rows) refToId.set(`${key}-${row.number}`, row.id);
 	}
@@ -798,7 +799,8 @@ export async function getIssuesBatch(ctx: ServiceCtx, raw: unknown) {
 		const rows = await inChunks(allIds, (chunk) => {
 			const conditions = [
 				inArray(schema.issues.id, chunk),
-				eq(schema.issues.workspaceId, ctx.workspaceId),
+				// PROJ-1099: scoped, but not index-driving (see workspaceScopeNoIndex).
+				workspaceScopeNoIndex(schema.issues.workspaceId, ctx.workspaceId),
 			];
 			if (visible) conditions.push(visible);
 			return orm
@@ -2882,6 +2884,10 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 	const ftsQuery = sanitizeFtsQuery(query);
 
 	const statements: D1PreparedStatement[] = [];
+	// PROJ-1100: `+i.workspace_id` (scoped, not index-driving) makes the label query start
+	// from idx_issue_labels_ws_label_lower and look issues up by id. Without it SQLite walks
+	// every issue in the workspace by created_at and probes the label list for each, about
+	// one row per issue on every search, even for a label nobody uses.
 	if (mayBeLabel) {
 		statements.push(
 			ctx.db
@@ -2889,7 +2895,7 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 					`SELECT ${columns}
 				 FROM issues i
 				 LEFT JOIN projects p ON p.id = i.project_id
-				 WHERE i.workspace_id = ?
+				 WHERE +i.workspace_id = ?
 				   AND i.id IN (SELECT issue_id FROM issue_labels WHERE workspace_id = ? AND lower(label) = lower(?))
 				   ${scope}
 				 ORDER BY i.created_at DESC, i.id DESC LIMIT ?`

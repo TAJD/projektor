@@ -10,7 +10,7 @@ import {
 } from "../schemas/sprints";
 import { canWriteProject, effectiveProjectRole, isWorkspaceAdmin } from "./access";
 import { ForbiddenError, NotFoundError, ValidationError } from "./errors";
-import { resolveIssueIdsParam } from "./issue-ref";
+import { resolveIssueIdsParam, workspaceScopeNoIndex } from "./issue-ref";
 import { inChunks } from "./sql";
 import type { ServiceCtx } from "./types";
 
@@ -232,7 +232,8 @@ export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 			.where(
 				and(
 					inArray(schema.issues.id, chunk),
-					eq(schema.issues.workspaceId, ctx.workspaceId),
+					// PROJ-1100: scoped, not index-driving (see workspaceScopeNoIndex).
+					workspaceScopeNoIndex(schema.issues.workspaceId, ctx.workspaceId),
 					ne(schema.issues.projectId, sprint.projectId)
 				)
 			)
@@ -248,7 +249,12 @@ export async function moveIssuesToSprint(ctx: ServiceCtx, raw: unknown) {
 		await orm
 			.update(schema.issues)
 			.set({ sprintId, updatedAt: now })
-			.where(and(inArray(schema.issues.id, chunk), eq(schema.issues.workspaceId, ctx.workspaceId)));
+			.where(
+				and(
+					inArray(schema.issues.id, chunk),
+					workspaceScopeNoIndex(schema.issues.workspaceId, ctx.workspaceId)
+				)
+			);
 		return [];
 	});
 
