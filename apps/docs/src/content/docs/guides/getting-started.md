@@ -32,8 +32,7 @@ custom connector and sign in; in Claude Code, run
 
 Behind Cloudflare Access, sign-in only works once the OAuth paths are exempt from Access:
 see [Deploying → Cloudflare Access carve-outs for OAuth](/projektor/guides/deploying/#6-cloudflare-access-carve-outs-for-oauth).
-An instance from the one-click deploy button can't use sign-in yet, so use a workspace API
-token there. Every option, including headless agents and what to do when it fails, is on
+Every option, including headless agents and what to do when it fails, is on
 one page: [Connect Claude](/projektor/agents/mcp-connection/).
 
 ## 4. Give it something to do

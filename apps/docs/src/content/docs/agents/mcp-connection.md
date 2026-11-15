@@ -304,16 +304,6 @@ Behind Cloudflare Access, `/.well-known/*` and `/oauth/token` must **bypass** Ac
 `/oauth/authorize` must stay **protected**: see
 [Deploying → Cloudflare Access carve-outs for OAuth](/projektor/guides/deploying/#6-cloudflare-access-carve-outs-for-oauth).
 
-:::note[One-click deploy: no sign-in yet]
-The [Deploy to Cloudflare button](https://github.com/TAJD/projektor-deploy-example) and
-its `deploy-auto.sh` currently pin Projektor **v0.3.7**, which predates sign-in (added in
-v0.6.1). Their generated config also has no
-`OAUTH_KV` binding, no `/.well-known/*` in `run_worker_first` and neither OAuth
-compatibility flag. On an instance deployed that way, connect with a workspace API token
-([§2](#2-claude-code)) until the deploy repo is updated, or follow the
-[manual deploy](/projektor/guides/deploying/), which ships the full config.
-:::
-
 ## Local development
 
 `GET /bootstrap` seeds a workspace, a user and a `pk_` token on a local stack (only when
