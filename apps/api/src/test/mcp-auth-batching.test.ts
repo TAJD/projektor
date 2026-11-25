@@ -217,10 +217,15 @@ describe("PROJ-1016: MCP auth path", () => {
 });
 
 describe("PROJ-1016: rate limiter runs alongside the auth lookup", () => {
+	const savedTimeout = env.RATE_LIMITER_TIMEOUT_MS;
 	beforeEach(async () => {
+		env.RATE_LIMITER_TIMEOUT_MS = "30000";
 		await resetRateLimits();
 	});
-	afterEach(() => vi.restoreAllMocks());
+	afterEach(() => {
+		env.RATE_LIMITER_TIMEOUT_MS = savedTimeout;
+		vi.restoreAllMocks();
+	});
 
 	it("an over-limit caller is 429 and its tool handler never runs", async () => {
 		const f = await seedFixture({ role: "member" });

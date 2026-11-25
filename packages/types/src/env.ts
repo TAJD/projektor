@@ -30,6 +30,7 @@ export interface Env {
 	RATE_LIMIT_AUTH_MAX?: string; // max requests per IP per window when no bearer token is present
 	RATE_LIMIT_API_MAX?: string; // max requests per token per window when a bearer token is present
 	RATE_LIMIT_WINDOW_SECS?: string; // window size in seconds (default 60)
+	RATE_LIMITER_TIMEOUT_MS?: string;
 	RATE_LIMIT_AUTH_FAIL_MAX?: string; // max failed bearer-token auths per IP per window before 429 (default 50)
 	// PROJ-378: public feedback-submit rate limiting. Dedicated from RATE_LIMIT_API_MAX/
 	// RATE_LIMIT_AUTH_MAX (which govern authenticated API/auth traffic) because the
