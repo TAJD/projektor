@@ -22,6 +22,7 @@ interface CommentRow {
 	author_id: string;
 	author_name: string;
 	author_email: string;
+	author_kind: "human" | "agent" | null;
 }
 
 // PROJ-311: a comment is reachable only if its issue's project is visible to the
@@ -63,6 +64,8 @@ export async function listComments(ctx: ServiceCtx, input: unknown): Promise<Com
 			author_name: schema.users.name,
 			// eslint-disable-next-line camelcase
 			author_email: schema.users.email,
+			// eslint-disable-next-line camelcase
+			author_kind: schema.issueComments.authorKind,
 			// eslint-disable-next-line camelcase
 			agent_session_id: schema.issueComments.agentSessionId,
 		})

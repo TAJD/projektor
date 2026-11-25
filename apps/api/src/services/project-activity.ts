@@ -11,6 +11,7 @@ export interface ActivityEvent {
 	entity_ref: string;
 	summary: string;
 	created_at: number;
+	author_kind?: "human" | "agent" | null;
 }
 
 async function fetchActivityRows(
@@ -31,7 +32,7 @@ async function fetchActivityRows(
 				`SELECT 'issue_created' AS type, i.created_by_id AS actor,
 				        'issue' AS entity_type, i.id AS entity_id,
 				        p.key || '-' || CAST(i.number AS TEXT) AS entity_ref,
-				        i.title AS summary, i.created_at
+				        i.title AS summary, i.created_at, i.author_kind
 				 FROM issues i JOIN projects p ON i.project_id = p.id
 				 WHERE i.project_id = ? AND i.workspace_id = ? ${sinceFilter("i.created_at")}
 				 ORDER BY i.created_at DESC LIMIT ?`
@@ -45,7 +46,7 @@ async function fetchActivityRows(
 				`SELECT 'issue_commented' AS type, ic.author_id AS actor,
 				        'issue' AS entity_type, i.id AS entity_id,
 				        p.key || '-' || CAST(i.number AS TEXT) AS entity_ref,
-				        'Comment on: ' || i.title AS summary, ic.created_at
+				        'Comment on: ' || i.title AS summary, ic.created_at, ic.author_kind
 				 FROM issue_comments ic
 				 JOIN issues i ON ic.issue_id = i.id
 				 JOIN projects p ON i.project_id = p.id
