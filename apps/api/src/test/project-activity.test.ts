@@ -4,7 +4,10 @@ import {
 	authHeaders,
 	type JsonRpcError,
 	type JsonRpcResult,
+	postCommentAsHuman,
 	seedComment,
+	seedFixture,
+	seedGroupGrant,
 	seedIssue,
 	seedProject,
 	seedProjectFixture,
@@ -486,5 +489,58 @@ describe("GET /api/projects/:id/activity (PROJ-245)", () => {
 			{ headers }
 		);
 		expect(repeated.status).toBe(400);
+	});
+});
+
+describe("PROJ-1110: issue_commented activity carries author_kind", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		({ token } = fixture);
+		({ slug, id: workspaceId } = fixture.workspace);
+		projectId = (await seedProject(workspaceId)).id;
+		await seedGroupGrant(workspaceId, fixture.user.id, projectId);
+		const issueId = (await seedIssue(workspaceId, projectId, fixture.user.id)).id;
+
+		await seedComment(issueId, fixture.user.id, "legacy");
+		const human = await postCommentAsHuman(issueId, fixture.user.email, slug, "human reply");
+		expect(human.status).toBe(201);
+		const agent = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ body: "agent note" }),
+		});
+		expect(agent.status).toBe(201);
+	});
+
+	function commentKinds(events: Array<Record<string, unknown>>) {
+		const commented = events.filter((e) => e.type === "issue_commented");
+		expect(commented).toHaveLength(3);
+		expect(commented.every((e) => "author_kind" in e)).toBe(true);
+		return commented.map((e) => e.author_kind).sort();
+	}
+
+	it("MCP list_project_activity", async () => {
+		const res = await mcpCall<McpContent>(
+			workspaceId,
+			"list_project_activity",
+			{ projectId },
+			authHeaders(token, slug)
+		);
+		const events = parseEvents(res) as Array<Record<string, unknown>>;
+		expect(commentKinds(events)).toEqual(["agent", "human", null]);
+	});
+
+	it("REST GET /api/projects/:id/activity", async () => {
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/activity`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		const events = (await res.json()) as Array<Record<string, unknown>>;
+		expect(commentKinds(events)).toEqual(["agent", "human", null]);
 	});
 });

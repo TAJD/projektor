@@ -116,7 +116,13 @@ describe("PROJ-1053: list_comments paging and slim rows", () => {
 			"comment 1",
 			"comment 2",
 		]);
-		expect(Object.keys(first.data.items[0]).sort()).toEqual(["author", "body", "created", "id"]);
+		expect(Object.keys(first.data.items[0]).sort()).toEqual([
+			"author",
+			"author_kind",
+			"body",
+			"created",
+			"id",
+		]);
 		expect(first.data.next).toBe("2");
 
 		const rest = await call("list_comments", { issueId, limit: 10, cursor: first.data.next });

@@ -4,6 +4,7 @@ import {
 	authHeaders,
 	type JsonRpcError,
 	type JsonRpcResult,
+	postCommentAsHuman,
 	seedComment,
 	seedFixture,
 	seedGroupGrant,
@@ -359,5 +360,67 @@ describe("PROJ-438 — comments accept an issue ref", () => {
 		});
 
 		expect(res.status).toBe(404);
+	});
+});
+
+describe("PROJ-1110: list_comments returns author_kind", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let issueId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		({ token } = fixture);
+		({ slug, id: workspaceId } = fixture.workspace);
+		const project = await seedProject(workspaceId);
+		await seedGroupGrant(workspaceId, fixture.user.id, project.id);
+		issueId = (await seedIssue(workspaceId, project.id, fixture.user.id)).id;
+
+		await seedComment(issueId, fixture.user.id, "legacy");
+		const human = await postCommentAsHuman(issueId, fixture.user.email, slug, "human reply");
+		expect(human.status).toBe(201);
+		const agent = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ body: "agent note" }),
+		});
+		expect(agent.status).toBe(201);
+	});
+
+	const expected = [
+		{ body: "legacy", author_kind: null },
+		{ body: "human reply", author_kind: "human" },
+		{ body: "agent note", author_kind: "agent" },
+	];
+
+	function pick(rows: Array<Record<string, unknown>>) {
+		expect(rows.every((r) => "author_kind" in r)).toBe(true);
+		return rows.map((r) => ({ body: r.body, author_kind: r.author_kind }));
+	}
+
+	it("REST GET returns author_kind on every row, null for a legacy row", async () => {
+		const res = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		expect(pick((await res.json()) as Array<Record<string, unknown>>)).toEqual(expected);
+	});
+
+	it.each([
+		["slim", {}],
+		["verbose", { verbose: true }],
+		["latest", { latest: 3 }],
+	])("MCP list_comments (%s) returns author_kind on every item", async (_label, extra) => {
+		const res = (await mcpCall<{ content: Array<{ text: string }> }>(
+			workspaceId,
+			"tools/call",
+			{ name: "list_comments", arguments: { issueId, ...extra } },
+			authHeaders(token, slug)
+		)) as JsonRpcResult<{ content: Array<{ text: string }> }>;
+		const { items } = JSON.parse(res.result.content[0].text) as {
+			items: Array<Record<string, unknown>>;
+		};
+		expect(pick(items)).toEqual(expected);
 	});
 });

@@ -18,6 +18,22 @@ Unless you pass `verbose:true`, a result omits:
 
 `labels` is a real array (`["mcp","api"]`), not a JSON string. A custom workflow status is kept as `status_key` when it differs from the legacy `status`. `verbose:true` returns the raw row.
 
+## `author_kind`: human or agent
+
+Issues and comments record how their author signed in when they wrote them:
+
+- `human`: a browser session (a Cloudflare Access sign-in).
+- `agent`: an API token or an OAuth grant. A grant is `agent` even when a person approved its consent screen: the grant, not the person, made the call.
+- `null`: written before Projektor recorded it. It is never guessed.
+
+A person and their agents often share one user, so `author_kind`, not the author's name, is how to tell a reply typed in the web app from an agent's comment.
+
+| Where | Shape |
+| --- | --- |
+| Issues in the `full` view (`get_issue`, `get_issues`) | `author_kind`, dropped when null |
+| `list_comments` (every view, and REST `GET /api/issues/:id/comments`) | `author_kind` on every comment, `null` included |
+| `list_project_activity` (and REST `GET /api/projects/:id/activity`) | `author_kind` on every `issue_commented` item, `null` included |
+
 ## `view=summary|full`
 
 List and get tools for issues take `view`. `list_issues` and `search_issues` default to

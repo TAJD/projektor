@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 
 export type JsonRpcResult<T = unknown> = { jsonrpc: "2.0"; id: unknown; result: T };
 export type JsonRpcError = {
@@ -159,6 +159,24 @@ export async function seedComment(
 		.bind(id, issueId, authorId, body, now, now, authorKind ?? null)
 		.run();
 	return { id, body };
+}
+
+export async function postCommentAsHuman(
+	issueId: string,
+	email: string,
+	slug: string,
+	body: string
+): Promise<Response> {
+	env.DEV_USER_EMAIL = email;
+	try {
+		return await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+			method: "POST",
+			headers: { "X-Workspace-Slug": slug, "Content-Type": "application/json" },
+			body: JSON.stringify({ body }),
+		});
+	} finally {
+		env.DEV_USER_EMAIL = "";
+	}
 }
 
 export async function seedTaskType(
