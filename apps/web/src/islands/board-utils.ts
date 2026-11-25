@@ -6,6 +6,7 @@ export interface TaskStatus {
 	color: string | null;
 	/** 1 for the status a new issue gets when none is picked (from GET /api/task-statuses). */
 	is_default?: number;
+	is_review_step?: number;
 }
 
 export interface CustomFieldValue {
@@ -116,10 +117,30 @@ export function getFirstStatusForCategory(
  * Returns issues to display in a board column.
  * Todo column excludes backlog issues (those belong to the Backlog view).
  */
-export function getBoardColumnIssues(issues: readonly Issue[], category: string): Issue[] {
+export function getBoardColumnIssues(
+	issues: readonly Issue[],
+	category: string,
+	statuses: readonly TaskStatus[]
+): Issue[] {
+	const reviewIds = new Set(statuses.filter((s) => s.is_review_step).map((s) => s.id));
+	const isReview = (i: Issue) =>
+		i.status_id !== null ? reviewIds.has(i.status_id) : i.status_key === "in_review";
+	if (category === "in_review") return issues.filter(isReview);
 	return issues.filter(
-		(i) => i.status_category === category && (category !== "todo" || i.status_key !== "backlog")
+		(i) =>
+			i.status_category === category &&
+			!isReview(i) &&
+			(category !== "todo" || i.status_key !== "backlog")
 	);
+}
+
+/** Returns the status a card dropped on a board column should move to. */
+export function getDropStatusForColumn(
+	statuses: readonly TaskStatus[],
+	category: string
+): TaskStatus | undefined {
+	if (category === "in_review") return statuses.find((s) => s.is_review_step);
+	return getFirstStatusForCategory(statuses, category);
 }
 
 /** Returns issues for the Backlog view: todo category with backlog key. */
