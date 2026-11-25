@@ -180,3 +180,30 @@ describe("BoardView — backlog note", () => {
 		expect(screen.queryByTestId("board-backlog-note")).toBeNull();
 	});
 });
+
+describe("BoardView — In Review column", () => {
+	const REVIEW_STATUSES: TaskStatus[] = [
+		...STATUSES,
+		{
+			id: "st-review",
+			key: "in_review",
+			name: "In Review",
+			category: "in_progress",
+			color: null,
+			is_review_step: 1,
+		},
+	];
+
+	it("drops onto the review-step status", () => {
+		const changeStatus = vi.fn();
+		setViewportWidth(1024);
+		render(
+			<BoardView issues={[TODO_ISSUE]} statuses={REVIEW_STATUSES} changeStatus={changeStatus} />
+		);
+
+		const dataTransfer = dragStartCard();
+		fireEvent.drop(screen.getByRole("region", { name: "In Review column" }), { dataTransfer });
+
+		expect(changeStatus).toHaveBeenCalledWith("i1", "st-review");
+	});
+});

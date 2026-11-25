@@ -6,6 +6,7 @@ import {
 	categoryColor,
 	getBacklogIssues,
 	getBoardColumnIssues,
+	getDropStatusForColumn,
 	getFirstStatusForCategory,
 	type Issue,
 	type TaskStatus,
@@ -166,25 +167,21 @@ describe("getBoardColumnIssues", () => {
 	];
 
 	it("returns non-backlog todo issues for the todo column", () => {
-		const result = getBoardColumnIssues(issues, "todo");
+		const result = getBoardColumnIssues(issues, "todo", []);
 		expect(result.map((i) => i.id)).toEqual(["i2"]);
 	});
 
 	it("excludes backlog issues from the todo column", () => {
-		const result = getBoardColumnIssues(issues, "todo");
+		const result = getBoardColumnIssues(issues, "todo", []);
 		expect(result.find((i) => i.status_key === "backlog")).toBeUndefined();
 	});
 
 	it("returns all in_progress issues", () => {
-		expect(getBoardColumnIssues(issues, "in_progress").map((i) => i.id)).toEqual(["i3"]);
-	});
-
-	it("returns all in_review issues", () => {
-		expect(getBoardColumnIssues(issues, "in_review").map((i) => i.id)).toEqual(["i4"]);
+		expect(getBoardColumnIssues(issues, "in_progress", []).map((i) => i.id)).toEqual(["i3"]);
 	});
 
 	it("returns all done issues", () => {
-		expect(getBoardColumnIssues(issues, "done").map((i) => i.id)).toEqual(["i5"]);
+		expect(getBoardColumnIssues(issues, "done", []).map((i) => i.id)).toEqual(["i5"]);
 	});
 
 	it("does NOT exclude backlog-keyed issues from non-todo columns", () => {
@@ -194,16 +191,84 @@ describe("getBoardColumnIssues", () => {
 			status_category: "in_progress",
 			status_key: "backlog",
 		});
-		expect(getBoardColumnIssues([oddIssue], "in_progress").map((i) => i.id)).toEqual(["odd"]);
+		expect(getBoardColumnIssues([oddIssue], "in_progress", []).map((i) => i.id)).toEqual(["odd"]);
 	});
 
 	it("returns empty array when no issues match the column category", () => {
 		// No issue in the fixture has category 'archived'
-		expect(getBoardColumnIssues(issues, "archived")).toEqual([]);
+		expect(getBoardColumnIssues(issues, "archived", [])).toEqual([]);
 	});
 
 	it("returns empty array for an empty input", () => {
-		expect(getBoardColumnIssues([], "todo")).toEqual([]);
+		expect(getBoardColumnIssues([], "todo", [])).toEqual([]);
+	});
+});
+
+const SEEDED_STATUSES: TaskStatus[] = [
+	makeStatus({ id: "s-backlog", key: "backlog", name: "Backlog", category: "todo" }),
+	makeStatus({ id: "s-todo", key: "todo", name: "Todo", category: "todo" }),
+	makeStatus({ id: "s-ip", key: "in_progress", name: "In Progress", category: "in_progress" }),
+	makeStatus({
+		id: "s-review",
+		key: "in_review",
+		name: "In Review",
+		category: "in_progress",
+		is_review_step: 1,
+	}),
+	makeStatus({ id: "s-done", key: "done", name: "Done", category: "done" }),
+	makeStatus({ id: "s-cancelled", key: "cancelled", name: "Cancelled", category: "cancelled" }),
+];
+
+describe("review-step board column", () => {
+	const inProgress = makeIssue({
+		id: "ip",
+		status_id: "s-ip",
+		status_key: "in_progress",
+		status_category: "in_progress",
+	});
+	const inReview = makeIssue({
+		id: "rev",
+		status_id: "s-review",
+		status_key: "in_review",
+		status_category: "in_progress",
+	});
+
+	it("puts an issue in the review-step status only in the In Review column", () => {
+		const issues = [inProgress, inReview];
+		const ids = (cat: string) =>
+			getBoardColumnIssues(issues, cat, SEEDED_STATUSES).map((i) => i.id);
+		expect(ids("in_review")).toEqual(["rev"]);
+		expect(ids("in_progress")).toEqual(["ip"]);
+		expect(ids("todo")).toEqual([]);
+		expect(ids("done")).toEqual([]);
+	});
+
+	it("falls back to the status key when the issue has no status_id", () => {
+		const legacy = makeIssue({
+			id: "legacy",
+			status_id: null,
+			status_key: "in_review",
+			status_category: "in_progress",
+		});
+		expect(getBoardColumnIssues([legacy], "in_review", SEEDED_STATUSES).map((i) => i.id)).toEqual([
+			"legacy",
+		]);
+		expect(getBoardColumnIssues([legacy], "in_progress", SEEDED_STATUSES)).toEqual([]);
+	});
+
+	it("leaves In Review empty when no status is a review step", () => {
+		const noReview = SEEDED_STATUSES.filter((s) => !s.is_review_step);
+		expect(getBoardColumnIssues([inProgress], "in_review", noReview)).toEqual([]);
+		expect(getDropStatusForColumn(noReview, "in_review")).toBeUndefined();
+	});
+
+	it("drops on In Review onto the first review-step status", () => {
+		expect(getDropStatusForColumn(SEEDED_STATUSES, "in_review")?.id).toBe("s-review");
+	});
+
+	it("drops on other columns onto the first status of that category", () => {
+		expect(getDropStatusForColumn(SEEDED_STATUSES, "in_progress")?.id).toBe("s-ip");
+		expect(getDropStatusForColumn(SEEDED_STATUSES, "todo")?.id).toBe("s-todo");
 	});
 });
 

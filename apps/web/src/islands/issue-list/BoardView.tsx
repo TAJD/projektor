@@ -6,7 +6,7 @@ import {
 	categoryColor,
 	getBacklogIssues,
 	getBoardColumnIssues,
-	getFirstStatusForCategory,
+	getDropStatusForColumn,
 	type Issue,
 	type TaskStatus,
 } from "../board-utils";
@@ -159,9 +159,9 @@ export default function BoardView({
 				style={{ height: rowHeight }}
 			>
 				{BOARD_COLUMNS.map((col) => {
-					const colIssues = getBoardColumnIssues(issues, col.category);
+					const colIssues = getBoardColumnIssues(issues, col.category, statuses);
 					const isOver = dragOverColumn === col.category;
-					const dropStatusId = getFirstStatusForCategory(statuses, col.category)?.id;
+					const dropStatusId = getDropStatusForColumn(statuses, col.category)?.id;
 
 					return (
 						<section
