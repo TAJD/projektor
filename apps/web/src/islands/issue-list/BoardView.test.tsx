@@ -207,3 +207,29 @@ describe("BoardView — In Review column", () => {
 		expect(changeStatus).toHaveBeenCalledWith("i1", "st-review");
 	});
 });
+
+describe("BoardView — Done column window (PROJ-1114)", () => {
+	it("notes the 14 day window and links to all done issues", () => {
+		const onShowDone = vi.fn();
+		render(
+			<BoardView
+				issues={[TODO_ISSUE]}
+				statuses={STATUSES}
+				changeStatus={vi.fn()}
+				onShowDone={onShowDone}
+			/>
+		);
+
+		const done = screen.getByRole("region", { name: "Done column" });
+		expect(done.textContent).toContain("Last 14 days");
+		fireEvent.click(screen.getByRole("button", { name: "View all done" }));
+		expect(onShowDone).toHaveBeenCalledTimes(1);
+	});
+
+	it("shows the note without a link when no handler is given", () => {
+		render(<BoardView issues={[TODO_ISSUE]} statuses={STATUSES} changeStatus={vi.fn()} />);
+
+		expect(screen.getByTestId("board-done-note").textContent).toContain("Last 14 days");
+		expect(screen.queryByRole("button", { name: "View all done" })).toBeNull();
+	});
+});
