@@ -4,7 +4,10 @@ import {
 	authHeaders,
 	type JsonRpcError,
 	type JsonRpcResult,
+	postAsHuman,
 	seedComment,
+	seedFixture,
+	seedGroupGrant,
 	seedIssue,
 	seedProject,
 	seedProjectFixture,
@@ -486,5 +489,76 @@ describe("GET /api/projects/:id/activity (PROJ-245)", () => {
 			{ headers }
 		);
 		expect(repeated.status).toBe(400);
+	});
+});
+
+describe("PROJ-1110: issue_created and issue_commented activity carry author_kind", () => {
+	let token: string;
+	let slug: string;
+	let workspaceId: string;
+	let projectId: string;
+
+	beforeEach(async () => {
+		const fixture = await seedFixture();
+		({ token } = fixture);
+		({ slug, id: workspaceId } = fixture.workspace);
+		projectId = (await seedProject(workspaceId)).id;
+		await seedGroupGrant(workspaceId, fixture.user.id, projectId);
+		const issueId = (await seedIssue(workspaceId, projectId, fixture.user.id)).id;
+		const email = fixture.user.email;
+
+		const humanIssue = await postAsHuman("/api/issues", email, slug, {
+			projectId,
+			title: "human issue",
+		});
+		expect(humanIssue.status).toBe(201);
+		const agentIssue = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "agent issue" }),
+		});
+		expect(agentIssue.status).toBe(201);
+
+		await seedComment(issueId, fixture.user.id, "legacy");
+		const human = await postAsHuman(`/api/issues/${issueId}/comments`, email, slug, {
+			body: "human reply",
+		});
+		expect(human.status).toBe(201);
+		const agent = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ body: "agent note" }),
+		});
+		expect(agent.status).toBe(201);
+	});
+
+	function kindsOf(events: Array<Record<string, unknown>>, type: string) {
+		const matching = events.filter((e) => e.type === type);
+		expect(matching).toHaveLength(3);
+		expect(matching.every((e) => "author_kind" in e)).toBe(true);
+		return matching.map((e) => e.author_kind).sort();
+	}
+
+	function assertKinds(events: Array<Record<string, unknown>>) {
+		expect(kindsOf(events, "issue_created")).toEqual(["agent", "human", null]);
+		expect(kindsOf(events, "issue_commented")).toEqual(["agent", "human", null]);
+	}
+
+	it("MCP list_project_activity", async () => {
+		const res = await mcpCall<McpContent>(
+			workspaceId,
+			"list_project_activity",
+			{ projectId },
+			authHeaders(token, slug)
+		);
+		assertKinds(parseEvents(res) as Array<Record<string, unknown>>);
+	});
+
+	it("REST GET /api/projects/:id/activity", async () => {
+		const res = await SELF.fetch(`http://localhost/api/projects/${projectId}/activity`, {
+			headers: authHeaders(token, slug),
+		});
+		expect(res.status).toBe(200);
+		assertKinds((await res.json()) as Array<Record<string, unknown>>);
 	});
 });

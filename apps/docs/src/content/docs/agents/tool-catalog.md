@@ -110,7 +110,7 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `list_project_activity` | List recent activity events for a project across issues, comments, wiki pages, and sprints. Returns `{items}` ordered most-recent first; a result over ~20,000 chars is cut to fit with `truncated:true` (lower `limit` or raise `since`). See /projektor/agents/response-conventions/. | read-only |
+| `list_project_activity` | List recent activity events for a project across issues, comments, wiki pages, and sprints. Returns `{items}` ordered most-recent first; `issue_created` and `issue_commented` items carry the author's `author_kind` (human, agent, or null). A result over ~20,000 chars is cut to fit with `truncated:true` (lower `limit` or raise `since`). See /projektor/agents/response-conventions/. | read-only |
 
 ### Issues (`issues`)
 
@@ -139,7 +139,7 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `list_comments` | List comments on an issue (UUID or ref like PROJ-42), oldest first. Paged: `limit` (default 50) with `next`/`total`; `latest:N` returns just the newest N. Each item is {id, author, created, body, edited?, agentSessionId?} (agentSessionId: the agent session that wrote it, when one did); bodyChars:N previews long bodies; verbose:true returns the raw rows. See /projektor/agents/response-conventions/. | read-only |
+| `list_comments` | List comments on an issue (UUID or ref like PROJ-42), oldest first. Paged: `limit` (default 50) with `next`/`total`; `latest:N` returns just the newest N. Each item is {id, author, author_kind, created, body, edited?, agentSessionId?}. author_kind is "human" (a browser session), "agent" (an API token or OAuth grant) or null (written before it was recorded); agentSessionId is the agent session that wrote it, when one did. bodyChars:N previews long bodies; verbose:true returns the raw rows. See /projektor/agents/response-conventions/. | read-only |
 | `add_comment` | Add a comment to an issue (UUID or ref like PROJ-42) | write |
 | `update_comment` | Update the body of a comment (author only) | write |
 | `delete_comment` | Delete a comment (author, admin, or owner) | destructive |

@@ -38,9 +38,11 @@ export const commentOperations = [
 		summary:
 			"List comments on an issue (UUID or ref like PROJ-42), oldest first. Paged: `limit` " +
 			"(default 50) with `next`/`total`; `latest:N` returns just the newest N. Each item is " +
-			"{id, author, created, body, edited?, agentSessionId?} (agentSessionId: the agent " +
-			"session that wrote it, when one did); bodyChars:N previews long bodies; verbose:true " +
-			"returns the raw rows. See /projektor/agents/response-conventions/.",
+			"{id, author, author_kind, created, body, edited?, agentSessionId?}. author_kind is " +
+			'"human" (a browser session), "agent" (an API token or OAuth grant) or null (written ' +
+			"before it was recorded); agentSessionId is the agent session that wrote it, when one " +
+			"did. bodyChars:N previews long bodies; verbose:true returns the raw rows. See " +
+			"/projektor/agents/response-conventions/.",
 		input: ListCommentsSchema.extend({
 			limit: z
 				.number()
@@ -85,6 +87,7 @@ export const commentOperations = [
 			const items = rows.slice(start, end).map((r) => ({
 				id: r.id,
 				author: r.author_name,
+				author_kind: r.author_kind,
 				created: r.created_at,
 				...(bodyChars === undefined ? { body: r.body } : bodyPreview(r.body, bodyChars)),
 				...(r.updated_at !== r.created_at ? { edited: true } : {}),
