@@ -404,7 +404,8 @@ export async function listIssues(
 			? [...conditions, sql`${schema.issues.createdAt} < ${cursor.createdAt}`]
 			: [
 					...conditions,
-					sql`(${schema.issues.createdAt} < ${cursor.createdAt} OR (${schema.issues.createdAt} = ${cursor.createdAt} AND ${schema.issues.id} < ${cursor.id}))`,
+					sql`${schema.issues.createdAt} <= ${cursor.createdAt}`,
+					sql`(${schema.issues.createdAt} < ${cursor.createdAt} OR ${schema.issues.id} < ${cursor.id})`,
 				];
 
 	// PROJ-857: the filtered total only changes the header count, which the first page
