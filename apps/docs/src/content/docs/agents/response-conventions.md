@@ -41,6 +41,13 @@ is `{type, ref, title, status?}`; `list_issue_links` returns link ids.
 issue has no value for it. `labels` is an array here too (`[]` when the issue has none).
 Unknown names are a validation error.
 
+Naming `body` in `fields` loads the body on `get_issues`, `list_issues` and `search_issues`
+(`get_issue` always returns it). On those three tools each body is cut to 1,000 characters
+with `bodyTruncated:true` when longer; `includeBody:true` returns whole bodies, and `get_issue`
+returns up to 16,000. A `null` or empty `body` means the issue has no body, never that it was
+not loaded. `get_issues` items carry no `rollup`, `links` or `assignee_name`, so naming one of
+those in `fields` is a validation error there; use `get_issue` for them.
+
 ## Lists: `{items, next}`
 
 Lists that can grow large return `{items: [...], next?: "..."}`. When `next` is present,

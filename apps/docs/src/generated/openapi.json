@@ -2445,7 +2445,7 @@
 					"issues"
 				],
 				"summary": "Fetch up to 50 issues in one call, by ref (e.g",
-				"description": "Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than repeated get_issue calls for triage. Items carry customFields but no rollup/links/assignee_name, and omit `body` unless includeBody:true. Returned in the order refs/ids were given; `missing` lists (once each) any requested ref/id that didn't resolve or isn't visible to you. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/.\n\nConstraints: Provide refs or ids; At most 50 issues per call (refs + ids combined).",
+				"description": "Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than repeated get_issue calls for triage. Items carry customFields but no rollup/links/assignee_name (naming one of those in `fields` is a validation error), and omit `body` unless includeBody:true or `fields` names `body`; with `fields:[\"body\"]` each body is cut to 1000 chars with `bodyTruncated:true` (includeBody:true returns whole bodies). A null `body` means the issue has no body, never \"not loaded\". Returned in the order refs/ids were given; `missing` lists (once each) any requested ref/id that didn't resolve or isn't visible to you. Omitted keys are null/empty/false; pass verbose:true for the raw shape. See /projektor/agents/response-conventions/.\n\nConstraints: Provide refs or ids; At most 50 issues per call (refs + ids combined).",
 				"parameters": [
 					{
 						"$ref": "#/components/parameters/WorkspaceSlug"
@@ -3138,6 +3138,33 @@
 							"type": "integer",
 							"minimum": 1,
 							"maximum": 50
+						}
+					},
+					{
+						"name": "includeBody",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"anyOf": [
+								{
+									"type": "boolean"
+								},
+								{
+									"type": "string",
+									"enum": [
+										"1",
+										"true"
+									]
+								},
+								{
+									"type": "string",
+									"enum": [
+										"0",
+										"false",
+										""
+									]
+								}
+							]
 						}
 					},
 					{

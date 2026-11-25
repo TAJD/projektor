@@ -3064,6 +3064,97 @@ describe("PROJ-931 — compact MCP responses", () => {
 		expect(b.items[0].body).toBe("hello");
 	});
 
+	it("PROJ-1108: get_issues fields:[body] returns the same body as get_issue", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Body parity" });
+		await env.DB.prepare("UPDATE issues SET body = ? WHERE id = ?").bind("real body", a.id).run();
+		const batch = await mcpCall({
+			name: "get_issues",
+			arguments: { ids: [a.id], fields: ["ref", "title", "body", "status"] },
+		});
+		const items = (
+			JSON.parse(batch.result!.content[0].text) as { items: Record<string, unknown>[] }
+		).items;
+		const single = await mcpCall({ name: "get_issue", arguments: { id: a.id } });
+		const one = JSON.parse(single.result!.content[0].text) as Record<string, unknown>;
+		expect(items[0].body).toBe("real body");
+		expect(items[0].body).toBe(one.body);
+		expect(items[0]).not.toHaveProperty("bodyTruncated");
+	});
+
+	it("PROJ-1108: get_issues fields:[body] is null for an issue with no body", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "No body" });
+		const res = await mcpCall({
+			name: "get_issues",
+			arguments: { ids: [a.id], fields: ["body"] },
+		});
+		const items = (JSON.parse(res.result!.content[0].text) as { items: Record<string, unknown>[] })
+			.items;
+		expect(items[0].body ?? "").toBe("");
+		expect(items[0]).not.toHaveProperty("bodyTruncated");
+	});
+
+	it("PROJ-1108: get_issues fields:[body] cuts a long body with bodyTruncated, never null", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Long body" });
+		const long = "x".repeat(5000);
+		await env.DB.prepare("UPDATE issues SET body = ? WHERE id = ?").bind(long, a.id).run();
+		const res = await mcpCall({
+			name: "get_issues",
+			arguments: { ids: [a.id], fields: ["body", "bodyTruncated"] },
+		});
+		const items = (JSON.parse(res.result!.content[0].text) as { items: Record<string, unknown>[] })
+			.items;
+		expect(typeof items[0].body).toBe("string");
+		expect((items[0].body as string).length).toBeGreaterThan(0);
+		expect((items[0].body as string).length).toBeLessThan(long.length);
+		expect(items[0].bodyTruncated).toBe(true);
+
+		const whole = await mcpCall({
+			name: "get_issues",
+			arguments: { ids: [a.id], includeBody: true },
+		});
+		const w = (JSON.parse(whole.result!.content[0].text) as { items: Record<string, unknown>[] })
+			.items;
+		expect(w[0].body).toBe(long);
+	});
+
+	it("PROJ-1108: get_issues rejects fields it can never return", async () => {
+		const a = await seedIssue(workspaceId, projectId, userId, { title: "Unreturnable" });
+		for (const field of ["rollup", "links", "assignee_name"]) {
+			const res = await mcpCall({
+				name: "get_issues",
+				arguments: { ids: [a.id], fields: ["title", field] },
+			});
+			const err = toolError(res);
+			expect(err?.code).toBe("validation");
+			expect(JSON.stringify(err)).toContain(field);
+		}
+	});
+
+	it("PROJ-1108: list_issues and search_issues fields:[body] return the body", async () => {
+		const created = await mcpCall({
+			name: "create_issue",
+			arguments: { projectId, title: "Finch note", body: "zebrafinch real body" },
+		});
+		const a = JSON.parse(created.result!.content[0].text) as { id: string };
+		const list = await mcpCall({
+			name: "list_issues",
+			arguments: { projectId, fields: ["id", "body"] },
+		});
+		const listed = (
+			JSON.parse(list.result!.content[0].text) as { items: Record<string, unknown>[] }
+		).items.find((i) => i.id === a.id);
+		expect(listed?.body).toBe("zebrafinch real body");
+
+		const search = await mcpCall({
+			name: "search_issues",
+			arguments: { query: "zebrafinch", fields: ["id", "body"] },
+		});
+		const found = (
+			JSON.parse(search.result!.content[0].text) as { items: Record<string, unknown>[] }
+		).items.find((i) => i.id === a.id);
+		expect(found?.body).toBe("zebrafinch real body");
+	});
+
 	it("fields keeps false as false and rejects unknown field names", async () => {
 		const { id } = await seedIssue(workspaceId, projectId, userId, { title: "Audit flag" });
 		const ok = await mcpCall({ name: "get_issue", arguments: { id, fields: ["needs_audit"] } });

@@ -2874,7 +2874,9 @@ export async function searchIssues(ctx: ServiceCtx, raw: unknown) {
 	scopeParams.push(...labelScope.params);
 
 	const columns = `i.id, i.number, i.title, i.status, i.priority,
-	              p.id as project_id, p.key as project_key, p.name as project_name`;
+	              p.id as project_id, p.key as project_key, p.name as project_name${
+									result.data.includeBody ? ", i.body" : ""
+								}`;
 
 	// PROJ-960: the FTS index covers title and body only, so searching for a label's text
 	// found nothing even when dozens of issues carried it. An issue whose label equals the

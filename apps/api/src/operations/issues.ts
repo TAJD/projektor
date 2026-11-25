@@ -18,6 +18,7 @@ import {
 	SearchIssuesInputSchema,
 	UpdateIssueSchema,
 } from "../schemas/issues";
+import { ValidationError } from "../services/errors";
 import {
 	createIssue,
 	createIssues,
@@ -72,15 +73,47 @@ const LabelsMode = d(
 	"How `labels` combine: all (default) or any"
 );
 
-type Shaping = { view?: unknown; verbose?: unknown; fields?: unknown; bodyChars?: number };
+type Shaping = {
+	view?: unknown;
+	verbose?: unknown;
+	fields?: unknown;
+	bodyChars?: number;
+	includeBody?: boolean;
+};
+
+function fieldsAskForBody(input: Shaping) {
+	return splitShapeOpts(input).fields?.includes("body") === true;
+}
 
 function serviceInput<T extends Shaping>(input: T) {
 	const { view: _v, verbose: _vb, fields: _f, bodyChars, ...rest } = input;
-	return bodyChars ? { ...rest, includeBody: true } : rest;
+	return bodyChars || fieldsAskForBody(input) ? { ...rest, includeBody: true } : rest;
+}
+
+function previewChars(input: Shaping) {
+	if (input.bodyChars) return input.bodyChars;
+	return !input.includeBody && fieldsAskForBody(input) ? LIST_BODY_MAX_CHARS : 0;
 }
 
 function withBodyPreview(item: Record<string, unknown>, bodyChars = 0) {
-	return bodyChars > 0 ? { ...item, ...bodyPreview(item.body, bodyChars) } : item;
+	return bodyChars > 0 && typeof item.body === "string"
+		? { ...item, ...bodyPreview(item.body, bodyChars) }
+		: item;
+}
+
+const BATCH_UNRETURNABLE_FIELDS = ["rollup", "links", "assignee_name"];
+
+function rejectUnreturnableBatchFields(input: Shaping) {
+	const bad = (splitShapeOpts(input).fields ?? []).filter((f) =>
+		BATCH_UNRETURNABLE_FIELDS.includes(f)
+	);
+	if (bad.length > 0)
+		throw new ValidationError({
+			formErrors: [
+				`get_issues cannot return ${bad.join(", ")} (batch items carry no rollup, links or assignee_name); use get_issue for those`,
+			],
+			fieldErrors: {},
+		});
 }
 
 type PrioritizedRaw = {
@@ -260,7 +293,7 @@ export const issueOperations = [
 				total?: number;
 			};
 			const page = toPage(
-				raw.map((i) => shapeIssue(withBodyPreview(i, input.bodyChars), shape)),
+				raw.map((i) => shapeIssue(withBodyPreview(i, previewChars(input)), shape)),
 				nextCursor,
 				total === undefined ? {} : { total }
 			);
@@ -348,7 +381,11 @@ export const issueOperations = [
 			const { rest: _, ...shape } = splitShapeOpts(input);
 			const opts =
 				shape.view || shape.fields || shape.verbose ? shape : { view: "summary" as const };
-			return toPage((result as Record<string, unknown>[]).map((r) => shapeIssue(r, opts)));
+			return toPage(
+				(result as Record<string, unknown>[]).map((r) =>
+					shapeIssue(withBodyPreview(r, previewChars(input)), opts)
+				)
+			);
 		},
 	}),
 	defineOperation({
@@ -361,7 +398,10 @@ export const issueOperations = [
 		summary:
 			"Fetch up to 50 issues in one call, by ref (e.g. PROJ-42) and/or id. Cheaper than " +
 			"repeated get_issue calls for triage. Items carry customFields but no rollup/links/" +
-			"assignee_name, and omit `body` unless includeBody:true. Returned in the order refs/ids " +
+			"assignee_name (naming one of those in `fields` is a validation error), and omit `body` " +
+			'unless includeBody:true or `fields` names `body`; with `fields:["body"]` each body is ' +
+			"cut to 1000 chars with `bodyTruncated:true` (includeBody:true returns whole bodies). A null " +
+			'`body` means the issue has no body, never "not loaded". Returned in the order refs/ids ' +
 			"were given; `missing` lists (once each) any requested ref/id that didn't resolve or " +
 			"isn't visible to you. " +
 			OMISSION_NOTE,
@@ -375,12 +415,15 @@ export const issueOperations = [
 			bodyChars: BodyChars,
 			...Shape,
 		}),
-		run: (ctx, input) => getIssuesBatch(ctx, serviceInput(input)),
+		run: (ctx, input) => {
+			rejectUnreturnableBatchFields(input);
+			return getIssuesBatch(ctx, serviceInput(input));
+		},
 		mcpResult: (result, input) => {
 			const { rest: _, ...shape } = splitShapeOpts(input);
 			const r = result as { items: Record<string, unknown>[]; missing: string[] };
 			return {
-				items: r.items.map((i) => shapeIssue(withBodyPreview(i, input.bodyChars), shape)),
+				items: r.items.map((i) => shapeIssue(withBodyPreview(i, previewChars(input)), shape)),
 				missing: r.missing,
 			};
 		},
