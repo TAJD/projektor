@@ -644,12 +644,20 @@ describe("PROJ-197: batchLoadCustomFields is workspace-scoped", () => {
 		const def = await seedCustomFieldDef(ws.workspace.id, { key: "sp", label: "Story Points" });
 
 		const COUNT = 95; // > CHUNK_SIZE (90), so ids span two queries
-		const issueIds: string[] = [];
-		for (let i = 0; i < COUNT; i++) {
-			const issue = await seedIssue(ws.workspace.id, proj.id, ws.user.id);
-			await seedCustomFieldValue(issue.id, def.id, String(i));
-			issueIds.push(issue.id);
-		}
+		const issueIds = Array.from({ length: COUNT }, () => crypto.randomUUID());
+		const now = Math.floor(Date.now() / 1000);
+		await env.DB.batch(
+			issueIds.flatMap((id, i) => [
+				env.DB.prepare(
+					`INSERT INTO issues (id, workspace_id, project_id, number, title, body, status, priority,
+					   labels, created_by_id, created_at, updated_at)
+					 VALUES (?, ?, ?, ?, 'Seeded issue', '', 'backlog', 'none', '[]', ?, ?, ?)`
+				).bind(id, ws.workspace.id, proj.id, i + 1, ws.user.id, now, now),
+				env.DB.prepare(
+					"INSERT INTO custom_field_values (issue_id, field_id, value) VALUES (?, ?, ?)"
+				).bind(id, def.id, String(i)),
+			])
+		);
 
 		const loaded = await batchLoadCustomFields(env.DB, ws.workspace.id, issueIds);
 
@@ -658,7 +666,7 @@ describe("PROJ-197: batchLoadCustomFields is workspace-scoped", () => {
 			expect(loaded[issueIds[i]]).toHaveLength(1);
 			expect(loaded[issueIds[i]][0].value).toBe(String(i));
 		}
-	}, 15000); // seeds 95 issues sequentially; coverage instrumentation pushes this past the 5s default
+	});
 });
 
 describe("PROJ-837: custom field definitions respect project access", () => {
