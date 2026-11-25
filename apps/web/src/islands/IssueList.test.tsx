@@ -377,6 +377,98 @@ async function selectEpicOption(name: string) {
 	fireEvent.click(await screen.findByRole("option", { name }));
 }
 
+function listUrls(mockFetch: ReturnType<typeof vi.fn>): URLSearchParams[] {
+	return (mockFetch.mock.calls as [string, RequestInit][])
+		.map((c) => String(c[0]))
+		.filter((u) => u.includes("/api/issues"))
+		.map((u) => new URL(u, "http://x").searchParams);
+}
+
+function setupViewFetch() {
+	const mockFetch = vi.fn().mockImplementation((url: string) => {
+		const u = String(url);
+		let body: unknown;
+		if (u.includes("task-statuses")) body = STATUSES;
+		else if (u.includes("task-types")) body = [];
+		else if (u.includes("/api/projects")) body = [];
+		else if (u.includes("category=done")) body = { items: [ORPHAN_ISSUE], total: 3 };
+		else body = { items: [EPIC_ISSUE, CHILD_ISSUE], nextCursor: null, total: 2 };
+		return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+	});
+	vi.stubGlobal("fetch", mockFetch);
+	return mockFetch;
+}
+
+describe("board/backlog fetch scope (PROJ-1114)", () => {
+	it("board runs an open walk and a recent-done walk and sums the totals", async () => {
+		localStorage.setItem("issues-view", "board");
+		const mockFetch = setupViewFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+		await waitFor(() => expect(listUrls(mockFetch).length).toBe(2));
+
+		const [open, done] = listUrls(mockFetch);
+		expect(open.get("open")).toBe("true");
+		expect(open.get("category")).toBeNull();
+		expect(done.get("open")).toBeNull();
+		expect(done.get("category")).toBe("done");
+		const after = Number(done.get("completedAfter"));
+		const expected = Math.floor(Date.now() / 1000) - 14 * 86400;
+		expect(Math.abs(after - expected)).toBeLessThan(120);
+		await screen.findByText(/\(of 5\)/);
+	});
+
+	it("backlog runs a single open walk", async () => {
+		localStorage.setItem("issues-view", "backlog");
+		const mockFetch = setupViewFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+
+		const urls = listUrls(mockFetch);
+		expect(urls.length).toBe(1);
+		expect(urls[0].get("open")).toBe("true");
+	});
+
+	it("an explicit status filter keeps a single unscoped walk", async () => {
+		localStorage.setItem("issues-view", "board");
+		history.replaceState(null, "", "/?status=st-done");
+		const mockFetch = setupViewFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+
+		const urls = listUrls(mockFetch);
+		expect(urls.length).toBe(1);
+		expect(urls[0].get("statusIds")).toBe("st-done");
+		expect(urls[0].get("open")).toBeNull();
+	});
+
+	it("list view sends neither open nor category", async () => {
+		const mockFetch = setupViewFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+
+		const urls = listUrls(mockFetch);
+		expect(urls.length).toBe(1);
+		expect(urls[0].get("open")).toBeNull();
+		expect(urls[0].get("category")).toBeNull();
+	});
+
+	it("the Done column link switches to list view filtered to done statuses", async () => {
+		localStorage.setItem("issues-view", "board");
+		const mockFetch = setupViewFetch();
+		render(<IssueList />);
+		await waitForLoaded();
+
+		fireEvent.click(await screen.findByRole("button", { name: "View all done" }));
+
+		await waitFor(() => {
+			const last = listUrls(mockFetch).at(-1);
+			expect(last?.get("statusIds")).toBe("st-done");
+		});
+		expect(screen.getByRole("button", { name: "list" }).getAttribute("aria-pressed")).toBe("true");
+	});
+});
+
 describe("epic filter (server-side, PROJ-211)", () => {
 	it("sends parentId when a specific epic is selected", async () => {
 		const mockFetch = setupEpicFetch();
@@ -895,9 +987,11 @@ describe("issues page loading (PROJ-862)", () => {
 			await waitForLoaded();
 			await waitFor(() => expect(listRequests(mock).length).toBeGreaterThan(0));
 			const reqs = listRequests(mock);
-			expect(reqs).toHaveLength(1);
-			expect(reqs[0]).toContain("project=proj-1");
-			expect(reqs[0]).toContain(view === "list" ? "limit=30" : "limit=100");
+			expect(reqs).toHaveLength(view === "list" ? 1 : 2);
+			for (const req of reqs) {
+				expect(req).toContain("project=proj-1");
+				expect(req).toContain(view === "list" ? "limit=30" : "limit=100");
+			}
 		}
 	);
 

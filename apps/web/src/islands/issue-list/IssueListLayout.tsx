@@ -150,6 +150,12 @@ function IssueListMain({
 				sortDir={filters.sortDir}
 				onSort={filters.handleHeaderClick}
 				onShowBacklog={() => setView("backlog")}
+				onShowDone={() => {
+					filters.setFilterStatuses(
+						data.statuses.filter((s) => s.category === "done").map((s) => s.id)
+					);
+					setView("list");
+				}}
 				nextCursor={data.nextCursor}
 				loadingMore={data.loadingMore}
 				loadMore={data.loadMore}

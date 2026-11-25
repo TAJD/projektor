@@ -10,6 +10,37 @@ type FilterInputs = FilterQueryFilters;
 // PROJ-862: board/backlog page through at most this many 100-issue pages (5,000 issues).
 const BOARD_MAX_PAGES = 50;
 
+type IssuePage = {
+	items: Issue[];
+	nextCursor: string | number | null;
+	total: number | null;
+};
+
+const EXPLICIT_FILTER_KEYS = [
+	"statusIds",
+	"completedAfter",
+	"completedBefore",
+	"updatedAfter",
+	"updatedBefore",
+];
+const DONE_WINDOW_SECONDS = 14 * 24 * 60 * 60;
+
+function appendUnique(prev: Issue[], next: Issue[]): Issue[] {
+	const seen = new Set(prev.map((i) => i.id));
+	return [...prev, ...next.filter((i) => !seen.has(i.id) && seen.add(i.id))];
+}
+
+function planWalks(view: ViewMode, base: URLSearchParams): URLSearchParams[] {
+	if (view === "list" || EXPLICIT_FILTER_KEYS.some((k) => base.has(k))) return [base];
+	const open = new URLSearchParams(base);
+	open.set("open", "true");
+	if (view === "backlog") return [open];
+	const done = new URLSearchParams(base);
+	done.set("category", "done");
+	done.set("completedAfter", String(Math.floor(Date.now() / 1000) - DONE_WINDOW_SECONDS));
+	return [open, done];
+}
+
 /** Owns the paginated issue set: fetching, "Load more", and loading/error state (PROJ-201/211). */
 export function useIssueFetching(
 	workspaceSlug: string | undefined,
@@ -52,25 +83,33 @@ export function useIssueFetching(
 		setLoading(true);
 		setError(null);
 		try {
-			const qs = buildFilterParams();
-			qs.set("limit", String(pageSize));
-			const data = await apiFetch<{
-				items: Issue[];
-				nextCursor: string | number | null;
-				total: number | null;
-			}>(`/api/issues?${qs.toString()}`, {
-				workspaceSlug,
-			});
+			const base = buildFilterParams();
+			base.set("limit", String(pageSize));
+			const walks = planWalks(view, base);
+			const pages = await Promise.all(
+				walks.map((qs) => apiFetch<IssuePage>(`/api/issues?${qs.toString()}`, { workspaceSlug }))
+			);
 			if (seq !== fetchSeq.current) return; // superseded by a newer request
-			setIssues(data.items);
-			setNextCursor(data.nextCursor ?? null);
-			setTotal(data.total ?? data.items.length);
+			setIssues(
+				walks.length === 1
+					? pages[0].items
+					: appendUnique(
+							[],
+							pages.flatMap((p) => p.items)
+						)
+			);
+			setNextCursor(pages[0].nextCursor ?? null);
+			setTotal(pages.reduce((sum, p) => sum + (p.total ?? p.items.length), 0));
 			hasLoadedOnce.current = true;
 			// PROJ-862: board and backlog show the whole working set — keep paging
 			// (the API caps a page at 100) instead of silently stopping at 100.
-			if (view !== "list" && data.nextCursor != null) {
+			if (view !== "list" && pages.some((p) => p.nextCursor != null)) {
 				setLoading(false);
-				await loadRemainingPages(qs, data.nextCursor, seq);
+				await loadRemainingPages(
+					walks,
+					pages.map((p) => p.nextCursor ?? null),
+					seq
+				);
 			}
 		} catch (e) {
 			if (seq !== fetchSeq.current) return;
@@ -80,21 +119,27 @@ export function useIssueFetching(
 		}
 	}, [workspaceSlug, buildFilterParams, pageSize, view]);
 
-	async function loadRemainingPages(base: URLSearchParams, first: string | number, seq: number) {
+	async function loadRemainingPages(
+		bases: URLSearchParams[],
+		firsts: Array<string | number | null>,
+		seq: number
+	) {
 		setLoadingMore(true);
-		let cursor: string | number | null = first;
 		try {
-			for (let page = 0; cursor != null && page < BOARD_MAX_PAGES; page++) {
-				const qs = new URLSearchParams(base);
-				qs.set("cursor", String(cursor));
-				const data: { items: Issue[]; nextCursor: string | number | null } = await apiFetch(
-					`/api/issues?${qs.toString()}`,
-					{ workspaceSlug }
-				);
-				if (seq !== fetchSeq.current) return;
-				setIssues((prev) => [...prev, ...data.items]);
-				cursor = data.nextCursor ?? null;
+			for (let i = 0; i < bases.length; i++) {
+				let cursor = firsts[i];
 				setNextCursor(cursor);
+				for (let page = 0; cursor != null && page < BOARD_MAX_PAGES; page++) {
+					const qs = new URLSearchParams(bases[i]);
+					qs.set("cursor", String(cursor));
+					const data: IssuePage = await apiFetch(`/api/issues?${qs.toString()}`, {
+						workspaceSlug,
+					});
+					if (seq !== fetchSeq.current) return;
+					setIssues((prev) => appendUnique(prev, data.items));
+					cursor = data.nextCursor ?? null;
+					setNextCursor(cursor);
+				}
 			}
 		} finally {
 			if (seq === fetchSeq.current) setLoadingMore(false);

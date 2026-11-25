@@ -26,6 +26,7 @@ interface MainContentProps {
 	loadMore: () => void;
 	/** Switch to the Backlog view (the board links to it for issues it doesn't show). */
 	onShowBacklog?: () => void;
+	onShowDone?: () => void;
 }
 
 export default function MainContent({
@@ -47,6 +48,7 @@ export default function MainContent({
 	loadingMore,
 	loadMore,
 	onShowBacklog,
+	onShowDone,
 }: MainContentProps) {
 	if (isSearchActive) {
 		return (
@@ -64,6 +66,7 @@ export default function MainContent({
 				statuses={statuses}
 				changeStatus={changeStatus}
 				onShowBacklog={onShowBacklog}
+				onShowDone={onShowDone}
 			/>
 		);
 	}

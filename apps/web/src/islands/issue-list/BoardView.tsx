@@ -118,11 +118,13 @@ export default function BoardView({
 	statuses,
 	changeStatus,
 	onShowBacklog,
+	onShowDone,
 }: {
 	issues: Issue[];
 	statuses: TaskStatus[];
 	changeStatus: (issueId: string, statusId: string) => void;
 	onShowBacklog?: () => void;
+	onShowDone?: () => void;
 }) {
 	const [dragIssueId, setDragIssueId] = useState<string | null>(null);
 	const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
@@ -187,8 +189,30 @@ export default function BoardView({
 							}}
 						>
 							<div class="px-3 py-2 bg-surface rounded-t-md border border-b-0 border-border flex justify-between items-center">
-								<span class="font-semibold text-sm" style={{ color: categoryColor(col.category) }}>
-									{col.label}
+								<span class="flex flex-wrap items-baseline gap-x-2">
+									<span
+										class="font-semibold text-sm"
+										style={{ color: categoryColor(col.category) }}
+									>
+										{col.label}
+									</span>
+									{col.category === "done" && (
+										<span class="text-[0.7rem] text-text-muted" data-testid="board-done-note">
+											Last 14 days
+											{onShowDone && (
+												<>
+													{" · "}
+													<button
+														type="button"
+														onClick={onShowDone}
+														class="bg-transparent border-none p-0 text-accent underline cursor-pointer font-[inherit]"
+													>
+														View all done
+													</button>
+												</>
+											)}
+										</span>
+									)}
 								</span>
 								<span
 									class={[
