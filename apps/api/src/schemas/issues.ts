@@ -224,6 +224,7 @@ export const SearchIssuesInputSchema = z
 		labels: LabelFilterSchema.optional(),
 		labelsMode: LabelsModeSchema.optional(),
 		limit: z.number().int().min(1).max(50).optional().default(20),
+		includeBody: BooleanQueryParam.optional(),
 	})
 	.strict();
 
