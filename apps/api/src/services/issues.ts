@@ -423,10 +423,8 @@ export async function listIssues(
 			assignee_id: schema.issues.assigneeId,
 			labels: sql<string>`${schema.issues.labels}`,
 			parent_id: schema.issues.parentId,
-			parent_ref: parentRefColumn(ctx),
 			type_id: schema.issues.typeId,
 			status_id: schema.issues.statusId,
-			status_category: schema.taskStatuses.category,
 			sprint_id: schema.issues.sprintId,
 			created_by_id: schema.issues.createdById,
 			author_kind: schema.issues.authorKind,
@@ -434,19 +432,8 @@ export async function listIssues(
 			updated_at: schema.issues.updatedAt,
 			completed_at: schema.issues.completedAt,
 			needs_audit: schema.issues.needsAudit,
-			assignee_name: schema.users.name,
-			project_key: schema.projects.key,
-			project_name: schema.projects.name,
-			type_key: schema.taskTypes.key,
-			type_name: schema.taskTypes.name,
-			status_key: schema.taskStatuses.key,
-			status_name: schema.taskStatuses.name,
 		})
 		.from(schema.issues)
-		.leftJoin(schema.users, eq(schema.issues.assigneeId, schema.users.id))
-		.leftJoin(schema.projects, eq(schema.issues.projectId, schema.projects.id))
-		.leftJoin(schema.taskTypes, eq(schema.issues.typeId, schema.taskTypes.id))
-		.leftJoin(schema.taskStatuses, eq(schema.issues.statusId, schema.taskStatuses.id))
 		.where(and(...pageConditions))
 		.orderBy(desc(schema.issues.createdAt), desc(schema.issues.id))
 		.limit(limit + 1);
@@ -471,23 +458,34 @@ export async function listIssues(
 	const nextCursor = hasMore && lastItem ? `${lastItem.created_at}:${lastItem.id}` : null;
 
 	const issueIds = (items as Array<{ id: string }>).map((i) => i.id);
-	const [customFieldsByIssue, rollupsByParent] = await Promise.all([
+	const [customFieldsByIssue, rollupsByParent, joined] = await Promise.all([
 		opts.customFields === false ? null : batchLoadCustomFields(ctx.db, ctx.workspaceId, issueIds),
 		// PROJ-441: computed in one grouped query for the whole page, rather than the
 		// frontend fanning out a getIssue call per row.
 		filters.includeRollups ? computeChildRollupsForParents(ctx, orm, issueIds) : null,
+		loadPageLookups(ctx, orm, items),
 	]);
 
 	const itemsWithFields = (items as Array<Record<string, unknown>>).map((i) => {
 		// PROJ-442: body is omitted by default — callers that need it pass includeBody=1.
 		const { body: _body, ...rest } = i;
+		const project = joined.projects.get(i.project_id as string);
+		const type = i.type_id ? joined.types.get(i.type_id as string) : undefined;
+		const status = i.status_id ? joined.statuses.get(i.status_id as string) : undefined;
 		const item: Record<string, unknown> = {
 			...rest,
+			assignee_name: i.assignee_id ? (joined.users.get(i.assignee_id as string) ?? null) : null,
+			project_key: project?.key ?? null,
+			project_name: project?.name ?? null,
+			type_key: type?.key ?? null,
+			type_name: type?.name ?? null,
+			status_category: status?.category ?? null,
+			status_key: status?.key ?? null,
+			status_name: status?.name ?? null,
+			parent_ref: i.parent_id ? (joined.parentRefs.get(i.parent_id as string) ?? null) : null,
 			...(filters.includeBody ? { body: i.body } : {}),
 			...(customFieldsByIssue ? { customFields: customFieldsByIssue[i.id as string] ?? [] } : {}),
-			url: i.project_key
-				? issuePath(i.project_key as string, i.number as number, i.title as string)
-				: null,
+			url: project ? issuePath(project.key, i.number as number, i.title as string) : null,
 		};
 		if (rollupsByParent) item.rollup = rollupsByParent[i.id as string] ?? computeChildRollup([]);
 		return item;
@@ -540,6 +538,98 @@ async function computeChildRollupsForParents(
 		result[parentId] = computeChildRollup(rowsByParent[parentId] ?? []);
 	}
 	return result;
+}
+
+async function loadPageLookups(
+	ctx: ServiceCtx,
+	orm: ReturnType<typeof drizzle>,
+	items: ReadonlyArray<unknown>
+) {
+	const rows = items as Array<{
+		assignee_id: string | null;
+		project_id: string;
+		type_id: string | null;
+		status_id: string | null;
+		parent_id: string | null;
+	}>;
+	const distinct = (pick: (r: (typeof rows)[number]) => string | null) => [
+		...new Set(rows.map(pick).filter((v): v is string => !!v)),
+	];
+
+	const [users, projects, types, statuses, parents] = await Promise.all([
+		inChunks(
+			distinct((r) => r.assignee_id),
+			(chunk) =>
+				orm
+					.select({ id: schema.users.id, name: schema.users.name })
+					.from(schema.users)
+					.where(inArray(schema.users.id, chunk))
+		),
+		inChunks(
+			distinct((r) => r.project_id),
+			(chunk) =>
+				orm
+					.select({
+						id: schema.projects.id,
+						key: schema.projects.key,
+						name: schema.projects.name,
+					})
+					.from(schema.projects)
+					.where(inArray(schema.projects.id, chunk))
+		),
+		inChunks(
+			distinct((r) => r.type_id),
+			(chunk) =>
+				orm
+					.select({
+						id: schema.taskTypes.id,
+						key: schema.taskTypes.key,
+						name: schema.taskTypes.name,
+					})
+					.from(schema.taskTypes)
+					.where(inArray(schema.taskTypes.id, chunk))
+		),
+		inChunks(
+			distinct((r) => r.status_id),
+			(chunk) =>
+				orm
+					.select({
+						id: schema.taskStatuses.id,
+						key: schema.taskStatuses.key,
+						name: schema.taskStatuses.name,
+						category: schema.taskStatuses.category,
+					})
+					.from(schema.taskStatuses)
+					.where(inArray(schema.taskStatuses.id, chunk))
+		),
+		inChunks(
+			distinct((r) => r.parent_id),
+			(chunk) =>
+				orm
+					.select({
+						id: schema.issues.id,
+						number: schema.issues.number,
+						key: schema.projects.key,
+					})
+					.from(schema.issues)
+					.innerJoin(schema.projects, eq(schema.projects.id, schema.issues.projectId))
+					.where(
+						and(
+							inArray(schema.issues.id, chunk),
+							eq(schema.issues.workspaceId, ctx.workspaceId),
+							visibleProjectPredicate(ctx, schema.issues.projectId)
+						)
+					)
+		),
+	]);
+
+	return {
+		users: new Map(users.map((u) => [u.id, u.name])),
+		projects: new Map(projects.map((p) => [p.id, p])),
+		types: new Map(types.map((t) => [t.id, t])),
+		statuses: new Map(statuses.map((s) => [s.id, s])),
+		parentRefs: new Map(parents.map((p) => [p.id, `${p.key}-${p.number}`])),
+	};
 }
 
 // Snake-case aliases preserve the existing response contract. The labels raw expression

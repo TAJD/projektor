@@ -2,7 +2,14 @@ import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createIssue, getPrioritizedIssues, listIssues, searchIssues } from "../services/issues";
 import type { ServiceCtx } from "../services/types";
-import { seedProjectFixture } from "./helpers";
+import {
+	seedIssue,
+	seedProject,
+	seedProjectFixture,
+	seedTaskStatus,
+	seedTaskType,
+	seedUser,
+} from "./helpers";
 
 function trackD1RoundTrips() {
 	let count = 0;
@@ -162,5 +169,145 @@ describe("PROJ-1020: query plans and batching", () => {
 			.all<{ detail: string }>();
 		const issuesStep = results.map((r) => r.detail).find((d) => /SEARCH "?issues"? /.test(d));
 		expect(issuesStep).toMatch(/created_at<\?/);
+	});
+});
+
+describe("PROJ-1112: listIssues page resolves joined fields by batched lookup", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	async function seedPage() {
+		const f = await seedProjectFixture({ role: "member" });
+		const ctx = {
+			db: env.DB,
+			kv: env.KV,
+			r2: env.R2,
+			workspaceId: f.workspaceId,
+			userId: f.userId,
+			role: "member",
+		} as ServiceCtx;
+		const hidden = await seedProject(f.workspaceId, "HID");
+		const assignee = await seedUser(`a-${crypto.randomUUID().slice(0, 8)}@example.com`);
+		const type = await seedTaskType(f.workspaceId, { key: "bug", name: "Bug" });
+		const status = await seedTaskStatus(f.workspaceId, {
+			key: "triage",
+			name: "Triage",
+			category: "in_progress",
+		});
+		const t = 1_700_000_000;
+		const mk = (title: string, o: Parameters<typeof seedIssue>[3], n: number) =>
+			seedIssue(f.workspaceId, f.projectId, f.userId, { title, createdAt: t + n, ...o });
+		const assigned = await mk("assigned", { assigneeId: assignee.id }, 1);
+		const unassigned = await mk("unassigned", {}, 2);
+		const typed = await mk("typed", { typeId: type.id }, 3);
+		const custom = await mk("custom", { statusId: status.id }, 4);
+		const parent = await mk("parent", {}, 5);
+		const child = await mk("child", { parentId: parent.id }, 6);
+		const hiddenParent = await seedIssue(f.workspaceId, hidden.id, f.userId, {
+			title: "hidden parent",
+		});
+		const orphan = await mk("orphan", { parentId: hiddenParent.id }, 7);
+		return {
+			f,
+			ctx,
+			assignee,
+			type,
+			status,
+			assigned,
+			unassigned,
+			typed,
+			custom,
+			parent,
+			child,
+			orphan,
+		};
+	}
+
+	it("returns the same joined fields and parent_ref as the joined query", async () => {
+		const s = await seedPage();
+		const page = (await listIssues(s.ctx, { projectId: s.f.projectId, limit: 50 })) as {
+			items: Array<Record<string, unknown>>;
+		};
+		const byTitle = Object.fromEntries(page.items.map((i) => [i.title as string, i]));
+		const base = {
+			workspace_id: s.f.workspaceId,
+			project_id: s.f.projectId,
+			project_key: "PROJ",
+			project_name: "Test Project",
+			assignee_id: null,
+			assignee_name: null,
+			parent_id: null,
+			parent_ref: null,
+			type_id: null,
+			type_key: null,
+			type_name: null,
+			status_id: null,
+			status_category: null,
+			status_key: null,
+			status_name: null,
+			status: "backlog",
+			priority: "none",
+			labels: "[]",
+			sprint_id: null,
+			created_by_id: s.f.userId,
+			author_kind: null,
+			created_at: expect.any(Number),
+			updated_at: expect.any(Number),
+			completed_at: null,
+			needs_audit: expect.anything(),
+			customFields: [],
+		};
+		const expected = (issue: { id: string; number: number }, title: string, o = {}) => ({
+			...base,
+			id: issue.id,
+			number: issue.number,
+			title,
+			url: `/projects/PROJ/issues/${issue.number}/${title}`,
+			...o,
+		});
+		expect(page.items).toHaveLength(7);
+		expect(byTitle.assigned).toEqual(
+			expected(s.assigned, "assigned", {
+				assignee_id: s.assignee.id,
+				assignee_name: "Test User",
+			})
+		);
+		expect(byTitle.unassigned).toEqual(expected(s.unassigned, "unassigned"));
+		expect(byTitle.typed).toEqual(
+			expected(s.typed, "typed", { type_id: s.type.id, type_key: "bug", type_name: "Bug" })
+		);
+		expect(byTitle.custom).toEqual(
+			expected(s.custom, "custom", {
+				status_id: s.status.id,
+				status_category: "in_progress",
+				status_key: "triage",
+				status_name: "Triage",
+			})
+		);
+		expect(byTitle.parent).toEqual(expected(s.parent, "parent"));
+		expect(byTitle.child).toEqual(
+			expected(s.child, "child", {
+				parent_id: s.parent.id,
+				parent_ref: `PROJ-${s.parent.number}`,
+			})
+		);
+		expect(byTitle.orphan).toEqual(
+			expected(s.orphan, "orphan", { parent_id: expect.any(String), parent_ref: null })
+		);
+	});
+
+	it("the page SQL has no joins or correlated parent subquery", async () => {
+		const s = await seedPage();
+		const prepared: string[] = [];
+		const origPrepare = env.DB.prepare.bind(env.DB);
+		vi.spyOn(env.DB, "prepare").mockImplementation((q: string) => {
+			prepared.push(q);
+			return origPrepare(q);
+		});
+		await listIssues(s.ctx, { projectId: s.f.projectId, limit: 50 });
+		vi.restoreAllMocks();
+		const pageSql = prepared.find((q) => q.includes("order by") && q.includes('from "issues"'));
+		expect(pageSql).toBeDefined();
+		expect(pageSql).not.toMatch(/left join/i);
+		expect(pageSql).not.toContain("pp.key");
 	});
 });
