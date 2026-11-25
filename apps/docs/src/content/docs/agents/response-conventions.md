@@ -32,7 +32,7 @@ A person and their agents often share one user, so `author_kind`, not the author
 | --- | --- |
 | Issues in the `full` view (`get_issue`, `get_issues`) | `author_kind`, dropped when null |
 | `list_comments` (every view, and REST `GET /api/issues/:id/comments`) | `author_kind` on every comment, `null` included |
-| `list_project_activity` (and REST `GET /api/projects/:id/activity`) | `author_kind` on every `issue_commented` item, `null` included |
+| `list_project_activity` (and REST `GET /api/projects/:id/activity`) | `author_kind` on every `issue_created` and `issue_commented` item, `null` included |
 
 ## `view=summary|full`
 

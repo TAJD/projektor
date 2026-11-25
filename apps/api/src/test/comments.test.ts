@@ -4,7 +4,7 @@ import {
 	authHeaders,
 	type JsonRpcError,
 	type JsonRpcResult,
-	postCommentAsHuman,
+	postAsHuman,
 	seedComment,
 	seedFixture,
 	seedGroupGrant,
@@ -378,7 +378,9 @@ describe("PROJ-1110: list_comments returns author_kind", () => {
 		issueId = (await seedIssue(workspaceId, project.id, fixture.user.id)).id;
 
 		await seedComment(issueId, fixture.user.id, "legacy");
-		const human = await postCommentAsHuman(issueId, fixture.user.email, slug, "human reply");
+		const human = await postAsHuman(`/api/issues/${issueId}/comments`, fixture.user.email, slug, {
+			body: "human reply",
+		});
 		expect(human.status).toBe(201);
 		const agent = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
 			method: "POST",

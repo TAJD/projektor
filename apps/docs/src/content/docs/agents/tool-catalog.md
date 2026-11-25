@@ -110,7 +110,7 @@ running server.
 
 | Tool | Description | Kind |
 |------|-------------|------|
-| `list_project_activity` | List recent activity events for a project across issues, comments, wiki pages, and sprints. Returns `{items}` ordered most-recent first; `issue_commented` items carry the comment's `author_kind` (human, agent, or null). A result over ~20,000 chars is cut to fit with `truncated:true` (lower `limit` or raise `since`). See /projektor/agents/response-conventions/. | read-only |
+| `list_project_activity` | List recent activity events for a project across issues, comments, wiki pages, and sprints. Returns `{items}` ordered most-recent first; `issue_created` and `issue_commented` items carry the author's `author_kind` (human, agent, or null). A result over ~20,000 chars is cut to fit with `truncated:true` (lower `limit` or raise `since`). See /projektor/agents/response-conventions/. | read-only |
 
 ### Issues (`issues`)
 

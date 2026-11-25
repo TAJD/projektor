@@ -4,7 +4,7 @@ import {
 	authHeaders,
 	type JsonRpcError,
 	type JsonRpcResult,
-	postCommentAsHuman,
+	postAsHuman,
 	seedComment,
 	seedFixture,
 	seedGroupGrant,
@@ -492,7 +492,7 @@ describe("GET /api/projects/:id/activity (PROJ-245)", () => {
 	});
 });
 
-describe("PROJ-1110: issue_commented activity carries author_kind", () => {
+describe("PROJ-1110: issue_created and issue_commented activity carry author_kind", () => {
 	let token: string;
 	let slug: string;
 	let workspaceId: string;
@@ -505,9 +505,24 @@ describe("PROJ-1110: issue_commented activity carries author_kind", () => {
 		projectId = (await seedProject(workspaceId)).id;
 		await seedGroupGrant(workspaceId, fixture.user.id, projectId);
 		const issueId = (await seedIssue(workspaceId, projectId, fixture.user.id)).id;
+		const email = fixture.user.email;
+
+		const humanIssue = await postAsHuman("/api/issues", email, slug, {
+			projectId,
+			title: "human issue",
+		});
+		expect(humanIssue.status).toBe(201);
+		const agentIssue = await SELF.fetch("http://localhost/api/issues", {
+			method: "POST",
+			headers: authHeaders(token, slug),
+			body: JSON.stringify({ projectId, title: "agent issue" }),
+		});
+		expect(agentIssue.status).toBe(201);
 
 		await seedComment(issueId, fixture.user.id, "legacy");
-		const human = await postCommentAsHuman(issueId, fixture.user.email, slug, "human reply");
+		const human = await postAsHuman(`/api/issues/${issueId}/comments`, email, slug, {
+			body: "human reply",
+		});
 		expect(human.status).toBe(201);
 		const agent = await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
 			method: "POST",
@@ -517,11 +532,16 @@ describe("PROJ-1110: issue_commented activity carries author_kind", () => {
 		expect(agent.status).toBe(201);
 	});
 
-	function commentKinds(events: Array<Record<string, unknown>>) {
-		const commented = events.filter((e) => e.type === "issue_commented");
-		expect(commented).toHaveLength(3);
-		expect(commented.every((e) => "author_kind" in e)).toBe(true);
-		return commented.map((e) => e.author_kind).sort();
+	function kindsOf(events: Array<Record<string, unknown>>, type: string) {
+		const matching = events.filter((e) => e.type === type);
+		expect(matching).toHaveLength(3);
+		expect(matching.every((e) => "author_kind" in e)).toBe(true);
+		return matching.map((e) => e.author_kind).sort();
+	}
+
+	function assertKinds(events: Array<Record<string, unknown>>) {
+		expect(kindsOf(events, "issue_created")).toEqual(["agent", "human", null]);
+		expect(kindsOf(events, "issue_commented")).toEqual(["agent", "human", null]);
 	}
 
 	it("MCP list_project_activity", async () => {
@@ -531,8 +551,7 @@ describe("PROJ-1110: issue_commented activity carries author_kind", () => {
 			{ projectId },
 			authHeaders(token, slug)
 		);
-		const events = parseEvents(res) as Array<Record<string, unknown>>;
-		expect(commentKinds(events)).toEqual(["agent", "human", null]);
+		assertKinds(parseEvents(res) as Array<Record<string, unknown>>);
 	});
 
 	it("REST GET /api/projects/:id/activity", async () => {
@@ -540,7 +559,6 @@ describe("PROJ-1110: issue_commented activity carries author_kind", () => {
 			headers: authHeaders(token, slug),
 		});
 		expect(res.status).toBe(200);
-		const events = (await res.json()) as Array<Record<string, unknown>>;
-		expect(commentKinds(events)).toEqual(["agent", "human", null]);
+		assertKinds((await res.json()) as Array<Record<string, unknown>>);
 	});
 });

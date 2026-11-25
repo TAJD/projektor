@@ -161,18 +161,18 @@ export async function seedComment(
 	return { id, body };
 }
 
-export async function postCommentAsHuman(
-	issueId: string,
+export async function postAsHuman(
+	path: string,
 	email: string,
 	slug: string,
-	body: string
+	payload: unknown
 ): Promise<Response> {
 	env.DEV_USER_EMAIL = email;
 	try {
-		return await SELF.fetch(`http://localhost/api/issues/${issueId}/comments`, {
+		return await SELF.fetch(`http://localhost${path}`, {
 			method: "POST",
 			headers: { "X-Workspace-Slug": slug, "Content-Type": "application/json" },
-			body: JSON.stringify({ body }),
+			body: JSON.stringify(payload),
 		});
 	} finally {
 		env.DEV_USER_EMAIL = "";
