@@ -135,4 +135,32 @@ describe("PROJ-1020: query plans and batching", () => {
 		expect(firstTrips).toBe(restTrips + 1);
 		expect(page.nextCursor).not.toBeNull();
 	});
+
+	it("a listIssues cursor page seeks created_at with bound parameters, not just the project (PROJ-1112)", async () => {
+		const first = (await listIssues(ctx, { projectId: f.projectId, limit: 1 })) as {
+			nextCursor: string;
+		};
+		const prepared: string[] = [];
+		const origPrepare = env.DB.prepare.bind(env.DB);
+		vi.spyOn(env.DB, "prepare").mockImplementation((q: string) => {
+			prepared.push(q);
+			return origPrepare(q);
+		});
+		const next = (await listIssues(ctx, {
+			projectId: f.projectId,
+			limit: 1,
+			cursor: first.nextCursor,
+		})) as { items: unknown[] };
+		vi.restoreAllMocks();
+		expect(next.items).toHaveLength(1);
+
+		const pageSql = prepared.find((q) => q.includes("order by") && q.includes('"created_at" <'));
+		expect(pageSql).toBeDefined();
+		const placeholders = (pageSql?.match(/\?/g) ?? []).length;
+		const { results } = await env.DB.prepare(`EXPLAIN QUERY PLAN ${pageSql}`)
+			.bind(...Array.from({ length: placeholders }, () => 0))
+			.all<{ detail: string }>();
+		const issuesStep = results.map((r) => r.detail).find((d) => /SEARCH "?issues"? /.test(d));
+		expect(issuesStep).toMatch(/created_at<\?/);
+	});
 });
